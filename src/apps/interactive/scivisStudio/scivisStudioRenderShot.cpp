@@ -1,0 +1,110 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+#include "ProjectContext.h"
+#include "RenderShot.h"
+#include "RenderShotCLI.h"
+
+#include "vsr/app/Context.h"
+#include "vsr/core/Logging.hpp"
+
+#include <csignal>
+#include <cstdio>
+#include <iostream>
+#include <string>
+#include <vector>
+
+#if defined(_WIN32)
+#include <io.h>
+#define VSR_ISATTY _isatty
+#define VSR_FILENO _fileno
+#else
+#include <unistd.h>
+#define VSR_ISATTY isatty
+#define VSR_FILENO fileno
+#endif
+
+namespace {
+
+volatile std::sig_atomic_t g_canceled = 0;
+
+void handleInterrupt(int)
+{
+  g_canceled = 1;
+}
+
+} // namespace
+
+int main(int argc, const char **argv)
+{
+  using namespace vsr::scivis_studio;
+
+  std::vector<std::string> args(argv, argv + argc);
+  const auto programName = args.empty() ? "scivisStudioRenderShot" : args[0];
+
+  RenderShotCommandLine commandLine;
+  std::string error;
+  if (!parseRenderShotCommandLine(args, commandLine, error)) {
+    std::cerr << error << '\n' << renderShotUsage(programName);
+    return 1;
+  }
+
+  if (commandLine.showHelp) {
+    std::cout << renderShotUsage(programName);
+    return 0;
+  }
+
+  // Surface status and error diagnostics on the terminal; without a logging
+  // callback they are silently dropped.
+  vsr::core::setLogToStdout();
+
+  vsr::app::Context appContext;
+  ProjectContext projectContext(&appContext);
+  if (!projectContext.openProject(
+          commandLine.projectDirectory, nullptr, nullptr, nullptr, &error)) {
+    std::cerr << "failed to open project: " << error << '\n';
+    return 1;
+  }
+
+  const bool interactive = VSR_ISATTY(VSR_FILENO(stdin)) != 0;
+  auto *shot = selectShotForRender(projectContext.project(),
+      commandLine.shotId,
+      interactive,
+      std::cin,
+      std::cout,
+      error);
+  if (!shot) {
+    std::cerr << error << '\n';
+    return 1;
+  }
+
+  projectContext.project().activeShotId = shot->id;
+  projectContext.syncAnimationManagerToActiveShot();
+  projectContext.applyActiveShot();
+
+  std::signal(SIGINT, handleInterrupt);
+
+  std::cout << "Rendering shot " << shot->id << " \"" << shot->name
+            << "\" from " << commandLine.projectDirectory.string() << '\n';
+
+  RenderShotProgress progress;
+  progress.onFrame = [](int frame, int totalFrames) {
+    if (g_canceled)
+      return false;
+
+    std::cout << "Frame " << frame + 1 << " / " << totalFrames << '\n';
+    return true;
+  };
+
+  const bool completed = renderActiveShotToFrames(projectContext, &progress);
+  if (!completed) {
+    if (g_canceled)
+      std::cerr << "Canceled\n";
+    else
+      std::cerr << "Render failed\n";
+    return 1;
+  }
+
+  std::cout << "Done\n";
+  return 0;
+}

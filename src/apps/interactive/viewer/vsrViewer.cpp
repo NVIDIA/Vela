@@ -1,0 +1,365 @@
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+// vsr_io
+#include <vsr/io/procedural.hpp>
+// vsr_ui_imgui
+#include <vsr/ui/imgui/Application.h>
+#include <vsr/ui/imgui/windows/Animations.h>
+#include <vsr/ui/imgui/windows/CameraPoses.h>
+#include <vsr/ui/imgui/windows/DatabaseEditor.h>
+#include <vsr/ui/imgui/windows/IsosurfaceEditor.h>
+#include <vsr/ui/imgui/windows/LayerTree.h>
+#include <vsr/ui/imgui/windows/Log.h>
+#include <vsr/ui/imgui/windows/ObjectEditor.h>
+#include <vsr/ui/imgui/windows/Terminal.h>
+#include <vsr/ui/imgui/windows/Timeline.h>
+#include <vsr/ui/imgui/windows/TransferFunctionEditor.h>
+#include <vsr/ui/imgui/windows/Viewport.h>
+
+// std
+#include <chrono>
+
+namespace vsr_viewer {
+
+using VSRApplication = vsr::ui::imgui::Application;
+namespace vsr_ui = vsr::ui::imgui;
+
+class Application : public VSRApplication
+{
+ public:
+  Application(int argc, const char *argv[]) : VSRApplication(argc, argv) {}
+  ~Application() override = default;
+
+  vsr::core::DataTreeMetadata applicationStateMetadata() const override
+  {
+    return {vsr::core::DATA_TREE_METADATA_ENVELOPE_VERSION,
+        "application-state",
+        "vsr.viewer.state",
+        1};
+  }
+
+  bool validateApplicationStateMetadata(
+      const vsr::core::DataTreeMetadataReadResult &metadata,
+      const vsr::core::DataNode &root,
+      const char *filename) const override
+  {
+    if (metadata.status == vsr::core::DataTreeMetadataReadStatus::Missing) {
+      if (auto *projectKindNode = root.child("projectKind")) {
+        const auto projectKind =
+            projectKindNode->getValueOr<std::string>("");
+        vsr::core::logError(
+            "[vsrViewer] Refusing to load '%s': projectKind='%s' is not a "
+            "vsrViewer state file",
+            filename,
+            projectKind.c_str());
+        return false;
+      }
+
+      vsr::core::logWarning(
+          "[vsrViewer] State file '%s' has no __vsr_metadata; loading as "
+          "legacy viewer state",
+          filename);
+      return true;
+    }
+
+    if (metadata.status == vsr::core::DataTreeMetadataReadStatus::Malformed) {
+      vsr::core::logError("[vsrViewer] Refusing to load state file '%s': %s",
+          filename,
+          metadata.message.c_str());
+      return false;
+    }
+
+    const auto &stateMetadata = *metadata.metadata;
+    if (stateMetadata.fileType != "application-state"
+        || stateMetadata.schema != "vsr.viewer.state") {
+      vsr::core::logError(
+          "[vsrViewer] Refusing to load '%s': expected vsr.viewer.state, got "
+          "fileType='%s' schema='%s'",
+          filename,
+          stateMetadata.fileType.c_str(),
+          stateMetadata.schema.c_str());
+      return false;
+    }
+
+    return true;
+  }
+
+  vsr::ui::imgui::WindowArray setupWindows() override
+  {
+    auto windows = VSRApplication::setupWindows();
+
+    auto *ctx = appContext();
+
+    auto *viewport =
+        new vsr_ui::Viewport(this, &ctx->view.manipulator, "Viewport");
+    auto *viewport2 =
+        new vsr_ui::Viewport(this, &ctx->view.manipulator, "Secondary View");
+    auto *animations = new vsr_ui::Animations(this);
+    auto *timeline = new vsr_ui::Timeline(this);
+    auto *cameras = new vsr_ui::CameraPoses(this);
+    auto *log = new vsr_ui::Log(this);
+    auto *dbeditor = new vsr_ui::DatabaseEditor(this);
+    auto *oeditor = new vsr_ui::ObjectEditor(this);
+    auto *otree = new vsr_ui::LayerTree(this);
+    auto *tfeditor = new vsr_ui::TransferFunctionEditor(this);
+    auto *isoeditor = new vsr_ui::IsosurfaceEditor(this);
+    auto *terminal = new vsr_ui::Terminal(this);
+
+    windows.emplace_back(animations);
+    windows.emplace_back(timeline);
+    windows.emplace_back(cameras);
+    windows.emplace_back(viewport);
+    windows.emplace_back(viewport2);
+    windows.emplace_back(dbeditor);
+    windows.emplace_back(oeditor);
+    windows.emplace_back(otree);
+    windows.emplace_back(tfeditor);
+    windows.emplace_back(isoeditor);
+    windows.emplace_back(terminal);
+    windows.emplace_back(log);
+
+    setWindowArray(windows);
+
+    if (commandLineOptions()->secondaryViewportLibrary.empty())
+      viewport2->hide();
+    tfeditor->hide();
+    isoeditor->hide();
+
+    // Populate scene //
+
+    auto populateScene = [this, vp = viewport, vp2 = viewport2, ctx = ctx]() {
+      auto loadStart = std::chrono::steady_clock::now();
+      ctx->setupSceneFromCommandLine();
+      auto loadEnd = std::chrono::steady_clock::now();
+      auto loadSeconds =
+          std::chrono::duration<float>(loadEnd - loadStart).count();
+
+      auto &scene = ctx->vsr.scene;
+
+      const bool setupDefaultLight = !ctx->commandLine.loadedFromStateFile
+          && scene.numberOfObjects(ANARI_LIGHT) == 0;
+      if (setupDefaultLight) {
+        vsr::core::logStatus("...setting up default light");
+        vsr::io::generate_default_lights(scene);
+      }
+
+      vsr::core::logStatus("...scene load complete! (%.3fs)", loadSeconds);
+      vsr::core::logStatus(
+          "%s", vsr::scene::objectDBInfo(scene.objectDB()).c_str());
+      ctx->vsr.sceneLoadComplete = true;
+
+      auto setupDefaultRenderer = !ctx->commandLine.loadedFromStateFile
+          && commandLineOptions()->useDefaultRenderer;
+      if (setupDefaultRenderer) {
+        vp->setLibraryToDefault();
+        if (!commandLineOptions()->secondaryViewportLibrary.empty())
+          vp2->setLibrary(commandLineOptions()->secondaryViewportLibrary);
+      }
+    };
+
+    showTaskModal(populateScene, "Please Wait: Loading Scene...");
+
+    return windows;
+  }
+
+  void teardown() override
+  {
+    if (m_sceneLoadFuture.valid())
+      m_sceneLoadFuture.get();
+    VSRApplication::teardown();
+  }
+
+  const char *getDefaultLayout() const override
+  {
+    return R"layout(
+[Window][MainDockSpace]
+Pos=0,56
+Size=3840,2206
+Collapsed=0
+
+[Window][Debug##Default]
+Pos=60,60
+Size=400,400
+Collapsed=0
+
+[Window][Viewport]
+Pos=901,56
+Size=2939,1524
+Collapsed=0
+DockId=0x00000006,0
+
+[Window][Database Editor]
+Pos=0,1207
+Size=899,1055
+Collapsed=0
+DockId=0x00000009,1
+
+[Window][Layers]
+Pos=0,56
+Size=899,1149
+Collapsed=0
+DockId=0x00000008,0
+
+[Window][Object Editor]
+Pos=0,1207
+Size=899,1055
+Collapsed=0
+DockId=0x00000009,0
+
+[Window][Log]
+Pos=901,1582
+Size=2939,680
+Collapsed=0
+DockId=0x00000005,0
+
+[Window][Terminal]
+Pos=901,1582
+Size=2939,680
+Collapsed=0
+DockId=0x00000005,1
+
+[Window][Secondary View]
+Pos=1237,26
+Size=683,848
+Collapsed=0
+DockId=0x00000007,0
+
+[Window][Isosurface Editor]
+Pos=1370,26
+Size=550,1054
+Collapsed=0
+DockId=0x0000000C,0
+
+[Window][TF Editor]
+Pos=2483,26
+Size=550,1769
+Collapsed=0
+DockId=0x0000000B,0
+
+[Window][Camera Poses]
+Pos=0,56
+Size=899,1149
+Collapsed=0
+DockId=0x00000008,2
+
+[Window][Animations]
+Pos=0,56
+Size=899,1149
+Collapsed=0
+DockId=0x00000008,1
+
+[Window][##]
+Pos=792,507
+Size=336,116
+Collapsed=0
+
+[Window][Timeline]
+Pos=901,1582
+Size=2939,680
+Collapsed=0
+DockId=0x00000005,2
+
+[Window][##blocking_task_modal]
+Pos=792,482
+Size=16,72
+Collapsed=0
+
+[Window][Cutting Plane]
+Pos=1293,781
+Size=446,232
+Collapsed=0
+
+[Table][0x44C159D3,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0x9E1800B1,1]
+Column 0  Weight=1.0000
+
+[Table][0xFAE9835A,1]
+Column 0  Weight=1.0000
+
+[Table][0x413D162D,1]
+Column 0  Weight=1.0000
+
+[Table][0x34853C34,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0xEEE697AB,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0x50507568,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0xF4075185,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0xF945472E,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0xC7D50986,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0x7AB8FCE0,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0xC6287F21,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0x3DC35996,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0x7C7C00B3,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0x7B5A3115,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Docking][Data]
+DockSpace         ID=0x80F5B4C5 Window=0x079D3A04 Pos=0,56 Size=3840,2206 Split=X
+  DockNode        ID=0x00000003 Parent=0x80F5B4C5 SizeRef=1368,1054 Split=X
+    DockNode      ID=0x00000001 Parent=0x00000003 SizeRef=899,1105 Split=Y Selected=0xCD8384B1
+      DockNode    ID=0x00000008 Parent=0x00000001 SizeRef=547,575 Selected=0xCD8384B1
+      DockNode    ID=0x00000009 Parent=0x00000001 SizeRef=547,528 Selected=0x82B4C496
+    DockNode      ID=0x00000002 Parent=0x00000003 SizeRef=2939,1105 Split=Y
+      DockNode    ID=0x00000004 Parent=0x00000002 SizeRef=1370,1524 Split=X Selected=0xC450F867
+        DockNode  ID=0x00000006 Parent=0x00000004 SizeRef=685,848 CentralNode=1 Selected=0xC450F867
+        DockNode  ID=0x00000007 Parent=0x00000004 SizeRef=683,848 Selected=0xA3219422
+      DockNode    ID=0x00000005 Parent=0x00000002 SizeRef=1370,680 Selected=0x139FDA3F
+  DockNode        ID=0x0000000A Parent=0x80F5B4C5 SizeRef=550,1054 Split=Y Selected=0x3429FA32
+    DockNode      ID=0x0000000B Parent=0x0000000A SizeRef=550,590 Selected=0x3429FA32
+    DockNode      ID=0x0000000C Parent=0x0000000A SizeRef=550,462 Selected=0xBCE6538B
+)layout";
+  }
+
+ private:
+  std::future<void> m_sceneLoadFuture;
+};
+
+} // namespace vsr_viewer
+
+///////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
+
+int main(int argc, const char *argv[])
+{
+  {
+    vsr_viewer::Application app(argc, argv);
+    app.run(1920, 1080, "VSR Viewer");
+  }
+
+  return 0;
+}

@@ -1,0 +1,73 @@
+// SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+#include "SaveToFilePass.h"
+#include "vsr/core/Logging.hpp"
+// stb_image
+#include "stb_image_write.h"
+
+namespace vsr::rendering {
+
+SaveToFilePass::SaveToFilePass() = default;
+
+SaveToFilePass::~SaveToFilePass() = default;
+
+void SaveToFilePass::setFilename(const std::string &filename)
+{
+  m_filename = filename;
+}
+
+const std::string &SaveToFilePass::getFilename() const
+{
+  return m_filename;
+}
+
+void SaveToFilePass::setSingleShotMode(bool enabled)
+{
+  m_singleShot = enabled;
+}
+
+void SaveToFilePass::render(ImageBuffers &b, int /*stageId*/)
+{
+  if (m_filename.empty()) {
+    vsr::core::logWarning("[SaveToFilePass] No filename set, skipping save");
+    return;
+  }
+
+  if (!b.color) {
+    vsr::core::logError("[SaveToFilePass] No color buffer available");
+    return;
+  }
+
+  const auto size = getDimensions();
+  const size_t totalPixels = size.x * size.y;
+
+  if (totalPixels == 0) {
+    vsr::core::logError("[SaveToFilePass] Invalid dimensions");
+    return;
+  }
+
+  stbi_flip_vertically_on_write(1);
+
+  int result = stbi_write_png(m_filename.c_str(),
+      static_cast<int>(size.x),
+      static_cast<int>(size.y),
+      4, // RGBA
+      b.color,
+      static_cast<int>(size.x) * 4);
+
+  stbi_flip_vertically_on_write(0);
+
+  if (result) {
+    vsr::core::logStatus(
+        "[SaveToFilePass] Saved image to '%s'", m_filename.c_str());
+  } else {
+    vsr::core::logWarning(
+        "[SaveToFilePass] Failed to save image to '%s'", m_filename.c_str());
+  }
+
+  if (m_singleShot)
+    setEnabled(false);
+}
+
+} // namespace vsr::rendering

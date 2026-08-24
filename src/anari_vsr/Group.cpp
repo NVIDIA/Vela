@@ -1,0 +1,82 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+#include "Group.h"
+// std
+#include <algorithm>
+#include <iterator>
+
+namespace vsr_device {
+
+Group::Group(DeviceGlobalState *s)
+    : Object(ANARI_GROUP, s),
+      m_surfaceData(this),
+      m_volumeData(this),
+      m_lightData(this)
+{}
+
+void Group::commitParameters()
+{
+  m_surfaceData = getParamObject<helium::ObjectArray>("surface");
+  m_volumeData = getParamObject<helium::ObjectArray>("volume");
+  m_lightData = getParamObject<helium::ObjectArray>("light");
+}
+
+void Group::finalize()
+{
+  m_surfaces.clear();
+  m_volumes.clear();
+  m_lights.clear();
+
+  if (m_surfaceData) {
+    std::transform(m_surfaceData->handlesBegin(),
+        m_surfaceData->handlesEnd(),
+        std::back_inserter(m_surfaces),
+        [](auto *o) { return (VSRObject *)o; });
+  }
+  if (m_volumeData) {
+    std::transform(m_volumeData->handlesBegin(),
+        m_volumeData->handlesEnd(),
+        std::back_inserter(m_volumes),
+        [](auto *o) { return (VSRObject *)o; });
+  }
+  if (m_lightData) {
+    std::transform(m_lightData->handlesBegin(),
+        m_lightData->handlesEnd(),
+        std::back_inserter(m_lights),
+        [](auto *o) { return (VSRObject *)o; });
+  }
+
+  auto *s = deviceState();
+  s->objectUpdates.instancing++;
+}
+
+const std::vector<VSRObject *> &Group::surfaces() const
+{
+  return m_surfaces;
+}
+
+const std::vector<VSRObject *> &Group::volumes() const
+{
+  return m_volumes;
+}
+
+const std::vector<VSRObject *> &Group::lights() const
+{
+  return m_lights;
+}
+
+void Group::addObjectsToLayer(vsr::scene::LayerNodeRef parent) const
+{
+  auto *layer = (*parent)->layer();
+  for (auto *obj : m_surfaces)
+    parent->insert_last_child({layer, obj->vsrObject()});
+  for (auto *obj : m_volumes)
+    parent->insert_last_child({layer, obj->vsrObject()});
+  for (auto *obj : m_lights)
+    parent->insert_last_child({layer, obj->vsrObject()});
+}
+
+} // namespace vsr_device
+
+VSR_DEVICE_ANARI_TYPEFOR_DEFINITION(vsr_device::Group *);

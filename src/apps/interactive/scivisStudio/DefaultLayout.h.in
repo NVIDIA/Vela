@@ -1,0 +1,12 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+#pragma once
+
+namespace vsr::scivis_studio {
+
+inline constexpr const char *DEFAULT_LAYOUT = R"layout(@SCIVIS_STUDIO_DEFAULT_LAYOUT@)layout";
+inline constexpr const char *DEFAULT_LAYOUT_FILE =
+    R"layout_path(@SCIVIS_STUDIO_DEFAULT_LAYOUT_FILE@)layout_path";
+
+} // namespace vsr::scivis_studio

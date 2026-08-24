@@ -1,0 +1,26 @@
+## SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+## SPDX-License-Identifier: Apache-2.0
+
+project(vsr_network)
+
+project_add_library(STATIC)
+
+project_sources(PRIVATE
+  messages/NewObject.cpp
+  messages/ParameterChange.cpp
+  messages/ParameterRemove.cpp
+  messages/RemoveObject.cpp
+  messages/TransferArrayData.cpp
+  messages/TransferLayer.cpp
+  messages/TransferScene.cpp
+  NetworkChannel.cpp
+)
+
+# Find Boost (Asio)
+find_package(Boost 1.66 REQUIRED)
+
+project_link_libraries(PUBLIC Boost::boost vsr_scene)
+project_include_directories(
+PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/../..>
+)

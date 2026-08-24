@@ -1,0 +1,63 @@
+// SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+#include "Modal.h"
+#include "vsr/ui/imgui/Application.h"
+
+namespace vsr::ui::imgui {
+
+Modal::Modal(Application *app, const char *name) : m_app(app), m_name(name) {}
+
+Modal::~Modal() = default;
+
+void Modal::renderUI()
+{
+  if (!m_visible)
+    return;
+
+  ImGuiIO &io = ImGui::GetIO();
+  ImGui::SetNextWindowPos(
+      ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f),
+      ImGuiCond_Always,
+      ImVec2(0.5f, 0.5f));
+
+  ImGui::OpenPopup(m_name.c_str());
+  bool *visible = userClosable() ? &m_visible : nullptr;
+  if (ImGui::BeginPopupModal(
+          m_name.c_str(), visible, ImGuiWindowFlags_AlwaysAutoResize)) {
+    buildUI();
+    ImGui::EndPopup();
+  }
+}
+
+void Modal::show()
+{
+  m_visible = true;
+}
+
+void Modal::hide()
+{
+  m_visible = false;
+}
+
+bool Modal::visible() const
+{
+  return m_visible;
+}
+
+const char *Modal::name() const
+{
+  return m_name.c_str();
+}
+
+bool Modal::userClosable() const
+{
+  return true;
+}
+
+vsr::app::Context *Modal::appContext() const
+{
+  return m_app ? m_app->appContext() : nullptr;
+}
+
+} // namespace vsr::ui::imgui

@@ -1,0 +1,23 @@
+## SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+## SPDX-License-Identifier: Apache-2.0
+
+project(vsr_animation)
+
+project_add_library(STATIC)
+
+project_sources(
+PRIVATE
+  Animation.cpp
+  AnimationManager.cpp
+  Binding.cpp
+  CallbackBinding.cpp
+  ObjectParameterBinding.cpp
+  TransformBinding.cpp
+)
+
+project_include_directories(
+PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/../..>
+)
+
+project_link_libraries(PUBLIC vsr_scene)

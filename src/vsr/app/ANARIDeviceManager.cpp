@@ -1,0 +1,270 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+#include "ANARIDeviceManager.h"
+// vsr_core
+#include "vsr/core/Logging.hpp"
+// vsr_rendering
+#include "vsr/rendering/index/RenderIndexAllLayers.hpp"
+#include "vsr/rendering/index/RenderIndexFlatRegistry.hpp"
+// std
+#include <cassert>
+
+namespace vsr::app {
+
+void anariStatusFunc(const void *_verboseFlag,
+    ANARIDevice device,
+    ANARIObject source,
+    anari::DataType sourceType,
+    ANARIStatusSeverity severity,
+    ANARIStatusCode code,
+    const char *message)
+{
+  const char *typeStr = anari::toString(sourceType);
+  const auto *verboseFlag = (const bool *)_verboseFlag;
+  const bool verbose = verboseFlag ? *verboseFlag : false;
+
+  if (severity == ANARI_SEVERITY_FATAL_ERROR) {
+    fprintf(stderr, "[ANARI][FATAL][%s][%p] %s", typeStr, source, message);
+    std::exit(1);
+  } else if (severity == ANARI_SEVERITY_ERROR)
+    vsr::core::logError("[ANARI][ERROR][%s][%p] %s", typeStr, source, message);
+  else if (severity == ANARI_SEVERITY_WARNING)
+    vsr::core::logWarning(
+        "[ANARI][WARN ][%s][%p] %s", typeStr, source, message);
+  else if (verbose && severity == ANARI_SEVERITY_PERFORMANCE_WARNING)
+    vsr::core::logPerfWarning(
+        "[ANARI][PERF ][%s][%p] %s", typeStr, source, message);
+  else if (verbose && severity == ANARI_SEVERITY_INFO)
+    vsr::core::logInfo("[ANARI][INFO ][%s][%p] %s", typeStr, source, message);
+  else if (verbose && severity == ANARI_SEVERITY_DEBUG)
+    vsr::core::logDebug("[ANARI][DEBUG][%s][%p] %s", typeStr, source, message);
+}
+
+static std::vector<std::string> parseLibraryList()
+{
+  const char *libsFromEnv = getenv("VSR_ANARI_LIBRARIES");
+
+  auto splitString = [](const std::string &input,
+                         const std::string &delim) -> std::vector<std::string> {
+    std::vector<std::string> tokens;
+    size_t pos = 0;
+    while (true) {
+      size_t begin = input.find_first_not_of(delim, pos);
+      if (begin == input.npos)
+        return tokens;
+      size_t end = input.find_first_of(delim, begin);
+      tokens.push_back(input.substr(
+          begin, (end == input.npos) ? input.npos : (end - begin)));
+      pos = end;
+    }
+  };
+
+  auto libList = splitString(libsFromEnv ? libsFromEnv : "", ",");
+  if (libList.empty()) {
+    libList.push_back("helide");
+    libList.push_back("visrtx");
+    libList.push_back("visgl");
+    if (getenv("ANARI_LIBRARY"))
+      libList.push_back("environment");
+  }
+
+  libList.push_back("{none}");
+
+  return libList;
+}
+
+// ANARIDeviceManager definitions /////////////////////////////////////////////
+
+ANARIDeviceManager::ANARIDeviceManager(const bool *verboseFlag)
+    : m_verboseFlag(verboseFlag)
+{
+  m_libraryList = parseLibraryList();
+}
+
+ANARIDeviceManager::~ANARIDeviceManager()
+{
+  releaseAllDevices();
+  unloadAllLibraries();
+}
+
+const std::vector<std::string> &ANARIDeviceManager::libraryList() const
+{
+  return m_libraryList;
+}
+
+void ANARIDeviceManager::setLibraryList(const std::vector<std::string> &libs)
+{
+  m_libraryList = libs;
+}
+
+bool ANARIDeviceManager::isLoadableLibrary(const std::string &libraryName) const
+{
+  return !libraryName.empty() && libraryName != "{none}";
+}
+
+anari::Device ANARIDeviceManager::loadDevice(const std::string &libraryName,
+    const std::vector<DeviceInitParam> &initialDeviceParams)
+{
+  if (!isLoadableLibrary(libraryName))
+    return nullptr;
+
+  anari::Device dev = m_loadedDevices[libraryName];
+  if (dev) {
+    anari::retain(dev, dev);
+    return dev;
+  }
+
+  anari::Library library = m_loadedLibraries[libraryName];
+  if (!library) {
+    library =
+        anari::loadLibrary(libraryName.c_str(), anariStatusFunc, m_verboseFlag);
+    if (!library)
+      return nullptr;
+    m_loadedLibraries[libraryName] = library;
+  }
+
+  dev = anari::newDevice(library, "default");
+
+  m_loadedDeviceExtensions[libraryName] =
+      anari::extension::getDeviceExtensionStruct(library, "default");
+
+  anari::setParameter(dev, dev, "glAPI", "OpenGL");
+
+  for (const auto &param : initialDeviceParams) {
+    anari::setParameter(dev,
+        dev,
+        param.first.c_str(),
+        param.second.type(),
+        param.second.data());
+  }
+
+  anari::commitParameters(dev, dev);
+
+  m_loadedDevices[libraryName] = dev;
+  anari::retain(dev, dev);
+
+  return dev;
+}
+
+const anari::Extensions *ANARIDeviceManager::loadDeviceExtensions(
+    const std::string &libName)
+{
+  auto d = loadDevice(libName);
+  if (!d)
+    return nullptr;
+  anari::release(d, d);
+  return &m_loadedDeviceExtensions[libName];
+}
+
+vsr::rendering::RenderIndex *ANARIDeviceManager::acquireRenderIndex(
+    vsr::scene::Scene &c, vsr::core::Token n, anari::Device d)
+{
+  auto &liveIdx = m_rIdxs[d];
+  if (liveIdx.scene && liveIdx.scene != &c) {
+    vsr::core::logError(
+        "ANARIDeviceManager::acquireRenderIndex() scene mismatch for device %p"
+        " (existing=%p, requested=%p)",
+        (void *)d,
+        (void *)liveIdx.scene,
+        (void *)&c);
+    return nullptr;
+  }
+
+  if (liveIdx.refCount == 0) {
+    liveIdx.scene = &c;
+    switch (renderIndexKind()) {
+    case RenderIndexKind::FLAT:
+      liveIdx.idx =
+          c.updateDelegate().emplace<vsr::rendering::RenderIndexFlatRegistry>(
+              c, n, d);
+      break;
+    case RenderIndexKind::ALL_LAYERS:
+    default:
+      liveIdx.idx =
+          c.updateDelegate().emplace<vsr::rendering::RenderIndexAllLayers>(
+              c, n, d);
+      break;
+    }
+    liveIdx.idx->populate();
+  }
+  liveIdx.refCount++;
+  return liveIdx.idx;
+}
+
+void ANARIDeviceManager::releaseRenderIndex(
+    vsr::scene::Scene &c, anari::Device d)
+{
+  auto itr = m_rIdxs.find(d);
+  if (itr == m_rIdxs.end())
+    return;
+
+  auto &liveIdx = itr->second;
+  if (liveIdx.scene && liveIdx.scene != &c) {
+    vsr::core::logError(
+        "ANARIDeviceManager::releaseRenderIndex() scene mismatch for device %p"
+        " (existing=%p, requested=%p)",
+        (void *)d,
+        (void *)liveIdx.scene,
+        (void *)&c);
+    return;
+  }
+
+  if (liveIdx.refCount == 0)
+    return;
+  if (--liveIdx.refCount == 0) {
+    c.updateDelegate().erase(liveIdx.idx);
+    m_rIdxs.erase(itr);
+  }
+}
+
+void ANARIDeviceManager::releaseAllDevices()
+{
+  for (auto &itr : m_rIdxs) {
+    auto &liveIdx = itr.second;
+    if (liveIdx.scene && liveIdx.idx)
+      liveIdx.scene->updateDelegate().erase(liveIdx.idx);
+  }
+  m_rIdxs.clear();
+
+  for (auto &d : m_loadedDevices) {
+    if (d.second)
+      anari::release(d.second, d.second);
+  }
+  m_loadedDevices.clear();
+}
+
+void ANARIDeviceManager::setRenderIndexKind(RenderIndexKind k)
+{
+  m_settings.renderIndexKind = k;
+}
+
+RenderIndexKind ANARIDeviceManager::renderIndexKind() const
+{
+  return m_settings.renderIndexKind;
+}
+
+void ANARIDeviceManager::saveSettings(vsr::core::DataNode &root) const
+{
+  root.reset();
+  root["renderIndexKind"] = static_cast<int>(m_settings.renderIndexKind);
+}
+
+void ANARIDeviceManager::loadSettings(vsr::core::DataNode &root)
+{
+  int kind = 0;
+  if (root["renderIndexKind"].getValue(ANARI_INT32, &kind)) {
+    m_settings.renderIndexKind = static_cast<RenderIndexKind>(kind);
+  }
+}
+
+void ANARIDeviceManager::unloadAllLibraries()
+{
+  for (auto &lib : m_loadedLibraries) {
+    if (anari::Library library = lib.second; library)
+      anari::unloadLibrary(library);
+  }
+  m_loadedLibraries.clear();
+}
+
+} // namespace vsr::app

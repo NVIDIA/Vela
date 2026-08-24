@@ -1,0 +1,91 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+#pragma once
+
+// vsr_rendering
+#include "vsr/rendering/index/RenderIndex.hpp"
+// std
+#include <map>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace vsr::app {
+
+enum class RenderIndexKind : int
+{
+  ALL_LAYERS = 0,
+  FLAT
+};
+
+using DeviceInitParam = std::pair<std::string, vsr::core::Any>;
+
+/*
+ * Manages the lifecycle of ANARI devices and their associated RenderIndex
+ * instances; loads libraries on demand and reference-counts one scene-owned
+ * RenderIndex per ANARI device.
+ *
+ * Example:
+ *   ANARIDeviceManager mgr;
+ *   auto device = mgr.loadDevice("visrtx");
+ *   auto *idx = mgr.acquireRenderIndex(scene, deviceToken, device);
+ *   mgr.releaseRenderIndex(scene, device);
+ */
+struct ANARIDeviceManager
+{
+  ANARIDeviceManager(const bool *verboseFlag = nullptr);
+  ~ANARIDeviceManager();
+
+  const std::vector<std::string> &libraryList() const;
+  void setLibraryList(const std::vector<std::string> &libs);
+  bool isLoadableLibrary(const std::string &libName) const;
+
+  anari::Device loadDevice(const std::string &libName,
+      const std::vector<DeviceInitParam> &initialDeviceParams = {});
+
+  const anari::Extensions *loadDeviceExtensions(const std::string &libName);
+  vsr::rendering::RenderIndex *acquireRenderIndex(
+      vsr::scene::Scene &c, vsr::core::Token deviceName, anari::Device device);
+  void releaseRenderIndex(vsr::scene::Scene &c, anari::Device device);
+  void releaseAllDevices();
+
+  void setRenderIndexKind(RenderIndexKind k);
+  RenderIndexKind renderIndexKind() const;
+
+  void saveSettings(vsr::core::DataNode &root) const;
+  void loadSettings(vsr::core::DataNode &root);
+
+ private:
+  void unloadAllLibraries();
+
+  const bool *m_verboseFlag{nullptr};
+  struct LiveAnariIndex
+  {
+    vsr::scene::Scene *scene{nullptr};
+    int refCount{0};
+    vsr::rendering::RenderIndex *idx{nullptr};
+  };
+  std::map<anari::Device, LiveAnariIndex> m_rIdxs;
+  std::map<std::string, anari::Library> m_loadedLibraries;
+  std::map<std::string, anari::Device> m_loadedDevices;
+  std::map<std::string, anari::Extensions> m_loadedDeviceExtensions;
+  std::vector<std::string> m_libraryList;
+
+  // Settings //
+
+  struct Settings
+  {
+    RenderIndexKind renderIndexKind{RenderIndexKind::ALL_LAYERS};
+  } m_settings;
+};
+
+void anariStatusFunc(const void *_core,
+    ANARIDevice device,
+    ANARIObject source,
+    anari::DataType sourceType,
+    ANARIStatusSeverity severity,
+    ANARIStatusCode code,
+    const char *message);
+
+} // namespace vsr::app
