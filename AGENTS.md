@@ -14,6 +14,7 @@ below relate to each other.
 
 Each area keeps a `CONTEXT.md` glossary. Use these terms in code and docs:
 
+- [src/vsr/core/CONTEXT.md](src/vsr/core/CONTEXT.md) — Data Trees, Data Paths, and change-notification vocabulary
 - [src/vsr/io/CONTEXT.md](src/vsr/io/CONTEXT.md) — Archives, serialization verbs, import/export vocabulary
 - [src/vsr/app/CONTEXT.md](src/vsr/app/CONTEXT.md) — Application Dumps and app-level state
 - [src/vsr/rendering/CONTEXT.md](src/vsr/rendering/CONTEXT.md) — Image Pipeline / Image Pass / render-index vocabulary

@@ -11,6 +11,9 @@ components.
   `ObjectPool`, `FlatMap`, and `Forest`.
 - `DataTree` and `DataNode` provide hierarchical typed data serialization to
   file or memory buffers.
+- `DataPath` addresses a `DataNode` within its tree, naming named children and
+  numbering anonymous ones; `DataTreeObserver` receives a signal per semantic
+  edit made to a tree.
 - `DataStream` defines stream-like readers/writers (`FileReader`,
   `BufferWriter`, etc.) used by serialization layers.
 - Utility systems for runtime behavior:

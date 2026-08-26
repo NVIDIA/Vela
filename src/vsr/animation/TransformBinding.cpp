@@ -213,7 +213,7 @@ void TransformBinding::fromDataNode(core::DataNode &node)
   }
 
   auto loadVec = [&](const char *key, auto &out) {
-    if (auto *n = node.child(key)) {
+    if (const auto *n = node.child(key)) {
       const auto *ptr = out.data();
       size_t count = 0;
       n->getValueAsArray(&ptr, &count);
