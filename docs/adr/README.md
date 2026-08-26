@@ -30,6 +30,19 @@ Project layout, dataset ownership, and file-animation persistence for the
 | [0013](0013-externalize-file-animation-source-lists.md) | Externalize file-animation source lists into sibling Source List Files | Revises [0003](0003-delegate-file-animation-io-to-vsr.md), [0004](0004-make-dataset-files-authoritative.md), [0005](0005-keep-the-dataset-directory-flat.md), [0007](0007-treat-file-animation-paths-as-opaque.md) |
 | [0023](0023-allow-declared-file-animation-datasets.md) | Allow declared file-animation datasets | |
 
+## VSR Core data trees
+
+Addressing and change notification for `vsr::core::DataTree`, and the
+boundary between its in-memory and serialized forms.
+
+| ADR | Decision | Supersedes / revised by |
+| --- | --- | --- |
+| [0025](0025-address-anonymous-data-nodes-by-ordinal.md) | Address anonymous Data Nodes by ordinal, not by name | |
+| [0026](0026-keep-the-data-tree-file-format-unchanged.md) | Keep the Data Tree file format unchanged when introducing Data Paths | |
+
+See [`src/vsr/core/CONTEXT.md`](../../src/vsr/core/CONTEXT.md) for the
+resulting vocabulary.
+
 ## VSR I/O vocabulary
 
 | ADR | Decision | Supersedes / revised by |

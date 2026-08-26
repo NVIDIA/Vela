@@ -414,6 +414,11 @@ change.
   without writing fan-out logic yourself.
 - Never bypass the delegate system by mutating scene objects and then calling
   renderer internals directly — that breaks the synchronization contract.
+- `vsr::core::DataTreeObserver` is a separate, peer mechanism covering
+  `DataTree` mutations, not a scene one: a tree notifies at most one Observer,
+  registered non-owning via `DataTree::setObserver()`. Use it for consumers of
+  hierarchical data; `BaseUpdateDelegate` still governs everything in a
+  `Scene`.
 
 ---
 

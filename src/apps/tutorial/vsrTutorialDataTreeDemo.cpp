@@ -66,8 +66,9 @@ int main()
         root["test2"]["child4"].getValueAs<std::string>().c_str());
 
     size_t arrSize = 0;
-    float *arrPtr = nullptr;
-    root["testArray"].getValueAsArray(&arrPtr, &arrSize);
+    const float *arrPtr = nullptr;
+    const vsr::core::DataNode *arrayNode = root.child("testArray");
+    arrayNode->getValueAsArray(&arrPtr, &arrSize);
     printf("testArray: %f, %f, %f\n", arrPtr[0], arrPtr[1], arrPtr[2]);
 
     printf("testObject: %s | %zu\n",

@@ -4,8 +4,11 @@
 #pragma once
 
 #include "vsr/core/Any.hpp"
+#include "vsr/core/DataPath.hpp"
 #include "vsr/core/DataStream.hpp"
+#include "vsr/core/DataTreeObserver.hpp"
 #include "vsr/core/Forest.hpp"
+#include "vsr/core/Logging.hpp"
 #include "vsr/core/TypeMacros.hpp"
 // std
 #include <algorithm>
@@ -16,6 +19,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace vsr::core {
@@ -25,6 +29,15 @@ struct DataTree;
 /*
  * Named node in a hierarchical tree that holds an Any value and an ordered
  * list of named child nodes; supports typed get/set helpers and tree traversal.
+ *
+ * Every mutation below produces a Signal on the tree's DataTreeObserver, if
+ * one is installed. Ask a node for its path() to learn where in the tree it
+ * lives; a DataPath is only built when asked for.
+ *
+ * A node name may not contain the DataPath separator. A name that contains one
+ * is repaired rather than rejected (see DataPath.hpp), on creation and on
+ * name-based lookup alike, so that the string used to append a node is the
+ * string that finds it again.
  *
  * Example:
  *   DataNode &n = tree.root()["material"];
@@ -46,6 +59,11 @@ struct DataNode
 
   const std::string &name() const;
 
+  // Where this node lives in its tree. Built on demand, never cached: an
+  // Observer that filters to a small subtree does not pay for the paths it
+  // would discard.
+  DataPath path() const;
+
   void reset(); // clear value and remove children
 
   // Setting values //
@@ -63,10 +81,13 @@ struct DataNode
   template <typename T>
   void setValueAsArray(const T *v, size_t numElements);
   void setValueAsArray(anari::DataType type, const void *v, size_t numElements);
-  void *setValueAsArray(anari::DataType type, size_t numElements);
 
+  // An External Array's contents belong to the caller, so a DataTree cannot
+  // observe them changing. Call signalExternalArrayChanged() after writing
+  // through the pointer to keep an Observer correct.
   void setValueAsExternalArray(
       anari::DataType type, const void *v, size_t numElements);
+  void signalExternalArrayChanged();
 
   void setValueObject(anari::DataType type, size_t idx);
 
@@ -85,11 +106,8 @@ struct DataNode
 
   template <typename T>
   void getValueAsArray(const T **ptr, size_t *size) const;
-  template <typename T>
-  void getValueAsArray(T **ptr, size_t *size);
   void getValueAsArray(
       anari::DataType *type, const void **ptr, size_t *size) const;
-  void getValueAsArray(anari::DataType *type, void **ptr, size_t *size);
 
   void getValueAsObjectIdx(anari::DataType *type, size_t *idx) const;
 
@@ -120,6 +138,16 @@ struct DataNode
   void forall_children(std::function<void(DataNode &)> &&fcn);
   void foreach_child(std::function<void(DataNode &)> &&fcn);
 
+  // Const counterparts, so that an Observer handed a doomed subtree by
+  // signalNodeRemoved() can walk it before it is destroyed. Named rather than
+  // overloaded, following Forest's own _const suffix: a generic lambda is
+  // convertible to both signatures, and the overload it picked would be a
+  // coin toss at every call site.
+  void traverse_const(
+      std::function<bool(const DataNode &n, int level)> &&fcn) const;
+  void forall_children_const(std::function<void(const DataNode &)> &&fcn) const;
+  void foreach_child_const(std::function<void(const DataNode &)> &&fcn) const;
+
 #ifndef VSR_DATA_TREE_TEST_MODE // allow access to self() in unit tests only (!)
  private:
 #endif
@@ -131,12 +159,38 @@ struct DataNode
 
   DataNode(const std::string &name); // only Data[Node|Tree] can construct nodes
 
+  // Mutation that no Observer can see is not offered publicly: a caller
+  // handed a raw pointer into a node's storage can change an owned value
+  // without a Signal. The loader reaches these through friendship.
+  void *setValueAsArray(anari::DataType type, size_t numElements);
+  template <typename T>
+  void getValueAsArray(T **ptr, size_t *size);
+  void getValueAsArray(anari::DataType *type, void **ptr, size_t *size);
+
+  // Signal helpers //
+
+  DataTreeObserver *observer() const;
+  void signalValueChanged() const;
+  void signalValueCleared() const;
+  void signalNodeAdded() const;
+  void signalNodeRemoved() const;
+
+  // Mutation helpers that deliberately produce no Signal of their own, used
+  // where a compound edit reports itself as one semantic event.
+  void clearValueSilently();
+  void removeChildren(); // signals one removal per direct child, not per node
+
+  DataNode *parentNode() const; // nullptr at the root
+  size_t ordinal() const; // position among siblings, for an Anonymous Node
+
   // Data members //
 
   struct NodeData
   {
     Ref self;
+    DataTree *tree{nullptr};
     std::string name;
+    bool anonymous{false};
     Any value;
     std::vector<uint8_t> arrayBytes;
     anari::DataType arrayType{ANARI_UNKNOWN};
@@ -153,8 +207,17 @@ using DataTreeVisitorExitFunction = std::function<void(DataNode &n, int level)>;
  * Non-copyable, non-movable tree of DataNode instances rooted at a single
  * unnamed root node; supports serialization and depth-first traversal.
  *
+ * A tree notifies at most one DataTreeObserver of each semantic edit made to
+ * it. A tree with no Observer installed costs one null test per edit, so the
+ * archive and serialization paths that build trees in bulk are unaffected.
+ *
+ * Mutating a tree from inside a Signal is not supported, and neither is
+ * touching a tree from more than one thread: like the rest of VSR, a DataTree
+ * makes no thread-safety guarantee and callers synchronize.
+ *
  * Example:
  *   DataTree tree;
+ *   tree.setObserver(&myObserver);
  *   tree.root()["width"] = 1920;
  *   tree.root()["height"] = 1080;
  *   tree.traverse([](DataNode &n, int lvl){ return true; }, {});
@@ -168,6 +231,33 @@ struct DataTree
 
   DataNode &root();
   const DataNode &root() const;
+
+  // Addressing //
+
+  // Resolve a DataPath back to the node it denotes, or nullptr when no such
+  // node exists. Deliberately non-creating, unlike DataNode::operator[]: there
+  // is no sane node for an ordinal segment to create, since nothing answers
+  // what the eighth child of a three-child node should be.
+  DataNode *node(const DataPath &path);
+  const DataNode *node(const DataPath &path) const;
+
+  // Change notification //
+
+  // The Observer is registered non-owning, so it must outlive its
+  // registration or be removed first -- a destroyed Observer left installed
+  // is a dangling pointer the tree will call through. Installing a second
+  // Observer replaces the first; pass nullptr to stop observing.
+  void setObserver(DataTreeObserver *observer);
+  DataTreeObserver *observer() const;
+
+  // Bracket a run of edits that a consumer downstream of the Observer should
+  // coalesce. Nesting is counted, so an inner bracket does not end an outer
+  // one. Compound tree operations self-bracket when the number of Signals they
+  // produce scales with the size of a tree -- DataNode copy-assignment does,
+  // DataNode::reset() does not. Loading does neither: it collapses to a single
+  // signalTreeReplaced().
+  void beginUpdateBatch();
+  void endUpdateBatch();
 
   // Traverse nodes //
 
@@ -195,13 +285,51 @@ struct DataTree
   VSR_NOT_COPYABLE(DataTree)
 
  private:
+  friend struct DataNode;
+
   bool saveImpl(DataWriter &writer);
   bool loadImpl(DataReader &reader);
-  void writeDataNode(
-      DataWriter &writer, const DataNode &node, const std::string &path) const;
-  std::string printablePath(const std::string &path) const;
+
+  // The serialized form stores a leaf's Parent Path -- the NUL-separated chain
+  // of its ancestors' names -- not a DataPath. The two are deliberately
+  // distinct spellings of a location, converted only here (ADR 0026).
+  void writeDataNode(DataWriter &writer,
+      const DataNode &node,
+      const std::string &parentPath) const;
+  std::string printableParentPath(const std::string &parentPath) const;
+
+  // The Observer to signal right now, or nullptr when there is none or when
+  // signals are being collapsed into one signalTreeReplaced().
+  DataTreeObserver *activeObserver() const;
 
   Forest<std::unique_ptr<DataNode>> m_tree;
+  DataTreeObserver *m_observer{nullptr};
+  int m_updateBatchDepth{0};
+  bool m_signalsSuppressed{false};
+};
+
+/*
+ * Scoped DataTree update batch: brackets a run of edits so that a consumer
+ * downstream of the Observer can coalesce the work they trigger, and ends the
+ * bracket however the scope is left.
+ *
+ * Example:
+ *   {
+ *     DataTreeUpdateBatch batch(tree);
+ *     for (auto &v : values)
+ *       tree.root()[v.name] = v.value;
+ *   }
+ */
+struct DataTreeUpdateBatch
+{
+  explicit DataTreeUpdateBatch(DataTree &tree);
+  ~DataTreeUpdateBatch();
+
+  VSR_NOT_COPYABLE(DataTreeUpdateBatch)
+  VSR_NOT_MOVEABLE(DataTreeUpdateBatch)
+
+ private:
+  DataTree *m_tree{nullptr};
 };
 
 // Inlined definitions ////////////////////////////////////////////////////////
@@ -213,6 +341,7 @@ inline DataNode::~DataNode() = default;
 inline DataNode::DataNode(const DataNode &o) : m_data(o.m_data)
 {
   m_data.self = {};
+  m_data.tree = nullptr;
 }
 
 inline DataNode &DataNode::operator=(const DataNode &o)
@@ -221,15 +350,44 @@ inline DataNode &DataNode::operator=(const DataNode &o)
     return *this;
 
   auto selfRef = m_data.self;
+  auto *tree = m_data.tree;
+  const bool heldSomething = !empty();
+
+  // Copying a subtree produces a Signal per node copied, so it brackets
+  // itself: its Signal count scales with the size of the source tree.
+  if (tree)
+    tree->beginUpdateBatch();
+
+  if (selfRef)
+    removeChildren();
+
+  // Copy-assignment copies a node's *value*; a node's identity comes from its
+  // position in the tree, so the destination keeps its own name and anonymity
+  // along with its self-reference and its tree. Taking the source's name
+  // instead would re-key the node under a name its parent's child list was
+  // never built with, and re-aim every DataPath already held for it.
+  auto name = std::move(m_data.name);
+  const bool anonymous = m_data.anonymous;
   m_data = o.m_data;
   m_data.self = selfRef;
+  m_data.tree = tree;
+  m_data.name = std::move(name);
+  m_data.anonymous = anonymous;
+
+  if (!empty())
+    signalValueChanged();
+  else if (heldSomething)
+    signalValueCleared();
+
   if (selfRef) {
-    selfRef->erase_subtree();
     for (size_t i = 0; i < o.numChildren(); ++i) {
       if (auto *child = o.child(i))
         append(child->name()) = *child;
     }
   }
+
+  if (tree)
+    tree->endUpdateBatch();
 
   return *this;
 }
@@ -239,10 +397,30 @@ inline const std::string &DataNode::name() const
   return m_data.name;
 }
 
+inline DataPath DataNode::path() const
+{
+  std::vector<const DataNode *> ancestry;
+  for (const DataNode *n = this; n != nullptr; n = n->parentNode()) {
+    auto ref = n->self();
+    if (!ref || ref->isRoot())
+      break;
+    ancestry.push_back(n);
+  }
+
+  DataPath path;
+  for (auto it = ancestry.rbegin(); it != ancestry.rend(); ++it) {
+    const DataNode *n = *it;
+    path =
+        n->m_data.anonymous ? path.child(n->ordinal()) : path.child(n->name());
+  }
+
+  return path;
+}
+
 inline void DataNode::reset()
 {
+  removeChildren();
   clearValue();
-  self()->erase_subtree();
 }
 
 template <typename T>
@@ -261,8 +439,10 @@ inline DataNode &DataNode::operator=(const std::string &v)
 
 inline void DataNode::setValue(const Any &v)
 {
-  reset();
+  removeChildren();
+  clearValueSilently();
   m_data.value = v;
+  signalValueChanged();
 }
 
 template <typename T>
@@ -293,11 +473,16 @@ inline void DataNode::setValueAsArray(
 {
   auto *ptr = setValueAsArray(type, numElements);
   std::memcpy(ptr, v, m_data.arrayBytes.size());
+  signalValueChanged();
 }
 
 inline void *DataNode::setValueAsArray(anari::DataType type, size_t numElements)
 {
-  reset();
+  // Silent by design: the caller still has to fill the storage this returns,
+  // so the value has not finished changing yet. Callers that hand the filled
+  // array back through the public overload get the Signal there.
+  removeChildren();
+  clearValueSilently();
   m_data.arrayType = type;
   m_data.arrayBytes.resize(numElements * anari::sizeOf(type));
   return m_data.arrayBytes.data();
@@ -306,10 +491,25 @@ inline void *DataNode::setValueAsArray(anari::DataType type, size_t numElements)
 inline void DataNode::setValueAsExternalArray(
     anari::DataType type, const void *v, size_t numElements)
 {
-  reset();
+  removeChildren();
+  clearValueSilently();
   m_data.arrayType = type;
   m_data.externalArray = v;
   m_data.externalArraySize = numElements * anari::sizeOf(type);
+  signalValueChanged();
+}
+
+inline void DataNode::signalExternalArrayChanged()
+{
+  if (!holdsExternalArray()) {
+    logWarning(
+        "DataNode '%s' holds no External Array to signal a change for; the "
+        "values a DataTree owns signal for themselves",
+        m_data.name.c_str());
+    return;
+  }
+
+  signalValueChanged();
 }
 
 inline void DataNode::setValueObject(anari::DataType type, size_t idx)
@@ -318,6 +518,14 @@ inline void DataNode::setValueObject(anari::DataType type, size_t idx)
 }
 
 inline void DataNode::clearValue()
+{
+  const bool heldSomething = !empty();
+  clearValueSilently();
+  if (heldSomething)
+    signalValueCleared();
+}
+
+inline void DataNode::clearValueSilently()
 {
   m_data.value.reset();
   m_data.arrayBytes.clear();
@@ -464,6 +672,11 @@ inline bool DataNode::holdsArray() const
   return arrayType() != ANARI_UNKNOWN;
 }
 
+inline bool DataNode::holdsExternalArray() const
+{
+  return holdsArray() && m_data.externalArray != nullptr;
+}
+
 inline anari::DataType DataNode::arrayType() const
 {
   return m_data.arrayType;
@@ -488,13 +701,16 @@ inline size_t DataNode::numChildren() const
 
 inline DataNode *DataNode::child(std::string_view childName)
 {
-  auto n = find_first_child(
-      self(), [&](DataNode::Ptr &cn) { return cn->name() == childName; });
-  return n ? (**n).get() : nullptr;
+  return const_cast<DataNode *>(std::as_const(*this).child(childName));
 }
 
 inline const DataNode *DataNode::child(std::string_view childName) const
 {
+  std::string sanitized;
+  if (dataNodeNameNeedsSanitizing(childName)) {
+    sanitized = sanitizeDataNodeName(childName);
+    childName = sanitized;
+  }
   auto n = find_first_child(
       self(), [&](DataNode::Ptr &cn) { return cn->name() == childName; });
   return n ? (**n).get() : nullptr;
@@ -508,10 +724,7 @@ inline DataNode &DataNode::operator[](std::string_view childName)
 
 inline DataNode *DataNode::child(size_t childIdx)
 {
-  size_t i = 0;
-  auto n = find_first_child(
-      self(), [&](DataNode::Ptr &cn) { return i++ == childIdx; });
-  return n ? (**n).get() : nullptr;
+  return const_cast<DataNode *>(std::as_const(*this).child(childIdx));
 }
 
 inline const DataNode *DataNode::child(size_t childIdx) const
@@ -526,34 +739,83 @@ inline DataNode &DataNode::append(std::string_view newChildName)
 {
   clearValue();
 
-  std::string name(newChildName);
-  if (name.empty()) {
-#if 1
+  std::string name = sanitizeDataNodeName(newChildName);
+
+  // Anonymity is recorded on the node rather than inferred from its name: the
+  // synthesized name is still what goes to disk, so nothing in the serialized
+  // form or in name-based lookup moves. The name a node carries stays an
+  // opaque counter, and a DataPath spells it as an ordinal instead (ADR 0025).
+  const bool anonymous = name.empty();
+  if (anonymous) {
     static int counter = 0;
     name = '<' + std::to_string(counter++) + '>';
-#else // for some reason, this breaks in VSR context export...
-    name = '<' + std::to_string(numChildren()) + '>';
-#endif
   }
 
   if (auto *c = child(name); c != nullptr)
     return *c;
-  else {
-    auto ref = self()->insert_last_child(DataNode::Ptr{new DataNode(name)});
-    ref->value()->m_data.self = ref;
-    return ***ref;
-  }
+
+  auto ref = self()->insert_last_child(DataNode::Ptr{new DataNode(name)});
+  auto &newNode = ***ref;
+  newNode.m_data.self = ref;
+  newNode.m_data.tree = m_data.tree;
+  newNode.m_data.anonymous = anonymous;
+  newNode.signalNodeAdded();
+  return newNode;
 }
 
 inline void DataNode::remove(std::string_view name)
 {
   if (auto *c = child(name); c != nullptr)
-    self()->container()->erase(c->self());
+    remove(*c);
 }
 
 inline void DataNode::remove(DataNode &childNode)
 {
+  // Signal first: an Observer given the node on its way out can still read it
+  // and walk what is going away with it. Only a real child is announced, so
+  // that a caller passing an unrelated node cannot fabricate a Signal.
+  if (childNode.parentNode() == this)
+    childNode.signalNodeRemoved();
   self()->container()->erase(childNode.self());
+}
+
+inline void DataNode::removeChildren()
+{
+  auto ref = self();
+  if (!ref || ref->isLeaf())
+    return;
+
+  if (observer() != nullptr) {
+    ::vsr::core::foreach_child(
+        ref, [](DataNode::Ptr &cn) { cn->signalNodeRemoved(); });
+  }
+
+  ref->erase_subtree();
+}
+
+inline DataNode *DataNode::parentNode() const
+{
+  auto ref = self();
+  auto parentRef = ref ? ref->parent() : Ref{};
+  return parentRef ? (**parentRef).get() : nullptr;
+}
+
+inline size_t DataNode::ordinal() const
+{
+  auto ref = self();
+  auto parentRef = ref ? ref->parent() : Ref{};
+  if (!parentRef)
+    return 0;
+
+  size_t position = 0;
+  find_first_child(parentRef, [&](DataNode::Ptr &cn) {
+    if (cn.get() == this)
+      return true;
+    position++;
+    return false;
+  });
+
+  return position;
 }
 
 inline void DataNode::traverse(
@@ -573,6 +835,26 @@ inline void DataNode::foreach_child(std::function<void(DataNode &)> &&fcn)
   ::vsr::core::foreach_child(self(), [&](auto &ref) { fcn(*ref); });
 }
 
+inline void DataNode::traverse_const(
+    std::function<bool(const DataNode &n, int level)> &&fcn) const
+{
+  self()->container()->traverse_const(
+      self(), [&](const auto &ref, int level) { return fcn(**ref, level); });
+}
+
+inline void DataNode::forall_children_const(
+    std::function<void(const DataNode &)> &&fcn) const
+{
+  ::vsr::core::forall_children_const(
+      self(), [&](const auto &ref) { fcn(*ref); });
+}
+
+inline void DataNode::foreach_child_const(
+    std::function<void(const DataNode &)> &&fcn) const
+{
+  ::vsr::core::foreach_child_const(self(), [&](const auto &ref) { fcn(*ref); });
+}
+
 inline DataNode::Ref DataNode::self() const
 {
   return m_data.self;
@@ -588,11 +870,41 @@ inline DataNode::DataNode(const std::string &name)
   m_data.name = name;
 }
 
+inline DataTreeObserver *DataNode::observer() const
+{
+  return m_data.tree ? m_data.tree->activeObserver() : nullptr;
+}
+
+inline void DataNode::signalValueChanged() const
+{
+  if (auto *o = observer(); o != nullptr)
+    o->signalValueChanged(*this);
+}
+
+inline void DataNode::signalValueCleared() const
+{
+  if (auto *o = observer(); o != nullptr)
+    o->signalValueCleared(*this);
+}
+
+inline void DataNode::signalNodeAdded() const
+{
+  if (auto *o = observer(); o != nullptr)
+    o->signalNodeAdded(*this);
+}
+
+inline void DataNode::signalNodeRemoved() const
+{
+  if (auto *o = observer(); o != nullptr)
+    o->signalNodeRemoved(*this);
+}
+
 // DataTree //
 
 inline DataTree::DataTree() : m_tree(DataNode::Ptr{new DataNode("<root>")})
 {
   root().m_data.self = m_tree.root();
+  root().m_data.tree = this;
 }
 
 inline DataTree::~DataTree() = default;
@@ -605,6 +917,54 @@ inline DataNode &DataTree::root()
 inline const DataNode &DataTree::root() const
 {
   return ***m_tree.root();
+}
+
+inline DataNode *DataTree::node(const DataPath &path)
+{
+  DataNode *current = &root();
+  for (auto segment : path) {
+    current = segment.isOrdinal() ? current->child(segment.ordinal())
+                                  : current->child(segment.name());
+    if (current == nullptr)
+      return nullptr;
+  }
+  return current;
+}
+
+inline const DataNode *DataTree::node(const DataPath &path) const
+{
+  return const_cast<DataTree *>(this)->node(path);
+}
+
+inline void DataTree::setObserver(DataTreeObserver *observer)
+{
+  m_observer = observer;
+}
+
+inline DataTreeObserver *DataTree::observer() const
+{
+  return m_observer;
+}
+
+inline void DataTree::beginUpdateBatch()
+{
+  if (m_updateBatchDepth++ != 0)
+    return;
+  if (auto *o = activeObserver(); o != nullptr)
+    o->signalUpdateBatchBegin();
+}
+
+inline void DataTree::endUpdateBatch()
+{
+  if (m_updateBatchDepth == 0 || --m_updateBatchDepth != 0)
+    return;
+  if (auto *o = activeObserver(); o != nullptr)
+    o->signalUpdateBatchEnd();
+}
+
+inline DataTreeObserver *DataTree::activeObserver() const
+{
+  return m_signalsSuppressed ? nullptr : m_observer;
 }
 
 inline void DataTree::traverse(DataTreeVisitorEntryFunction &&onNodeEntry,
@@ -723,8 +1083,11 @@ inline bool DataTree::saveImpl(DataWriter &writer)
 
   // Travese tree and write nodes //
 
-  std::string path;
-  path.reserve(256);
+  // This is a Parent Path, not a DataPath: the chain of ancestor names, with
+  // the leaf's own name written separately. The file format is deliberately
+  // left byte-identical to what it was before Data Paths existed (ADR 0026).
+  std::string parentPath;
+  parentPath.reserve(256);
   m_tree.traverse(
       m_tree.root(),
       [&](auto &nodeRef, int level) {
@@ -732,12 +1095,12 @@ inline bool DataTree::saveImpl(DataWriter &writer)
           return true;
 
         if (auto &node = **nodeRef; nodeRef.isLeaf()) {
-          writeDataNode(writer, node, path);
+          writeDataNode(writer, node, parentPath);
           numLeafNodes++;
         } else {
           const auto &name = node.name();
-          std::copy(name.begin(), name.end(), std::back_inserter(path));
-          path.push_back('\0');
+          std::copy(name.begin(), name.end(), std::back_inserter(parentPath));
+          parentPath.push_back('\0');
         }
 
         return true;
@@ -746,12 +1109,13 @@ inline bool DataTree::saveImpl(DataWriter &writer)
         if (level == 0)
           return;
         else if (level == 1) {
-          path.clear();
+          parentPath.clear();
           return;
         }
 
         if (!nodeRef.isLeaf())
-          path.resize(path.size() - ((*nodeRef)->name().size() + 1));
+          parentPath.resize(
+              parentPath.size() - ((*nodeRef)->name().size() + 1));
       });
 
   return true;
@@ -774,7 +1138,21 @@ inline bool DataTree::loadImpl(DataReader &reader)
     return result;
   };
 
+  // Files written before Anonymous Nodes carried a flag identify them only by
+  // the shape of the name the writer synthesized, so the inference lives here
+  // and nowhere else.
+  auto appendLoadedNode = [](DataNode &parent,
+                              const std::string &name) -> DataNode & {
+    auto &node = parent.append(name);
+    node.m_data.anonymous = isDelimitedNumber(node.name(), '<', '>');
+    return node;
+  };
+
   /////////////////////////////////////////////////////////////////////////////
+
+  // Loading is one semantic event, not thousands: the individual edits below
+  // are collapsed into the single signalTreeReplaced() at the end.
+  m_signalsSuppressed = true;
 
   m_tree.root()->erase_subtree();
   auto &rootNode = root();
@@ -805,15 +1183,16 @@ inline bool DataTree::loadImpl(DataReader &reader)
 
     // Create node //
 
-    auto path = splitNullSeparatedStrings(fullPath.c_str(), fullPath.size());
+    auto parentPath =
+        splitNullSeparatedStrings(fullPath.c_str(), fullPath.size());
 
     DataNode *parentPtr = &rootNode;
-    for (auto &loc : path) {
+    for (auto &loc : parentPath) {
       if (!loc.empty())
-        parentPtr = &parentPtr->append(loc);
+        parentPtr = &appendLoadedNode(*parentPtr, loc);
     }
 
-    auto &node = parentPtr->append(name);
+    auto &node = appendLoadedNode(*parentPtr, name);
 
     // Read node value //
 
@@ -848,20 +1227,27 @@ inline bool DataTree::loadImpl(DataReader &reader)
     }
   }
 
+  // Suppression is lifted before the one Signal a load does deliver, so that
+  // an Observer reading the tree back sees it behaving normally.
+  m_signalsSuppressed = false;
+  if (auto *o = activeObserver(); o != nullptr)
+    o->signalTreeReplaced();
+
   return true;
 }
 
-inline void DataTree::writeDataNode(
-    DataWriter &writer, const DataNode &node, const std::string &path) const
+inline void DataTree::writeDataNode(DataWriter &writer,
+    const DataNode &node,
+    const std::string &parentPath) const
 {
   // name
   size_t size = node.name().size();
   writer.write(&size, sizeof(size_t), 1);
   writer.write(node.name().c_str(), sizeof(char), size);
-  // path
-  size = path.size();
+  // parent path
+  size = parentPath.size();
   writer.write(&size, sizeof(size_t), 1);
-  writer.write(path.c_str(), sizeof(char), size);
+  writer.write(parentPath.c_str(), sizeof(char), size);
   // isArray
   const uint8_t isArray = node.holdsArray();
   writer.write(&isArray, sizeof(uint8_t), 1);
@@ -894,11 +1280,24 @@ inline void DataTree::writeDataNode(
   }
 }
 
-inline std::string DataTree::printablePath(const std::string &path) const
+inline std::string DataTree::printableParentPath(
+    const std::string &parentPath) const
 {
-  std::string printable = path;
-  std::replace(printable.begin(), printable.end(), '\0', '/');
+  std::string printable = parentPath;
+  std::replace(printable.begin(), printable.end(), '\0', DATA_PATH_SEPARATOR);
   return printable;
+}
+
+// DataTreeUpdateBatch //
+
+inline DataTreeUpdateBatch::DataTreeUpdateBatch(DataTree &tree) : m_tree(&tree)
+{
+  m_tree->beginUpdateBatch();
+}
+
+inline DataTreeUpdateBatch::~DataTreeUpdateBatch()
+{
+  m_tree->endUpdateBatch();
 }
 
 } // namespace vsr::core

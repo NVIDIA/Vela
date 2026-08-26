@@ -17,6 +17,7 @@ project_add_executable(
   test_AnyArray.cpp
   test_Array.cpp
   test_ComponentSerialization.cpp
+  test_DataPath.cpp
   test_DataTree.cpp
   test_FlatMap.cpp
   test_Forest.cpp
@@ -81,6 +82,7 @@ add_test(NAME vsr::AnyArray      COMMAND ${PROJECT_NAME} "[AnyArray]"     )
 add_test(NAME vsr::Array         COMMAND ${PROJECT_NAME} "[Array]"        )
 add_test(NAME vsr::ComponentSerialization
   COMMAND ${PROJECT_NAME} "[ComponentSerialization]")
+add_test(NAME vsr::DataPath      COMMAND ${PROJECT_NAME} "[DataPath]"     )
 add_test(NAME vsr::DataTree      COMMAND ${PROJECT_NAME} "[DataTree]"     )
 add_test(NAME vsr::FlatMap       COMMAND ${PROJECT_NAME} "[FlatMap]"      )
 add_test(NAME vsr::Forest        COMMAND ${PROJECT_NAME} "[Forest]"       )

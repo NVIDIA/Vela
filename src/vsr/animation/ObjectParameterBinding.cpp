@@ -286,7 +286,9 @@ void ObjectParameterBinding::fromDataNode(core::DataNode &node)
 
   const float *tbPtr = nullptr;
   size_t tbCount = 0;
-  if (auto *tbNode = node.child("timeBase"))
+  // Read through a const node: array storage a DataTree owns is only
+  // handed out const, so that no value can change without a Signal.
+  if (const auto *tbNode = node.child("timeBase"))
     tbNode->getValueAsArray(&tbPtr, &tbCount);
 
   const void *dataPtr = nullptr;
