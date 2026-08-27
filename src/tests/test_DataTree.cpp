@@ -421,7 +421,7 @@ struct RecordedSignal
     ValueCleared,
     NodeAdded,
     NodeRemoved,
-    TreeReplaced,
+    SubtreeReplaced,
     BatchBegin,
     BatchEnd
   };
@@ -464,9 +464,9 @@ struct RecordingObserver : vsr::core::DataTreeObserver
     });
   }
 
-  void signalTreeReplaced() override
+  void signalSubtreeReplaced(const vsr::core::DataNode &n) override
   {
-    signals.push_back({RecordedSignal::TreeReplaced, "", "", 0, 0, 0});
+    record(RecordedSignal::SubtreeReplaced, n);
   }
 
   void signalUpdateBatchBegin() override
@@ -776,7 +776,7 @@ SCENARIO("vsr::core::DataTree update batches", "[DataTree]")
   }
 }
 
-SCENARIO("vsr::core::DataTree collapses a load to one signal", "[DataTree]")
+SCENARIO("vsr::core::DataTree collapses a read to one signal", "[DataTree]")
 {
   GIVEN("A serialized tree of many nodes")
   {
@@ -795,10 +795,11 @@ SCENARIO("vsr::core::DataTree collapses a load to one signal", "[DataTree]")
 
       REQUIRE(destination.read(buffer));
 
-      THEN("Only the tree-replaced signal arrives")
+      THEN("Only the subtree-replaced signal arrives, naming the root")
       {
         REQUIRE(observer.signals.size() == 1);
-        REQUIRE(observer.signals[0].kind == RecordedSignal::TreeReplaced);
+        REQUIRE(observer.signals[0].kind == RecordedSignal::SubtreeReplaced);
+        REQUIRE(vsr::core::DataPath(observer.signals[0].path).isRoot());
       }
 
       THEN("The tree really was populated")
@@ -869,6 +870,292 @@ SCENARIO("vsr::core::DataNode names are sanitized, not rejected", "[DataTree]")
       {
         REQUIRE(&root["units_mm"] == &node);
         REQUIRE(root.numChildren() == 1);
+      }
+    }
+  }
+}
+
+SCENARIO("A DataNode serializes as the tree it roots", "[DataTree]")
+{
+  GIVEN("A subtree written from an interior node")
+  {
+    vsr::core::DataTree source;
+    source.root()["material"]["roughness"] = 0.4f;
+    source.root()["material"]["layers"]["base"] = 7;
+    source.root()["unrelated"] = 1;
+
+    std::vector<std::byte> buffer;
+    REQUIRE(source.root()["material"].write(buffer));
+
+    WHEN("It is read into a differently named node of another tree")
+    {
+      vsr::core::DataTree destination;
+      REQUIRE(destination.root()["surface"].read(buffer));
+
+      THEN("The subtree arrives beneath the node that read it")
+      {
+        REQUIRE(destination.root()["surface"]["roughness"].getValueAs<float>()
+            == 0.4f);
+        REQUIRE(
+            destination.root()["surface"]["layers"]["base"].getValueAs<int>()
+            == 7);
+      }
+
+      THEN("The source node's own name did not travel with its bytes")
+      {
+        REQUIRE(destination.root().child("material") == nullptr);
+      }
+
+      THEN("Nothing outside the written subtree came along")
+      {
+        REQUIRE(destination.root().child("unrelated") == nullptr);
+      }
+    }
+
+    WHEN("It is read into the root of another tree")
+    {
+      vsr::core::DataTree destination;
+      REQUIRE(destination.read(buffer));
+
+      THEN("The subtree becomes that tree's whole contents")
+      {
+        REQUIRE(destination.root()["roughness"].getValueAs<float>() == 0.4f);
+        REQUIRE(destination.root().child("material") == nullptr);
+      }
+    }
+  }
+
+  GIVEN("A leaf node, which roots an empty tree")
+  {
+    vsr::core::DataTree source;
+    source.root()["count"] = 16;
+
+    std::vector<std::byte> buffer;
+    REQUIRE(source.root()["count"].write(buffer));
+
+    WHEN("Its bytes are read back")
+    {
+      vsr::core::DataTree destination;
+      destination.root()["stale"] = 1;
+      REQUIRE(destination.read(buffer));
+
+      THEN("A valid, empty tree comes back rather than the leaf's value")
+      {
+        REQUIRE_FALSE(buffer.empty());
+        REQUIRE(destination.root().numChildren() == 0);
+      }
+    }
+  }
+}
+
+SCENARIO("Reading into a DataNode replaces what it held", "[DataTree]")
+{
+  GIVEN("A serialized subtree and a node that already has contents")
+  {
+    vsr::core::DataTree source;
+    source.root()["fromFile"] = 1;
+
+    std::vector<std::byte> buffer;
+    REQUIRE(source.write(buffer));
+
+    vsr::core::DataTree destination;
+    destination.root()["target"]["keep"] = 2;
+    destination.root()["target"]["alsoKeep"] = 3;
+
+    WHEN("The subtree is read into that node")
+    {
+      REQUIRE(destination.root()["target"].read(buffer));
+
+      THEN("What the node held is gone, not merged with")
+      {
+        REQUIRE(destination.root()["target"].child("keep") == nullptr);
+        REQUIRE(destination.root()["target"].child("alsoKeep") == nullptr);
+        REQUIRE(
+            destination.root()["target"]["fromFile"].getValueAs<int>() == 1);
+        REQUIRE(destination.root()["target"].numChildren() == 1);
+      }
+    }
+  }
+
+  GIVEN("A node holding a value rather than children")
+  {
+    vsr::core::DataTree source;
+    source.root()["fromFile"] = 1;
+
+    std::vector<std::byte> buffer;
+    REQUIRE(source.write(buffer));
+
+    vsr::core::DataTree destination;
+    destination.root()["target"] = 99;
+
+    WHEN("A subtree is read into it")
+    {
+      REQUIRE(destination.root()["target"].read(buffer));
+
+      THEN("Its value is gone too: the node holds exactly what was read")
+      {
+        REQUIRE(destination.root()["target"].empty());
+        REQUIRE(
+            destination.root()["target"]["fromFile"].getValueAs<int>() == 1);
+      }
+    }
+  }
+}
+
+SCENARIO("A failed read leaves the node empty", "[DataTree]")
+{
+  GIVEN("A truncated buffer and a populated node")
+  {
+    vsr::core::DataTree source;
+    for (int i = 0; i < 32; i++)
+      source.root()["values"][std::to_string(i)] = i;
+
+    std::vector<std::byte> buffer;
+    REQUIRE(source.write(buffer));
+    buffer.resize(buffer.size() / 2);
+
+    vsr::core::DataTree destination;
+    destination.root()["target"]["keep"] = 1;
+
+    WHEN("The truncated buffer is read into the node")
+    {
+      const bool ok = destination.root()["target"].read(buffer);
+
+      THEN("The read reports failure")
+      {
+        REQUIRE_FALSE(ok);
+      }
+
+      THEN("No half-built subtree is left behind")
+      {
+        REQUIRE(destination.root()["target"].numChildren() == 0);
+        REQUIRE(destination.root()["target"].empty());
+      }
+    }
+
+    WHEN("An observed node fails to read")
+    {
+      RecordingObserver observer;
+      destination.setObserver(&observer);
+
+      REQUIRE_FALSE(destination.root()["target"].read(buffer));
+
+      THEN("One subtree-replaced signal still arrives: the node did change")
+      {
+        REQUIRE(observer.signals.size() == 1);
+        REQUIRE(observer.signals[0].kind == RecordedSignal::SubtreeReplaced);
+        REQUIRE(observer.signals[0].path == "/target");
+      }
+    }
+  }
+}
+
+SCENARIO("A DataNode with no tree behind it refuses to read", "[DataTree]")
+{
+  GIVEN("A serialized tree and a detached DataNode")
+  {
+    vsr::core::DataTree source;
+    source.root()["value"] = 1;
+
+    std::vector<std::byte> buffer;
+    REQUIRE(source.write(buffer));
+
+    vsr::core::DataNode detached;
+
+    WHEN("The buffer is read into it")
+    {
+      THEN("The read fails rather than dereferencing nothing")
+      {
+        REQUIRE_FALSE(detached.read(buffer));
+      }
+    }
+
+    WHEN("It is written")
+    {
+      std::vector<std::byte> detachedBuffer;
+
+      THEN("It writes the empty tree it roots")
+      {
+        REQUIRE(detached.write(detachedBuffer));
+
+        vsr::core::DataTree destination;
+        destination.root()["stale"] = 1;
+        REQUIRE(destination.read(detachedBuffer));
+        REQUIRE(destination.root().numChildren() == 0);
+      }
+    }
+  }
+}
+
+SCENARIO("Reading a subtree signals only the node that read it", "[DataTree]")
+{
+  GIVEN("An observed tree with two independent subtrees")
+  {
+    vsr::core::DataTree source;
+    for (int i = 0; i < 8; i++)
+      source.root()[std::to_string(i)] = i;
+
+    std::vector<std::byte> buffer;
+    REQUIRE(source.write(buffer));
+
+    vsr::core::DataTree destination;
+    destination.root()["left"]["old"] = 1;
+    destination.root()["right"]["untouched"] = 2;
+
+    RecordingObserver observer;
+    destination.setObserver(&observer);
+
+    WHEN("One of them is read into")
+    {
+      REQUIRE(destination.root()["left"].read(buffer));
+
+      THEN("Exactly one signal arrives, naming the node that was replaced")
+      {
+        REQUIRE(observer.signals.size() == 1);
+        REQUIRE(observer.signals[0].kind == RecordedSignal::SubtreeReplaced);
+        REQUIRE(observer.signals[0].path == "/left");
+      }
+
+      THEN("The other subtree is untouched")
+      {
+        REQUIRE(
+            destination.root()["right"]["untouched"].getValueAs<int>() == 2);
+      }
+    }
+  }
+}
+
+SCENARIO("Loaded anonymous names are claimed against the counter", "[DataTree]")
+{
+  GIVEN("A subtree carrying an anonymous name this process has not minted yet")
+  {
+    // A name minted by some other process's counter: ahead of this one, which
+    // is exactly the case a subtree read from a file presents.
+    const int reach = vsr::core::anonymousNodeCounter() + 5;
+    const std::string futureName = "<" + std::to_string(reach) + ">";
+
+    vsr::core::DataTree source;
+    source.root()["items"][futureName] = 1;
+
+    std::vector<std::byte> buffer;
+    REQUIRE(source.root()["items"].write(buffer));
+
+    WHEN("It is read in and anonymous nodes are appended afterwards")
+    {
+      vsr::core::DataTree destination;
+      auto &items = destination.root()["items"];
+      REQUIRE(items.read(buffer));
+      REQUIRE(items.numChildren() == 1);
+
+      // Enough appends to walk the counter past where the loaded name sits.
+      constexpr size_t NUM_APPENDS = 8;
+      for (size_t i = 0; i < NUM_APPENDS; i++)
+        items.append();
+
+      THEN("Every append produced a new node rather than a loaded one")
+      {
+        REQUIRE(items.numChildren() == 1 + NUM_APPENDS);
+        REQUIRE(items[futureName].getValueAs<int>() == 1);
       }
     }
   }

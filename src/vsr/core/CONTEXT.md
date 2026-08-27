@@ -11,14 +11,19 @@ it.
 
 **Data Tree**:
 A hierarchical container of typed values rooted at a single unnamed node.
-A Data Tree is the unit of ownership and of serialization; nodes have no
-meaning apart from the tree that holds them.
+A Data Tree is the unit of ownership; nodes have no meaning apart from the
+tree that holds them.
 _Avoid_: Property tree, blackboard, dictionary
 
 **Data Node**:
 One position in a Data Tree, holding at most one typed value and an ordered
 list of children. A Data Node's identity comes from its position in the tree,
 not from its value.
+
+Any Data Node serializes as the tree it roots, so a subtree and a whole tree
+are the same kind of artifact and either reads back into either. A node's own
+name and value are not part of what it serializes: the position a subtree
+lands in belongs to whoever reads it, not to the bytes.
 _Avoid_: Entry, field, property
 
 **Anonymous Node**:
@@ -67,3 +72,11 @@ One notification delivered to a Data Tree Observer, reporting a single
 semantic edit. A compound edit that touches many nodes is one Signal about the
 subtree, not many Signals about its nodes.
 _Avoid_: Event, notification, message
+
+**Subtree Replacement**:
+The edit that discards everything a Data Node held and puts something else
+there, as reading a subtree does. It is one Signal naming that node, never a
+replay of the edits that rebuilt it. Replacing an entire Data Tree is the
+degenerate case, where the node named is the root, and not a separate kind of
+event.
+_Avoid_: Tree reload, refresh, reset

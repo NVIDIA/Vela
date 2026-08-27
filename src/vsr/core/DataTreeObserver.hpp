@@ -51,10 +51,14 @@ struct DataTreeObserver
   // that node, not one per descendant.
   virtual void signalNodeRemoved(const DataNode &n) = 0;
 
-  // The tree's entire contents were replaced wholesale, as by loading a file.
-  // The individual edits that built the new contents are suppressed: replaying
-  // thousands of adds says less than "the tree you knew is gone".
-  virtual void signalTreeReplaced() = 0;
+  // Everything beneath n was replaced wholesale, as by reading a subtree from
+  // a file. The individual edits that built the new contents are suppressed:
+  // replaying thousands of adds says less than "what you knew here is gone".
+  //
+  // Replacing the whole tree is the degenerate case, not a separate event: n
+  // is then the root and n.path() is empty. An Observer watching one subtree
+  // can ignore a replacement elsewhere by testing its own path against n's.
+  virtual void signalSubtreeReplaced(const DataNode &n) = 0;
 
   // Bracket a run of edits that should produce at most one downstream rebuild.
   // Nesting is counted, so an outer batch is not ended by an inner one. Every
