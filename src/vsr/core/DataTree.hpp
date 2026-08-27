@@ -12,6 +12,7 @@
 #include "vsr/core/TypeMacros.hpp"
 // std
 #include <algorithm>
+#include <climits>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -148,6 +149,27 @@ struct DataNode
   void forall_children_const(std::function<void(const DataNode &)> &&fcn) const;
   void foreach_child_const(std::function<void(const DataNode &)> &&fcn) const;
 
+  // Serialization //
+
+  // A node serializes as the tree it roots, in the same format a whole
+  // DataTree writes -- there is no separate subtree format, and either can be
+  // read back into either. The node's own name and value are not part of it:
+  // a node's identity comes from its position, and the position is the
+  // destination's business, so a leaf writes an empty tree (ADR 0027).
+  //
+  // Reading replaces. The node's value and children are gone whether or not
+  // the read succeeds; on a short or malformed read the node is left empty
+  // and false is returned, so a caller never inherits a plausible-looking
+  // subtree that is quietly missing its tail. Either way the node's contents
+  // changed, so either way one signalSubtreeReplaced() is delivered.
+  //
+  // A node with no tree behind it writes an empty tree and refuses to read.
+  bool write(std::vector<std::byte> &buffer) const;
+  bool read(const std::vector<std::byte> &buffer);
+
+  bool save(const char *filename) const;
+  bool load(const char *filename);
+
 #ifndef VSR_DATA_TREE_TEST_MODE // allow access to self() in unit tests only (!)
  private:
 #endif
@@ -167,6 +189,19 @@ struct DataNode
   void getValueAsArray(T **ptr, size_t *size);
   void getValueAsArray(anari::DataType *type, void **ptr, size_t *size);
 
+  // Serialization helpers //
+
+  bool saveImpl(DataWriter &writer) const;
+  bool loadImpl(DataReader &reader);
+
+  // The serialized form stores a leaf's Parent Path -- the NUL-separated chain
+  // of its ancestors' names, relative to the node being written -- not a
+  // DataPath. The two are deliberately distinct spellings of a location,
+  // converted only here (ADR 0026).
+  void writeDataNode(DataWriter &writer,
+      const DataNode &node,
+      const std::string &parentPath) const;
+
   // Signal helpers //
 
   DataTreeObserver *observer() const;
@@ -174,6 +209,7 @@ struct DataNode
   void signalValueCleared() const;
   void signalNodeAdded() const;
   void signalNodeRemoved() const;
+  void signalSubtreeReplaced() const;
 
   // Mutation helpers that deliberately produce no Signal of their own, used
   // where a compound edit reports itself as one semantic event.
@@ -255,7 +291,7 @@ struct DataTree
   // one. Compound tree operations self-bracket when the number of Signals they
   // produce scales with the size of a tree -- DataNode copy-assignment does,
   // DataNode::reset() does not. Loading does neither: it collapses to a single
-  // signalTreeReplaced().
+  // signalSubtreeReplaced().
   void beginUpdateBatch();
   void endUpdateBatch();
 
@@ -269,12 +305,17 @@ struct DataTree
 
   // Buffer I/O //
 
-  bool write(std::vector<std::byte> &buffer);
+  // Every one of these is the root node's, spelled from the tree. A tree is
+  // no longer the unit of serialization -- any node is -- so these forward to
+  // root() and add nothing of their own. See DataNode's serialization block
+  // for what they mean.
+
+  bool write(std::vector<std::byte> &buffer) const;
   bool read(const std::vector<std::byte> &buffer);
 
   // File I/O //
 
-  bool save(const char *filename);
+  bool save(const char *filename) const;
   bool load(const char *filename);
 
   // Visual inspection //
@@ -287,19 +328,8 @@ struct DataTree
  private:
   friend struct DataNode;
 
-  bool saveImpl(DataWriter &writer);
-  bool loadImpl(DataReader &reader);
-
-  // The serialized form stores a leaf's Parent Path -- the NUL-separated chain
-  // of its ancestors' names -- not a DataPath. The two are deliberately
-  // distinct spellings of a location, converted only here (ADR 0026).
-  void writeDataNode(DataWriter &writer,
-      const DataNode &node,
-      const std::string &parentPath) const;
-  std::string printableParentPath(const std::string &parentPath) const;
-
   // The Observer to signal right now, or nullptr when there is none or when
-  // signals are being collapsed into one signalTreeReplaced().
+  // signals are being collapsed into one signalSubtreeReplaced().
   DataTreeObserver *activeObserver() const;
 
   Forest<std::unique_ptr<DataNode>> m_tree;
@@ -333,6 +363,51 @@ struct DataTreeUpdateBatch
 };
 
 // Inlined definitions ////////////////////////////////////////////////////////
+
+// Anonymous node names //
+
+// The delimiters append() wraps a synthesized name in. Deliberately not the
+// DataPath ordinal delimiters: the name a node carries is an opaque counter,
+// and a DataPath spells the same node as an ordinal instead (ADR 0025).
+constexpr char ANONYMOUS_NAME_OPEN = '<';
+constexpr char ANONYMOUS_NAME_CLOSE = '>';
+
+// The counter behind the '<n>' names append() synthesizes. It is process-wide
+// because a name only has to be unique among its siblings and a global counter
+// is the cheapest way to guarantee that -- but a name that came off disk was
+// minted by some other process's counter, so the two supplies have to be
+// reconciled or a load can hand this one a name that is already taken. Reading
+// a subtree into a live tree makes that a routine event rather than a rarity,
+// which is why the reconciliation exists (see reserveAnonymousNodeName).
+inline int &anonymousNodeCounter()
+{
+  static int counter = 0;
+  return counter;
+}
+
+// Claim a loaded '<n>' so the counter never mints it again. Without this, a
+// later append("") can synthesize a name a loaded node already carries, and
+// append() answers a name collision by returning the existing child -- so the
+// caller asking for a new anonymous node would silently be handed an old one.
+inline void reserveAnonymousNodeName(std::string_view name)
+{
+  if (!isDelimitedNumber(name, ANONYMOUS_NAME_OPEN, ANONYMOUS_NAME_CLOSE))
+    return;
+
+  const auto digits = name.substr(1, name.size() - 2);
+  int value = 0;
+  for (char c : digits) {
+    // A name long enough to overflow is not one this counter minted, so there
+    // is nothing to reserve against it.
+    if (value > (INT_MAX - (c - '0')) / 10)
+      return;
+    value = value * 10 + (c - '0');
+  }
+
+  auto &counter = anonymousNodeCounter();
+  if (value >= counter)
+    counter = value + 1;
+}
 
 // DataNode //
 
@@ -747,8 +822,9 @@ inline DataNode &DataNode::append(std::string_view newChildName)
   // opaque counter, and a DataPath spells it as an ordinal instead (ADR 0025).
   const bool anonymous = name.empty();
   if (anonymous) {
-    static int counter = 0;
-    name = '<' + std::to_string(counter++) + '>';
+    auto &counter = anonymousNodeCounter();
+    name =
+        ANONYMOUS_NAME_OPEN + std::to_string(counter++) + ANONYMOUS_NAME_CLOSE;
   }
 
   if (auto *c = child(name); c != nullptr)
@@ -899,6 +975,315 @@ inline void DataNode::signalNodeRemoved() const
     o->signalNodeRemoved(*this);
 }
 
+inline void DataNode::signalSubtreeReplaced() const
+{
+  if (auto *o = observer(); o != nullptr)
+    o->signalSubtreeReplaced(*this);
+}
+
+// DataNode serialization //
+
+inline bool DataNode::save(const char *filename) const
+{
+  FileWriter writer(filename);
+  if (!writer)
+    return false;
+  return saveImpl(writer);
+}
+
+inline bool DataNode::write(std::vector<std::byte> &buffer) const
+{
+  BufferWriter writer;
+  bool res = saveImpl(writer);
+  buffer = writer.take();
+  return res;
+}
+
+inline bool DataNode::load(const char *filename)
+{
+  FileReader reader(filename);
+  if (!reader)
+    return false;
+  return loadImpl(reader);
+}
+
+inline bool DataNode::read(const std::vector<std::byte> &buffer)
+{
+  BufferReader reader(buffer);
+  return loadImpl(reader);
+}
+
+inline bool DataNode::saveImpl(DataWriter &writer) const
+{
+  // Level 0 is this node, and nothing about it is written: what goes out is
+  // the tree it roots, so a detached node and a leaf alike write an empty one.
+  auto ref = self();
+  if (!ref) {
+    const size_t numLeafNodes = 0;
+    writer.write(&numLeafNodes, sizeof(size_t), 1);
+    return true;
+  }
+
+  // Count + write number of leaf nodes //
+
+  size_t numLeafNodes = 0;
+  traverse_const([&](const DataNode &n, int level) {
+    if (level != 0 && n.isLeaf())
+      numLeafNodes++;
+    return true;
+  });
+
+  writer.write(&numLeafNodes, sizeof(size_t), 1);
+
+  // Traverse subtree and write nodes //
+
+  // This is a Parent Path, not a DataPath: the chain of ancestor names between
+  // this node and the leaf, with the leaf's own name written separately. The
+  // file format is deliberately left byte-identical to what it was before Data
+  // Paths existed (ADR 0026).
+  std::string parentPath;
+  parentPath.reserve(256);
+  ref->container()->traverse_const(
+      ref,
+      [&](const auto &nodeRef, int level) {
+        if (level == 0)
+          return true;
+
+        if (const auto &node = **nodeRef; nodeRef.isLeaf())
+          writeDataNode(writer, node, parentPath);
+        else {
+          const auto &name = node.name();
+          std::copy(name.begin(), name.end(), std::back_inserter(parentPath));
+          parentPath.push_back('\0');
+        }
+
+        return true;
+      },
+      [&](const auto &nodeRef, int level) {
+        if (level == 0)
+          return;
+        else if (level == 1) {
+          parentPath.clear();
+          return;
+        }
+
+        if (!nodeRef.isLeaf())
+          parentPath.resize(
+              parentPath.size() - ((*nodeRef)->name().size() + 1));
+      });
+
+  return true;
+}
+
+inline bool DataNode::loadImpl(DataReader &reader)
+{
+  // Reading fills a node's storage, which a node with no tree behind it does
+  // not have: its self-reference is empty, so appending would dereference
+  // nothing. Refusing is how a caller finds that out short of a crash.
+  if (!self() || m_data.tree == nullptr)
+    return false;
+
+  auto splitNullSeparatedStrings =
+      [](const char *buffer, size_t bufferSize) -> std::vector<std::string> {
+    std::vector<std::string> result;
+    for (size_t start = 0; start < bufferSize;) {
+      size_t end = start;
+      while (end < bufferSize && buffer[end] != '\0')
+        ++end;
+      if (end > start)
+        result.emplace_back(buffer + start, end - start);
+      start = end + 1;
+    }
+
+    return result;
+  };
+
+  // Files written before Anonymous Nodes carried a flag identify them only by
+  // the shape of the name the writer synthesized, so the inference lives here
+  // and nowhere else. A loaded name is also claimed against this process's
+  // counter, so that a later append("") cannot mint a name already in use.
+  auto appendLoadedNode = [](DataNode &parent,
+                              const std::string &name) -> DataNode & {
+    auto &node = parent.append(name);
+    node.m_data.anonymous = isDelimitedNumber(
+        node.name(), ANONYMOUS_NAME_OPEN, ANONYMOUS_NAME_CLOSE);
+    if (node.m_data.anonymous)
+      reserveAnonymousNodeName(node.name());
+    return node;
+  };
+
+  /////////////////////////////////////////////////////////////////////////////
+
+  auto &tree = *m_data.tree;
+
+  // Reading is one semantic event, not thousands: the individual edits below
+  // are collapsed into the single signalSubtreeReplaced() at the end.
+  tree.m_signalsSuppressed = true;
+
+  // Replace, not merge: what this node held is gone before the first byte is
+  // decoded, so the node ends up holding exactly what was read and nothing it
+  // happened to be carrying beforehand.
+  clearValueSilently();
+  self()->erase_subtree();
+
+  // A short read means the rest of the subtree is not coming. Rather than
+  // leave a plausible-looking tree that is quietly missing its tail, empty the
+  // node again and say so; the Signal still goes out, because the node did
+  // change. Rebuilding aside and swapping on success would preserve the old
+  // contents instead -- the option to revisit if a failed read ever costs
+  // enough to be worth a transient copy of the subtree.
+  bool ok = true;
+  auto readExactly = [&](void *ptr, size_t size, size_t count) {
+    if (ok)
+      ok = reader.read(ptr, size, count) == count;
+    return ok;
+  };
+
+  auto finish = [&](bool succeeded) {
+    if (!succeeded) {
+      clearValueSilently();
+      self()->erase_subtree();
+    }
+    tree.m_signalsSuppressed = false;
+    signalSubtreeReplaced();
+    return succeeded;
+  };
+
+  size_t numLeafNodes = 0;
+  if (!readExactly(&numLeafNodes, sizeof(size_t), 1))
+    return finish(false);
+
+  for (size_t i = 0; i < numLeafNodes; i++) {
+    size_t size = 0;
+
+    // name
+    if (!readExactly(&size, sizeof(size_t), 1))
+      return finish(false);
+    std::string name(size, '\0');
+    if (!readExactly(name.data(), sizeof(char), size))
+      return finish(false);
+
+    // path
+    if (!readExactly(&size, sizeof(size_t), 1))
+      return finish(false);
+    std::string fullPath(size, '\0');
+    if (!readExactly(fullPath.data(), sizeof(char), size))
+      return finish(false);
+
+    // isArray
+    uint8_t isArray = 0;
+    if (!readExactly(&isArray, sizeof(uint8_t), 1))
+      return finish(false);
+
+    // type
+    anari::DataType type = ANARI_UNKNOWN;
+    if (!readExactly(&type, sizeof(anari::DataType), 1))
+      return finish(false);
+
+    // Create node //
+
+    auto parentPath =
+        splitNullSeparatedStrings(fullPath.c_str(), fullPath.size());
+
+    DataNode *parentPtr = this;
+    for (auto &loc : parentPath) {
+      if (!loc.empty())
+        parentPtr = &appendLoadedNode(*parentPtr, loc);
+    }
+
+    auto &node = appendLoadedNode(*parentPtr, name);
+
+    // Read node value //
+
+    if (isArray) {
+      // array size + data
+      if (!readExactly(&size, sizeof(size_t), 1))
+        return finish(false);
+      void *dataPtr = node.setValueAsArray(type, size);
+      if (!readExactly(dataPtr, anari::sizeOf(type), size))
+        return finish(false);
+    } else {
+      if (anari::isObject(type)) {
+        size_t idx = INVALID_INDEX;
+        if (!readExactly(&idx, sizeof(size_t), 1))
+          return finish(false);
+        node.setValueObject(type, idx);
+      } else if (type == ANARI_STRING) {
+        if (!readExactly(&size, sizeof(size_t), 1))
+          return finish(false);
+        std::string str(size, '\0');
+        if (!readExactly(str.data(), sizeof(char), size))
+          return finish(false);
+        node = str.c_str();
+      } else if (type != ANARI_UNKNOWN) {
+        constexpr int MAX_SIZE = 16 * sizeof(float);
+        // A type too large to be one this writer emitted says the bytes are
+        // not what they claim. That is a read failure like any other now that
+        // there is a way to report one -- aborting the process over a corrupt
+        // file was tolerable only while the victim was always a throwaway
+        // tree, which reading into a live subtree it no longer is.
+        if (anari::sizeOf(type) > MAX_SIZE) {
+          logWarning(
+              "[DataNode] type %s is too large to read when parsing DataTree",
+              anari::toString(type));
+          return finish(false);
+        }
+
+        uint8_t data[MAX_SIZE];
+        if (!readExactly(data, anari::sizeOf(type), 1))
+          return finish(false);
+        node.setValue(type, (void *)data);
+      }
+    }
+  }
+
+  return finish(true);
+}
+
+inline void DataNode::writeDataNode(DataWriter &writer,
+    const DataNode &node,
+    const std::string &parentPath) const
+{
+  // name
+  size_t size = node.name().size();
+  writer.write(&size, sizeof(size_t), 1);
+  writer.write(node.name().c_str(), sizeof(char), size);
+  // parent path
+  size = parentPath.size();
+  writer.write(&size, sizeof(size_t), 1);
+  writer.write(parentPath.c_str(), sizeof(char), size);
+  // isArray
+  const uint8_t isArray = node.holdsArray();
+  writer.write(&isArray, sizeof(uint8_t), 1);
+
+  if (isArray) {
+    // array info + data
+    anari::DataType type = ANARI_UNKNOWN;
+    const void *data = nullptr;
+    size = 0;
+    node.getValueAsArray(&type, &data, &size);
+    writer.write(&type, sizeof(anari::DataType), 1);
+    writer.write(&size, sizeof(size_t), 1);
+    writer.write(data, sizeof(uint8_t), size * anari::sizeOf(type));
+  } else {
+    // value info + data
+    auto &v = node.getValue();
+    auto type = v.type();
+    writer.write(&type, sizeof(anari::DataType), 1);
+    if (anari::isObject(type)) {
+      size_t idx = v.getAsObjectIndex();
+      writer.write(&idx, sizeof(size_t), 1);
+    } else if (type == ANARI_STRING) {
+      const char *data = v.getCStr();
+      size = data ? std::strlen(data) : 0;
+      writer.write(&size, sizeof(size_t), 1);
+      writer.write(data, sizeof(char), size);
+    } else if (type != ANARI_UNKNOWN) {
+      writer.write(v.data(), anari::sizeOf(type), 1);
+    }
+  }
+}
+
 // DataTree //
 
 inline DataTree::DataTree() : m_tree(DataNode::Ptr{new DataNode("<root>")})
@@ -985,34 +1370,24 @@ inline void DataTree::traverse(DataNode::Ref start,
   // clang-format on
 }
 
-inline bool DataTree::save(const char *filename)
+inline bool DataTree::save(const char *filename) const
 {
-  FileWriter writer(filename);
-  if (!writer)
-    return false;
-  return saveImpl(writer);
+  return root().save(filename);
 }
 
-inline bool DataTree::write(std::vector<std::byte> &buffer)
+inline bool DataTree::write(std::vector<std::byte> &buffer) const
 {
-  BufferWriter writer;
-  bool res = saveImpl(writer);
-  buffer = writer.take();
-  return res;
+  return root().write(buffer);
 }
 
 inline bool DataTree::load(const char *filename)
 {
-  FileReader reader(filename);
-  if (!reader)
-    return false;
-  return loadImpl(reader);
+  return root().load(filename);
 }
 
 inline bool DataTree::read(const std::vector<std::byte> &buffer)
 {
-  BufferReader reader(buffer);
-  return loadImpl(reader);
+  return root().read(buffer);
 }
 
 inline void DataTree::print()
@@ -1064,228 +1439,6 @@ inline void DataTree::print()
   });
 
   printf("\n");
-}
-
-inline bool DataTree::saveImpl(DataWriter &writer)
-{
-  // Count + write number of leaf nodes //
-
-  size_t numLeafNodes = 0;
-  m_tree.traverse(m_tree.root(), [&](auto &nodeRef, int level) {
-    if (level == 0)
-      return true;
-    else if (auto &node = **nodeRef; nodeRef.isLeaf())
-      numLeafNodes++;
-    return true;
-  });
-
-  writer.write(&numLeafNodes, sizeof(size_t), 1);
-
-  // Travese tree and write nodes //
-
-  // This is a Parent Path, not a DataPath: the chain of ancestor names, with
-  // the leaf's own name written separately. The file format is deliberately
-  // left byte-identical to what it was before Data Paths existed (ADR 0026).
-  std::string parentPath;
-  parentPath.reserve(256);
-  m_tree.traverse(
-      m_tree.root(),
-      [&](auto &nodeRef, int level) {
-        if (level == 0)
-          return true;
-
-        if (auto &node = **nodeRef; nodeRef.isLeaf()) {
-          writeDataNode(writer, node, parentPath);
-          numLeafNodes++;
-        } else {
-          const auto &name = node.name();
-          std::copy(name.begin(), name.end(), std::back_inserter(parentPath));
-          parentPath.push_back('\0');
-        }
-
-        return true;
-      },
-      [&](auto &nodeRef, int level) {
-        if (level == 0)
-          return;
-        else if (level == 1) {
-          parentPath.clear();
-          return;
-        }
-
-        if (!nodeRef.isLeaf())
-          parentPath.resize(
-              parentPath.size() - ((*nodeRef)->name().size() + 1));
-      });
-
-  return true;
-}
-
-inline bool DataTree::loadImpl(DataReader &reader)
-{
-  auto splitNullSeparatedStrings =
-      [](const char *buffer, size_t bufferSize) -> std::vector<std::string> {
-    std::vector<std::string> result;
-    for (size_t start = 0; start < bufferSize;) {
-      size_t end = start;
-      while (end < bufferSize && buffer[end] != '\0')
-        ++end;
-      if (end > start)
-        result.emplace_back(buffer + start, end - start);
-      start = end + 1;
-    }
-
-    return result;
-  };
-
-  // Files written before Anonymous Nodes carried a flag identify them only by
-  // the shape of the name the writer synthesized, so the inference lives here
-  // and nowhere else.
-  auto appendLoadedNode = [](DataNode &parent,
-                              const std::string &name) -> DataNode & {
-    auto &node = parent.append(name);
-    node.m_data.anonymous = isDelimitedNumber(node.name(), '<', '>');
-    return node;
-  };
-
-  /////////////////////////////////////////////////////////////////////////////
-
-  // Loading is one semantic event, not thousands: the individual edits below
-  // are collapsed into the single signalTreeReplaced() at the end.
-  m_signalsSuppressed = true;
-
-  m_tree.root()->erase_subtree();
-  auto &rootNode = root();
-
-  size_t numLeafNodes = 0;
-  auto r = reader.read(&numLeafNodes, sizeof(size_t), 1);
-
-  for (size_t i = 0; i < numLeafNodes; i++) {
-    size_t size = 0;
-
-    // name
-    r = reader.read(&size, sizeof(size_t), 1);
-    std::string name(size, '\0');
-    r = reader.read(name.data(), sizeof(char), size);
-
-    // path
-    r = reader.read(&size, sizeof(size_t), 1);
-    std::string fullPath(size, '\0');
-    r = reader.read(fullPath.data(), sizeof(char), size);
-
-    // isArray
-    uint8_t isArray = 0;
-    r = reader.read(&isArray, sizeof(uint8_t), 1);
-
-    // type
-    anari::DataType type = ANARI_UNKNOWN;
-    r = reader.read(&type, sizeof(anari::DataType), 1);
-
-    // Create node //
-
-    auto parentPath =
-        splitNullSeparatedStrings(fullPath.c_str(), fullPath.size());
-
-    DataNode *parentPtr = &rootNode;
-    for (auto &loc : parentPath) {
-      if (!loc.empty())
-        parentPtr = &appendLoadedNode(*parentPtr, loc);
-    }
-
-    auto &node = appendLoadedNode(*parentPtr, name);
-
-    // Read node value //
-
-    if (isArray) {
-      // array size + data
-      r = reader.read(&size, sizeof(size_t), 1);
-      void *dataPtr = node.setValueAsArray(type, size);
-      r = reader.read(dataPtr, anari::sizeOf(type), size);
-    } else {
-      if (anari::isObject(type)) {
-        size_t idx = INVALID_INDEX;
-        r = reader.read(&idx, sizeof(size_t), 1);
-        node.setValueObject(type, idx);
-      } else if (type == ANARI_STRING) {
-        r = reader.read(&size, sizeof(size_t), 1);
-        std::string str(size, '\0');
-        r = reader.read(str.data(), sizeof(char), size);
-        node = str.c_str();
-      } else if (type != ANARI_UNKNOWN) {
-        constexpr int MAX_SIZE = 16 * sizeof(float);
-        if (anari::sizeOf(type) <= MAX_SIZE) {
-          uint8_t data[MAX_SIZE];
-          r = reader.read(data, anari::sizeOf(type), 1);
-          node.setValue(type, (void *)data);
-        } else {
-          printf("ERROR: type %s is too large to read when parsing DataTree\n",
-              anari::toString(type));
-          fflush(stdout);
-          abort();
-        }
-      }
-    }
-  }
-
-  // Suppression is lifted before the one Signal a load does deliver, so that
-  // an Observer reading the tree back sees it behaving normally.
-  m_signalsSuppressed = false;
-  if (auto *o = activeObserver(); o != nullptr)
-    o->signalTreeReplaced();
-
-  return true;
-}
-
-inline void DataTree::writeDataNode(DataWriter &writer,
-    const DataNode &node,
-    const std::string &parentPath) const
-{
-  // name
-  size_t size = node.name().size();
-  writer.write(&size, sizeof(size_t), 1);
-  writer.write(node.name().c_str(), sizeof(char), size);
-  // parent path
-  size = parentPath.size();
-  writer.write(&size, sizeof(size_t), 1);
-  writer.write(parentPath.c_str(), sizeof(char), size);
-  // isArray
-  const uint8_t isArray = node.holdsArray();
-  writer.write(&isArray, sizeof(uint8_t), 1);
-
-  if (isArray) {
-    // array info + data
-    anari::DataType type = ANARI_UNKNOWN;
-    const void *data = nullptr;
-    size = 0;
-    node.getValueAsArray(&type, &data, &size);
-    writer.write(&type, sizeof(anari::DataType), 1);
-    writer.write(&size, sizeof(size_t), 1);
-    writer.write(data, sizeof(uint8_t), size * anari::sizeOf(type));
-  } else {
-    // value info + data
-    auto &v = node.getValue();
-    auto type = v.type();
-    writer.write(&type, sizeof(anari::DataType), 1);
-    if (anari::isObject(type)) {
-      size_t idx = v.getAsObjectIndex();
-      writer.write(&idx, sizeof(size_t), 1);
-    } else if (type == ANARI_STRING) {
-      const char *data = v.getCStr();
-      size = data ? std::strlen(data) : 0;
-      writer.write(&size, sizeof(size_t), 1);
-      writer.write(data, sizeof(char), size);
-    } else if (type != ANARI_UNKNOWN) {
-      writer.write(v.data(), anari::sizeOf(type), 1);
-    }
-  }
-}
-
-inline std::string DataTree::printableParentPath(
-    const std::string &parentPath) const
-{
-  std::string printable = parentPath;
-  std::replace(printable.begin(), printable.end(), '\0', DATA_PATH_SEPARATOR);
-  return printable;
 }
 
 // DataTreeUpdateBatch //
