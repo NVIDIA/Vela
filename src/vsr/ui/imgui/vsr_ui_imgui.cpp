@@ -114,6 +114,11 @@ static void buildUI_parameter_contextMenu(
 
         ImGui::Separator();
 
+        if (ImGui::MenuItem("bool")) {
+          p->setUsage(vsr::scene::ParameterUsageHint::DIRECTION);
+          p->setValue(bool(false));
+        }
+
         if (ImGui::BeginMenu("float")) {
           if (ImGui::MenuItem("float1") && p) {
             p->setUsage(vsr::scene::ParameterUsageHint::NONE);
