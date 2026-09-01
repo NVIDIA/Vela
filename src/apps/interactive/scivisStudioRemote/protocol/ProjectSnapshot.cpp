@@ -175,6 +175,8 @@ bool nodeToRuntime(DataNode &n, Project &p)
       auto *rn = cameraRigs->child(r.id);
       if (!rn)
         continue;
+      // The model's reader reports nothing, so a corrupt rig subtree yields
+      // a default rig rather than a decode failure.
       if (auto *rig = rn->child("rig"))
         camera_rig::nodeToCameraRig(*rig, r);
       r.persistedName = readChildOr(*rn, "persistedName", r.persistedName);
