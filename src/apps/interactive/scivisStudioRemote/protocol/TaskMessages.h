@@ -35,7 +35,8 @@ struct TaskStartedResult
 
 struct TaskProgress
 {
-  static constexpr StudioMessageType kType = StudioMessageType::TaskProgress;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::TaskProgress;
   uint64_t taskId{0};
   uint64_t current{0};
   uint64_t total{0}; // 0 = indeterminate
@@ -44,7 +45,8 @@ struct TaskProgress
 
 struct TaskCompleted
 {
-  static constexpr StudioMessageType kType = StudioMessageType::TaskCompleted;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::TaskCompleted;
   uint64_t taskId{0};
   std::string message;
   uint64_t framesCompleted{0}; // RenderShot only; 0 otherwise
@@ -52,14 +54,16 @@ struct TaskCompleted
 
 struct TaskFailed
 {
-  static constexpr StudioMessageType kType = StudioMessageType::TaskFailed;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::TaskFailed;
   uint64_t taskId{0};
   std::string error;
 };
 
 struct CancelTask
 {
-  static constexpr StudioMessageType kType = StudioMessageType::CancelTask;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::CancelTask;
   uint64_t requestId{0};
   uint64_t taskId{0};
 };

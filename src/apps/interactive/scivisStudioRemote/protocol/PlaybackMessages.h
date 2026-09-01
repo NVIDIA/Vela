@@ -31,7 +31,8 @@ namespace vsr::scivis_studio::protocol {
 
 struct SetPlaying
 {
-  static constexpr StudioMessageType kType = StudioMessageType::SetPlaying;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::SetPlaying;
   uint64_t requestId{0};
   ShotID shotId;
   bool playing{false};
@@ -39,14 +40,14 @@ struct SetPlaying
 
 struct SetTime
 {
-  static constexpr StudioMessageType kType = StudioMessageType::SetTime;
+  static constexpr StudioMessageType MESSAGE_TYPE = StudioMessageType::SetTime;
   ShotID shotId;
   int frame{0};
 };
 
 struct TimeAdvanceWarning
 {
-  static constexpr StudioMessageType kType =
+  static constexpr StudioMessageType MESSAGE_TYPE =
       StudioMessageType::TimeAdvanceWarning;
   ShotID shotId;
   int frame{0};
@@ -56,7 +57,8 @@ struct TimeAdvanceWarning
 // Task-launching: answered by a ProjectOpReply carrying a TaskStartedResult.
 struct RenderShot
 {
-  static constexpr StudioMessageType kType = StudioMessageType::RenderShot;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::RenderShot;
   uint64_t requestId{0};
   ShotID shotId;
 };

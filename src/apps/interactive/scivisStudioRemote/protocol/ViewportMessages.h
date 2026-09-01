@@ -37,7 +37,7 @@ namespace vsr::scivis_studio::protocol {
 
 struct Pick
 {
-  static constexpr StudioMessageType kType = StudioMessageType::Pick;
+  static constexpr StudioMessageType MESSAGE_TYPE = StudioMessageType::Pick;
   uint64_t requestId{0};
   int x{0};
   int y{0};
@@ -46,7 +46,8 @@ struct Pick
 // object is absent when the pick landed on background.
 struct PickReply
 {
-  static constexpr StudioMessageType kType = StudioMessageType::PickReply;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::PickReply;
   uint64_t requestId{0};
   bool hit{false};
   vsr::math::float3 worldPosition{0.f, 0.f, 0.f};
@@ -56,7 +57,8 @@ struct PickReply
 // Empty object clears the outline.
 struct SetOutline
 {
-  static constexpr StudioMessageType kType = StudioMessageType::SetOutline;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::SetOutline;
   std::optional<SceneObjectRef> object;
 };
 
@@ -67,7 +69,7 @@ struct SetOutline
 // VisualizeAOVPass.
 struct ViewportSettings
 {
-  static constexpr StudioMessageType kType =
+  static constexpr StudioMessageType MESSAGE_TYPE =
       StudioMessageType::ViewportSettings;
   bool highlightSelection{true};
   bool outlinePrimitives{false};
@@ -82,7 +84,7 @@ struct ViewportSettings
 
 struct RequestArrayHistogram
 {
-  static constexpr StudioMessageType kType =
+  static constexpr StudioMessageType MESSAGE_TYPE =
       StudioMessageType::RequestArrayHistogram;
   uint64_t requestId{0};
   SceneObjectRef array;

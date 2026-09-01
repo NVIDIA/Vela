@@ -33,14 +33,16 @@ namespace vsr::scivis_studio::protocol {
 
 struct CreateShot
 {
-  static constexpr StudioMessageType kType = StudioMessageType::CreateShot;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::CreateShot;
   uint64_t requestId{0};
   std::string name;
 };
 
 struct RemoveShot
 {
-  static constexpr StudioMessageType kType = StudioMessageType::RemoveShot;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::RemoveShot;
   uint64_t requestId{0};
   vsr::scivis_studio::ShotID shotId;
 };
@@ -48,14 +50,16 @@ struct RemoveShot
 // The whole Shot; the server validates and replaces its copy.
 struct UpdateShot
 {
-  static constexpr StudioMessageType kType = StudioMessageType::UpdateShot;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::UpdateShot;
   uint64_t requestId{0};
   vsr::scivis_studio::Shot shot;
 };
 
 struct SetActiveShot
 {
-  static constexpr StudioMessageType kType = StudioMessageType::SetActiveShot;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::SetActiveShot;
   uint64_t requestId{0};
   vsr::scivis_studio::ShotID shotId;
 };
@@ -69,28 +73,32 @@ struct ShotCreatedResult
 
 struct CreateLightRig
 {
-  static constexpr StudioMessageType kType = StudioMessageType::CreateLightRig;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::CreateLightRig;
   uint64_t requestId{0};
   std::string name;
 };
 
 struct CloneLightRig
 {
-  static constexpr StudioMessageType kType = StudioMessageType::CloneLightRig;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::CloneLightRig;
   uint64_t requestId{0};
   vsr::scivis_studio::LightRigID lightRigId;
 };
 
 struct RemoveLightRig
 {
-  static constexpr StudioMessageType kType = StudioMessageType::RemoveLightRig;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::RemoveLightRig;
   uint64_t requestId{0};
   vsr::scivis_studio::LightRigID lightRigId;
 };
 
 struct RenameLightRig
 {
-  static constexpr StudioMessageType kType = StudioMessageType::RenameLightRig;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::RenameLightRig;
   uint64_t requestId{0};
   vsr::scivis_studio::LightRigID lightRigId;
   std::string newName;
@@ -99,7 +107,8 @@ struct RenameLightRig
 // subtype is the ANARI light subtype ("directional", "point", ...).
 struct AddLightToRig
 {
-  static constexpr StudioMessageType kType = StudioMessageType::AddLightToRig;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::AddLightToRig;
   uint64_t requestId{0};
   vsr::scivis_studio::LightRigID lightRigId;
   std::string subtype;
@@ -107,7 +116,7 @@ struct AddLightToRig
 
 struct RemoveLightFromRig
 {
-  static constexpr StudioMessageType kType =
+  static constexpr StudioMessageType MESSAGE_TYPE =
       StudioMessageType::RemoveLightFromRig;
   uint64_t requestId{0};
   vsr::scivis_studio::LightRigID lightRigId;
@@ -116,7 +125,7 @@ struct RemoveLightFromRig
 
 struct SaveLightRigArchive
 {
-  static constexpr StudioMessageType kType =
+  static constexpr StudioMessageType MESSAGE_TYPE =
       StudioMessageType::SaveLightRigArchive;
   uint64_t requestId{0};
   vsr::scivis_studio::LightRigID lightRigId;
@@ -125,7 +134,7 @@ struct SaveLightRigArchive
 
 struct LoadLightRigArchive
 {
-  static constexpr StudioMessageType kType =
+  static constexpr StudioMessageType MESSAGE_TYPE =
       StudioMessageType::LoadLightRigArchive;
   uint64_t requestId{0};
   std::filesystem::path file;
@@ -147,21 +156,24 @@ struct LightAddedResult
 
 struct CreateCameraRig
 {
-  static constexpr StudioMessageType kType = StudioMessageType::CreateCameraRig;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::CreateCameraRig;
   uint64_t requestId{0};
   std::string name;
 };
 
 struct RemoveCameraRig
 {
-  static constexpr StudioMessageType kType = StudioMessageType::RemoveCameraRig;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::RemoveCameraRig;
   uint64_t requestId{0};
   vsr::scivis_studio::CameraRigID cameraRigId;
 };
 
 struct RenameCameraRig
 {
-  static constexpr StudioMessageType kType = StudioMessageType::RenameCameraRig;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::RenameCameraRig;
   uint64_t requestId{0};
   vsr::scivis_studio::CameraRigID cameraRigId;
   std::string newName;
@@ -169,7 +181,7 @@ struct RenameCameraRig
 
 struct SaveCameraRigArchive
 {
-  static constexpr StudioMessageType kType =
+  static constexpr StudioMessageType MESSAGE_TYPE =
       StudioMessageType::SaveCameraRigArchive;
   uint64_t requestId{0};
   vsr::scivis_studio::CameraRigID cameraRigId;
@@ -178,7 +190,7 @@ struct SaveCameraRigArchive
 
 struct LoadCameraRigArchive
 {
-  static constexpr StudioMessageType kType =
+  static constexpr StudioMessageType MESSAGE_TYPE =
       StudioMessageType::LoadCameraRigArchive;
   uint64_t requestId{0};
   std::filesystem::path file;
@@ -194,14 +206,16 @@ struct CameraRigCreatedResult
 
 struct CreateColorMap
 {
-  static constexpr StudioMessageType kType = StudioMessageType::CreateColorMap;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::CreateColorMap;
   uint64_t requestId{0};
   std::string name;
 };
 
 struct RenameColorMap
 {
-  static constexpr StudioMessageType kType = StudioMessageType::RenameColorMap;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::RenameColorMap;
   uint64_t requestId{0};
   vsr::scivis_studio::ColorMapID colorMapId;
   std::string newName;
@@ -209,7 +223,8 @@ struct RenameColorMap
 
 struct RemoveColorMap
 {
-  static constexpr StudioMessageType kType = StudioMessageType::RemoveColorMap;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::RemoveColorMap;
   uint64_t requestId{0};
   vsr::scivis_studio::ColorMapID colorMapId;
 };

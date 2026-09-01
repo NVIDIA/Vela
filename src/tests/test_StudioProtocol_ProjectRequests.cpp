@@ -22,13 +22,13 @@ template <typename T>
 T roundTrip(const T &payload)
 {
   const auto msg = encode(payload);
-  REQUIRE(msg.header.type == uint8_t(T::kType));
+  REQUIRE(msg.header.type == uint8_t(T::MESSAGE_TYPE));
   const auto out = decode<T>(msg);
   REQUIRE(out);
   return *out;
 }
 
-// Round-trips a result payload (no kType) through a serialized DataTree.
+// Round-trips a result payload (no MESSAGE_TYPE) through a serialized DataTree.
 template <typename T>
 T roundTripTree(const T &payload)
 {

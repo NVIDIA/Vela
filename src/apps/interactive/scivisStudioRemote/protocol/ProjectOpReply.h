@@ -33,7 +33,8 @@ namespace vsr::scivis_studio::protocol {
  */
 struct ProjectOpReply
 {
-  static constexpr StudioMessageType kType = StudioMessageType::ProjectOpReply;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::ProjectOpReply;
   uint64_t requestId{0};
   bool ok{true};
   std::string error;

@@ -18,45 +18,48 @@ namespace vsr::scivis_studio::protocol {
 
 struct Hello
 {
-  static constexpr StudioMessageType kType = StudioMessageType::Hello;
+  static constexpr StudioMessageType MESSAGE_TYPE = StudioMessageType::Hello;
   int version{PROTOCOL_VERSION};
   std::string buildInfo;
 };
 
 struct Error
 {
-  static constexpr StudioMessageType kType = StudioMessageType::Error;
+  static constexpr StudioMessageType MESSAGE_TYPE = StudioMessageType::Error;
   std::string message;
 };
 
 struct Ping
 {
-  static constexpr StudioMessageType kType = StudioMessageType::Ping;
+  static constexpr StudioMessageType MESSAGE_TYPE = StudioMessageType::Ping;
 };
 
 struct Pong
 {
-  static constexpr StudioMessageType kType = StudioMessageType::Pong;
+  static constexpr StudioMessageType MESSAGE_TYPE = StudioMessageType::Pong;
 };
 
 struct Disconnect
 {
-  static constexpr StudioMessageType kType = StudioMessageType::Disconnect;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::Disconnect;
 };
 
 struct Shutdown
 {
-  static constexpr StudioMessageType kType = StudioMessageType::Shutdown;
+  static constexpr StudioMessageType MESSAGE_TYPE = StudioMessageType::Shutdown;
 };
 
 struct BootstrapBegin
 {
-  static constexpr StudioMessageType kType = StudioMessageType::BootstrapBegin;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::BootstrapBegin;
 };
 
 struct BootstrapEnd
 {
-  static constexpr StudioMessageType kType = StudioMessageType::BootstrapEnd;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::BootstrapEnd;
 };
 
 // version is required; buildInfo is optional.
