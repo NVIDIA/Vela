@@ -8,6 +8,7 @@ add_library(vsr_scivis_studio_protocol OBJECT
   ProjectRequests.cpp
   SessionMessages.cpp
   StudioProtocol.cpp
+  TaskMessages.cpp
 )
 
 target_include_directories(vsr_scivis_studio_protocol
