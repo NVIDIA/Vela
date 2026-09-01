@@ -54,7 +54,7 @@ const char *toString(AOVType type)
   case AOVType::INSTANCE_ID:
     return "INSTANCE_ID";
   }
-  return "NONE";
+  return "Unknown";
 }
 
 std::optional<AOVType> aovTypeFromString(std::string_view name)
