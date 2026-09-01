@@ -16,13 +16,25 @@
 namespace vsr::network {
 
 using MessageFuture = std::future<boost::system::error_code>;
+using ConnectHandler = std::function<void()>;
+using DisconnectHandler =
+    std::function<void(const boost::system::error_code &)>;
 
 /*
  * Shared base for network endpoints that manages an asio io_context, a TCP
  * socket, and a dispatch table mapping message type bytes to handler callbacks.
  *
+ * Connection lifecycle is observable through two hooks. The connect handler
+ * runs once per established connection; the disconnect handler runs at most
+ * once per connection when the socket closes for any reason (peer close,
+ * read/write/connect error, or a local disconnect()/stop()), and is re-armed
+ * by the next accept or connect. Both run on the IO thread, except that a
+ * local disconnect()/stop() reports on the calling thread. Handlers must only
+ * latch state for another thread to poll; never touch UI or exit from them.
+ *
  * Example:
  *   channel->registerHandler(MSG_UPDATE, [](auto msg) { handle(*msg); });
+ *   channel->setDisconnectHandler([&](auto ec) { lost.store(true); });
  *   channel->send(MSG_PING);
  */
 struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
@@ -37,6 +49,11 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
   void registerHandler(uint8_t messageType, MessageHandler handler);
   void removeHandler(uint8_t messageType);
   void removeAllHandlers();
+
+  //// Connection lifecycle ////
+
+  void setConnectHandler(ConnectHandler handler);
+  void setDisconnectHandler(DisconnectHandler handler);
 
   //// Send messages ////
 
@@ -63,6 +80,12 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
   void log_asio_error(
       const boost::system::error_code &error, const char *context);
 
+  // A connection was just established: re-arms the disconnect latch and runs
+  // the connect handler.
+  void notify_connected();
+  // Closes the socket (if open) and runs the disconnect handler once.
+  void close_socket(const boost::system::error_code &reason);
+
   asio::io_context m_io_context;
   std::thread m_io_thread;
 
@@ -71,6 +94,9 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
 
   tcp::socket m_socket;
   HandlerMap m_handlers;
+  // True once the current connection's loss has been reported (or when there
+  // is no connection to report on); armed by notify_connected().
+  std::atomic<bool> m_disconnectReported{true};
 
  private:
   struct PendingWrite
@@ -83,10 +109,9 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
   void enqueue_write(std::shared_ptr<PendingWrite> pending);
   void start_next_write();
   void fail_pending_writes(const boost::system::error_code &error);
-  void complete_write(
-      const std::shared_ptr<PendingWrite> &pending,
+  void complete_write(const std::shared_ptr<PendingWrite> &pending,
       const boost::system::error_code &error);
-  void close_socket();
+  void notify_disconnected(const boost::system::error_code &reason);
 
   Message make_message(uint8_t type);
   Message make_message(uint8_t type, const std::string &data);
@@ -97,6 +122,10 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
   std::deque<std::shared_ptr<PendingWrite>> m_pendingWrites;
   bool m_writeInProgress{false};
   std::atomic<bool> m_messagingActive{false};
+
+  std::mutex m_lifecycleMutex;
+  ConnectHandler m_connectHandler;
+  DisconnectHandler m_disconnectHandler;
 };
 
 /*
@@ -126,7 +155,9 @@ struct NetworkServer : public NetworkChannel
 
 /*
  * NetworkChannel that initiates a TCP connection to a remote host and port;
- * can be connected and disconnected at any time after construction.
+ * can be connected and disconnected at any time after construction, and
+ * connect() may be called again after a failed or closed connection: it
+ * restarts the IO thread and reopens the socket.
  *
  * Example:
  *   NetworkClient client("127.0.0.1", 9000);
