@@ -4,6 +4,7 @@
 add_library(vsr_scivis_studio_protocol OBJECT
   FrameMessages.cpp
   PayloadCommon.cpp
+  ProjectOpReply.cpp
   ProjectRequests.cpp
   SessionMessages.cpp
   StudioProtocol.cpp
