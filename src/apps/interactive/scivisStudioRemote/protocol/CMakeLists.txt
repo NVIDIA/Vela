@@ -6,6 +6,7 @@ add_library(vsr_scivis_studio_protocol OBJECT
   PayloadCommon.cpp
   ProjectOpReply.cpp
   ProjectRequests.cpp
+  ProjectSnapshot.cpp
   SessionMessages.cpp
   StudioProtocol.cpp
   TaskMessages.cpp
