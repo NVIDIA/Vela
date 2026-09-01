@@ -6,6 +6,7 @@
 # testable; the scivisStudioClient executable builds on it below.
 add_library(vsr_scivis_studio_client_core OBJECT
   MirrorUpdateDelegate.cpp
+  ServerConnection.cpp
 )
 
 target_include_directories(vsr_scivis_studio_client_core
