@@ -18,6 +18,12 @@ struct LayerTree : public Window
 
   void setEnableAddRemoveLayers(bool enable);
 
+  // Puts the whole widget in read-only mode: selection, expand/collapse, and
+  // hover still work, but every affordance that mutates the scene or layer
+  // structure is hidden or disabled. Used by the remote client, where layer
+  // structure is server-push-only (see the SciVis Studio client-server spec).
+  void setReadOnly(bool readOnly);
+
  private:
   void buildUI_layerHeader();
   void buildUI_tree();
@@ -48,6 +54,7 @@ struct LayerTree : public Window
   // Data //
 
   bool m_enableAddRemove{true};
+  bool m_readOnly{false};
   size_t m_hoveredNode{VSR_INVALID_INDEX};
   size_t m_menuNode{VSR_INVALID_INDEX};
   bool m_activeLayerMenuTriggered{false};

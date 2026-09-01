@@ -51,6 +51,11 @@ void LayerTree::setEnableAddRemoveLayers(bool enable)
   m_enableAddRemove = enable;
 }
 
+void LayerTree::setReadOnly(bool readOnly)
+{
+  m_readOnly = readOnly;
+}
+
 void LayerTree::buildUI_layerHeader()
 {
   auto &scene = appContext()->vsr.scene;
@@ -58,12 +63,14 @@ void LayerTree::buildUI_layerHeader()
 
   if (scene.numberOfLayers() == 0) {
     ImGui::Text("No layers in scene");
-    ImGui::BeginDisabled(!m_enableAddRemove);
-    if (ImGui::Button("new")) {
-      s_newLayerName.clear();
-      ImGui::OpenPopup("LayerTree_contextMenu_newLayer");
+    if (!m_readOnly) {
+      ImGui::BeginDisabled(!m_enableAddRemove);
+      if (ImGui::Button("new")) {
+        s_newLayerName.clear();
+        ImGui::OpenPopup("LayerTree_contextMenu_newLayer");
+      }
+      ImGui::EndDisabled();
     }
-    ImGui::EndDisabled();
     return;
   }
 
@@ -75,12 +82,21 @@ void LayerTree::buildUI_layerHeader()
       layers.size());
 
   if (ImGui::IsItemHovered()) {
-    tooltipForPreviousItem("right-click to set layer visibility", false);
+    if (m_readOnly) {
+      tooltipForPreviousItem("right-click to view layer visibility", false);
+    } else {
+      tooltipForPreviousItem("right-click to set layer visibility", false);
+    }
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
       ImGui::OpenPopup("LayerTree_contextMenu_setActiveLayers");
       m_activeLayerMenuTriggered = true;
     }
   }
+
+  // Everything below mutates the scene or layer structure, so it is hidden
+  // outright in read-only mode.
+  if (m_readOnly)
+    return;
 
   if (ImGui::Button("clear")) {
     appContext()->clearSelected();
@@ -331,8 +347,9 @@ void LayerTree::buildUI_tree()
         // mouse release if no drag occurred.
       }
 
-      // Drag and drop source
-      if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+      // Drag and drop source (reparenting is a mutation, so the whole
+      // drag/drop affordance is off in read-only mode)
+      if (!m_readOnly && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
         // Get parent-only nodes from the selection
         auto draggedNodes = appContext()->getParentOnlySelectedNodes();
 
@@ -376,8 +393,9 @@ void LayerTree::buildUI_tree()
         }
       }
 
-      // Drag and drop target
-      if (ImGui::BeginDragDropTarget()) {
+      // Drag and drop target (reparenting is a mutation, so no drop target
+      // exists in read-only mode)
+      if (!m_readOnly && ImGui::BeginDragDropTarget()) {
         // Peek at the payload to validate before accepting
         if (const ImGuiPayload *payload = ImGui::GetDragDropPayload()) {
           if (payload->IsDataType("LAYER_TREE_NODE")) {
@@ -428,8 +446,9 @@ void LayerTree::buildUI_tree()
     layer.traverse(layer.root(), onNodeEntryBuildUI, onNodeExitTreePop);
     ImGui::EndTable();
 
-    // Drag and drop target on the panel itself. Will drop under the root node.
-    if (ImGui::BeginDragDropTarget()) {
+    // Drag and drop target on the panel itself. Will drop under the root
+    // node. Off in read-only mode, same as the per-node drop targets above.
+    if (!m_readOnly && ImGui::BeginDragDropTarget()) {
       if (const ImGuiPayload *payload =
               ImGui::AcceptDragDropPayload("LAYER_TREE_NODE")) {
         dragAndDropTarget = layer.root();
@@ -464,7 +483,7 @@ void LayerTree::buildUI_activateObjectSceneMenu()
     }
 
     // Check for Delete key to delete selected nodes
-    if (ImGui::IsKeyPressed(ImGuiKey_Delete, false)) {
+    if (!m_readOnly && ImGui::IsKeyPressed(ImGuiKey_Delete, false)) {
       auto &scene = appContext()->vsr.scene;
       auto parentOnlyNodes = appContext()->getParentOnlySelectedNodes();
 
@@ -497,8 +516,11 @@ void LayerTree::buildUI_handleSelection()
 {
   ImGuiIO &io = ImGui::GetIO();
 
+  // Cut/copy/paste are all mutation-adjacent (paste and cut-then-paste both
+  // mutate the layer tree), so the whole trio is off in read-only mode.
+
   // Check for Ctrl+X to cut selected nodes
-  if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_X, false)) {
+  if (!m_readOnly && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_X, false)) {
     auto parentOnlyNodes = appContext()->getParentOnlySelectedNodes();
     if (!parentOnlyNodes.empty()) {
       appContext()->vsr.stashedSelection.nodes = parentOnlyNodes;
@@ -507,7 +529,7 @@ void LayerTree::buildUI_handleSelection()
   }
 
   // Check for Ctrl+C to copy selected nodes
-  if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_C, false)) {
+  if (!m_readOnly && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_C, false)) {
     auto parentOnlyNodes = appContext()->getParentOnlySelectedNodes();
     if (!parentOnlyNodes.empty()) {
       appContext()->vsr.stashedSelection.nodes = parentOnlyNodes;
@@ -516,7 +538,7 @@ void LayerTree::buildUI_handleSelection()
   }
 
   // Check for Ctrl+V to paste stashed nodes
-  if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_V, false)) {
+  if (!m_readOnly && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_V, false)) {
     auto &scene = appContext()->vsr.scene;
     auto &stashed = appContext()->vsr.stashedSelection;
     auto selectedNodes = appContext()->getSelectedNodes();
@@ -593,37 +615,42 @@ void LayerTree::buildUI_objectSceneMenu()
   bool clearSelectedNode = false;
 
   if (ImGui::BeginPopup("LayerTree_contextMenu_object")) {
-    bool enabled = (*menuNode)->isEnabled();
-    if (nodeSelected && ImGui::Checkbox("visible", &enabled)) {
-      (*menuNode)->setEnabled(enabled);
-      scene.signalLayerStructureChanged(&layer);
+    // Visibility toggles, rename, add/import, and load-archive all mutate the
+    // scene or layer structure, so they are hidden outright in read-only
+    // mode; only the export/save items below survive.
+    if (!m_readOnly) {
+      bool enabled = (*menuNode)->isEnabled();
+      if (nodeSelected && ImGui::Checkbox("visible", &enabled)) {
+        (*menuNode)->setEnabled(enabled);
+        scene.signalLayerStructureChanged(&layer);
+      }
+
+      if (nodeSelected && ImGui::MenuItem("show all")) {
+        layer.traverse(menuNode, [&](auto &n, int) {
+          n->setEnabled(true);
+          return true;
+        });
+        scene.signalLayerStructureChanged(&layer);
+      }
+
+      if (nodeSelected && ImGui::MenuItem("hide all")) {
+        layer.traverse(menuNode, [&](auto &n, int) {
+          n->setEnabled(false);
+          return true;
+        });
+        scene.signalLayerStructureChanged(&layer);
+      }
+
+      if (nodeSelected)
+        ImGui::Separator();
+
+      if (nodeSelected && ImGui::BeginMenu("rename")) {
+        ImGui::InputText("##edit_node_name", &(*menuNode)->name());
+        ImGui::EndMenu();
+      }
     }
 
-    if (nodeSelected && ImGui::MenuItem("show all")) {
-      layer.traverse(menuNode, [&](auto &n, int) {
-        n->setEnabled(true);
-        return true;
-      });
-      scene.signalLayerStructureChanged(&layer);
-    }
-
-    if (nodeSelected && ImGui::MenuItem("hide all")) {
-      layer.traverse(menuNode, [&](auto &n, int) {
-        n->setEnabled(false);
-        return true;
-      });
-      scene.signalLayerStructureChanged(&layer);
-    }
-
-    if (nodeSelected)
-      ImGui::Separator();
-
-    if (nodeSelected && ImGui::BeginMenu("rename")) {
-      ImGui::InputText("##edit_node_name", &(*menuNode)->name());
-      ImGui::EndMenu();
-    }
-
-    if (ImGui::BeginMenu("add")) {
+    if (!m_readOnly && ImGui::BeginMenu("add")) {
       if (ImGui::MenuItem("transform")) {
         scene.insertChildTransformNode(menuNode);
         clearSelectedNode = true;
@@ -788,16 +815,18 @@ void LayerTree::buildUI_objectSceneMenu()
       ImGui::EndMenu();
     }
 
-    ImGui::Separator();
+    if (!m_readOnly) {
+      ImGui::Separator();
 
-    if (ImGui::BeginMenu("load VSR Archive")) {
-      if (ImGui::MenuItem("object"))
-        m_app->showLoadObjectArchiveDialog(menuNode);
+      if (ImGui::BeginMenu("load VSR Archive")) {
+        if (ImGui::MenuItem("object"))
+          m_app->showLoadObjectArchiveDialog(menuNode);
 
-      if (ImGui::MenuItem("layer subtree"))
-        m_app->showLoadLayerSubtreeArchiveDialog(menuNode);
+        if (ImGui::MenuItem("layer subtree"))
+          m_app->showLoadLayerSubtreeArchiveDialog(menuNode);
 
-      ImGui::EndMenu();
+        ImGui::EndMenu();
+      }
     }
 
     auto *menuObject = nodeSelected && (*menuNode)->isObject()
@@ -842,24 +871,26 @@ void LayerTree::buildUI_objectSceneMenu()
             m_app->showExportNanoVDBFileDialog();
         }
       }
-      ImGui::Separator();
+      if (!m_readOnly) {
+        ImGui::Separator();
 
-      if (ImGui::MenuItem("delete selected")) {
-        auto parentOnlyNodes = appContext()->getParentOnlySelectedNodes();
+        if (ImGui::MenuItem("delete selected")) {
+          auto parentOnlyNodes = appContext()->getParentOnlySelectedNodes();
 
-        if (!parentOnlyNodes.empty()) {
-          for (const auto &node : parentOnlyNodes) {
-            if (node.valid()) {
-              scene.removeNode(node);
+          if (!parentOnlyNodes.empty()) {
+            for (const auto &node : parentOnlyNodes) {
+              if (node.valid()) {
+                scene.removeNode(node);
+              }
             }
+            m_menuNode = VSR_INVALID_INDEX;
+            appContext()->clearSelected();
+          } else if (m_menuNode != VSR_INVALID_INDEX) {
+            // Fallback: delete the menu node if nothing is selected
+            scene.removeNode(layer.at(m_menuNode));
+            m_menuNode = VSR_INVALID_INDEX;
+            appContext()->clearSelected();
           }
-          m_menuNode = VSR_INVALID_INDEX;
-          appContext()->clearSelected();
-        } else if (m_menuNode != VSR_INVALID_INDEX) {
-          // Fallback: delete the menu node if nothing is selected
-          scene.removeNode(layer.at(m_menuNode));
-          m_menuNode = VSR_INVALID_INDEX;
-          appContext()->clearSelected();
         }
       }
     }
@@ -878,6 +909,12 @@ void LayerTree::buildUI_objectSceneMenu()
 
 void LayerTree::buildUI_newLayerSceneMenu()
 {
+  // Only reachable via the "new" button, which is itself hidden in
+  // read-only mode; guarded again here so this popup can never mutate the
+  // scene even if that changes.
+  if (m_readOnly)
+    return;
+
   if (ImGui::BeginPopup("LayerTree_contextMenu_newLayer")) {
     ImGui::InputText("layer name", &s_newLayerName);
 
@@ -915,25 +952,29 @@ void LayerTree::buildUI_setActiveLayersSceneMenus()
   if (ImGui::BeginPopup("LayerTree_contextMenu_setActiveLayers")) {
     auto &scene = appContext()->vsr.scene;
 
-    if (ImGui::Button("show all"))
+    // Activating/deactivating layers mutates scene state, so in read-only
+    // mode this popup only ever shows the current active/inactive state.
+    if (!m_readOnly && ImGui::Button("show all"))
       scene.setAllLayersActive();
 
     for (auto &ls : scene.layers()) {
       ImGui::PushID(ls.second.ptr.get());
       // Make sure at least one layer is always active
       ImGui::BeginDisabled(
-          scene.numberOfActiveLayers() < 2 && ls.second.active);
+          m_readOnly || (scene.numberOfActiveLayers() < 2 && ls.second.active));
 
       bool active = ls.second.active;
-      if (ImGui::Checkbox(ls.first.c_str(), &active))
+      if (ImGui::Checkbox(ls.first.c_str(), &active) && !m_readOnly)
         scene.setLayerActive(ls.first, active);
 
-      ImGui::SameLine();
-      ImGui::Text("|");
-      ImGui::SameLine();
+      if (!m_readOnly) {
+        ImGui::SameLine();
+        ImGui::Text("|");
+        ImGui::SameLine();
 
-      if (ImGui::Button("o"))
-        scene.setOnlyLayerActive(ls.first);
+        if (ImGui::Button("o"))
+          scene.setOnlyLayerActive(ls.first);
+      }
 
       ImGui::EndDisabled();
       ImGui::PopID();
