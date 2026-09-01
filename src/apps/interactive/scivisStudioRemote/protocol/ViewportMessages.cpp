@@ -10,14 +10,6 @@ using vsr::rendering::AOVType;
 
 namespace {
 
-// Optional scalar: absent keeps `out`, present-but-mistyped is an error.
-template <typename T>
-bool readOptionalChild(
-    const vsr::core::DataNode &parent, const char *name, T &out)
-{
-  return !hasChild(parent, name) || readChild(parent, name, out);
-}
-
 void writeOptionalObject(vsr::core::DataNode &parent,
     const char *name,
     const std::optional<SceneObjectRef> &object)
@@ -146,10 +138,9 @@ void toNode(const ViewportSettings &s, vsr::core::DataNode &n)
 bool fromNode(const vsr::core::DataNode &n, ViewportSettings &s)
 {
   s = ViewportSettings{};
-  if (hasChild(n, "visualizeAOV")
-      && !readEnumChild(n, "visualizeAOV", s.visualizeAOV, aovTypeFromString))
-    return false;
-  return readOptionalChild(n, "highlightSelection", s.highlightSelection)
+  return readOptionalEnumChild(
+             n, "visualizeAOV", s.visualizeAOV, aovTypeFromString)
+      && readOptionalChild(n, "highlightSelection", s.highlightSelection)
       && readOptionalChild(n, "outlinePrimitives", s.outlinePrimitives)
       && readOptionalChild(n, "showWorldBounds", s.showWorldBounds)
       && readOptionalChild(n, "worldBoundsColor", s.worldBoundsColor)

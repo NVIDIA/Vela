@@ -43,6 +43,21 @@ std::optional<DatasetSourceKind> sourceKindFromString(const std::string &s)
 
 // Dataset runtime fields ////////////////////////////////////////////////////
 
+void sourceFileToNode(const DatasetSourceFile &f, DataNode &n)
+{
+  writeChild(n, "path", f.path);
+  writeChild(n, "resolvedPath", f.resolvedPath);
+}
+
+// path is required; resolvedPath defaults to "".
+bool nodeToSourceFile(const DataNode &n, DatasetSourceFile &f)
+{
+  if (!readChild(n, "path", f.path))
+    return false;
+  f.resolvedPath = readChildOr(n, "resolvedPath", std::string());
+  return true;
+}
+
 void datasetRuntimeToNode(const Dataset &d, DataNode &n)
 {
   writeChild(n, "status", std::string(dataset::toString(d.status)));
@@ -57,14 +72,7 @@ void datasetRuntimeToNode(const Dataset &d, DataNode &n)
       writeChild(settings, kv.first.c_str(), kv.second);
   }
 
-  if (!d.sourceFiles.empty()) {
-    auto &files = n["sourceFiles"];
-    for (size_t i = 0; i < d.sourceFiles.size(); ++i) {
-      auto &f = files[std::to_string(i)];
-      writeChild(f, "path", d.sourceFiles[i].path);
-      writeChild(f, "resolvedPath", d.sourceFiles[i].resolvedPath);
-    }
-  }
+  writeNodeList(n, "sourceFiles", d.sourceFiles, sourceFileToNode);
 
   writeChildNode(n, "rootNode", d.rootNode);
   writeChild(n, "dirty", d.dirty);
@@ -76,11 +84,9 @@ void datasetRuntimeToNode(const Dataset &d, DataNode &n)
 
 bool nodeToDatasetRuntime(const DataNode &n, Dataset &d)
 {
-  if (hasChild(n, "status")
-      && !readEnumChild(n, "status", d.status, statusFromString))
-    return false;
-  if (hasChild(n, "sourceKind")
-      && !readEnumChild(n, "sourceKind", d.sourceKind, sourceKindFromString))
+  if (!readOptionalEnumChild(n, "status", d.status, statusFromString)
+      || !readOptionalEnumChild(
+          n, "sourceKind", d.sourceKind, sourceKindFromString))
     return false;
   d.importerType = readChildOr(n, "importerType", d.importerType);
 
@@ -101,23 +107,11 @@ bool nodeToDatasetRuntime(const DataNode &n, Dataset &d)
     }
   }
 
-  if (const auto *files = n.child("sourceFiles")) {
-    d.sourceFiles.clear();
-    bool ok = true;
-    files->foreach_child_const([&](const DataNode &f) {
-      DatasetSourceFile file;
-      if (!readChild(f, "path", file.path)) {
-        ok = false;
-        return;
-      }
-      file.resolvedPath = readChildOr(f, "resolvedPath", std::string());
-      d.sourceFiles.push_back(std::move(file));
-    });
-    if (!ok)
-      return false;
-  }
+  if (hasChild(n, "sourceFiles")
+      && !readNodeList(n, "sourceFiles", d.sourceFiles, nodeToSourceFile))
+    return false;
 
-  if (hasChild(n, "rootNode") && !readChildNode(n, "rootNode", d.rootNode))
+  if (!readOptionalChildNode(n, "rootNode", d.rootNode))
     return false;
   d.dirty = readChildOr(n, "dirty", d.dirty);
   d.declared = readChildOr(n, "declared", d.declared);
@@ -171,8 +165,7 @@ bool nodeToRuntime(DataNode &n, Project &p)
   if (const auto *shots = n.child("shots")) {
     for (auto &s : p.shots) {
       const auto *sn = shots->child(s.id);
-      if (sn && hasChild(*sn, "camera")
-          && !readChildNode(*sn, "camera", s.camera))
+      if (sn && !readOptionalChildNode(*sn, "camera", s.camera))
         return false;
     }
   }
@@ -182,8 +175,7 @@ bool nodeToRuntime(DataNode &n, Project &p)
       const auto *rn = lightRigs->child(r.id);
       if (!rn)
         continue;
-      if (hasChild(*rn, "rootNode")
-          && !readChildNode(*rn, "rootNode", r.rootNode))
+      if (!readOptionalChildNode(*rn, "rootNode", r.rootNode))
         return false;
       r.persistedName = readChildOr(*rn, "persistedName", r.persistedName);
     }

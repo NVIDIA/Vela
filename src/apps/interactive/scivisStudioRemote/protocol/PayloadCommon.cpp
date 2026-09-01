@@ -59,6 +59,28 @@ bool readPath(const vsr::core::DataNode &parent,
   return true;
 }
 
+void writePathList(vsr::core::DataNode &parent,
+    const char *name,
+    const std::vector<std::filesystem::path> &paths)
+{
+  std::vector<std::string> items;
+  items.reserve(paths.size());
+  for (const auto &p : paths)
+    items.push_back(p.generic_string());
+  writeStringList(parent, name, items);
+}
+
+bool readPathList(const vsr::core::DataNode &parent,
+    const char *name,
+    std::vector<std::filesystem::path> &out)
+{
+  std::vector<std::string> items;
+  if (!readStringList(parent, name, items))
+    return false;
+  out.assign(items.begin(), items.end());
+  return true;
+}
+
 // ANARI type names ///////////////////////////////////////////////////////////
 
 const char *toString(anari::DataType type)

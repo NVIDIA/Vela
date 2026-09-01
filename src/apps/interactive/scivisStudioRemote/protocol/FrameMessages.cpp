@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "FrameMessages.h"
-#include "PayloadCommon.h"
+#include "PayloadMacros.h"
 
 namespace vsr::scivis_studio::protocol {
 
@@ -164,16 +164,7 @@ bool fromNode(const vsr::core::DataNode &n, SetEncodings &e)
 
 // Empty payloads /////////////////////////////////////////////////////////////
 
-#define VSR_STUDIO_EMPTY_PAYLOAD(T)                                            \
-  void toNode(const T &, vsr::core::DataNode &) {}                             \
-  bool fromNode(const vsr::core::DataNode &, T &)                              \
-  {                                                                            \
-    return true;                                                               \
-  }
-
 VSR_STUDIO_EMPTY_PAYLOAD(StartRendering)
 VSR_STUDIO_EMPTY_PAYLOAD(StopRendering)
-
-#undef VSR_STUDIO_EMPTY_PAYLOAD
 
 } // namespace vsr::scivis_studio::protocol

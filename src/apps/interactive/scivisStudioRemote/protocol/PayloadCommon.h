@@ -16,6 +16,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace vsr::scivis_studio::protocol {
@@ -57,6 +58,12 @@ T readChildOr(
 
 bool hasChild(const vsr::core::DataNode &parent, const char *name);
 
+// An optional scalar: absent keeps `out` as is (true); present but mistyped
+// is a malformed payload (false).
+template <typename T>
+bool readOptionalChild(
+    const vsr::core::DataNode &parent, const char *name, T &out);
+
 // Strings, lists, paths //////////////////////////////////////////////////////
 
 // Writes items as children "0", "1", ... of `parent[name]`. An empty list
@@ -78,12 +85,27 @@ bool readPath(const vsr::core::DataNode &parent,
     const char *name,
     std::filesystem::path &out);
 
+// A path list is a string list of generic_string()s.
+void writePathList(vsr::core::DataNode &parent,
+    const char *name,
+    const std::vector<std::filesystem::path> &paths);
+bool readPathList(const vsr::core::DataNode &parent,
+    const char *name,
+    std::vector<std::filesystem::path> &out);
+
 // Enums //////////////////////////////////////////////////////////////////////
 
 // Enum fields travel as strings. `fromString` is the payload's own parser
 // returning std::optional<E>; an unknown string reads as false.
 template <typename E, typename FromString>
 bool readEnumChild(const vsr::core::DataNode &parent,
+    const char *name,
+    E &out,
+    FromString &&fromString);
+
+// readEnumChild() with the readOptionalChild() contract.
+template <typename E, typename FromString>
+bool readOptionalEnumChild(const vsr::core::DataNode &parent,
     const char *name,
     E &out,
     FromString &&fromString);
@@ -133,6 +155,33 @@ void writeChildNode(
 template <typename T>
 bool readChildNode(const vsr::core::DataNode &parent, const char *name, T &out);
 
+// An optional nested payload, same contract as readOptionalChild().
+template <typename T>
+bool readOptionalChildNode(
+    const vsr::core::DataNode &parent, const char *name, T &out);
+
+// Ordered lists travel as children "0", "1", ... of parent[name]; an empty
+// list writes nothing (leaf-only serialization would drop the node anyway)
+// and an absent child reads as an empty list. The two-argument forms call
+// toNode()/fromNode() on each item; pass `writeItem(item, node)` /
+// `readItem(node, item) -> bool` for item types without those overloads.
+template <typename T>
+void writeNodeList(
+    vsr::core::DataNode &parent, const char *name, const std::vector<T> &items);
+template <typename T, typename WriteItem>
+void writeNodeList(vsr::core::DataNode &parent,
+    const char *name,
+    const std::vector<T> &items,
+    WriteItem &&writeItem);
+template <typename T>
+bool readNodeList(
+    const vsr::core::DataNode &parent, const char *name, std::vector<T> &out);
+template <typename T, typename ReadItem>
+bool readNodeList(const vsr::core::DataNode &parent,
+    const char *name,
+    std::vector<T> &out,
+    ReadItem &&readItem);
+
 // Inlined definitions ////////////////////////////////////////////////////////
 
 template <typename T>
@@ -177,6 +226,13 @@ inline bool hasChild(const vsr::core::DataNode &parent, const char *name)
   return parent.child(name) != nullptr;
 }
 
+template <typename T>
+inline bool readOptionalChild(
+    const vsr::core::DataNode &parent, const char *name, T &out)
+{
+  return !hasChild(parent, name) || readChild(parent, name, out);
+}
+
 template <typename E, typename FromString>
 inline bool readEnumChild(const vsr::core::DataNode &parent,
     const char *name,
@@ -193,6 +249,16 @@ inline bool readEnumChild(const vsr::core::DataNode &parent,
   return true;
 }
 
+template <typename E, typename FromString>
+inline bool readOptionalEnumChild(const vsr::core::DataNode &parent,
+    const char *name,
+    E &out,
+    FromString &&fromString)
+{
+  return !hasChild(parent, name)
+      || readEnumChild(parent, name, out, std::forward<FromString>(fromString));
+}
+
 template <typename T>
 inline void writeChildNode(
     vsr::core::DataNode &parent, const char *name, const T &value)
@@ -206,6 +272,67 @@ inline bool readChildNode(
 {
   const auto *c = parent.child(name);
   return c && fromNode(*c, out);
+}
+
+template <typename T>
+inline bool readOptionalChildNode(
+    const vsr::core::DataNode &parent, const char *name, T &out)
+{
+  return !hasChild(parent, name) || readChildNode(parent, name, out);
+}
+
+template <typename T>
+inline void writeNodeList(
+    vsr::core::DataNode &parent, const char *name, const std::vector<T> &items)
+{
+  writeNodeList(parent, name, items, [](const T &item, vsr::core::DataNode &n) {
+    toNode(item, n);
+  });
+}
+
+template <typename T, typename WriteItem>
+inline void writeNodeList(vsr::core::DataNode &parent,
+    const char *name,
+    const std::vector<T> &items,
+    WriteItem &&writeItem)
+{
+  if (items.empty())
+    return;
+  auto &list = parent[name];
+  for (size_t i = 0; i < items.size(); ++i)
+    writeItem(items[i], list[std::to_string(i)]);
+}
+
+template <typename T>
+inline bool readNodeList(
+    const vsr::core::DataNode &parent, const char *name, std::vector<T> &out)
+{
+  return readNodeList(
+      parent, name, out, [](const vsr::core::DataNode &n, T &item) {
+        return fromNode(n, item);
+      });
+}
+
+template <typename T, typename ReadItem>
+inline bool readNodeList(const vsr::core::DataNode &parent,
+    const char *name,
+    std::vector<T> &out,
+    ReadItem &&readItem)
+{
+  out.clear();
+  const auto *list = parent.child(name);
+  if (!list)
+    return true;
+  bool ok = true;
+  list->foreach_child_const([&](const vsr::core::DataNode &item) {
+    T value;
+    if (!readItem(item, value)) {
+      ok = false;
+      return;
+    }
+    out.push_back(std::move(value));
+  });
+  return ok;
 }
 
 } // namespace vsr::scivis_studio::protocol
