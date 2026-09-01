@@ -11,6 +11,7 @@
 #include "vsr/core/Logging.hpp"
 // std
 #include <algorithm>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -998,6 +999,47 @@ SCENARIO("Reading into a DataNode replaces what it held", "[DataTree]")
         REQUIRE(
             destination.root()["target"]["fromFile"].getValueAs<int>() == 1);
       }
+    }
+  }
+}
+
+SCENARIO("A corrupt buffer is rejected without allocating for it", "[DataTree]")
+{
+  GIVEN("A buffer whose leaf count and lengths are garbage")
+  {
+    std::vector<std::byte> buffer;
+    for (int i = 0; i < 64; ++i)
+      buffer.push_back(std::byte(0xA5 ^ (i * 37)));
+
+    WHEN("It is read into a node")
+    {
+      vsr::core::DataTree destination;
+      bool ok = true;
+
+      THEN("The read fails instead of throwing")
+      {
+        REQUIRE_NOTHROW(ok = destination.root().read(buffer));
+        REQUIRE_FALSE(ok);
+        REQUIRE(destination.root().numChildren() == 0);
+      }
+    }
+  }
+
+  GIVEN("A valid buffer whose first string length is overwritten")
+  {
+    vsr::core::DataTree source;
+    source.root()["a"]["b"] = 1;
+    std::vector<std::byte> buffer;
+    REQUIRE(source.write(buffer));
+    const size_t hugeLength = size_t(1) << 60;
+    std::memcpy(buffer.data() + sizeof(size_t), &hugeLength, sizeof(size_t));
+
+    THEN("The read fails instead of throwing")
+    {
+      vsr::core::DataTree destination;
+      bool ok = true;
+      REQUIRE_NOTHROW(ok = destination.root().read(buffer));
+      REQUIRE_FALSE(ok);
     }
   }
 }
