@@ -16,6 +16,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -94,6 +95,14 @@ bool readPathList(const vsr::core::DataNode &parent,
     std::vector<std::filesystem::path> &out);
 
 // Enums //////////////////////////////////////////////////////////////////////
+
+// Strict inverse of a toString(E) over the contiguous enumerators
+// first..last (inclusive): the E whose toString() spelling equals `name`,
+// empty otherwise. Model parsers fall back to a default on unknown text,
+// which would hide a corrupt payload; every protocol *FromString uses this.
+template <typename E>
+std::optional<E> enumFromName(
+    std::string_view name, E first, E last, const char *(*toString)(E));
 
 // Enum fields travel as strings. `fromString` is the payload's own parser
 // returning std::optional<E>; an unknown string reads as false.
@@ -231,6 +240,18 @@ inline bool readOptionalChild(
     const vsr::core::DataNode &parent, const char *name, T &out)
 {
   return !hasChild(parent, name) || readChild(parent, name, out);
+}
+
+template <typename E>
+inline std::optional<E> enumFromName(
+    std::string_view name, E first, E last, const char *(*toString)(E))
+{
+  using U = std::underlying_type_t<E>;
+  for (U v = U(first); v <= U(last); ++v) {
+    if (name == toString(E(v)))
+      return E(v);
+  }
+  return {};
 }
 
 template <typename E, typename FromString>

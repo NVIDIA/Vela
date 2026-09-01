@@ -59,23 +59,7 @@ const char *toString(AOVType type)
 
 std::optional<AOVType> aovTypeFromString(std::string_view name)
 {
-  if (name == "NONE")
-    return AOVType::NONE;
-  if (name == "DEPTH")
-    return AOVType::DEPTH;
-  if (name == "ALBEDO")
-    return AOVType::ALBEDO;
-  if (name == "NORMAL")
-    return AOVType::NORMAL;
-  if (name == "EDGES")
-    return AOVType::EDGES;
-  if (name == "OBJECT_ID")
-    return AOVType::OBJECT_ID;
-  if (name == "PRIMITIVE_ID")
-    return AOVType::PRIMITIVE_ID;
-  if (name == "INSTANCE_ID")
-    return AOVType::INSTANCE_ID;
-  return {};
+  return enumFromName(name, AOVType::NONE, AOVType::INSTANCE_ID, toString);
 }
 
 // Picking ////////////////////////////////////////////////////////////////////

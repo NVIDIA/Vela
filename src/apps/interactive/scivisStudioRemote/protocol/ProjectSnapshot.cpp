@@ -15,30 +15,19 @@ namespace {
 
 using vsr::core::DataNode;
 
-// Strict enum parsers: dataset::*FromString() silently fall back to a default
-// on unknown text, which would hide a corrupt snapshot. Accept exactly the
-// spellings toString() emits.
+// Strict counterparts of dataset::*FromString(), which fall back to a default.
 std::optional<DatasetStatus> statusFromString(const std::string &s)
 {
-  for (auto v : {DatasetStatus::Available,
-           DatasetStatus::Unavailable,
-           DatasetStatus::Importing,
-           DatasetStatus::ImportFailed}) {
-    if (s == dataset::toString(v))
-      return v;
-  }
-  return {};
+  return enumFromName(s,
+      DatasetStatus::Available,
+      DatasetStatus::ImportFailed,
+      dataset::toString);
 }
 
 std::optional<DatasetSourceKind> sourceKindFromString(const std::string &s)
 {
-  for (auto v : {DatasetSourceKind::Static,
-           DatasetSourceKind::FileAnimation,
-           DatasetSourceKind::Live}) {
-    if (s == dataset::toString(v))
-      return v;
-  }
-  return {};
+  return enumFromName(
+      s, DatasetSourceKind::Static, DatasetSourceKind::Live, dataset::toString);
 }
 
 // Dataset runtime fields ////////////////////////////////////////////////////

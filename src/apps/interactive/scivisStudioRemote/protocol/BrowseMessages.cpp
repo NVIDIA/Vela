@@ -21,13 +21,8 @@ const char *toString(EntryKind kind)
 
 std::optional<EntryKind> entryKindFromString(std::string_view name)
 {
-  if (name == "File")
-    return EntryKind::File;
-  if (name == "Directory")
-    return EntryKind::Directory;
-  if (name == "ProjectDirectory")
-    return EntryKind::ProjectDirectory;
-  return {};
+  return enumFromName(
+      name, EntryKind::File, EntryKind::ProjectDirectory, toString);
 }
 
 // Requests ///////////////////////////////////////////////////////////////////

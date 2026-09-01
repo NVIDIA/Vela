@@ -34,20 +34,14 @@ const char *toString(PixelFormat format)
 
 std::optional<FrameEncoding> frameEncodingFromString(std::string_view name)
 {
-  if (name == "Raw")
-    return FrameEncoding::Raw;
-  if (name == "TurboJpeg")
-    return FrameEncoding::TurboJpeg;
-  return {};
+  return enumFromName(
+      name, FrameEncoding::Raw, FrameEncoding::TurboJpeg, toString);
 }
 
 std::optional<PixelFormat> pixelFormatFromString(std::string_view name)
 {
-  if (name == "RGBA8")
-    return PixelFormat::RGBA8;
-  if (name == "RGBA8_sRGB")
-    return PixelFormat::RGBA8_sRGB;
-  return {};
+  return enumFromName(
+      name, PixelFormat::RGBA8, PixelFormat::RGBA8_sRGB, toString);
 }
 
 // Frame header ///////////////////////////////////////////////////////////////
