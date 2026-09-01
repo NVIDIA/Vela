@@ -62,6 +62,12 @@ option(VSR_USE_OIIO
   "Use OpenImageIO to decode texture formats stb cannot (e.g. TIFF)" OFF)
 option(VSR_USE_MPI "Enable MPI support" OFF)
 option(VSR_USE_NETWORKING "Enable networking support via boost.asio" OFF)
+cmake_dependent_option(VSR_USE_TURBOJPEG
+  "Encode SciVis Studio remote frames with libjpeg-turbo"
+  OFF
+  VSR_USE_NETWORKING
+  OFF
+)
 option(VSR_NANOVDB_SKIP_INVALID_VOLUMES
   "Skip NanoVDB volumes with zero active voxels" OFF)
 option(VSR_NANOVDB_USE_ZIP

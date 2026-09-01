@@ -37,7 +37,7 @@ cmake --build . --parallel
 Requires ANARI-SDK 0.15.0+ (`find_package(anari)` must succeed).
 
 Key optional CMake flags: `VSR_BUILD_APPS`, `VSR_BUILD_INTERACTIVE_APPS`,
-`VSR_BUILD_UI_LIBRARY`, `VSR_USE_LUA`, `VSR_USE_ASSIMP`, `VSR_USE_HDF5`, `VSR_USE_MPI`, `VSR_USE_NETWORKING`, `VSR_USE_VTK`, `VSR_USE_SILO`, `VSR_USE_USD`, `VSR_USE_OIIO`.
+`VSR_BUILD_UI_LIBRARY`, `VSR_USE_LUA`, `VSR_USE_ASSIMP`, `VSR_USE_HDF5`, `VSR_USE_MPI`, `VSR_USE_NETWORKING`, `VSR_USE_TURBOJPEG` (needs networking; JPEG-compressed SciVis Studio remote frames), `VSR_USE_VTK`, `VSR_USE_SILO`, `VSR_USE_USD`, `VSR_USE_OIIO`.
 
 ## Tests
 
