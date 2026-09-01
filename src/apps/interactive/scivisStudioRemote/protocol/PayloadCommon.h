@@ -26,7 +26,8 @@ namespace vsr::scivis_studio::protocol {
  * Building blocks shared by every payload's toNode()/fromNode() pair. Writers
  * put each scalar under a named child (ADR 0027); readers never create
  * children and never throw on untrusted input -- absent or mistyped children
- * report `false` and leave the output untouched.
+ * report `false`. On failure the output is unspecified; decode<T>() discards
+ * it.
  *
  * Example:
  *   void toNode(const Foo &f, DataNode &n)
