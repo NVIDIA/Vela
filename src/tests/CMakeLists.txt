@@ -61,6 +61,7 @@ if (TARGET vsr_scivis_studio_protocol)
     test_StudioProtocol_ProjectRequests.cpp
     test_StudioProtocol_ShotRigRequests.cpp
     test_StudioProtocol_Tasks.cpp
+    test_StudioProtocol_Viewport.cpp
   )
 endif()
 project_link_libraries(
