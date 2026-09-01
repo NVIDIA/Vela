@@ -18,3 +18,20 @@ target_link_libraries(vsr_scivis_studio_client_core
 PUBLIC
   vsr_scivis_studio_protocol
 )
+
+# The thin client executable: ImGui UI over the client core.
+add_executable(scivisStudioClient
+  Application.cpp
+  StudioViewport.cpp
+  scivisStudioClient.cpp
+)
+
+# OBJECT libraries only contribute their objects to direct linkers, so the
+# core's own OBJECT dependencies are named here as well.
+target_link_libraries(scivisStudioClient
+PRIVATE
+  vsr_scivis_studio_client_core
+  vsr_scivis_studio_protocol
+  vsr_scivis_studio_model
+  vsr_ui_imgui
+)
