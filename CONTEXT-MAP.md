@@ -12,6 +12,9 @@
   images via render indexes and an image pipeline of composable passes
 - [SciVis Studio](./src/apps/interactive/scivisStudio/CONTEXT.md) — organizes
   scientific-visualization assets into projects and shots
+- [SciVis Studio Remote](./src/apps/interactive/scivisStudioRemote/CONTEXT.md) —
+  the wire vocabulary of the Studio client-server split: protocol, client-held
+  state, and session semantics
 
 ## Relationships
 
@@ -25,3 +28,12 @@
 - **VSR App → VSR I/O**: VSR App composes Archives produced by VSR I/O with
   application-level state to create Application Dumps. VSR I/O does not depend
   on or create Application Dumps.
+- **SciVis Studio Remote → SciVis Studio**: the Remote context moves SciVis
+  Studio's project language across a network without redefining it — Project
+  Ops mirror project operations one-to-one, and the Project Snapshot carries
+  the Project as SciVis Studio defines it. Terms about the wire and the
+  client's copies (Structural Mirror, Project Replica, Server Task, …) belong
+  to Remote alone.
+- **SciVis Studio Remote → VSR Core**: Remote messages are serialized Data
+  Trees; the Remote context uses VSR Core's serialization vocabulary and never
+  redefines it.

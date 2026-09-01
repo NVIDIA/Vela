@@ -30,6 +30,24 @@ Project layout, dataset ownership, and file-animation persistence for the
 | [0013](0013-externalize-file-animation-source-lists.md) | Externalize file-animation source lists into sibling Source List Files | Revises [0003](0003-delegate-file-animation-io-to-vsr.md), [0004](0004-make-dataset-files-authoritative.md), [0005](0005-keep-the-dataset-directory-flat.md), [0007](0007-treat-file-animation-paths-as-opaque.md) |
 | [0023](0023-allow-declared-file-animation-datasets.md) | Allow declared file-animation datasets | |
 
+## SciVis Studio client-server split
+
+The split of SciVis Studio into a project-owning server and a thin UI client.
+Design doc: [`scivis-studio-client-server.md`](../scivis-studio-client-server.md);
+wire vocabulary:
+[SciVis Studio Remote](../../src/apps/interactive/scivisStudioRemote/CONTEXT.md).
+
+| ADR | Decision | Supersedes / revised by |
+| --- | --- | --- |
+| [0028](0028-split-scivis-studio-into-a-project-owning-server-and-a-thin-client.md) | Split SciVis Studio into a project-owning server and a thin client | |
+| [0029](0029-mint-all-scene-object-identity-on-the-server.md) | Mint all scene-object identity on the server | |
+| [0030](0030-split-authority-between-round-tripped-structure-and-optimistic-parameters.md) | Split authority between round-tripped structure and optimistic parameters | |
+| [0031](0031-keep-all-files-server-side-with-no-wire-file-transfer.md) | Keep all files server-side with no wire file transfer | |
+| [0032](0032-run-every-long-operation-as-a-server-task.md) | Run every long operation as a Server Task | |
+| [0033](0033-give-studio-its-own-message-set.md) | Give Studio its own message set | |
+| [0034](0034-confirm-mutations-with-a-whole-project-snapshot.md) | Confirm mutations with a whole-project snapshot | |
+| [0035](0035-carry-in-motion-time-in-the-frame-header.md) | Carry in-motion time in the frame header | |
+
 ## VSR Core data trees
 
 Addressing and change notification for `vsr::core::DataTree`, and the
