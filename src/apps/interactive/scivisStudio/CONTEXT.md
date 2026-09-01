@@ -190,6 +190,12 @@ A future dataset driven by a running simulation. Live datasets are outside the
 standalone dataset model until concrete use cases establish their lifecycle and
 persistence semantics.
 
+**Color Map**:
+A project-owned, named mapping from scalar values to color and opacity,
+usable by any shot in the project. Its identity and name are project state;
+the mapping's values live on a scene-side object the project entry refers to.
+_Avoid_: Transfer function (the editing widget, not the asset), palette
+
 **Shot**:
 A project-owned composition of datasets, a camera rig, and a light rig. A shot,
 rather than any of its constituent assets, owns the associations among them and
