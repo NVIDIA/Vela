@@ -16,7 +16,7 @@ ParameterRemove::ParameterRemove(
   }
 
   // NOTE(jda) - node names intentionally short to reduce message size
-  auto root = m_tree.root();
+  auto &root = m_tree.root();
   root["o"] = vsr::core::Any(obj->type(), obj->index()); // object
   root["n"] = param->name().str(); // parameter name
 }

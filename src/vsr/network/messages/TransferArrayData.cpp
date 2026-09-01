@@ -33,7 +33,7 @@ TransferArrayData::TransferArrayData(const vsr::scene::Array *array)
     return;
   }
 
-  auto root = m_tree.root();
+  auto &root = m_tree.root();
   root["a"] = vsr::core::Any(array->type(), array->index()); // array
 
   auto &d = root["d"];

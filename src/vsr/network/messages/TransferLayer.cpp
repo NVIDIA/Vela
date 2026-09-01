@@ -18,7 +18,7 @@ TransferLayer::TransferLayer(
     return;
   }
 
-  auto root = m_tree.root();
+  auto &root = m_tree.root();
   root["n"] = scene->getLayerName(layer).str();
   vsr::io::serialize_Layer(*layer, root["l"]);
 }
