@@ -76,12 +76,14 @@ FileWriter::operator bool() const
   return valid();
 }
 
-// BufferReader definitions ///////////////////////////////////////////////////
+// DataReader definitions /////////////////////////////////////////////////////
 
 size_t DataReader::bytesRemaining() const
 {
   return SIZE_MAX;
 }
+
+// BufferReader definitions ///////////////////////////////////////////////////
 
 BufferReader::BufferReader(const std::vector<std::byte> &buffer, size_t offset)
     : m_buffer(buffer), m_offset(offset)
