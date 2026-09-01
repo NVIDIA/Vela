@@ -24,7 +24,7 @@ ParameterChange::ParameterChange(const vsr::scene::Object *obj,
     return;
   }
 
-  auto root = m_tree.root();
+  auto &root = m_tree.root();
   root["o"] = vsr::core::Any(obj->type(), obj->index()); // object
 
   auto &ps = root["p"];
