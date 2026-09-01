@@ -32,12 +32,10 @@ const char *toString(vsr::io::ImporterType importerType)
 std::optional<vsr::io::ImporterType> importerTypeFromString(
     const std::string &name)
 {
-  // The model's parser answers NONE for unknown names; only accept NONE when
-  // the wire actually said so.
-  const auto type = vsr::scivis_studio::importerTypeFromString(name);
-  if (name != vsr::scivis_studio::toString(type))
-    return {};
-  return type;
+  return enumFromName(name,
+      vsr::io::ImporterType::AGX,
+      vsr::io::ImporterType::NONE,
+      vsr::scivis_studio::toString);
 }
 
 // Project ////////////////////////////////////////////////////////////////////
