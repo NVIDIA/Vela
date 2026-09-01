@@ -130,7 +130,9 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
 
 /*
  * NetworkChannel that listens on a TCP port, accepts a single client
- * connection, and supports restart without re-creating the acceptor.
+ * connection, and supports restart without re-creating the acceptor. The
+ * constructor binds immediately and throws boost::system::system_error when
+ * the port is busy; port 0 asks the OS for a free port, read back via port().
  *
  * Example:
  *   NetworkServer srv(9000);
@@ -143,14 +145,20 @@ struct NetworkServer : public NetworkChannel
   NetworkServer(short port);
   ~NetworkServer() override = default;
 
+  // The port actually bound; differs from the constructor argument for 0.
+  unsigned short port() const;
+
   void start();
   void restart(); // must be running already
   void stop();
 
  private:
+  // Queues one async_accept unless one is already pending, so repeated
+  // restart() calls do not stack accepts.
   void start_accept();
 
   tcp::acceptor m_acceptor;
+  std::atomic<bool> m_acceptPending{false};
 };
 
 /*

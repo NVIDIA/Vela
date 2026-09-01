@@ -367,6 +367,11 @@ NetworkServer::NetworkServer(short port)
   start_accept();
 }
 
+unsigned short NetworkServer::port() const
+{
+  return m_acceptor.local_endpoint().port();
+}
+
 void NetworkServer::start()
 {
   start_messaging();
@@ -386,9 +391,13 @@ void NetworkServer::stop()
 
 void NetworkServer::start_accept()
 {
+  if (m_acceptPending.exchange(true))
+    return;
+
   auto socket = std::make_shared<tcp::socket>(m_io_context);
   m_acceptor.async_accept(
       *socket, [this, socket](const boost::system::error_code &error) {
+        m_acceptPending.store(false);
         if (!error) {
           vsr::core::logStatus("[NetworkServer] New connection from %s",
               socket->remote_endpoint().address().to_string().c_str());
