@@ -16,15 +16,6 @@ using namespace vsr::network;
 
 namespace {
 
-// NetworkServer(short port) cannot take port 0, so ask the OS for a free port
-// by binding a throwaway acceptor and reading back what it was given.
-short freePort()
-{
-  asio::io_context io;
-  tcp::acceptor probe(io, tcp::endpoint(tcp::v4(), 0));
-  return short(probe.local_endpoint().port());
-}
-
 bool waitFor(const std::function<bool()> &done,
     std::chrono::milliseconds timeout = std::chrono::seconds(5))
 {
@@ -57,8 +48,9 @@ SCENARIO(
 {
   GIVEN("a server and a client connected on an ephemeral port")
   {
-    const short port = freePort();
-    auto server = std::make_shared<NetworkServer>(port);
+    auto server = std::make_shared<NetworkServer>(0);
+    const auto port = server->port();
+    REQUIRE(port != 0);
     auto client = std::make_shared<NetworkClient>();
     LifecycleCounters serverCounters;
     LifecycleCounters clientCounters;
@@ -130,7 +122,12 @@ SCENARIO(
 
   GIVEN("a client and no server listening")
   {
-    const short port = freePort();
+    // Bind and drop an ephemeral port so nothing is listening on it.
+    unsigned short port = 0;
+    {
+      NetworkServer probe(0);
+      port = probe.port();
+    }
     auto client = std::make_shared<NetworkClient>();
     LifecycleCounters counters;
     counters.attach(*client);
