@@ -130,7 +130,12 @@ void NetworkChannel::stop_messaging()
       m_io_thread.join();
     m_work.reset();
 
-    // Ensure all completion handlers have finished before returning
+    // Run the completions the stop cut off (aborted reads and writes on the
+    // closed socket) here, on the caller's thread. Left queued, they would
+    // run on the next start_messaging()'s IO thread and their close_socket()
+    // could tear down a freshly opened socket mid-connect. poll() only runs
+    // them once the stopped context is restarted.
+    m_io_context.restart();
     m_io_context.poll();
   } catch (const std::system_error &e) {
     vsr::core::logError(
