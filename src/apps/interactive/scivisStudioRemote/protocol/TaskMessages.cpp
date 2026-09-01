@@ -2,19 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "TaskMessages.h"
-#include "PayloadCommon.h"
+#include "PayloadMacros.h"
 
 namespace vsr::scivis_studio::protocol {
 
-void toNode(const TaskStartedResult &r, vsr::core::DataNode &n)
-{
-  writeChild(n, "taskId", r.taskId);
-}
-
-bool fromNode(const vsr::core::DataNode &n, TaskStartedResult &r)
-{
-  return readChild(n, "taskId", r.taskId);
-}
+VSR_STUDIO_ID_RESULT(TaskStartedResult, taskId)
 
 void toNode(const TaskProgress &p, vsr::core::DataNode &n)
 {
@@ -64,16 +56,6 @@ bool fromNode(const vsr::core::DataNode &n, TaskFailed &f)
   return true;
 }
 
-void toNode(const CancelTask &c, vsr::core::DataNode &n)
-{
-  writeChild(n, "requestId", c.requestId);
-  writeChild(n, "taskId", c.taskId);
-}
-
-bool fromNode(const vsr::core::DataNode &n, CancelTask &c)
-{
-  return readChild(n, "requestId", c.requestId)
-      && readChild(n, "taskId", c.taskId);
-}
+VSR_STUDIO_ID_REQUEST(CancelTask, taskId)
 
 } // namespace vsr::scivis_studio::protocol

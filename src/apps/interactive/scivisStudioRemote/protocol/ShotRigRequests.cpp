@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "ShotRigRequests.h"
-#include "PayloadCommon.h"
+#include "PayloadMacros.h"
 
 namespace vsr::scivis_studio::protocol {
 
@@ -11,23 +11,6 @@ using vsr::scivis_studio::Shot;
 using vsr::scivis_studio::ShotRenderSettings;
 
 namespace {
-
-// An optional scalar: absent keeps `out` as is (true); present but mistyped
-// is a malformed payload (false).
-template <typename T>
-bool readOptionalChild(
-    const vsr::core::DataNode &parent, const char *name, T &out)
-{
-  return !hasChild(parent, name) || readChild(parent, name, out);
-}
-
-// An optional nested payload, same contract as readOptionalChild().
-template <typename T>
-bool readOptionalChildNode(
-    const vsr::core::DataNode &parent, const char *name, T &out)
-{
-  return !hasChild(parent, name) || readChildNode(parent, name, out);
-}
 
 // Bindings are keyed by datasetId so a binding has a stable address
 // (ADR 0025); an empty list writes nothing.
@@ -130,59 +113,7 @@ bool fromNode(const vsr::core::DataNode &n, Shot &s)
 
 // Requests ///////////////////////////////////////////////////////////////////
 
-// Most requests are {requestId, one id or name}; these two macros define
-// their toNode()/fromNode() pairs from the field name and its wire child.
-
-#define VSR_STUDIO_ID_REQUEST(T, field)                                        \
-  void toNode(const T &p, vsr::core::DataNode &n)                              \
-  {                                                                            \
-    writeChild(n, "requestId", p.requestId);                                   \
-    writeChild(n, #field, p.field);                                            \
-  }                                                                            \
-  bool fromNode(const vsr::core::DataNode &n, T &p)                            \
-  {                                                                            \
-    return readChild(n, "requestId", p.requestId)                              \
-        && readChild(n, #field, p.field);                                      \
-  }
-
-#define VSR_STUDIO_RENAME_REQUEST(T, field)                                    \
-  void toNode(const T &p, vsr::core::DataNode &n)                              \
-  {                                                                            \
-    writeChild(n, "requestId", p.requestId);                                   \
-    writeChild(n, #field, p.field);                                            \
-    writeChild(n, "newName", p.newName);                                       \
-  }                                                                            \
-  bool fromNode(const vsr::core::DataNode &n, T &p)                            \
-  {                                                                            \
-    return readChild(n, "requestId", p.requestId)                              \
-        && readChild(n, #field, p.field)                                       \
-        && readChild(n, "newName", p.newName);                                 \
-  }
-
-#define VSR_STUDIO_ARCHIVE_LOAD_REQUEST(T)                                     \
-  void toNode(const T &p, vsr::core::DataNode &n)                              \
-  {                                                                            \
-    writeChild(n, "requestId", p.requestId);                                   \
-    writePath(n, "file", p.file);                                              \
-  }                                                                            \
-  bool fromNode(const vsr::core::DataNode &n, T &p)                            \
-  {                                                                            \
-    return readChild(n, "requestId", p.requestId)                              \
-        && readPath(n, "file", p.file);                                        \
-  }
-
-#define VSR_STUDIO_ARCHIVE_SAVE_REQUEST(T, field)                              \
-  void toNode(const T &p, vsr::core::DataNode &n)                              \
-  {                                                                            \
-    writeChild(n, "requestId", p.requestId);                                   \
-    writeChild(n, #field, p.field);                                            \
-    writePath(n, "file", p.file);                                              \
-  }                                                                            \
-  bool fromNode(const vsr::core::DataNode &n, T &p)                            \
-  {                                                                            \
-    return readChild(n, "requestId", p.requestId)                              \
-        && readChild(n, #field, p.field) && readPath(n, "file", p.file);       \
-  }
+// Most requests are {requestId, one id or name}; see PayloadMacros.h.
 
 // Shot
 
@@ -253,28 +184,11 @@ VSR_STUDIO_ID_REQUEST(CreateColorMap, name)
 VSR_STUDIO_RENAME_REQUEST(RenameColorMap, colorMapId)
 VSR_STUDIO_ID_REQUEST(RemoveColorMap, colorMapId)
 
-#undef VSR_STUDIO_ID_REQUEST
-#undef VSR_STUDIO_RENAME_REQUEST
-#undef VSR_STUDIO_ARCHIVE_LOAD_REQUEST
-#undef VSR_STUDIO_ARCHIVE_SAVE_REQUEST
-
 // Results ////////////////////////////////////////////////////////////////////
-
-#define VSR_STUDIO_ID_RESULT(T, field)                                         \
-  void toNode(const T &p, vsr::core::DataNode &n)                              \
-  {                                                                            \
-    writeChild(n, #field, p.field);                                            \
-  }                                                                            \
-  bool fromNode(const vsr::core::DataNode &n, T &p)                            \
-  {                                                                            \
-    return readChild(n, #field, p.field);                                      \
-  }
 
 VSR_STUDIO_ID_RESULT(ShotCreatedResult, shotId)
 VSR_STUDIO_ID_RESULT(LightRigCreatedResult, lightRigId)
 VSR_STUDIO_ID_RESULT(CameraRigCreatedResult, cameraRigId)
-
-#undef VSR_STUDIO_ID_RESULT
 
 void toNode(const LightAddedResult &p, vsr::core::DataNode &n)
 {

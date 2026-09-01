@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "ProjectRequests.h"
+#include "PayloadMacros.h"
 // vsr_scivis_studio_model
 #include "ProjectContext.h"
 
@@ -17,31 +18,6 @@ void writeImporterType(vsr::core::DataNode &n, vsr::io::ImporterType type)
 bool readImporterType(const vsr::core::DataNode &n, vsr::io::ImporterType &out)
 {
   return readEnumChild(n, "importerType", out, importerTypeFromString);
-}
-
-void writePathList(vsr::core::DataNode &parent,
-    const char *name,
-    const std::vector<std::filesystem::path> &paths)
-{
-  std::vector<std::string> items;
-  items.reserve(paths.size());
-  for (const auto &p : paths)
-    items.push_back(p.generic_string());
-  writeStringList(parent, name, items);
-}
-
-bool readPathList(const vsr::core::DataNode &parent,
-    const char *name,
-    std::vector<std::filesystem::path> &out)
-{
-  std::vector<std::string> items;
-  if (!readStringList(parent, name, items))
-    return false;
-  out.clear();
-  out.reserve(items.size());
-  for (const auto &s : items)
-    out.emplace_back(s);
-  return true;
 }
 
 } // namespace
@@ -66,15 +42,7 @@ std::optional<vsr::io::ImporterType> importerTypeFromString(
 
 // Project ////////////////////////////////////////////////////////////////////
 
-void toNode(const NewProject &r, vsr::core::DataNode &n)
-{
-  writeChild(n, "requestId", r.requestId);
-}
-
-bool fromNode(const vsr::core::DataNode &n, NewProject &r)
-{
-  return readChild(n, "requestId", r.requestId);
-}
+VSR_STUDIO_BARE_REQUEST(NewProject)
 
 void toNode(const OpenProject &r, vsr::core::DataNode &n)
 {
@@ -172,39 +140,11 @@ bool fromNode(const vsr::core::DataNode &n, DeclareFileAnimationDataset &r)
 
 // Dataset edits and residency ////////////////////////////////////////////////
 
-// Requests whose only field beyond requestId is the target dataset id.
-#define VSR_STUDIO_DATASET_ID_PAYLOAD(T)                                       \
-  void toNode(const T &r, vsr::core::DataNode &n)                              \
-  {                                                                            \
-    writeChild(n, "requestId", r.requestId);                                   \
-    writeChild(n, "datasetId", r.datasetId);                                   \
-  }                                                                            \
-  bool fromNode(const vsr::core::DataNode &n, T &r)                            \
-  {                                                                            \
-    return readChild(n, "requestId", r.requestId)                              \
-        && readChild(n, "datasetId", r.datasetId);                             \
-  }
-
-VSR_STUDIO_DATASET_ID_PAYLOAD(ReimportDataset)
-VSR_STUDIO_DATASET_ID_PAYLOAD(LoadDataset)
-VSR_STUDIO_DATASET_ID_PAYLOAD(UnloadDataset)
-VSR_STUDIO_DATASET_ID_PAYLOAD(RefreshDatasetAvailability)
-
-#undef VSR_STUDIO_DATASET_ID_PAYLOAD
-
-void toNode(const RenameDataset &r, vsr::core::DataNode &n)
-{
-  writeChild(n, "requestId", r.requestId);
-  writeChild(n, "datasetId", r.datasetId);
-  writeChild(n, "newName", r.newName);
-}
-
-bool fromNode(const vsr::core::DataNode &n, RenameDataset &r)
-{
-  return readChild(n, "requestId", r.requestId)
-      && readChild(n, "datasetId", r.datasetId)
-      && readChild(n, "newName", r.newName);
-}
+VSR_STUDIO_ID_REQUEST(ReimportDataset, datasetId)
+VSR_STUDIO_ID_REQUEST(LoadDataset, datasetId)
+VSR_STUDIO_ID_REQUEST(UnloadDataset, datasetId)
+VSR_STUDIO_ID_REQUEST(RefreshDatasetAvailability, datasetId)
+VSR_STUDIO_RENAME_REQUEST(RenameDataset, datasetId)
 
 void toNode(const RemoveDataset &r, vsr::core::DataNode &n)
 {
@@ -224,39 +164,9 @@ bool fromNode(const vsr::core::DataNode &n, RemoveDataset &r)
 
 // Dataset archives and candidates ////////////////////////////////////////////
 
-void toNode(const SaveDatasetArchive &r, vsr::core::DataNode &n)
-{
-  writeChild(n, "requestId", r.requestId);
-  writeChild(n, "datasetId", r.datasetId);
-  writePath(n, "file", r.file);
-}
-
-bool fromNode(const vsr::core::DataNode &n, SaveDatasetArchive &r)
-{
-  return readChild(n, "requestId", r.requestId)
-      && readChild(n, "datasetId", r.datasetId) && readPath(n, "file", r.file);
-}
-
-void toNode(const LoadDatasetArchive &r, vsr::core::DataNode &n)
-{
-  writeChild(n, "requestId", r.requestId);
-  writePath(n, "file", r.file);
-}
-
-bool fromNode(const vsr::core::DataNode &n, LoadDatasetArchive &r)
-{
-  return readChild(n, "requestId", r.requestId) && readPath(n, "file", r.file);
-}
-
-void toNode(const DiscoverDatasetCandidates &r, vsr::core::DataNode &n)
-{
-  writeChild(n, "requestId", r.requestId);
-}
-
-bool fromNode(const vsr::core::DataNode &n, DiscoverDatasetCandidates &r)
-{
-  return readChild(n, "requestId", r.requestId);
-}
+VSR_STUDIO_ARCHIVE_SAVE_REQUEST(SaveDatasetArchive, datasetId)
+VSR_STUDIO_ARCHIVE_LOAD_REQUEST(LoadDatasetArchive)
+VSR_STUDIO_BARE_REQUEST(DiscoverDatasetCandidates)
 
 void toNode(const IncorporateDatasetCandidate &r, vsr::core::DataNode &n)
 {
@@ -277,15 +187,7 @@ bool fromNode(const vsr::core::DataNode &n, IncorporateDatasetCandidate &r)
 
 // Results ////////////////////////////////////////////////////////////////////
 
-void toNode(const DatasetCreatedResult &r, vsr::core::DataNode &n)
-{
-  writeChild(n, "datasetId", r.datasetId);
-}
-
-bool fromNode(const vsr::core::DataNode &n, DatasetCreatedResult &r)
-{
-  return readChild(n, "datasetId", r.datasetId);
-}
+VSR_STUDIO_ID_RESULT(DatasetCreatedResult, datasetId)
 
 void toNode(const DatasetCandidateEntry &e, vsr::core::DataNode &n)
 {
@@ -303,29 +205,12 @@ bool fromNode(const vsr::core::DataNode &n, DatasetCandidateEntry &e)
 
 void toNode(const DiscoverDatasetCandidatesResult &r, vsr::core::DataNode &n)
 {
-  if (r.candidates.empty())
-    return;
-  auto &list = n["candidates"];
-  for (size_t i = 0; i < r.candidates.size(); ++i)
-    writeChildNode(list, std::to_string(i).c_str(), r.candidates[i]);
+  writeNodeList(n, "candidates", r.candidates);
 }
 
 bool fromNode(const vsr::core::DataNode &n, DiscoverDatasetCandidatesResult &r)
 {
-  r.candidates.clear();
-  const auto *list = n.child("candidates");
-  if (!list)
-    return true;
-  bool ok = true;
-  list->foreach_child_const([&](const vsr::core::DataNode &item) {
-    DatasetCandidateEntry entry;
-    if (!fromNode(item, entry)) {
-      ok = false;
-      return;
-    }
-    r.candidates.push_back(std::move(entry));
-  });
-  return ok;
+  return readNodeList(n, "candidates", r.candidates);
 }
 
 } // namespace vsr::scivis_studio::protocol

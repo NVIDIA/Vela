@@ -2,46 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "BrowseMessages.h"
-#include "PayloadCommon.h"
+#include "PayloadMacros.h"
 
 namespace vsr::scivis_studio::protocol {
-
-namespace {
-
-// Ordered lists travel as children "0", "1", ... of parent[name]; an empty
-// list writes nothing (leaf-only serialization would drop the node anyway).
-template <typename T>
-void writeNodeList(
-    vsr::core::DataNode &parent, const char *name, const std::vector<T> &items)
-{
-  if (items.empty())
-    return;
-  auto &list = parent[name];
-  for (size_t i = 0; i < items.size(); ++i)
-    toNode(items[i], list[std::to_string(i)]);
-}
-
-template <typename T>
-bool readNodeList(
-    const vsr::core::DataNode &parent, const char *name, std::vector<T> &out)
-{
-  out.clear();
-  const auto *list = parent.child(name);
-  if (!list)
-    return true;
-  bool ok = true;
-  list->foreach_child_const([&](const vsr::core::DataNode &item) {
-    T value;
-    if (!fromNode(item, value)) {
-      ok = false;
-      return;
-    }
-    out.push_back(std::move(value));
-  });
-  return ok;
-}
-
-} // namespace
 
 const char *toString(EntryKind kind)
 {
@@ -69,15 +32,7 @@ std::optional<EntryKind> entryKindFromString(std::string_view name)
 
 // Requests ///////////////////////////////////////////////////////////////////
 
-void toNode(const ListRoots &r, vsr::core::DataNode &n)
-{
-  writeChild(n, "requestId", r.requestId);
-}
-
-bool fromNode(const vsr::core::DataNode &n, ListRoots &r)
-{
-  return readChild(n, "requestId", r.requestId);
-}
+VSR_STUDIO_BARE_REQUEST(ListRoots)
 
 void toNode(const ListDirectory &r, vsr::core::DataNode &n)
 {
@@ -113,20 +68,12 @@ bool fromNode(const vsr::core::DataNode &n, DirectoryEntry &e)
 
 void toNode(const ListRootsResult &r, vsr::core::DataNode &n)
 {
-  std::vector<std::string> roots;
-  roots.reserve(r.roots.size());
-  for (const auto &p : r.roots)
-    roots.push_back(p.generic_string());
-  writeStringList(n, "roots", roots);
+  writePathList(n, "roots", r.roots);
 }
 
 bool fromNode(const vsr::core::DataNode &n, ListRootsResult &r)
 {
-  std::vector<std::string> roots;
-  if (!readStringList(n, "roots", roots))
-    return false;
-  r.roots.assign(roots.begin(), roots.end());
-  return true;
+  return readPathList(n, "roots", r.roots);
 }
 
 void toNode(const ListDirectoryResult &r, vsr::core::DataNode &n)

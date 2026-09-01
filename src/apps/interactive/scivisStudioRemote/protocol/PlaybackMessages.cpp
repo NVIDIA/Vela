@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "PlaybackMessages.h"
-#include "PayloadCommon.h"
+#include "PayloadMacros.h"
 
 namespace vsr::scivis_studio::protocol {
 
@@ -45,16 +45,6 @@ bool fromNode(const vsr::core::DataNode &n, TimeAdvanceWarning &w)
   return true;
 }
 
-void toNode(const RenderShot &r, vsr::core::DataNode &n)
-{
-  writeChild(n, "requestId", r.requestId);
-  writeChild(n, "shotId", r.shotId);
-}
-
-bool fromNode(const vsr::core::DataNode &n, RenderShot &r)
-{
-  return readChild(n, "requestId", r.requestId)
-      && readChild(n, "shotId", r.shotId);
-}
+VSR_STUDIO_ID_REQUEST(RenderShot, shotId)
 
 } // namespace vsr::scivis_studio::protocol
