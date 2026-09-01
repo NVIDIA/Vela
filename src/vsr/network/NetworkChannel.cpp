@@ -367,8 +367,12 @@ NetworkClient::NetworkClient(const std::string &host, short port)
 void NetworkClient::connect(const std::string &host, short port)
 {
   start_messaging();
+  // The port travels as `short` for API symmetry with NetworkServer, whose
+  // tcp::endpoint converts it to unsigned; the resolver needs the same
+  // unsigned spelling or ports above 32767 come out negative.
+  const auto service = std::to_string(static_cast<unsigned short>(port));
   asio::ip::tcp::resolver resolver(m_io_context);
-  auto endpoints = resolver.resolve(host, std::to_string(port));
+  auto endpoints = resolver.resolve(host, service);
   asio::async_connect(m_socket,
       endpoints,
       [this](const boost::system::error_code &error, const tcp::endpoint &) {
