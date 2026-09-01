@@ -9,10 +9,12 @@ add_library(vsr_scivis_studio_protocol OBJECT
   ProjectOpReply.cpp
   ProjectRequests.cpp
   ProjectSnapshot.cpp
+  SceneEditMessages.cpp
   SessionMessages.cpp
   ShotRigRequests.cpp
   StudioProtocol.cpp
   TaskMessages.cpp
+  ViewportMessages.cpp
 )
 
 target_include_directories(vsr_scivis_studio_protocol
