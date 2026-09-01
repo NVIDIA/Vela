@@ -16,7 +16,7 @@ const char *toString(EntryKind kind)
   case EntryKind::ProjectDirectory:
     return "ProjectDirectory";
   }
-  return "File";
+  return "Unknown";
 }
 
 std::optional<EntryKind> entryKindFromString(std::string_view name)

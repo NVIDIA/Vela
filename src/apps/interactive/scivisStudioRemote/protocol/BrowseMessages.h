@@ -71,7 +71,8 @@ struct ListDirectoryResult
   std::vector<DirectoryEntry> entries;
 };
 
-// Enumerator names ("File", "Directory", "ProjectDirectory").
+// Enumerator names ("File", "Directory", "ProjectDirectory"), "Unknown"
+// otherwise.
 const char *toString(EntryKind kind);
 std::optional<EntryKind> entryKindFromString(std::string_view name);
 

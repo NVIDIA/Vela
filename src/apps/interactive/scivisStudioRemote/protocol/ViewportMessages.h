@@ -99,7 +99,7 @@ struct ArrayHistogramResult
   float maxValue{0.f};
 };
 
-// Enumerator names ("NONE", "DEPTH", ..., "INSTANCE_ID").
+// Enumerator names ("NONE", "DEPTH", ..., "INSTANCE_ID"), "Unknown" otherwise.
 const char *toString(vsr::rendering::AOVType type);
 std::optional<vsr::rendering::AOVType> aovTypeFromString(std::string_view name);
 
