@@ -3,6 +3,7 @@
 
 add_library(vsr_scivis_studio_protocol OBJECT
   BrowseMessages.cpp
+  FrameCodec.cpp
   FrameMessages.cpp
   PayloadCommon.cpp
   PlaybackMessages.cpp
@@ -28,3 +29,15 @@ PUBLIC
   vsr_network
   vsr_scivis_studio_model
 )
+
+if (VSR_USE_TURBOJPEG)
+  find_package(libjpeg-turbo CONFIG REQUIRED)
+  target_link_libraries(vsr_scivis_studio_protocol
+  PUBLIC
+    libjpeg-turbo::turbojpeg
+  )
+  target_compile_definitions(vsr_scivis_studio_protocol
+  PUBLIC
+    VSR_USE_TURBOJPEG
+  )
+endif()
