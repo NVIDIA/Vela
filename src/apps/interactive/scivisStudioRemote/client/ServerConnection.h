@@ -144,6 +144,9 @@ struct ServerConnection
   // Callbacks, invoked from poll() on the UI thread //
 
   std::function<void(ConnectionState from, ConnectionState to)> onStateChanged;
+  // BootstrapBegin received: the mirror is about to be wholesale-replaced, so
+  // anything pointing into it (selection, cached refs) must be dropped now.
+  std::function<void()> onBootstrapBegin;
   // BootstrapEnd received: mirror and replica are fresh.
   std::function<void()> onBootstrapComplete;
   std::function<void(const std::string &)> onServerError;
