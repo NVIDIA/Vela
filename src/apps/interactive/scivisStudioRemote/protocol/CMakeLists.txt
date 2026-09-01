@@ -3,6 +3,7 @@
 
 add_library(vsr_scivis_studio_protocol OBJECT
   PayloadCommon.cpp
+  SessionMessages.cpp
   StudioProtocol.cpp
 )
 
