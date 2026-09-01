@@ -1139,6 +1139,22 @@ inline bool DataNode::loadImpl(DataReader &reader)
     return ok;
   };
 
+  // Sizes come off the wire unverified, so a corrupt length must not become a
+  // giant allocation before the short read that would reject it: grow the
+  // destination in bounded steps and stop as soon as the reader runs dry.
+  auto readSized = [&](auto &out, size_t numBytes) {
+    constexpr size_t STEP = 64 * 1024;
+    out.clear();
+    for (size_t done = 0; done < numBytes;) {
+      const size_t n = std::min(STEP, numBytes - done);
+      out.resize(done + n);
+      if (!readExactly(out.data() + done, 1, n))
+        return false;
+      done += n;
+    }
+    return true;
+  };
+
   auto finish = [&](bool succeeded) {
     if (!succeeded) {
       clearValueSilently();
@@ -1157,17 +1173,13 @@ inline bool DataNode::loadImpl(DataReader &reader)
     size_t size = 0;
 
     // name
-    if (!readExactly(&size, sizeof(size_t), 1))
-      return finish(false);
-    std::string name(size, '\0');
-    if (!readExactly(name.data(), sizeof(char), size))
+    std::string name;
+    if (!readExactly(&size, sizeof(size_t), 1) || !readSized(name, size))
       return finish(false);
 
     // path
-    if (!readExactly(&size, sizeof(size_t), 1))
-      return finish(false);
-    std::string fullPath(size, '\0');
-    if (!readExactly(fullPath.data(), sizeof(char), size))
+    std::string fullPath;
+    if (!readExactly(&size, sizeof(size_t), 1) || !readSized(fullPath, size))
       return finish(false);
 
     // isArray
@@ -1199,9 +1211,15 @@ inline bool DataNode::loadImpl(DataReader &reader)
       // array size + data
       if (!readExactly(&size, sizeof(size_t), 1))
         return finish(false);
-      void *dataPtr = node.setValueAsArray(type, size);
-      if (!readExactly(dataPtr, anari::sizeOf(type), size))
+      const size_t elementSize = anari::sizeOf(type);
+      if (elementSize != 0 && size > SIZE_MAX / elementSize)
         return finish(false);
+      std::vector<uint8_t> bytes;
+      if (!readSized(bytes, size * elementSize))
+        return finish(false);
+      void *dataPtr = node.setValueAsArray(type, size);
+      if (!bytes.empty())
+        std::memcpy(dataPtr, bytes.data(), bytes.size());
     } else {
       if (anari::isObject(type)) {
         size_t idx = INVALID_INDEX;
@@ -1209,10 +1227,8 @@ inline bool DataNode::loadImpl(DataReader &reader)
           return finish(false);
         node.setValueObject(type, idx);
       } else if (type == ANARI_STRING) {
-        if (!readExactly(&size, sizeof(size_t), 1))
-          return finish(false);
-        std::string str(size, '\0');
-        if (!readExactly(str.data(), sizeof(char), size))
+        std::string str;
+        if (!readExactly(&size, sizeof(size_t), 1) || !readSized(str, size))
           return finish(false);
         node = str.c_str();
       } else if (type != ANARI_UNKNOWN) {
