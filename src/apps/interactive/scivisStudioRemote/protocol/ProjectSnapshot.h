@@ -48,7 +48,8 @@ namespace vsr::scivis_studio::protocol {
  */
 struct ProjectSnapshot
 {
-  static constexpr StudioMessageType kType = StudioMessageType::ProjectSnapshot;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::ProjectSnapshot;
   vsr::scivis_studio::Project project;
 };
 
@@ -59,7 +60,7 @@ struct ProjectSnapshot
  */
 struct UIState
 {
-  static constexpr StudioMessageType kType = StudioMessageType::UIState;
+  static constexpr StudioMessageType MESSAGE_TYPE = StudioMessageType::UIState;
   SubtreePtr tree;
 };
 

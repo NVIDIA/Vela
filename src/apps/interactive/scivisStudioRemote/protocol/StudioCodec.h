@@ -17,7 +17,7 @@ namespace vsr::scivis_studio::protocol {
 
 /*
  * Generic codec between payload structs and wire Messages. A payload type T
- * must expose `static constexpr StudioMessageType kType` and the free
+ * must expose `static constexpr StudioMessageType MESSAGE_TYPE` and the free
  * functions `toNode(const T &, DataNode &)` / `fromNode(const DataNode &, T
  * &)`. Frames are the one payload that bypasses this (raw bytes, see
  * FrameMessages.h); everything else, including empty payloads, goes through
@@ -29,11 +29,11 @@ namespace vsr::scivis_studio::protocol {
  *     use(hello->version);
  */
 
-// Serializes `payload` into a Message tagged with T::kType.
+// Serializes `payload` into a Message tagged with T::MESSAGE_TYPE.
 template <typename T>
 vsr::network::Message encode(const T &payload);
 
-// Empty when the type byte is not T::kType, the tree fails to parse, or
+// Empty when the type byte is not T::MESSAGE_TYPE, the tree fails to parse, or
 // fromNode() rejects the contents. Never throws on malformed input.
 template <typename T>
 std::optional<T> decode(const vsr::network::Message &msg);
@@ -47,14 +47,14 @@ std::optional<StudioMessageType> messageType(const vsr::network::Message &msg);
 template <typename T>
 inline vsr::network::Message encode(const T &payload)
 {
-  static_assert(
-      std::is_same_v<std::decay_t<decltype(T::kType)>, StudioMessageType>,
+  static_assert(std::is_same_v<std::decay_t<decltype(T::MESSAGE_TYPE)>,
+                    StudioMessageType>,
       "protocol payloads must declare `static constexpr StudioMessageType "
-      "kType`");
+      "MESSAGE_TYPE`");
   vsr::core::DataTree tree;
   toNode(payload, tree.root());
   vsr::network::Message msg;
-  msg.header.type = uint8_t(T::kType);
+  msg.header.type = uint8_t(T::MESSAGE_TYPE);
   tree.write(msg.payload);
   msg.header.payload_length = uint32_t(msg.payload.size());
   return msg;
@@ -63,11 +63,11 @@ inline vsr::network::Message encode(const T &payload)
 template <typename T>
 inline std::optional<T> decode(const vsr::network::Message &msg)
 {
-  static_assert(
-      std::is_same_v<std::decay_t<decltype(T::kType)>, StudioMessageType>,
+  static_assert(std::is_same_v<std::decay_t<decltype(T::MESSAGE_TYPE)>,
+                    StudioMessageType>,
       "protocol payloads must declare `static constexpr StudioMessageType "
-      "kType`");
-  if (msg.header.type != uint8_t(T::kType))
+      "MESSAGE_TYPE`");
+  if (msg.header.type != uint8_t(T::MESSAGE_TYPE))
     return {};
   vsr::core::DataTree tree;
   // A bare message with no bytes at all is accepted as an empty tree so that

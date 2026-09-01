@@ -20,7 +20,7 @@ using vsr::scivis_studio::SceneObjectRef;
 
 namespace {
 
-// Result payloads have no kType; push them through a serialized tree.
+// Result payloads have no MESSAGE_TYPE; push them through a serialized tree.
 template <typename T>
 bool roundTripNode(const T &in, T &out)
 {

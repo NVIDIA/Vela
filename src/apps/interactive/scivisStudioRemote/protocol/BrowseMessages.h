@@ -31,13 +31,15 @@ namespace vsr::scivis_studio::protocol {
 
 struct ListRoots
 {
-  static constexpr StudioMessageType kType = StudioMessageType::ListRoots;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::ListRoots;
   uint64_t requestId{0};
 };
 
 struct ListDirectory
 {
-  static constexpr StudioMessageType kType = StudioMessageType::ListDirectory;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::ListDirectory;
   uint64_t requestId{0};
   std::filesystem::path directory;
 };

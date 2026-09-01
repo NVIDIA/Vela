@@ -36,7 +36,7 @@ namespace vsr::scivis_studio::protocol {
 
 struct SetObjectParameter
 {
-  static constexpr StudioMessageType kType =
+  static constexpr StudioMessageType MESSAGE_TYPE =
       StudioMessageType::SetObjectParameter;
   SceneObjectRef object;
   std::string name;
@@ -45,7 +45,7 @@ struct SetObjectParameter
 
 struct RemoveObjectParameter
 {
-  static constexpr StudioMessageType kType =
+  static constexpr StudioMessageType MESSAGE_TYPE =
       StudioMessageType::RemoveObjectParameter;
   SceneObjectRef object;
   std::string name;
@@ -53,7 +53,7 @@ struct RemoveObjectParameter
 
 struct SetNodeTransform
 {
-  static constexpr StudioMessageType kType =
+  static constexpr StudioMessageType MESSAGE_TYPE =
       StudioMessageType::SetNodeTransform;
   SceneNodeRef node;
   vsr::math::mat4 transform{vsr::math::IDENTITY_MAT4};

@@ -41,14 +41,16 @@ namespace vsr::scivis_studio::protocol {
 // Sync: replaces the current project with an unsaved empty one.
 struct NewProject
 {
-  static constexpr StudioMessageType kType = StudioMessageType::NewProject;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::NewProject;
   uint64_t requestId{0};
 };
 
 // Task: opens the project stored in `directory`.
 struct OpenProject
 {
-  static constexpr StudioMessageType kType = StudioMessageType::OpenProject;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::OpenProject;
   uint64_t requestId{0};
   std::filesystem::path directory;
 };
@@ -58,7 +60,8 @@ struct OpenProject
 // with the project and handed back on open.
 struct SaveProject
 {
-  static constexpr StudioMessageType kType = StudioMessageType::SaveProject;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::SaveProject;
   uint64_t requestId{0};
   std::optional<std::filesystem::path> directory;
   SubtreePtr uiState;
@@ -70,7 +73,7 @@ struct SaveProject
 // `fromSubtreeArchive` is set (then `importerType` is ignored).
 struct ImportStaticDataset
 {
-  static constexpr StudioMessageType kType =
+  static constexpr StudioMessageType MESSAGE_TYPE =
       StudioMessageType::ImportStaticDataset;
   uint64_t requestId{0};
   std::string name;
@@ -82,7 +85,7 @@ struct ImportStaticDataset
 // Task: addFileAnimationDataset().
 struct ImportFileAnimationDataset
 {
-  static constexpr StudioMessageType kType =
+  static constexpr StudioMessageType MESSAGE_TYPE =
       StudioMessageType::ImportFileAnimationDataset;
   uint64_t requestId{0};
   std::string name;
@@ -95,7 +98,7 @@ struct ImportFileAnimationDataset
 // reply's results decode to DatasetCreatedResult.
 struct DeclareFileAnimationDataset
 {
-  static constexpr StudioMessageType kType =
+  static constexpr StudioMessageType MESSAGE_TYPE =
       StudioMessageType::DeclareFileAnimationDataset;
   uint64_t requestId{0};
   std::string name;
@@ -109,7 +112,8 @@ struct DeclareFileAnimationDataset
 // Task: reimportStaticDataset().
 struct ReimportDataset
 {
-  static constexpr StudioMessageType kType = StudioMessageType::ReimportDataset;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::ReimportDataset;
   uint64_t requestId{0};
   DatasetID datasetId;
 };
@@ -117,7 +121,8 @@ struct ReimportDataset
 // Sync: renameDataset().
 struct RenameDataset
 {
-  static constexpr StudioMessageType kType = StudioMessageType::RenameDataset;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::RenameDataset;
   uint64_t requestId{0};
   DatasetID datasetId;
   std::string newName;
@@ -126,7 +131,8 @@ struct RenameDataset
 // Sync: removeDataset().
 struct RemoveDataset
 {
-  static constexpr StudioMessageType kType = StudioMessageType::RemoveDataset;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::RemoveDataset;
   uint64_t requestId{0};
   DatasetID datasetId;
   bool keepAssetFile{false};
@@ -135,7 +141,8 @@ struct RemoveDataset
 // Task: loadDataset().
 struct LoadDataset
 {
-  static constexpr StudioMessageType kType = StudioMessageType::LoadDataset;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::LoadDataset;
   uint64_t requestId{0};
   DatasetID datasetId;
 };
@@ -143,7 +150,8 @@ struct LoadDataset
 // Sync: unloadDataset().
 struct UnloadDataset
 {
-  static constexpr StudioMessageType kType = StudioMessageType::UnloadDataset;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::UnloadDataset;
   uint64_t requestId{0};
   DatasetID datasetId;
 };
@@ -151,7 +159,7 @@ struct UnloadDataset
 // Sync: refreshUnloadedDatasetAvailability() on the dataset with this id.
 struct RefreshDatasetAvailability
 {
-  static constexpr StudioMessageType kType =
+  static constexpr StudioMessageType MESSAGE_TYPE =
       StudioMessageType::RefreshDatasetAvailability;
   uint64_t requestId{0};
   DatasetID datasetId;
@@ -162,7 +170,7 @@ struct RefreshDatasetAvailability
 // Task: saveDatasetArchive().
 struct SaveDatasetArchive
 {
-  static constexpr StudioMessageType kType =
+  static constexpr StudioMessageType MESSAGE_TYPE =
       StudioMessageType::SaveDatasetArchive;
   uint64_t requestId{0};
   DatasetID datasetId;
@@ -172,7 +180,7 @@ struct SaveDatasetArchive
 // Task: loadDatasetArchive().
 struct LoadDatasetArchive
 {
-  static constexpr StudioMessageType kType =
+  static constexpr StudioMessageType MESSAGE_TYPE =
       StudioMessageType::LoadDatasetArchive;
   uint64_t requestId{0};
   std::filesystem::path file;
@@ -182,7 +190,7 @@ struct LoadDatasetArchive
 // DiscoverDatasetCandidatesResult.
 struct DiscoverDatasetCandidates
 {
-  static constexpr StudioMessageType kType =
+  static constexpr StudioMessageType MESSAGE_TYPE =
       StudioMessageType::DiscoverDatasetCandidates;
   uint64_t requestId{0};
 };
@@ -190,7 +198,7 @@ struct DiscoverDatasetCandidates
 // Task: incorporateDatasetCandidate({file, proposedName}, name).
 struct IncorporateDatasetCandidate
 {
-  static constexpr StudioMessageType kType =
+  static constexpr StudioMessageType MESSAGE_TYPE =
       StudioMessageType::IncorporateDatasetCandidate;
   uint64_t requestId{0};
   std::filesystem::path file;

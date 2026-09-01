@@ -112,7 +112,8 @@ std::optional<FrameView> decodeFrame(const vsr::network::Message &msg);
 // Client -> server: the viewport size the client wants frames rendered at.
 struct SetFrameConfig
 {
-  static constexpr StudioMessageType kType = StudioMessageType::SetFrameConfig;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::SetFrameConfig;
   uint32_t width{0};
   uint32_t height{0};
 };
@@ -120,7 +121,8 @@ struct SetFrameConfig
 // Server -> client: the effective frame configuration in force.
 struct FrameConfig
 {
-  static constexpr StudioMessageType kType = StudioMessageType::FrameConfig;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::FrameConfig;
   uint32_t width{0};
   uint32_t height{0};
 };
@@ -128,18 +130,21 @@ struct FrameConfig
 // Client -> server: decodings the client supports, most preferred first.
 struct SetEncodings
 {
-  static constexpr StudioMessageType kType = StudioMessageType::SetEncodings;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::SetEncodings;
   std::vector<FrameEncoding> supported;
 };
 
 struct StartRendering
 {
-  static constexpr StudioMessageType kType = StudioMessageType::StartRendering;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::StartRendering;
 };
 
 struct StopRendering
 {
-  static constexpr StudioMessageType kType = StudioMessageType::StopRendering;
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::StopRendering;
 };
 
 // width and height are required.

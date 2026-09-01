@@ -22,7 +22,7 @@ template <typename T>
 T roundTrip(const T &in)
 {
   const auto msg = encode(in);
-  REQUIRE(msg.header.type == uint8_t(T::kType));
+  REQUIRE(msg.header.type == uint8_t(T::MESSAGE_TYPE));
   const auto out = decode<T>(msg);
   REQUIRE(out);
   return *out;
