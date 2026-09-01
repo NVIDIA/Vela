@@ -57,6 +57,7 @@ endif()
 if (TARGET vsr_scivis_studio_protocol)
   target_sources(${PROJECT_NAME} PRIVATE
     test_StudioProtocol.cpp
+    test_StudioProtocol_FrameCodec.cpp
     test_StudioProtocol_Frames.cpp
     test_StudioProtocol_ProjectRequests.cpp
     test_StudioProtocol_Scene.cpp
