@@ -1,7 +1,7 @@
 ## SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 ## SPDX-License-Identifier: Apache-2.0
 
-add_library(vsr_scivis_studio_model STATIC
+add_library(vsr_scivis_studio_model OBJECT
   CameraRig.cpp
   Dataset.cpp
   DatasetIO.cpp
