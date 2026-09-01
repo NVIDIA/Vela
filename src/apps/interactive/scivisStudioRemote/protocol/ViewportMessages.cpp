@@ -82,7 +82,7 @@ void toNode(const PickReply &r, vsr::core::DataNode &n)
   writeChild(n, "requestId", r.requestId);
   writeChild(n, "hit", r.hit);
   writeChild(n, "worldPosition", r.worldPosition);
-  writeOptionalObject(n, "object", r.object);
+  writeOptionalObject(n, "objectIdentity", r.objectIdentity);
 }
 
 bool fromNode(const vsr::core::DataNode &n, PickReply &r)
@@ -91,17 +91,17 @@ bool fromNode(const vsr::core::DataNode &n, PickReply &r)
     return false;
   r.worldPosition = vsr::math::float3(0.f, 0.f, 0.f);
   return readOptionalChild(n, "worldPosition", r.worldPosition)
-      && readOptionalObject(n, "object", r.object);
+      && readOptionalObject(n, "objectIdentity", r.objectIdentity);
 }
 
 void toNode(const SetOutline &o, vsr::core::DataNode &n)
 {
-  writeOptionalObject(n, "object", o.object);
+  writeOptionalObject(n, "objectIdentity", o.objectIdentity);
 }
 
 bool fromNode(const vsr::core::DataNode &n, SetOutline &o)
 {
-  return readOptionalObject(n, "object", o.object);
+  return readOptionalObject(n, "objectIdentity", o.objectIdentity);
 }
 
 // Viewport passes ////////////////////////////////////////////////////////////

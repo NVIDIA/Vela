@@ -384,35 +384,35 @@ SCENARIO("Viewport payloads", "[StudioProtocol]")
     reply.hit = true;
     reply.worldPosition = vsr::math::float3(1.5f, -2.f, 0.25f);
 
-    THEN("with an object it round-trips")
+    THEN("with an object identity it round-trips")
     {
-      reply.object = makeRef(ANARI_VOLUME, 3);
+      reply.objectIdentity = makeRef(ANARI_VOLUME, 3);
       const auto out = decode<PickReply>(encode(reply));
       REQUIRE(out);
       REQUIRE(out->requestId == 31);
       REQUIRE(out->hit);
       REQUIRE(out->worldPosition == vsr::math::float3(1.5f, -2.f, 0.25f));
-      REQUIRE(out->object);
-      REQUIRE(out->object->type == ANARI_VOLUME);
-      REQUIRE(out->object->objectIndex == 3);
+      REQUIRE(out->objectIdentity);
+      REQUIRE(out->objectIdentity->type == ANARI_VOLUME);
+      REQUIRE(out->objectIdentity->objectIndex == 3);
     }
 
-    THEN("without an object (background) it round-trips with object absent")
+    THEN("without an identity (background) it round-trips with it absent")
     {
       reply.hit = false;
       const auto msg = encode(reply);
       const auto out = decode<PickReply>(msg);
       REQUIRE(out);
       REQUIRE_FALSE(out->hit);
-      REQUIRE_FALSE(out->object);
+      REQUIRE_FALSE(out->objectIdentity);
       REQUIRE(out->worldPosition == vsr::math::float3(1.5f, -2.f, 0.25f));
     }
 
-    THEN("a malformed object child is rejected")
+    THEN("a malformed objectIdentity child is rejected")
     {
       vsr::core::DataTree tree;
       toNode(reply, tree.root());
-      tree.root()["object"]["type"] = std::string("ANARI_BOGUS");
+      tree.root()["objectIdentity"]["type"] = std::string("ANARI_BOGUS");
       PickReply out;
       REQUIRE_FALSE(fromNode(tree.root(), out));
     }
@@ -427,18 +427,18 @@ SCENARIO("Viewport payloads", "[StudioProtocol]")
       REQUIRE(msg.header.type == uint8_t(StudioMessageType::SetOutline));
       const auto out = decode<SetOutline>(msg);
       REQUIRE(out);
-      REQUIRE_FALSE(out->object);
+      REQUIRE_FALSE(out->objectIdentity);
     }
 
-    THEN("a set outline round-trips with its object")
+    THEN("a set outline round-trips with its object identity")
     {
       SetOutline outline;
-      outline.object = makeRef(ANARI_SURFACE, 9);
+      outline.objectIdentity = makeRef(ANARI_SURFACE, 9);
       const auto out = decode<SetOutline>(encode(outline));
       REQUIRE(out);
-      REQUIRE(out->object);
-      REQUIRE(out->object->type == ANARI_SURFACE);
-      REQUIRE(out->object->objectIndex == 9);
+      REQUIRE(out->objectIdentity);
+      REQUIRE(out->objectIdentity->type == ANARI_SURFACE);
+      REQUIRE(out->objectIdentity->objectIndex == 9);
     }
   }
 

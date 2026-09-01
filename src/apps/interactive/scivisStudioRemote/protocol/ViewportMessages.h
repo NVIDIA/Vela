@@ -43,7 +43,8 @@ struct Pick
   int y{0};
 };
 
-// object is absent when the pick landed on background.
+// objectIdentity is the server-minted (type, pool index) of what was hit;
+// absent when the pick landed on background.
 struct PickReply
 {
   static constexpr StudioMessageType MESSAGE_TYPE =
@@ -51,15 +52,15 @@ struct PickReply
   uint64_t requestId{0};
   bool hit{false};
   vsr::math::float3 worldPosition{0.f, 0.f, 0.f};
-  std::optional<SceneObjectRef> object;
+  std::optional<SceneObjectRef> objectIdentity;
 };
 
-// Empty object clears the outline.
+// An absent objectIdentity clears the outline.
 struct SetOutline
 {
   static constexpr StudioMessageType MESSAGE_TYPE =
       StudioMessageType::SetOutline;
-  std::optional<SceneObjectRef> object;
+  std::optional<SceneObjectRef> objectIdentity;
 };
 
 // Field names and defaults mirror vsr::ui::Viewport's saved settings so the
@@ -108,11 +109,12 @@ void toNode(const Pick &, vsr::core::DataNode &);
 bool fromNode(const vsr::core::DataNode &, Pick &);
 
 // requestId and hit are required; worldPosition defaults to the origin; a
-// present but malformed object is rejected.
+// present but malformed objectIdentity is rejected.
 void toNode(const PickReply &, vsr::core::DataNode &);
 bool fromNode(const vsr::core::DataNode &, PickReply &);
 
-// An absent object reads as "clear"; a present but malformed one is rejected.
+// An absent objectIdentity reads as "clear"; a present but malformed one is
+// rejected.
 void toNode(const SetOutline &, vsr::core::DataNode &);
 bool fromNode(const vsr::core::DataNode &, SetOutline &);
 
