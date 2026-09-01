@@ -54,6 +54,11 @@ if (TARGET vsr_scivis_studio_model)
     test_SciVisStudio.cpp
   )
 endif()
+if (TARGET vsr_scivis_studio_protocol)
+  target_sources(${PROJECT_NAME} PRIVATE
+    test_StudioProtocol.cpp
+  )
+endif()
 project_link_libraries(
 PRIVATE
   vsr_algorithms
@@ -66,6 +71,9 @@ PRIVATE
 )
 if (TARGET vsr_scivis_studio_model)
   target_link_libraries(${PROJECT_NAME} PRIVATE vsr_scivis_studio_model)
+endif()
+if (TARGET vsr_scivis_studio_protocol)
+  target_link_libraries(${PROJECT_NAME} PRIVATE vsr_scivis_studio_protocol)
 endif()
 
 add_test(NAME vsr::AnimationManager COMMAND ${PROJECT_NAME} "[AnimationManager]")
@@ -106,4 +114,7 @@ add_test(NAME vsr::Token         COMMAND ${PROJECT_NAME} "[Token]"        )
 add_test(NAME vsr::UsdImport     COMMAND ${PROJECT_NAME} "[UsdImport]"    )
 if (TARGET vsr_scivis_studio_model)
   add_test(NAME vsr::SciVisStudio COMMAND ${PROJECT_NAME} "[SciVisStudio]")
+endif()
+if (TARGET vsr_scivis_studio_protocol)
+  add_test(NAME vsr::StudioProtocol COMMAND ${PROJECT_NAME} "[StudioProtocol]")
 endif()
