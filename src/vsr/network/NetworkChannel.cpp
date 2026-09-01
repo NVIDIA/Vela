@@ -47,6 +47,18 @@ void NetworkChannel::removeAllHandlers()
   m_handlers.clear();
 }
 
+void NetworkChannel::setConnectHandler(ConnectHandler handler)
+{
+  std::lock_guard lock(m_lifecycleMutex);
+  m_connectHandler = std::move(handler);
+}
+
+void NetworkChannel::setDisconnectHandler(DisconnectHandler handler)
+{
+  std::lock_guard lock(m_lifecycleMutex);
+  m_disconnectHandler = std::move(handler);
+}
+
 MessageFuture NetworkChannel::send(Message &&msg)
 {
   using MessagePromise = std::promise<boost::system::error_code>;
@@ -66,8 +78,7 @@ MessageFuture NetworkChannel::send(Message &&msg)
   const auto payloadLength = static_cast<size_t>(msg.header.payload_length);
   assert(payloadLength == msg.payload.size());
   pending->wireData.resize(sizeof(Message::Header) + payloadLength);
-  std::memcpy(
-      pending->wireData.data(), &msg.header, sizeof(Message::Header));
+  std::memcpy(pending->wireData.data(), &msg.header, sizeof(Message::Header));
   if (payloadLength > 0) {
     const auto bytesToCopy = std::min(payloadLength, msg.payload.size());
     std::memcpy(pending->wireData.data() + sizeof(Message::Header),
@@ -75,9 +86,8 @@ MessageFuture NetworkChannel::send(Message &&msg)
         bytesToCopy);
   }
 
-  boost::asio::post(m_io_context, [self, pending]() {
-    self->enqueue_write(std::move(pending));
-  });
+  boost::asio::post(m_io_context,
+      [self, pending]() { self->enqueue_write(std::move(pending)); });
 
   return future;
 }
@@ -124,7 +134,7 @@ void NetworkChannel::stop_messaging()
   try {
     m_messagingActive.store(false);
     fail_pending_writes(asio::error::operation_aborted);
-    close_socket();
+    close_socket(asio::error::operation_aborted);
     m_io_context.stop();
     if (m_io_thread.joinable())
       m_io_thread.join();
@@ -226,7 +236,33 @@ void NetworkChannel::log_asio_error(
   }
 
   fail_pending_writes(error);
-  close_socket();
+  close_socket(error);
+}
+
+void NetworkChannel::notify_connected()
+{
+  m_disconnectReported.store(false);
+  ConnectHandler handler;
+  {
+    std::lock_guard lock(m_lifecycleMutex);
+    handler = m_connectHandler;
+  }
+  if (handler)
+    handler();
+}
+
+void NetworkChannel::notify_disconnected(
+    const boost::system::error_code &reason)
+{
+  if (m_disconnectReported.exchange(true))
+    return;
+  DisconnectHandler handler;
+  {
+    std::lock_guard lock(m_lifecycleMutex);
+    handler = m_disconnectHandler;
+  }
+  if (handler)
+    handler(reason);
 }
 
 void NetworkChannel::enqueue_write(std::shared_ptr<PendingWrite> pending)
@@ -285,8 +321,7 @@ void NetworkChannel::start_next_write()
       });
 }
 
-void NetworkChannel::fail_pending_writes(
-    const boost::system::error_code &error)
+void NetworkChannel::fail_pending_writes(const boost::system::error_code &error)
 {
   std::deque<std::shared_ptr<PendingWrite>> pending;
   {
@@ -312,14 +347,16 @@ void NetworkChannel::complete_write(
   pending->promise->set_value(error);
 }
 
-void NetworkChannel::close_socket()
+void NetworkChannel::close_socket(const boost::system::error_code &reason)
 {
-  if (!m_socket.is_open())
-    return;
-
-  boost::system::error_code ec{};
-  m_socket.shutdown(tcp::socket::shutdown_both, ec);
-  m_socket.close(ec);
+  if (m_socket.is_open()) {
+    boost::system::error_code ec{};
+    m_socket.shutdown(tcp::socket::shutdown_both, ec);
+    m_socket.close(ec);
+  }
+  // The latch, not the socket state, decides whether this reports: a failed
+  // connect can leave the socket closed yet still owes its one notification.
+  notify_disconnected(reason);
 }
 
 // NetworkServer definitions //////////////////////////////////////////////////
@@ -356,6 +393,7 @@ void NetworkServer::start_accept()
           vsr::core::logStatus("[NetworkServer] New connection from %s",
               socket->remote_endpoint().address().to_string().c_str());
           m_socket = std::move(*socket);
+          notify_connected();
           read_header();
           start_accept(); // Accept next connection
         }
@@ -371,22 +409,40 @@ NetworkClient::NetworkClient(const std::string &host, short port)
 
 void NetworkClient::connect(const std::string &host, short port)
 {
+  // start_messaging() tears down any previous connection first (reporting it
+  // through the disconnect handler if it was still open), so a connect after
+  // a failed or closed connection behaves like a first connect. The latch is
+  // armed here so that a failure below is reported exactly once.
   start_messaging();
+  m_disconnectReported.store(false);
+
   // The port travels as `short` for API symmetry with NetworkServer, whose
   // tcp::endpoint converts it to unsigned; the resolver needs the same
   // unsigned spelling or ports above 32767 come out negative.
   const auto service = std::to_string(static_cast<unsigned short>(port));
+  boost::system::error_code resolveError;
   asio::ip::tcp::resolver resolver(m_io_context);
-  auto endpoints = resolver.resolve(host, service);
+  auto endpoints = resolver.resolve(host, service, resolveError);
+  if (resolveError) {
+    vsr::core::logError("[NetworkClient] Cannot resolve %s:%s: %s",
+        host.c_str(),
+        service.c_str(),
+        resolveError.message().c_str());
+    close_socket(resolveError);
+    return;
+  }
+
   asio::async_connect(m_socket,
       endpoints,
       [this](const boost::system::error_code &error, const tcp::endpoint &) {
         if (!error) {
           vsr::core::logStatus("[NetworkClient] Connected to server");
+          notify_connected();
           read_header();
         } else {
           vsr::core::logError(
               "[NetworkClient] Connection error: %s", error.message().c_str());
+          close_socket(error);
         }
       });
 }
