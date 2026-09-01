@@ -442,20 +442,22 @@ void StudioServer::applyControlState()
     m_control = ControlState{};
   }
 
-  // Session events first: they decide whether the rest applies at all.
+  // Session events first, in causal order: a loss belongs to the session in
+  // progress, an accept opens the next one, and a Hello or a close request
+  // can only concern that newest connection (all of them may share a batch).
   if (control.disconnected && m_state != SessionState::Listening)
     endSession(control.disconnectReason);
-  if (control.closeRequested && m_state != SessionState::Listening) {
-    if (control.farewell.valid())
-      control.farewell.wait_for(FAREWELL_TIMEOUT);
-    endSession(control.closeReason);
-  }
   if (control.accepted)
     beginSession();
   if (m_state == SessionState::AwaitingHello && m_server
       && !m_server->isConnected()) {
     // The accept and its loss both landed since the last iteration.
     endSession("connection closed before Hello");
+  }
+  if (control.closeRequested && m_state != SessionState::Listening) {
+    if (control.farewell.valid())
+      control.farewell.wait_for(FAREWELL_TIMEOUT);
+    endSession(control.closeReason);
   }
   if (control.helloReceived) {
     if (m_state == SessionState::AwaitingHello) {
