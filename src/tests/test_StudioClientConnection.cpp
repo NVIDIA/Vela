@@ -228,6 +228,10 @@ struct Fixture
     connection.onStateChanged = [this](ConnectionState, ConnectionState to) {
       transitions.push_back(to);
     };
+    connection.onBootstrapBegin = [this]() {
+      bootstrapBegins++;
+      mirrorPopulatedAtBegin = mirror.numberOfObjects(ANARI_GEOMETRY) != 0;
+    };
     connection.onBootstrapComplete = [this]() { bootstraps++; };
     connection.onServerError = [this](const std::string &m) {
       errors.push_back(m);
@@ -260,6 +264,8 @@ struct Fixture
   FakeServer server;
   ServerConnection connection;
   std::vector<ConnectionState> transitions;
+  int bootstrapBegins{0};
+  bool mirrorPopulatedAtBegin{false};
   int bootstraps{0};
   std::vector<std::string> errors;
 };
@@ -295,6 +301,7 @@ SCENARIO("ServerConnection handshakes and bootstraps", "[StudioClient]")
         REQUIRE(f.connection.project() != nullptr);
         REQUIRE(f.connection.project()->name == "fake project");
         REQUIRE(f.bootstraps == 0);
+        REQUIRE(f.bootstrapBegins == 1);
         REQUIRE(f.transitions
             == std::vector<ConnectionState>{ConnectionState::Connected});
 
@@ -409,6 +416,10 @@ SCENARIO("ServerConnection watches liveness", "[StudioClient]")
         REQUIRE(f.waitConnectedAndBootstrapped(2));
         REQUIRE(f.server.accepts == 2);
         REQUIRE(f.mirrorHasGeometry());
+        // The frozen mirror was still populated when the second bootstrap
+        // announced itself: the hook fires before the mirror is cleared.
+        REQUIRE(f.bootstrapBegins == 2);
+        REQUIRE(f.mirrorPopulatedAtBegin);
         REQUIRE(f.transitions
             == std::vector<ConnectionState>{ConnectionState::Connected,
                 ConnectionState::Lost,

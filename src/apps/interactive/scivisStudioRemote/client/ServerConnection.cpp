@@ -505,6 +505,8 @@ void ServerConnection::handleMessage(const vsr::network::Message &msg)
   case StudioMessageType::BootstrapBegin:
     m_bootstrapping = true;
     setDelegateEnabled(false);
+    if (onBootstrapBegin)
+      onBootstrapBegin();
     clearMirror();
     return;
   case StudioMessageType::BootstrapEnd:
