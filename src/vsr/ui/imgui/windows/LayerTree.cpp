@@ -615,16 +615,22 @@ void LayerTree::buildUI_objectSceneMenu()
   bool clearSelectedNode = false;
 
   if (ImGui::BeginPopup("LayerTree_contextMenu_object")) {
-    // Visibility toggles, rename, add/import, and load-archive all mutate the
-    // scene or layer structure, so they are hidden outright in read-only
-    // mode; only the export/save items below survive.
-    if (!m_readOnly) {
+    // The "visible" checkbox displays node state, so it stays rendered (but
+    // non-interactive) in read-only mode. "show all"/"hide all", rename,
+    // add/import, and load-archive are pure actions that mutate the scene or
+    // layer structure, so they are hidden outright in read-only mode; only
+    // the export/save items below survive.
+    if (nodeSelected) {
+      ImGui::BeginDisabled(m_readOnly);
       bool enabled = (*menuNode)->isEnabled();
-      if (nodeSelected && ImGui::Checkbox("visible", &enabled)) {
+      if (ImGui::Checkbox("visible", &enabled) && !m_readOnly) {
         (*menuNode)->setEnabled(enabled);
         scene.signalLayerStructureChanged(&layer);
       }
+      ImGui::EndDisabled();
+    }
 
+    if (!m_readOnly) {
       if (nodeSelected && ImGui::MenuItem("show all")) {
         layer.traverse(menuNode, [&](auto &n, int) {
           n->setEnabled(true);
