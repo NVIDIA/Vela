@@ -58,6 +58,7 @@ if (TARGET vsr_scivis_studio_protocol)
   target_sources(${PROJECT_NAME} PRIVATE
     test_StudioProtocol.cpp
     test_StudioProtocol_Frames.cpp
+    test_StudioProtocol_ProjectRequests.cpp
   )
 endif()
 project_link_libraries(
