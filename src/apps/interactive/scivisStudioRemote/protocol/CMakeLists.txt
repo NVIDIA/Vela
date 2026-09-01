@@ -2,8 +2,10 @@
 ## SPDX-License-Identifier: Apache-2.0
 
 add_library(vsr_scivis_studio_protocol OBJECT
+  BrowseMessages.cpp
   FrameMessages.cpp
   PayloadCommon.cpp
+  PlaybackMessages.cpp
   ProjectOpReply.cpp
   ProjectRequests.cpp
   ProjectSnapshot.cpp
