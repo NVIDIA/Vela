@@ -13,11 +13,18 @@
 #include "ServerOptions.h"
 #include "StudioServer.h"
 // vsr_scivis_studio_protocol
+#include "BrowseMessages.h"
+#include "ProjectOpReply.h"
+#include "ProjectRequests.h"
+#include "ProjectSnapshot.h"
 #include "SessionMessages.h"
+#include "ShotRigRequests.h"
 #include "StudioCodec.h"
 #include "StudioProtocol.h"
+#include "TaskMessages.h"
 // vsr_scivis_studio_model
 #include "Project.h"
+#include "Shot.h"
 // vsr_network
 #include "vsr/network/NetworkChannel.hpp"
 // vsr_scene
@@ -26,9 +33,11 @@
 // std
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -187,6 +196,350 @@ unsigned short ScriptedServer::port() const
   return channel->port();
 }
 
+/*
+ * A fake project server: the Bootstrap on the client's Hello, then scripted
+ * answers to the project requests the runner's commands send, kept minimal
+ * but shaped like the real ones -- replies by request id, results, Server
+ * Task messages, a ProjectSnapshot after every mutation. Every handler runs
+ * on the server's IO thread and answers at once, so a task's completion is
+ * usually in the client's queue before the script awaits it.
+ */
+struct ProjectOpsServer
+{
+  using Message = vsr::network::Message;
+
+  ProjectOpsServer();
+  ~ProjectOpsServer();
+
+  unsigned short port() const;
+  // Every request of type T received so far, decoded, in arrival order.
+  template <typename T>
+  std::vector<T> requests();
+
+  void onMessage(const Message &msg);
+  void send(Message msg);
+  void sendSnapshot();
+  template <typename Result>
+  void reply(uint64_t requestId, const Result &result);
+  void replyOk(uint64_t requestId);
+  void replyError(uint64_t requestId, const std::string &error);
+  uint64_t startTask(uint64_t requestId);
+
+  std::shared_ptr<vsr::network::NetworkServer> channel;
+  std::mutex mutex;
+  std::vector<Message> received;
+  Project project;
+  uint64_t nextTaskId{1};
+  int nextShot{2};
+  int nextDataset{1};
+};
+
+ProjectOpsServer::ProjectOpsServer()
+{
+  Shot shot;
+  shot.id = "shot_0001";
+  shot.name = "Shot 1";
+  project.shots.push_back(shot);
+  project.activeShotId = shot.id;
+  LightRig rig;
+  rig.id = "lightRig_0001";
+  rig.name = "Default";
+  project.lightRigs.push_back(rig);
+  CameraRig cameraRig;
+  cameraRig.id = "cameraRig_0001";
+  cameraRig.name = "Default";
+  project.cameraRigs.push_back(cameraRig);
+  project.dirty = true;
+
+  channel = std::make_shared<vsr::network::NetworkServer>(0);
+  channel->setConnectHandler([this]() {
+    Hello hello;
+    hello.version = PROTOCOL_VERSION;
+    hello.buildInfo = "fake project server";
+    channel->send(encode(hello));
+  });
+  for (int value = 1; value < vsr::network::MESSAGE_TYPE_INVALID; ++value) {
+    if (!isStudioMessageType(uint8_t(value)))
+      continue;
+    channel->registerHandler(
+        uint8_t(value), [this](const Message &msg) { onMessage(msg); });
+  }
+  channel->start();
+}
+
+ProjectOpsServer::~ProjectOpsServer()
+{
+  channel->stop();
+}
+
+unsigned short ProjectOpsServer::port() const
+{
+  return channel->port();
+}
+
+template <typename T>
+std::vector<T> ProjectOpsServer::requests()
+{
+  std::lock_guard lock(mutex);
+  std::vector<T> out;
+  for (const auto &msg : received)
+    if (auto decoded = decode<T>(msg))
+      out.push_back(std::move(*decoded));
+  return out;
+}
+
+void ProjectOpsServer::send(Message msg)
+{
+  channel->send(std::move(msg));
+}
+
+void ProjectOpsServer::sendSnapshot()
+{
+  send(encode(ProjectSnapshot{project}));
+}
+
+template <typename Result>
+void ProjectOpsServer::reply(uint64_t requestId, const Result &result)
+{
+  auto r = makeOkReply(requestId);
+  setResults(r, result);
+  send(encode(r));
+}
+
+void ProjectOpsServer::replyOk(uint64_t requestId)
+{
+  send(encode(makeOkReply(requestId)));
+}
+
+void ProjectOpsServer::replyError(uint64_t requestId, const std::string &error)
+{
+  send(encode(makeErrorReply(requestId, error)));
+}
+
+uint64_t ProjectOpsServer::startTask(uint64_t requestId)
+{
+  const auto taskId = nextTaskId++;
+  reply(requestId, TaskStartedResult{taskId});
+  return taskId;
+}
+
+void ProjectOpsServer::onMessage(const Message &msg)
+{
+  std::lock_guard lock(mutex);
+  received.push_back(msg);
+  const auto type = messageType(msg);
+  if (!type)
+    return;
+
+  switch (*type) {
+  case StudioMessageType::Hello: {
+    send(encode(BootstrapBegin{}));
+    FrameConfig config;
+    config.width = 640;
+    config.height = 480;
+    send(encode(config));
+    sendSnapshot();
+    send(encode(BootstrapEnd{}));
+    return;
+  }
+  case StudioMessageType::Ping:
+    send(encode(Pong{}));
+    return;
+
+  case StudioMessageType::CreateShot: {
+    const auto req = *decode<CreateShot>(msg);
+    // A reply to a request nobody sent: the runner must look past it.
+    replyOk(999999);
+    Shot shot;
+    char id[16];
+    std::snprintf(id, sizeof(id), "shot_%04d", nextShot++);
+    shot.id = id;
+    shot.name = req.name;
+    project.shots.push_back(shot);
+    project.activeShotId = shot.id;
+    reply(req.requestId, ShotCreatedResult{shot.id});
+    sendSnapshot();
+    return;
+  }
+  case StudioMessageType::RemoveShot: {
+    const auto req = *decode<RemoveShot>(msg);
+    auto *shot = project::findShot(project, req.shotId);
+    if (!shot || project.shots.size() < 2) {
+      replyError(req.requestId,
+          shot ? "cannot remove the last shot" : "shot not found");
+      return;
+    }
+    project.shots.erase(project.shots.begin() + (shot - project.shots.data()));
+    project.activeShotId = project.shots.front().id;
+    replyOk(req.requestId);
+    sendSnapshot();
+    return;
+  }
+  case StudioMessageType::UpdateShot: {
+    const auto req = *decode<UpdateShot>(msg);
+    auto *shot = project::findShot(project, req.shot.id);
+    if (!shot) {
+      replyError(req.requestId, "shot not found");
+      return;
+    }
+    *shot = req.shot;
+    replyOk(req.requestId);
+    sendSnapshot();
+    return;
+  }
+  case StudioMessageType::SetActiveShot: {
+    const auto req = *decode<SetActiveShot>(msg);
+    if (!project::findShot(project, req.shotId)) {
+      replyError(req.requestId, "shot not found");
+      return;
+    }
+    project.activeShotId = req.shotId;
+    replyOk(req.requestId);
+    sendSnapshot();
+    return;
+  }
+
+  case StudioMessageType::SaveProject: {
+    const auto req = *decode<SaveProject>(msg);
+    const auto taskId = startTask(req.requestId);
+    TaskProgress progress;
+    progress.taskId = taskId;
+    progress.message = "writing";
+    send(encode(progress));
+    project.projectDirectory = req.directory.value_or("/data/unnamed");
+    project.name = project.projectDirectory.filename().string();
+    project.dirty = false;
+    TaskCompleted completed;
+    completed.taskId = taskId;
+    send(encode(completed));
+    sendSnapshot();
+    return;
+  }
+  case StudioMessageType::OpenProject: {
+    const auto req = *decode<OpenProject>(msg);
+    TaskFailed failed;
+    failed.taskId = startTask(req.requestId);
+    failed.error = "project directory does not exist";
+    send(encode(failed));
+    return;
+  }
+  case StudioMessageType::ImportStaticDataset: {
+    const auto req = *decode<ImportStaticDataset>(msg);
+    const auto taskId = startTask(req.requestId);
+    TaskProgress progress;
+    progress.taskId = taskId;
+    progress.message = "importing";
+    send(encode(progress));
+    Dataset dataset;
+    char id[20];
+    std::snprintf(id, sizeof(id), "dataset_%04d", nextDataset++);
+    dataset.id = id;
+    dataset.name = req.name;
+    dataset.status = DatasetStatus::Available;
+    project.datasets.push_back(dataset);
+    TaskCompleted completed;
+    completed.taskId = taskId;
+    completed.message = dataset.id;
+    send(encode(completed));
+    sendSnapshot();
+    return;
+  }
+  case StudioMessageType::DeclareFileAnimationDataset: {
+    const auto req = *decode<DeclareFileAnimationDataset>(msg);
+    Dataset dataset;
+    char id[20];
+    std::snprintf(id, sizeof(id), "dataset_%04d", nextDataset++);
+    dataset.id = id;
+    dataset.name = req.name;
+    dataset.sourceKind = DatasetSourceKind::FileAnimation;
+    dataset.declared = true;
+    project.datasets.push_back(dataset);
+    reply(req.requestId, DatasetCreatedResult{dataset.id});
+    sendSnapshot();
+    return;
+  }
+  case StudioMessageType::CancelTask: {
+    const auto req = *decode<CancelTask>(msg);
+    replyError(req.requestId, "unknown task " + std::to_string(req.taskId));
+    return;
+  }
+
+  case StudioMessageType::CreateLightRig: {
+    const auto req = *decode<CreateLightRig>(msg);
+    LightRig rig;
+    rig.id = "lightRig_0002";
+    rig.name = req.name;
+    project.lightRigs.push_back(rig);
+    reply(req.requestId, LightRigCreatedResult{rig.id});
+    sendSnapshot();
+    return;
+  }
+  case StudioMessageType::AddLightToRig: {
+    const auto req = *decode<AddLightToRig>(msg);
+    SceneNodeRef node;
+    node.layerName = "studio";
+    node.nodeIndex = 7;
+    reply(req.requestId, LightAddedResult{node});
+    return;
+  }
+  case StudioMessageType::CreateCameraRig: {
+    const auto req = *decode<CreateCameraRig>(msg);
+    CameraRig rig;
+    rig.id = "cameraRig_0002";
+    rig.name = req.name.empty() ? "Camera Rig 2" : req.name;
+    project.cameraRigs.push_back(rig);
+    reply(req.requestId, CameraRigCreatedResult{rig.id});
+    sendSnapshot();
+    return;
+  }
+  case StudioMessageType::CreateColorMap: {
+    const auto req = *decode<CreateColorMap>(msg);
+    ColorMapRecord record;
+    record.id = "colorMap_0001";
+    record.name = req.name;
+    project.colorMaps.push_back(record);
+    SceneObjectRef object;
+    object.type = ANARI_ARRAY1D;
+    object.objectIndex = 3;
+    reply(req.requestId, ColorMapCreatedResult{record.id, object});
+    sendSnapshot();
+    return;
+  }
+
+  case StudioMessageType::ListRoots: {
+    const auto req = *decode<ListRoots>(msg);
+    reply(req.requestId, ListRootsResult{{"/data"}});
+    return;
+  }
+  case StudioMessageType::ListDirectory: {
+    const auto req = *decode<ListDirectory>(msg);
+    if (req.directory != "/data") {
+      replyError(req.requestId,
+          "'" + req.directory.generic_string()
+              + "' is outside every Data Root");
+      return;
+    }
+    ListDirectoryResult result;
+    DirectoryEntry dir;
+    dir.name = "runs";
+    dir.kind = EntryKind::Directory;
+    DirectoryEntry file;
+    file.name = "mesh.obj";
+    file.size = 32;
+    file.mtimeSeconds = 1700000000;
+    result.entries = {dir, file};
+    reply(req.requestId, result);
+    return;
+  }
+  default: {
+    Error error;
+    error.message = std::string(toString(*type)) + " is not served by the fake";
+    send(encode(error));
+    return;
+  }
+  }
+}
+
 } // namespace
 
 SCENARIO("the test client parses its script language", "[StudioTestClient]")
@@ -295,6 +648,43 @@ SCENARIO("the test client parses its script language", "[StudioTestClient]")
       REQUIRE_FALSE(takeTimeoutSuffix(c, &error));
       c.args = {"timeout=-5"};
       REQUIRE_FALSE(takeTimeoutSuffix(c, &error));
+    }
+  }
+
+  GIVEN("$name variables in arguments")
+  {
+    std::vector<Command> commands;
+    REQUIRE(parseScript(
+        "update-shot $lastShotId name=$title path=$root/x $ 5$ $$root",
+        commands));
+    auto &command = commands[0];
+    const auto lookup =
+        [](const std::string &name) -> std::optional<std::string> {
+      if (name == "lastShotId")
+        return "shot_0002";
+      if (name == "title")
+        return "Intro";
+      if (name == "root")
+        return "/data";
+      return {};
+    };
+    std::string error;
+
+    THEN("every name expands, alone or inside a token; a bare $ stays")
+    {
+      REQUIRE(expandVariables(command, lookup, &error));
+      REQUIRE(command.args
+          == std::vector<std::string>{
+              "shot_0002", "name=Intro", "path=/data/x", "$", "5$", "$/data"});
+      REQUIRE(command.name == "update-shot");
+    }
+    THEN("an unknown variable is an error that leaves the arguments alone")
+    {
+      command.args = {"$lastShotId", "$nosuch"};
+      REQUIRE_FALSE(expandVariables(command, lookup, &error));
+      REQUIRE(error == "unknown variable $nosuch");
+      REQUIRE(
+          command.args == std::vector<std::string>{"$lastShotId", "$nosuch"});
     }
   }
 
@@ -650,6 +1040,251 @@ SCENARIO("the test client's liveness timers end a wait on a silent server",
   }
 }
 
+SCENARIO("the test client drives project ops against a fake server",
+    "[StudioTestClient]")
+{
+  GIVEN("a fake project server and a session")
+  {
+    ProjectOpsServer server;
+    TestSession session;
+    const auto endpoint = "127.0.0.1 " + std::to_string(server.port());
+
+    WHEN("a script runs the request, task, browse and wait commands")
+    {
+      const std::string script =
+          "connect " + endpoint + "\n"
+          "assert project.shots == 1\n"
+          "assert snapshots.received == 1\n"
+          // The reply is matched by request id: a stray one is looked past.
+          "create-shot Intro\n"
+          "await-snapshot\n"
+          "assert project.shots == 2\n"
+          "assert project.activeShot == shot_0002\n"
+          "assert var.lastShotId == shot_0002\n"
+          "assert shot.$lastShotId.name == Intro\n"
+          "update-shot $lastShotId name=\"Intro Cut\" frameCount=10 fps=30 loop=off binding.dataset_0009=on\n"
+          "await-snapshot\n"
+          "assert shot.$lastShotId.name == \"Intro Cut\"\n"
+          "assert shot.$lastShotId.frameCount == 10\n"
+          "assert shot.$lastShotId.fps == 30\n"
+          "assert shot.$lastShotId.loop == false\n"
+          "assert shot.$lastShotId.binding.dataset_0009 == true\n"
+          "expect-fail remove-shot shot_9999\n"
+          "assert replies.failed == 1\n"
+          "remove-shot $lastShotId\n"
+          "await-snapshot\n"
+          "assert project.shots == 1\n"
+          // The task ends before await-task runs: the session's record is
+          // what the wait consults.
+          "save-project /data/p1\n"
+          "assert var.lastTaskId == 1\n"
+          "sleep 50\n"
+          "await-task\n"
+          "await-snapshot\n"
+          "assert tasks.completed == 1\n"
+          "assert project.dirty == false\n"
+          "assert project.directory == /data/p1\n"
+          "assert project.name == p1\n"
+          "open-project /data/missing\n"
+          "await-task expect-fail\n"
+          "assert tasks.failed == 1\n"
+          "expect-fail cancel-task 7\n"
+          // Two requests in flight, collected in send order.
+          "no-wait import-static-dataset /data/a.obj A OBJ\n"
+          "no-wait import-static-dataset /data/b.obj B\n"
+          "assert replies.pending == 2\n"
+          "await-reply\n"
+          "assert var.lastTaskId == 3\n"
+          "await-reply\n"
+          "assert var.lastTaskId == 4\n"
+          "assert replies.pending == 0\n"
+          "await-task 3\n"
+          "assert var.lastDatasetId == dataset_0001\n"
+          "await-task 4\n"
+          "assert var.lastDatasetId == dataset_0002\n"
+          "await-snapshot\n"
+          "assert project.datasets == 2\n"
+          "assert dataset.dataset_0002.name == B\n"
+          "assert dataset.$lastDatasetId.status == Available\n"
+          "list-roots\n"
+          "assert var.dataRoot == /data\n"
+          "list-directory $dataRoot\n"
+          "assert browse.entries == 2\n"
+          "expect-fail list-directory /elsewhere\n"
+          "assert browse.entries == 0\n"
+          "declare-file-animation-dataset Series VOLUME_ANIMATION f0 f1 set-frame-count=false\n"
+          "assert var.lastDatasetId == dataset_0003\n"
+          "await-snapshot\n"
+          "assert dataset.dataset_0003.declared == true\n"
+          "create-light-rig Studio\n"
+          "assert var.lastLightRigId == lightRig_0002\n"
+          "add-light $lastLightRigId point\n"
+          "assert var.lastLightLayer == studio\n"
+          "assert var.lastLightNode == 7\n"
+          "create-camera-rig\n"
+          "assert var.lastCameraRigId == cameraRig_0002\n"
+          "create-color-map Warm\n"
+          "assert var.lastColorMapId == colorMap_0001\n"
+          "assert var.lastObjectRef == array1d:3\n"
+          "await-snapshot\n"
+          "assert project.colorMaps == 1\n"
+          "dump-project\n"
+          "assert replies.failed == 3\n"
+          "assert errors.received == 0\n"
+          "disconnect\n";
+      const auto result = runScript(session, script);
+      for (const auto &f : failLines(result.records))
+        WARN(f);
+      REQUIRE(result.ok);
+
+      THEN("the records show the replies with their results and the waits")
+      {
+        const auto &r = result.records;
+        REQUIRE(hasLine(
+            r, "EVT ProjectOpReply requestId=999999 ok=true error=\"\""));
+        REQUIRE(hasLine(r,
+            "EVT ProjectOpReply requestId=1 ok=true error=\"\" shotId=shot_0002"));
+        REQUIRE(hasLine(r,
+            "EVT ProjectOpReply requestId=3 ok=false error=\"shot not found\""));
+        REQUIRE(hasLine(r, "OK expect-fail remove-shot shot_9999"));
+        REQUIRE(hasLine(
+            r, "EVT ProjectOpReply requestId=5 ok=true error=\"\" taskId=1"));
+        REQUIRE(hasLine(r,
+            "EVT TaskProgress taskId=1 current=0 total=0 message=\"writing\""));
+        REQUIRE(hasLine(r, "EVT TaskCompleted taskId=1 message=\"\""));
+        REQUIRE(hasLine(r,
+            "EVT TaskFailed taskId=2 error=\"project directory does not exist\""));
+        REQUIRE(hasLine(r, "OK await-task expect-fail"));
+        REQUIRE(
+            hasLine(r, "EVT TaskCompleted taskId=4 message=\"dataset_0002\""));
+        REQUIRE(hasLine(
+            r, "EVT ProjectOpReply requestId=10 ok=true error=\"\" roots=1"));
+        REQUIRE(hasLine(r, "EVT DataRoot path=\"/data\""));
+        REQUIRE(hasLine(r,
+            "EVT DirectoryEntry name=\"runs\" kind=Directory size=0 mtime=0"));
+        REQUIRE(hasLine(r,
+            "EVT DirectoryEntry name=\"mesh.obj\" kind=File size=32 mtime=1700000000"));
+        REQUIRE(hasLine(r,
+            "EVT ProjectOpReply requestId=13 ok=true error=\"\" datasetId=dataset_0003"));
+        REQUIRE(hasLine(r,
+            "EVT ProjectOpReply requestId=15 ok=true error=\"\" lightNode=studio:7"));
+        REQUIRE(hasLine(r,
+            "EVT ProjectOpReply requestId=17 ok=true error=\"\" colorMapId=colorMap_0001"
+            " object=array1d:3"));
+        REQUIRE(hasLineStarting(r,
+            "EVT ProjectSnapshot activeShot=shot_0002 shots=2 datasets=0 lightRigs=1"
+            " cameraRigs=1 colorMaps=0 dirty=true"));
+        REQUIRE(hasLineStarting(r, "EVT Shot id=shot_0001 name=\"Shot 1\""));
+        REQUIRE(
+            hasLineStarting(r, "EVT Dataset id=dataset_0003 name=\"Series\""));
+        REQUIRE(
+            hasLineStarting(r, "EVT ColorMap id=colorMap_0001 name=\"Warm\""));
+        REQUIRE(hasLine(r,
+            "OK update-shot $lastShotId name=\"Intro Cut\" frameCount=10"
+            " fps=30 loop=off binding.dataset_0009=on"));
+      }
+
+      THEN("the expanded ids and the whole edited Shot reached the wire")
+      {
+        const auto removes = server.requests<RemoveShot>();
+        REQUIRE(removes.size() == 2);
+        REQUIRE(removes[0].shotId == "shot_9999");
+        REQUIRE(removes[1].shotId == "shot_0002");
+        const auto updates = server.requests<UpdateShot>();
+        REQUIRE(updates.size() == 1);
+        REQUIRE(updates[0].shot.id == "shot_0002");
+        REQUIRE(updates[0].shot.name == "Intro Cut");
+        REQUIRE(updates[0].shot.frameCount == 10);
+        REQUIRE(updates[0].shot.fps == 30.f);
+        REQUIRE_FALSE(updates[0].shot.loop);
+        REQUIRE(updates[0].shot.datasetBindings.size() == 1);
+        REQUIRE(updates[0].shot.datasetBindings[0].datasetId == "dataset_0009");
+        const auto imports = server.requests<ImportStaticDataset>();
+        REQUIRE(imports.size() == 2);
+        REQUIRE(imports[0].importerType == vsr::io::ImporterType::OBJ);
+        REQUIRE(imports[1].importerType == vsr::io::ImporterType::NONE);
+        REQUIRE(imports[1].sourcePath == "/data/b.obj");
+        const auto declares = server.requests<DeclareFileAnimationDataset>();
+        REQUIRE(declares.size() == 1);
+        REQUIRE(declares[0].sourceList == std::vector<std::string>{"f0", "f1"});
+        REQUIRE_FALSE(declares[0].setActiveShotFrameCount);
+        const auto listings = server.requests<ListDirectory>();
+        REQUIRE(listings.size() == 2);
+        REQUIRE(listings[0].directory == "/data");
+        const auto cancels = server.requests<CancelTask>();
+        REQUIRE(cancels.size() == 1);
+        REQUIRE(cancels[0].taskId == 7);
+      }
+    }
+
+    WHEN("a script misuses the prefixes, variables and waits")
+    {
+      const auto result = runScript(session,
+          "connect " + endpoint + "\n"
+          "assert $nosuch == 1\n"
+          "expect-fail ping\n"
+          "no-wait await-task\n"
+          "await-reply\n"
+          "await-task\n"
+          "await-task 99 timeout=100\n"
+          "expect-fail create-shot Fine\n"
+          "update-shot shot_9999 name=x\n"
+          "update-shot shot_0001 bogus=1\n"
+          "update-shot shot_0001 frameCount=abc\n"
+          "update-shot shot_0001 playing=true\n"
+          "import-static-dataset /data/x.obj X TRIANGLES\n"
+          "remove-dataset dataset_0001 keep\n"
+          "await-snapshot timeout=100\n"
+          "expect-fail\n"
+          "create-shot\n"
+          "assert var.lastShotId == shot_0003\n"
+          "disconnect\n",
+          [] {
+            RunnerOptions o;
+            o.keepGoing = true;
+            return o;
+          }());
+
+      THEN("each FAILs by name and the rest still runs")
+      {
+        REQUIRE_FALSE(result.ok);
+        const auto fails = failLines(result.records);
+        REQUIRE(fails.size() == 14);
+        REQUIRE(
+            fails[0] == "FAIL assert $nosuch == 1: unknown variable $nosuch");
+        REQUIRE(fails[1].find("expect-fail applies to request commands")
+            != std::string::npos);
+        REQUIRE(fails[2].find("no-wait applies to request commands")
+            != std::string::npos);
+        REQUIRE(fails[3].find("no no-wait request") != std::string::npos);
+        REQUIRE(fails[4].find("$lastTaskId is unset") != std::string::npos);
+        REQUIRE(fails[5] == "FAIL await-task 99 timeout=100: no the end of task 99"
+                            " within 100 ms");
+        REQUIRE(
+            fails[6].find("expected the request to fail") != std::string::npos);
+        REQUIRE(fails[7].find("no shot 'shot_9999'") != std::string::npos);
+        REQUIRE(
+            fails[8].find("unknown Shot field 'bogus'") != std::string::npos);
+        REQUIRE(
+            fails[9].find("not a valid frameCount: abc") != std::string::npos);
+        REQUIRE(
+            fails[10].find("playing is playback state") != std::string::npos);
+        REQUIRE(fails[11].find("unknown importer 'TRIANGLES'")
+            != std::string::npos);
+        REQUIRE(fails[12].find("usage: remove-dataset") != std::string::npos);
+        REQUIRE(fails[13].find("usage: expect-fail") != std::string::npos);
+        // The expect-fail create-shot above still created a shot; the last
+        // one without the prefix is the third.
+        REQUIRE(
+            hasLine(result.records, "OK assert var.lastShotId == shot_0003"));
+        // No request went out without a snapshot to await, so this one holds.
+        REQUIRE(hasLine(result.records, "OK await-snapshot timeout=100"));
+        REQUIRE(hasLine(result.records, "OK disconnect"));
+      }
+    }
+  }
+}
+
 SCENARIO(
     "the test client runs the milestone-3 command surface against a"
     " StudioServer",
@@ -799,8 +1434,8 @@ SCENARIO(
                 + project.activeShotId + " shots=1 datasets=0"));
         REQUIRE(hasLine(r, "EVT Error message=\"unknown message type 255\""));
         REQUIRE(hasLine(r, "EVT Error message=\"unknown message type 0\""));
-        REQUIRE(hasLineStarting(
-            r, "EVT Error message=\"Pick is not implemented"));
+        REQUIRE(
+            hasLineStarting(r, "EVT Error message=\"Pick is not implemented"));
         REQUIRE(hasLine(r, "OK expect-error \"not implemented\""));
         REQUIRE(hasLine(r, "OK assert state == Disconnected"));
         REQUIRE(r.back() == "OK assert state == Disconnected");
