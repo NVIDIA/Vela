@@ -276,7 +276,7 @@ void ProjectOpDispatcher::handle(const OpenProject &req)
 
   startTask(req.requestId,
       "open project '" + directory->string() + "'",
-      [this, directory = *directory](const TaskProgressFunction &progress) {
+      [this, directory = *directory](const TaskControl &progress) {
         return runTaskBody(
             [&] {
               TaskResult result;
@@ -326,7 +326,7 @@ void ProjectOpDispatcher::handle(const SaveProject &req)
       named ? "save project to '" + named->string() + "'"
             : std::string("save project"),
       [this, named, uiState = req.uiState](
-          const TaskProgressFunction &progress) {
+          const TaskControl &progress) {
         return runTaskBody(
             [&] {
               TaskResult result;
@@ -380,7 +380,7 @@ void ProjectOpDispatcher::handle(const ImportStaticDataset &req)
 
   startTask(req.requestId,
       "import '" + source->string() + "'",
-      [this, req, source = *source](const TaskProgressFunction &progress) {
+      [this, req, source = *source](const TaskControl &progress) {
         return runTaskBody(
             [&] {
               progress("importing");
@@ -414,7 +414,7 @@ void ProjectOpDispatcher::handle(const ImportFileAnimationDataset &req)
       "import " + std::to_string(sources.size()) + " animation frame(s) from '"
           + sources.front().string() + "'",
       [this, req, sources = std::move(sources)](
-          const TaskProgressFunction &progress) {
+          const TaskControl &progress) {
         return runTaskBody(
             [&] {
               progress("importing");
@@ -450,7 +450,7 @@ void ProjectOpDispatcher::handle(const ReimportDataset &req)
 {
   startTask(req.requestId,
       "reimport dataset '" + req.datasetId + "'",
-      [this, id = req.datasetId](const TaskProgressFunction &progress) {
+      [this, id = req.datasetId](const TaskControl &progress) {
         return runTaskBody(
             [&] {
               TaskResult result;
@@ -489,7 +489,7 @@ void ProjectOpDispatcher::handle(const LoadDataset &req)
 {
   startTask(req.requestId,
       "load dataset '" + req.datasetId + "'",
-      [this, id = req.datasetId](const TaskProgressFunction &progress) {
+      [this, id = req.datasetId](const TaskControl &progress) {
         return runTaskBody(
             [&] {
               TaskResult result;
@@ -544,7 +544,7 @@ void ProjectOpDispatcher::handle(const SaveDatasetArchive &req)
   startTask(req.requestId,
       "save dataset '" + req.datasetId + "' to '" + file->string() + "'",
       [this, id = req.datasetId, file = *file](
-          const TaskProgressFunction &progress) {
+          const TaskControl &progress) {
         return runTaskBody(
             [&] {
               TaskResult result;
@@ -568,7 +568,7 @@ void ProjectOpDispatcher::handle(const LoadDatasetArchive &req)
   }
   startTask(req.requestId,
       "load dataset archive '" + file->string() + "'",
-      [this, file = *file](const TaskProgressFunction &progress) {
+      [this, file = *file](const TaskControl &progress) {
         return runTaskBody(
             [&] {
               TaskResult result;
@@ -608,7 +608,7 @@ void ProjectOpDispatcher::handle(const IncorporateDatasetCandidate &req)
   const DatasetCandidate candidate{req.file, req.proposedName};
   startTask(req.requestId,
       "incorporate dataset candidate '" + file->string() + "'",
-      [this, candidate, name = req.name](const TaskProgressFunction &progress) {
+      [this, candidate, name = req.name](const TaskControl &progress) {
         return runTaskBody(
             [&] {
               TaskResult result;

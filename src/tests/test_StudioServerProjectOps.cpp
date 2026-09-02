@@ -333,7 +333,7 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
   {
     std::string cancelRunningError;
     uint64_t first = 0;
-    first = runner.enqueue("first", [&](const TaskProgressFunction &progress) {
+    first = runner.enqueue("first", [&](const TaskControl &progress) {
       progress("half way");
       // The running task cannot cancel itself (or be cancelled).
       REQUIRE_FALSE(runner.cancel(first, &cancelRunningError));
@@ -344,14 +344,14 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
       return result;
     });
     const auto second =
-        runner.enqueue("second", [&](const TaskProgressFunction &) {
+        runner.enqueue("second", [&](const TaskControl &) {
           TaskResult result;
           result.ok = false;
           result.error = "boom";
           return result;
         });
     const auto third = runner.enqueue(
-        "third", [&](const TaskProgressFunction &) { return TaskResult{}; });
+        "third", [&](const TaskControl &) { return TaskResult{}; });
 
     THEN("ids increase and nothing is sent until a task runs")
     {
@@ -376,8 +376,9 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
         REQUIRE(failed->taskId == third);
         REQUIRE(failed->error == "cancelled");
         REQUIRE_FALSE(runner.cancel(third, &error));
-        REQUIRE(error.find("unknown task") != std::string::npos);
+        REQUIRE(error == "task already finished");
         REQUIRE_FALSE(runner.cancel(9999, &error));
+        REQUIRE(error.find("unknown task") != std::string::npos);
       }
 
       AND_WHEN("the queue is run down")
@@ -432,17 +433,157 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
     }
   }
 
+  GIVEN("an exclusive task that polls its cancel flag")
+  {
+    uint64_t frames = 0;
+    uint64_t render = 0;
+    render = runner.enqueue(
+        "render shot 'shot_0001'",
+        [&](const TaskControl &task) {
+          REQUIRE(runner.exclusivePending());
+          REQUIRE(task.taskId() == render);
+          TaskResult result;
+          for (uint64_t frame = 1; frame <= 200; ++frame) {
+            if (task.cancelRequested())
+              break;
+            task(frame, 200, "frame");
+            ++frames;
+            // What the IO thread does when a CancelTask names the running id.
+            if (frame == 3)
+              REQUIRE(runner.requestCancelRunning(render));
+          }
+          result.ok = frames == 200;
+          result.error = result.ok ? "" : "cancelled";
+          result.framesCompleted = frames;
+          return result;
+        },
+        true);
+    const auto after = runner.enqueue(
+        "after", [&](const TaskControl &) { return TaskResult{}; });
+
+    THEN("it is pending, and the flag is refused for a task that is not running")
+    {
+      REQUIRE(runner.exclusivePending());
+      REQUIRE_FALSE(runner.requestCancelRunning(render));
+      REQUIRE_FALSE(runner.requestCancelRunning(after));
+      REQUIRE_FALSE(runner.cancelRequested(render));
+    }
+
+    WHEN("it runs")
+    {
+      const auto ran = runner.runOne();
+
+      THEN("it stopped at the next frame boundary and reports how far it got")
+      {
+        REQUIRE(ran);
+        REQUIRE(ran->exclusive);
+        REQUIRE_FALSE(ran->result.ok);
+        REQUIRE(ran->result.error == "cancelled");
+        REQUIRE(frames == 3);
+        REQUIRE_FALSE(runner.exclusivePending());
+        REQUIRE(sent.size() == 4);
+        const auto second = decode<TaskProgress>(sent[1]);
+        REQUIRE(second);
+        REQUIRE(second->current == 2);
+        REQUIRE(second->total == 200);
+        REQUIRE(second->message == "frame");
+        const auto failed = decode<TaskFailed>(sent.back());
+        REQUIRE(failed);
+        REQUIRE(failed->taskId == render);
+        REQUIRE(failed->error == "cancelled");
+      }
+
+      THEN("the CancelTask dispatched after the body is acknowledged")
+      {
+        std::string error;
+        REQUIRE(runner.cancel(render, &error));
+        REQUIRE(runner.cancel(render, &error)); // idempotent
+        REQUIRE(runner.finished().size() == 1);
+        REQUIRE(runner.finished().front().cancelRequested);
+      }
+
+      AND_WHEN("the next bootstrap replays the history")
+      {
+        runner.runOne(); // 'after' completes
+        sent.clear();
+        std::vector<Message> replayed;
+        runner.replayTo([&](Message &&msg) { replayed.push_back(msg); });
+
+        THEN("both endings go out verbatim, once")
+        {
+          REQUIRE(replayed.size() == 2);
+          const auto failed = decode<TaskFailed>(replayed[0]);
+          REQUIRE(failed);
+          REQUIRE(failed->taskId == render);
+          REQUIRE(failed->error == "cancelled");
+          const auto completed = decode<TaskCompleted>(replayed[1]);
+          REQUIRE(completed);
+          REQUIRE(completed->taskId == after);
+          REQUIRE(runner.finished().empty());
+          REQUIRE(sent.empty());
+
+          replayed.clear();
+          runner.replayTo([&](Message &&msg) { replayed.push_back(msg); });
+          REQUIRE(replayed.empty());
+        }
+      }
+    }
+  }
+
+  GIVEN("more endings than the history keeps")
+  {
+    for (size_t i = 0; i < ServerTaskRunner::HISTORY_CAP + 3; ++i) {
+      runner.enqueue("n", [&](const TaskControl &) { return TaskResult{}; });
+      runner.runOne();
+    }
+
+    THEN("the oldest are forgotten first")
+    {
+      REQUIRE(runner.finished().size() == ServerTaskRunner::HISTORY_CAP);
+      REQUIRE(runner.finished().front().taskId == 4);
+    }
+  }
+
+  GIVEN("a task completed with a determinate result")
+  {
+    const auto id = runner.enqueue("render", [&](const TaskControl &task) {
+      task(4, 4, "frame");
+      TaskResult result;
+      result.message = "/renders/shot_0001";
+      result.framesCompleted = 4;
+      return result;
+    });
+    runner.runOne();
+
+    THEN("TaskCompleted carries the frame count and the replay repeats it")
+    {
+      const auto completed = decode<TaskCompleted>(sent.back());
+      REQUIRE(completed);
+      REQUIRE(completed->framesCompleted == 4);
+      REQUIRE(completed->message == "/renders/shot_0001");
+      std::string error;
+      REQUIRE_FALSE(runner.cancel(id, &error));
+      REQUIRE(error == "task already finished");
+      std::vector<Message> replayed;
+      runner.replayTo([&](Message &&msg) { replayed.push_back(msg); });
+      REQUIRE(replayed.size() == 1);
+      const auto again = decode<TaskCompleted>(replayed[0]);
+      REQUIRE(again);
+      REQUIRE(again->framesCompleted == 4);
+    }
+  }
+
   GIVEN("a task whose body throws")
   {
     const auto thrower =
-        runner.enqueue("thrower", [&](const TaskProgressFunction &) {
+        runner.enqueue("thrower", [&](const TaskControl &) {
           throw std::filesystem::filesystem_error("stat failed",
               std::filesystem::path("/locked/dir"),
               std::make_error_code(std::errc::permission_denied));
           return TaskResult{};
         });
     const auto after = runner.enqueue(
-        "after", [&](const TaskProgressFunction &) { return TaskResult{}; });
+        "after", [&](const TaskControl &) { return TaskResult{}; });
 
     WHEN("the queue is run")
     {
@@ -1270,7 +1411,7 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
 
         const auto late = session.request(CancelTask{0, taskId + 1});
         REQUIRE_FALSE(late.ok);
-        REQUIRE(late.error.find("unknown task") != std::string::npos);
+        REQUIRE(late.error == "task already finished");
       }
     }
   }
