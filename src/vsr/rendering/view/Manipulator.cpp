@@ -51,7 +51,8 @@ void Manipulator::setPose(anari::math::float3 eye,
     m_axis = static_cast<UpAxis>(best);
   }
 
-  const float distance = std::abs(m_distance) > 0.f ? std::abs(m_distance) : 1.f;
+  const float distance =
+      std::abs(m_distance) > 0.f ? std::abs(m_distance) : 1.f;
   m_distance = distance;
   m_speed = distance;
   m_eye = eye;

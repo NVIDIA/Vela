@@ -64,8 +64,7 @@ struct ProjectContext
   // stopped callback writes playing=false and currentFrame=last. None of
   // these dirty the project: the playback position is transient state, as
   // when the monolith's tick writes it.
-  bool setPlaying(
-      const ShotID &id, bool playing, std::string *error = nullptr);
+  bool setPlaying(const ShotID &id, bool playing, std::string *error = nullptr);
   void setActiveShotFrame(int frame);
   Dataset *addStaticDataset(const std::string &name,
       const std::filesystem::path &sourcePath,

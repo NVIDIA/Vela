@@ -69,7 +69,8 @@ void SpatialFieldFileBinding::update(float t)
     logWarning("[SpatialFieldFileBinding] failed to load frame %d: '%s'",
         idx,
         m_files[idx].c_str());
-    reportLoadFailure(idx, "failed to load spatial field '" + m_files[idx] + "'");
+    reportLoadFailure(
+        idx, "failed to load spatial field '" + m_files[idx] + "'");
     return;
   }
 

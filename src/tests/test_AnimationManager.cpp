@@ -85,7 +85,8 @@ struct FailingFileBinding : public vsr::animation::FileBinding
 
 } // namespace
 
-SCENARIO("A file binding reports the frames it cannot load", "[AnimationManager]")
+SCENARIO(
+    "A file binding reports the frames it cannot load", "[AnimationManager]")
 {
   GIVEN("A manager owning a binding whose last two frames are bad")
   {
