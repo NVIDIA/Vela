@@ -851,7 +851,8 @@ const std::vector<std::string> &CommandRunner::commandHelp()
       "                             set a transform node's matrix (column-major)",
       "dump-scene | dump-layers | dump-project | dump-frame",
       "                             print the mirror, replica or last frame header",
-      "set-ui-state KEY=VALUE...    build the windows/<key> UI state tree save-project sends",
+      "set-ui-state KEY=VALUE...|none",
+      "                             build (or drop) the windows/<key> tree save-project sends",
       "dump-ui-state                print the UIState tree the server sent last",
       "viewport-settings keys: highlightSelection outlinePrimitives showWorldBounds",
       "                             worldBoundsColor=r,g,b,a worldBoundsWidth visualizeAOV",
@@ -894,7 +895,8 @@ const std::vector<std::string> &CommandRunner::commandHelp()
       "`no-wait <request>` sends without awaiting the reply. Replies fill",
       "$lastShotId $lastLightRigId $lastCameraRigId $lastColorMapId $lastObjectRef",
       "$lastObjectType $lastObjectIndex $lastLightLayer $lastLightNode $lastDatasetId",
-      "$lastTaskId $lastRequestId $dataRoot; `$name` expands in any argument.",
+      "$lastTaskId $lastTaskMessage $lastRequestId $dataRoot; `$name` expands in any",
+      "argument.",
       "",
       "Waiting commands take a trailing timeout=MS and FAIL as soon as the",
       "connection is Lost. An Error the server sends during any command but",
@@ -1693,7 +1695,12 @@ CommandRunner::Failure CommandRunner::dumpFrame(const Command &command)
 CommandRunner::Failure CommandRunner::setUIState(const Command &command)
 {
   if (command.args.empty())
-    return usageError(command, "<key>=<value>...");
+    return usageError(command, "<key>=<value>... | none");
+  if (command.args.size() == 1 && lower(command.args[0]) == "none") {
+    // Back to sending no tree: the server then keeps the one it retains.
+    m_uiStateToSave.reset();
+    return {};
+  }
   // The shape the GUI saves is {windows/<Window>/..., layout, settings/...};
   // the server reads no further than those child names, so string leaves
   // under windows/ are all a round trip needs. Repeated commands compose:
@@ -2789,9 +2796,13 @@ CommandRunner::Failure CommandRunner::awaitTask(
     return "task " + std::to_string(taskId)
         + " completed, but was expected to fail";
   }
-  // Imports report the new dataset's id as their completion message.
-  if (!failed && !task.message.empty())
-    m_variables["lastDatasetId"] = task.message;
+  // The completion message: an import's is the new dataset's id, a render's
+  // the output directory.
+  if (!failed) {
+    m_variables["lastTaskMessage"] = task.message;
+    if (task.message.rfind("dataset_", 0) == 0)
+      m_variables["lastDatasetId"] = task.message;
+  }
   return {};
 }
 

@@ -302,7 +302,7 @@ struct CommandRunner
   std::optional<protocol::ArrayHistogramResult> m_histogram;
   // The UI state tree set-ui-state builds (`windows/<key>` string leaves),
   // sent with every save-project from then on; null until the first
-  // set-ui-state, and save-project then sends none.
+  // set-ui-state and after `set-ui-state none`, when save-project sends none.
   protocol::SubtreePtr m_uiStateToSave;
 };
 
