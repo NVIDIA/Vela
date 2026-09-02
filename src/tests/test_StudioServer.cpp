@@ -314,6 +314,8 @@ SCENARIO("StudioServer runs a viewer-parity session", "[StudioServer]")
                   != std::string::npos);
             }
 
+            // A payload-less Pick decodes to nothing: refused as malformed
+            // rather than serviced.
             client.clear();
             Message pick;
             pick.header.type = uint8_t(StudioMessageType::Pick);
@@ -322,7 +324,19 @@ SCENARIO("StudioServer runs a viewer-parity session", "[StudioServer]")
             const auto refused =
                 decode<Error>(client.last(StudioMessageType::Error));
             REQUIRE(refused);
-            REQUIRE(refused->message.find("not implemented in this server")
+            REQUIRE(refused->message.find("malformed Pick payload")
+                != std::string::npos);
+
+            client.clear();
+            Message render;
+            render.header.type = uint8_t(StudioMessageType::RenderShot);
+            client.channel->send(std::move(render));
+            REQUIRE(client.waitForCount(StudioMessageType::Error, 1));
+            const auto unimplemented =
+                decode<Error>(client.last(StudioMessageType::Error));
+            REQUIRE(unimplemented);
+            REQUIRE(
+                unimplemented->message.find("not implemented in this server")
                 != std::string::npos);
           }
 

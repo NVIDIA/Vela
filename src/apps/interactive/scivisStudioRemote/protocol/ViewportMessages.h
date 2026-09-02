@@ -35,6 +35,12 @@ namespace vsr::scivis_studio::protocol {
  *   channel.send(encode(pick));
  */
 
+// x and y are frame pixels in the header's width x height: x grows to the
+// right, y downwards from the top-left corner (the client's image origin;
+// the server converts to ANARI's bottom-up buffer). Coordinates outside the
+// frame are clamped to its edge. The server services one Pick at a time,
+// latest-wins: a Pick arriving before an earlier one was serviced replaces
+// it, and only the survivor is answered.
 struct Pick
 {
   static constexpr StudioMessageType MESSAGE_TYPE = StudioMessageType::Pick;
