@@ -187,9 +187,6 @@ void ShotEditor::buildEditorUI(const Project &project)
   if (ImGui::IsItemDeactivatedAfterEdit())
     sendDraft();
 
-  ImGui::Text("Current frame: %d", shot.currentFrame);
-  vsr::ui::tooltipForPreviousItem("Playback arrives in a later milestone");
-
   ImGui::InputInt("Frame count", &shot.frameCount);
   if (ImGui::IsItemDeactivatedAfterEdit())
     sendDraft();

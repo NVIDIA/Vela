@@ -29,8 +29,9 @@ namespace vsr::scivis_studio::client {
  * Structural Mirror's Renderer objects, which is all the client can know
  * about the server's devices.
  *
- * Not here: transport (Play/Stop, current frame) is milestone 6 and Render
- * Active Shot is milestone 7; `playing` is never sent.
+ * Not here: transport (Play/Stop, current frame, loop, fps) lives in the
+ * Timeline window and Render Active Shot is milestone 7; `playing` is never
+ * sent from here.
  */
 struct ShotEditor : public EditorWindow
 {
