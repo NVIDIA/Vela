@@ -186,13 +186,25 @@ bool renderActiveShotToFrames(ProjectContext &projectContext,
   auto *renderIndex = ctx->vsr.scene.updateDelegate()
                           .emplace<vsr::rendering::RenderIndexAllLayers>(
                               ctx->vsr.scene, libName, device);
+  // However the render ends -- the last frame, a cancel, a refused renderer,
+  // a throw from a frame's load or encode -- the scene stops mirroring into
+  // the render's index and the device loses the retain taken for it.
+  struct RenderIndexGuard
+  {
+    vsr::app::Context &ctx;
+    vsr::rendering::RenderIndexAllLayers *index;
+    anari::Device device;
+    ~RenderIndexGuard()
+    {
+      ctx.vsr.scene.updateDelegate().erase(index);
+      anari::release(device, device);
+    }
+  } renderIndexGuard{*ctx, renderIndex, device};
   renderIndex->populate();
 
   const auto rendererIndex = shot->renderSettings.rendererObjectIndex;
   auto rendererObject = ctx->vsr.scene.getObject(ANARI_RENDERER, rendererIndex);
   if (!rendererObject || rendererObject->rendererDeviceName() != libName) {
-    ctx->vsr.scene.updateDelegate().erase(renderIndex);
-    anari::release(device, device);
     return failRender(out,
         "Renderer object index " + std::to_string(rendererIndex)
             + " is unavailable for ANARI device '" + libName + "'");
@@ -200,8 +212,6 @@ bool renderActiveShotToFrames(ProjectContext &projectContext,
 
   auto renderer = renderIndex->renderer(rendererIndex);
   if (!renderer) {
-    ctx->vsr.scene.updateDelegate().erase(renderIndex);
-    anari::release(device, device);
     return failRender(out,
         "Failed to resolve renderer object index "
             + std::to_string(rendererIndex));
@@ -238,6 +248,29 @@ bool renderActiveShotToFrames(ProjectContext &projectContext,
       : shot->renderSettings.outputFilePrefix;
   shot->playing = false;
   projectContext.syncAnimationManagerToActiveShot();
+  // The shot's time and playback state come back whatever ends the frame
+  // loop, and the interactive pipeline follows the shot again; declared
+  // after the index guard so this runs first, while the index still stands.
+  struct ShotStateGuard
+  {
+    ProjectContext &projectContext;
+    Shot *shot;
+    int frame;
+    bool playing;
+    ~ShotStateGuard()
+    {
+      shot->currentFrame = frame;
+      shot->playing = playing;
+      try {
+        projectContext.syncAnimationManagerToActiveShot();
+        projectContext.applyActiveShot();
+      } catch (const std::exception &e) {
+        vsr::core::logWarning(
+            "[SciVisStudio] Failed to restore the shot after rendering: %s",
+            e.what());
+      }
+    }
+  } shotStateGuard{projectContext, shot, savedFrame, savedPlaying};
 
   vsr::core::logStatus("[SciVisStudio] Rendering %d frames to '%s'",
       totalFrames,
@@ -268,14 +301,6 @@ bool renderActiveShotToFrames(ProjectContext &projectContext,
     }
     ++out.framesCompleted;
   }
-
-  shot->currentFrame = savedFrame;
-  shot->playing = savedPlaying;
-  projectContext.syncAnimationManagerToActiveShot();
-  projectContext.applyActiveShot();
-
-  ctx->vsr.scene.updateDelegate().erase(renderIndex);
-  anari::release(device, device);
 
   return out.completed;
 }

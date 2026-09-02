@@ -31,13 +31,16 @@
 #include "vsr/scene/objects/Renderer.hpp"
 #include "vsr/scene/objects/SpatialField.hpp"
 #include "vsr/scene/objects/Volume.hpp"
-
+// anari
+#include <anari/anari_cpp.hpp>
+// std
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <sstream>
+#include <stdexcept>
 #include <utility>
 
 using namespace vsr::scivis_studio;
@@ -3155,6 +3158,81 @@ SCENARIO("SciVis Studio shot rendering reports why it did not run",
       REQUIRE(result.outputDirectory.empty());
     }
   }
+}
+
+SCENARIO("SciVis Studio shot rendering restores the scene when a frame throws",
+    "[SciVisStudio]")
+{
+  // The frame loop needs a real device; builds without helide skip.
+  auto library = anari::loadLibrary("helide",
+      [](const void *,
+          ANARIDevice,
+          ANARIObject,
+          anari::DataType,
+          ANARIStatusSeverity,
+          ANARIStatusCode,
+          const char *) {});
+  if (!library) {
+    WARN("helide ANARI library unavailable, skipping the render throw test");
+    return;
+  }
+  anari::unloadLibrary(library);
+
+  const auto root = std::filesystem::temp_directory_path()
+      / "vsr_scivis_studio_render_throw";
+  std::filesystem::remove_all(root);
+
+  vsr::app::Context appContext;
+  ProjectContext projectContext(&appContext);
+  projectContext.createUnsavedProject();
+  REQUIRE(projectContext.saveProject(root));
+  auto *shot = project::activeShot(projectContext.project());
+  REQUIRE(shot);
+  shot->frameCount = 3;
+  shot->currentFrame = 2;
+  shot->playing = true;
+  shot->renderSettings.width = 8;
+  shot->renderSettings.height = 8;
+  shot->renderSettings.samples = 1;
+  // A fresh project has no renderer objects; pick one the way the server's
+  // bind does, so the render reaches its frame loop.
+  auto device = appContext.anari.loadDevice("helide");
+  REQUIRE(device);
+  const auto renderers =
+      appContext.vsr.scene.createStandardRenderers("helide", device);
+  REQUIRE_FALSE(renderers.empty());
+  shot->renderSettings.rendererLibrary = "helide";
+  shot->renderSettings.rendererObjectIndex = renderers.front()->index();
+  shot->renderSettings.rendererSubtype = renderers.front()->subtype().str();
+  const auto delegates = appContext.vsr.scene.updateDelegate().size();
+
+  GIVEN("A frame hook that throws on the second frame")
+  {
+    RenderShotProgress progress;
+    progress.onFrame = [](int frame, int) {
+      if (frame == 1)
+        throw std::runtime_error("frame 1 refused to load");
+      return true;
+    };
+
+    THEN("The throw propagates and the render's scene state is undone")
+    {
+      RenderShotResult result;
+      REQUIRE_THROWS_WITH(
+          renderActiveShotToFrames(projectContext, &progress, &result),
+          "frame 1 refused to load");
+      // The render index the scene mirrored into is gone again.
+      REQUIRE(appContext.vsr.scene.updateDelegate().size() == delegates);
+      // The shot's time and playback state are back where they were.
+      REQUIRE(shot->currentFrame == 2);
+      REQUIRE(shot->playing);
+      REQUIRE(result.framesCompleted == 1);
+    }
+  }
+
+  anari::release(device, device);
+  appContext.anari.releaseAllDevices();
+  std::filesystem::remove_all(root);
 }
 
 SCENARIO("SciVis Studio shot rendering materializes bound datasets",
