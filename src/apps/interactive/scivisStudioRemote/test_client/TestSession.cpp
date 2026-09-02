@@ -1009,6 +1009,7 @@ void TestSession::handleMessage(const Message &msg)
     auto &record = taskRecord(progress->taskId);
     if (!record.finished()) {
       record.status = TaskRecord::Status::Running;
+      ++record.progressReports;
       record.current = progress->current;
       record.total = progress->total;
     }

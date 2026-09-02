@@ -885,7 +885,7 @@ const std::vector<std::string> &CommandRunner::commandHelp()
       "cancel-task TASKID",
       "await-task [TASKID] [expect-fail]",
       "                             wait for the task (default $lastTaskId) to end",
-      "await-task-progress [TASKID] wait for the next TaskProgress of the task (default $lastTaskId)",
+      "await-task-progress [TASKID] wait until the task (default $lastTaskId) has reported progress",
       "await-snapshot               wait for a ProjectSnapshot newer than the last request",
       "                             (or than the previous await-snapshot; one per await)",
       "await-reply [REQUESTID]      collect the reply of a no-wait request (default the oldest)",
@@ -2810,30 +2810,22 @@ CommandRunner::Failure CommandRunner::awaitTaskProgress(
     return error;
   if (m_session->state() != SessionState::Connected)
     return std::string("not connected (") + toString(m_session->state()) + ")";
-  // One TaskProgress of that task, from now on: what was heard before this
-  // command is not it. A task that ends first will send no more, so its end
-  // stops the wait as a FAIL rather than the deadline.
+  // Until the task has reported progress at least once: a report an earlier
+  // command already drained counts, so an assert between the launch and this
+  // wait costs nothing. A task that ends first will report no more, so its
+  // end stops the wait, as a FAIL when it never reported.
   const auto idText = std::to_string(*id);
-  const auto wait = pumpUntilEvent(
-      [&](const Event &e) {
-        if (e.name != "TaskProgress")
-          return false;
-        for (const auto &[key, value] : e.fields)
-          if (key == "taskId")
-            return value == idText;
-        return false;
-      },
-      deadline,
-      nullptr,
-      LossEnds::Wait,
+  const auto wait = pumpUntil(
       [&] {
         const auto *task = m_session->task(*id);
-        return task && task->finished();
-      });
+        return task && (task->progressReports > 0 || task->finished());
+      },
+      deadline);
   if (wait != Wait::Done)
     return waitFailure(wait, "progress of task " + idText, deadline);
-  if (const auto *task = m_session->task(*id); task && task->finished()) {
-    return "task " + idText + " ended (" + toString(task->status)
+  const auto &task = *m_session->task(*id);
+  if (task.progressReports == 0) {
+    return "task " + idText + " ended (" + toString(task.status)
         + ") before reporting progress";
   }
   return {};

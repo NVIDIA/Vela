@@ -95,7 +95,9 @@ struct TaskRecord
   };
   Status status{Status::Queued};
   std::string message; // the completion message, or the failure's error
-  // The newest TaskProgress: current of total (0 = indeterminate).
+  // TaskProgress messages heard, and the newest one's current of total
+  // (0 = indeterminate).
+  size_t progressReports{0};
   uint64_t current{0};
   uint64_t total{0};
   // Frames written, as the end message reported it (a RenderShot; 0 else).
