@@ -281,8 +281,7 @@ void ProjectContext::installDatasetDirtyDelegate()
 
 void ProjectContext::markDatasetDirtyForObject(const vsr::scene::Object *object)
 {
-  if (!m_ctx || !object || m_syncingAnimationManager
-      || m_mutatingDatasetRuntime
+  if (!m_ctx || !object || m_syncingAnimationManager || m_mutatingDatasetRuntime
       || m_ctx->vsr.animationMgr.isApplyingAnimations())
     return;
   for (auto &dataset : m_project.datasets) {
@@ -974,6 +973,11 @@ bool ProjectContext::updateShot(const Shot &incoming, std::string *error)
   Shot shot = incoming;
   shot.camera = existing->camera;
   shot.playing = existing->playing;
+  // Time in Motion is the manager's: an edit landing while the shot plays
+  // (a loop or fps change from a transport) must not seek it back to the
+  // frame the editor last saw.
+  if (existing->playing)
+    shot.currentFrame = existing->currentFrame;
   shot::clampToValidRanges(shot);
   shot.datasetBindings.erase(std::remove_if(shot.datasetBindings.begin(),
                                  shot.datasetBindings.end(),
@@ -1554,8 +1558,7 @@ bool ProjectContext::saveDatasetArchive(
   // destroy a valid pair already at the target.
   const auto sources = sourceListFilePath(file);
   const auto stageName = [](const std::filesystem::path &target) {
-    return target.parent_path()
-        / ("." + target.filename().string() + ".stage");
+    return target.parent_path() / ("." + target.filename().string() + ".stage");
   };
   const auto stagedFile = stageName(file);
   const auto stagedSources = stageName(sources);

@@ -94,9 +94,13 @@ void Timeline::sendDraft(int currentFrame)
   Shot shot = *m_draft;
   shot.frameCount = std::max(1, shot.frameCount);
   shot.fps = std::max(1.f, shot.fps);
-  // The server replaces its copy wholesale; carrying the frame it is showing
-  // keeps an fps or loop edit from also jumping in time.
-  shot.currentFrame = std::clamp(currentFrame, 0, shot.frameCount - 1);
+  // The server replaces its copy wholesale. While paused, the frame shown (a
+  // scrub included) rides along so an fps or loop edit does not also jump in
+  // time; while playing, Time in Motion is the server's alone, so the
+  // replica's resting frame goes (the header frame would seek the server
+  // back by the wire's latency) and the server keeps its own anyway.
+  const int frame = shot.playing ? shot.currentFrame : currentFrame;
+  shot.currentFrame = std::clamp(frame, 0, shot.frameCount - 1);
   *m_draft = shot;
   m_pendingUpdate =
       ops().updateShot(shot, [this](const protocol::ProjectOpReply &reply) {
