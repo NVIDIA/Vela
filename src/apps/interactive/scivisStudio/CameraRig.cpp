@@ -19,7 +19,7 @@ namespace vsr::scivis_studio::camera_rig {
 
 CameraRigID nextCameraRigId(const Project &project)
 {
-  return project::makeGeneratedId("cameraRig", project.cameraRigs.size() + 1);
+  return project::nextUnusedId("cameraRig", project.cameraRigs);
 }
 
 CameraRig *findCameraRig(Project &project, const CameraRigID &id)
