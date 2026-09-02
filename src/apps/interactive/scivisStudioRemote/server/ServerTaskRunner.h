@@ -45,10 +45,12 @@ struct RanTask
  * iteration, between applying the Control-State Latch and rendering, so a
  * task runs to completion on the loop thread while frames pause. The runner
  * pushes the task's TaskProgress events and exactly one TaskCompleted or
- * TaskFailed. Cancel is cooperative and coarse: a task still in the queue is
- * dropped and reported as TaskFailed{"cancelled"}; the running one cannot be
- * interrupted (no ProjectContext operation has a cancel hook yet). Task ids
- * increase monotonically for the life of the runner and are never reused.
+ * TaskFailed. A body that throws is caught here and reported as TaskFailed
+ * with the exception's message, so no request can bring the loop down.
+ * Cancel is cooperative and coarse: a task still in the queue is dropped and
+ * reported as TaskFailed{"cancelled"}; the running one cannot be interrupted
+ * (no ProjectContext operation has a cancel hook yet). Task ids increase
+ * monotonically for the life of the runner and are never reused.
  *
  * Example:
  *   const auto taskId = runner.enqueue("import 'a.obj'", [&](auto &progress) {

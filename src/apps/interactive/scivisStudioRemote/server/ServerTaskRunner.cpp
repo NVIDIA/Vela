@@ -9,6 +9,8 @@
 #include "vsr/core/Logging.hpp"
 // std
 #include <algorithm>
+#include <exception>
+#include <string>
 #include <utility>
 
 namespace vsr::scivis_studio::server {
@@ -80,7 +82,18 @@ std::optional<RanTask> ServerTaskRunner::runOne()
 
   RanTask ran;
   ran.taskId = task.id;
-  ran.result = task.body(progress);
+  try {
+    ran.result = task.body(progress);
+  } catch (const std::exception &e) {
+    // A body that throws (a std::filesystem_error for a path the Data Roots
+    // admitted but the OS refuses, say) fails its task instead of taking the
+    // server down. How far it got is unknown, so the Project counts as
+    // changed and the client gets a snapshot to resync from.
+    ran.result = TaskResult{};
+    ran.result.ok = false;
+    ran.result.error = std::string("task aborted: ") + e.what();
+    ran.result.projectChanged = true;
+  }
   m_running.reset();
 
   if (ran.result.ok) {
