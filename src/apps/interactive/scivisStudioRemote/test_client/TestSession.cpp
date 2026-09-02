@@ -272,7 +272,22 @@ void TestSession::poll()
 {
   const auto now = Clock::now();
 
-  // 1. The IO thread's disconnect latch.
+  // 1. Inbound messages, on this thread only. They come before the disconnect
+  // latch so a peer's last words (an Error, then close) are still heard.
+  std::vector<Message> batch;
+  {
+    std::lock_guard lock(m_inboundMutex);
+    batch.swap(m_inbound);
+  }
+  for (const auto &msg : batch) {
+    if (m_phase == Phase::Idle)
+      break; // a handled message tore the connection down; drop the rest
+    handleMessage(msg);
+  }
+  if (m_phase != Phase::Idle)
+    consumeFrame();
+
+  // 2. The IO thread's disconnect latch.
   if (m_ioDisconnected.exchange(false)) {
     boost::system::error_code error;
     {
@@ -297,20 +312,6 @@ void TestSession::poll()
       break;
     }
   }
-
-  // 2. Inbound messages, on this thread only.
-  std::vector<Message> batch;
-  {
-    std::lock_guard lock(m_inboundMutex);
-    batch.swap(m_inbound);
-  }
-  for (const auto &msg : batch) {
-    if (m_phase == Phase::Idle)
-      break; // a handled message tore the connection down; drop the rest
-    handleMessage(msg);
-  }
-  if (m_phase != Phase::Idle)
-    consumeFrame();
 
   // 3. Completed sends that failed mean the link is gone.
   checkSendFailures();
@@ -685,9 +686,18 @@ void TestSession::handleMessage(const Message &msg)
     break;
   case StudioMessageType::Error: {
     const auto error = decode<Error>(msg);
-    m_lastError = error ? error->message : "(undecodable Error)";
+    const std::string text = error ? error->message : "(undecodable Error)";
+    event.fields.emplace_back("message", "\"" + text + "\"");
+    if (!m_bootstrapped) {
+      // Nothing of ours but the Hello is in flight before BootstrapEnd, so an
+      // Error here is the server turning the attempt down (a version it does
+      // not speak, say); it usually closes right after.
+      pushEvent(std::move(event));
+      attemptFailed("server refused: " + text);
+      return;
+    }
+    m_lastError = text;
     ++m_errorsReceived;
-    event.fields.emplace_back("message", "\"" + m_lastError + "\"");
     vsr::core::logWarning(
         "[TestSession] server error: %s", m_lastError.c_str());
     break;
