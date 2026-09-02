@@ -50,11 +50,13 @@ std::string formatUnixSeconds(int64_t seconds)
   if (seconds == 0)
     return {};
   const std::time_t t = std::time_t(seconds);
-  std::tm local{};
-  if (!localtime_r(&t, &local))
+  // std::localtime, as the rest of the tree (Viewport.cpp): the UI thread is
+  // the only caller, so the shared buffer is fine and MSVC needs no variant.
+  const std::tm *local = std::localtime(&t);
+  if (!local)
     return {};
   char buffer[32];
-  if (std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M", &local) == 0)
+  if (std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M", local) == 0)
     return {};
   return buffer;
 }
