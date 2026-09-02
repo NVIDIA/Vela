@@ -919,7 +919,10 @@ void Scene::removeNode(LayerNodeRef obj, bool deleteReferencedObjects)
       removeObject(o->value().getObject());
   }
 
-  layer->erase(obj);
+  // removeObject() already erased every node that referenced its object --
+  // `obj` itself when it is an object leaf -- so erase only what is left.
+  if (layer->at(obj.index()))
+    layer->erase(obj);
   signalLayerStructureChanged(layer);
 }
 
