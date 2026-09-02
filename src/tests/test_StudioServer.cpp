@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // catch
+#include "StudioRemoteTestHelpers.h"
 #include "catch.hpp"
 // vsr_scivis_studio_server_core
 #include "ServerOptions.h"
@@ -19,8 +20,6 @@
 #include "vsr/network/messages/TransferScene.hpp"
 // vsr_scene
 #include "vsr/scene/Scene.hpp"
-// anari
-#include <anari/anari_cpp.hpp>
 // std
 #include <atomic>
 #include <chrono>
@@ -45,35 +44,6 @@ std::vector<std::string> argv(std::initializer_list<const char *> items)
   std::vector<std::string> out{"scivisStudioServer"};
   out.insert(out.end(), items.begin(), items.end());
   return out;
-}
-
-bool waitFor(
-    const std::function<bool()> &done, std::chrono::milliseconds timeout = 5s)
-{
-  const auto deadline = std::chrono::steady_clock::now() + timeout;
-  while (std::chrono::steady_clock::now() < deadline) {
-    if (done())
-      return true;
-    std::this_thread::sleep_for(1ms);
-  }
-  return done();
-}
-
-// The session test needs a real device; absent builds skip rather than fail.
-bool helideAvailable()
-{
-  auto library = anari::loadLibrary("helide",
-      [](const void *,
-          ANARIDevice,
-          ANARIObject,
-          anari::DataType,
-          ANARIStatusSeverity,
-          ANARIStatusCode,
-          const char *) {});
-  if (!library)
-    return false;
-  anari::unloadLibrary(library);
-  return true;
 }
 
 // A raw NetworkClient that records every Studio message in arrival order.

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // catch
+#include "StudioRemoteTestHelpers.h"
 #include "catch.hpp"
 // vsr_scivis_studio_server_core
 #include "ServerOptions.h"
@@ -16,8 +17,6 @@
 // vsr_scene
 #include "vsr/scene/Scene.hpp"
 #include "vsr/scene/UpdateDelegate.hpp"
-// anari
-#include <anari/anari_cpp.hpp>
 // std
 #include <algorithm>
 #include <atomic>
@@ -37,61 +36,15 @@ using namespace std::chrono_literals;
 
 namespace {
 
-// The whole session needs a real device; absent builds skip rather than fail.
-bool helideAvailable()
+// A helide bootstrap under ctest parallelism must never trip the liveness
+// timers, and a real server takes longer than the fake one to come back.
+ConnectionTimings e2eTimings()
 {
-  auto library = anari::loadLibrary("helide",
-      [](const void *,
-          ANARIDevice,
-          ANARIObject,
-          anari::DataType,
-          ANARIStatusSeverity,
-          ANARIStatusCode,
-          const char *) {});
-  if (!library)
-    return false;
-  anari::unloadLibrary(library);
-  return true;
+  return fastTimings(200ms, 2s, 30s);
 }
 
-// Liveness timers short enough to observe a loss inside a test, long enough
-// that a helide bootstrap under ctest parallelism never trips them.
-ConnectionTimings fastTimings()
-{
-  ConnectionTimings t;
-  t.pingAfterQuiet = 200ms;
-  t.lossAfterSilence = 2s;
-  t.retryInitialDelay = 50ms;
-  t.retryMaxDelay = 200ms;
-  t.autoRetryFor = 30s;
-  return t;
-}
-
-// Drives poll() until `done` holds or the deadline passes.
-bool pollUntil(ServerConnection &connection,
-    const std::function<bool()> &done,
-    std::chrono::milliseconds timeout = 10s)
-{
-  const auto deadline = std::chrono::steady_clock::now() + timeout;
-  while (std::chrono::steady_clock::now() < deadline) {
-    connection.poll();
-    if (done())
-      return true;
-    std::this_thread::sleep_for(1ms);
-  }
-  connection.poll();
-  return done();
-}
-
-// Keeps polling for a fixed span; for asserting that nothing happens.
-void pollFor(ServerConnection &connection, std::chrono::milliseconds span)
-{
-  const auto deadline = std::chrono::steady_clock::now() + span;
-  while (std::chrono::steady_clock::now() < deadline) {
-    connection.poll();
-    std::this_thread::sleep_for(1ms);
-  }
-}
+// The end-to-end waits include a real bootstrap and a server restart.
+constexpr std::chrono::milliseconds E2E_TIMEOUT = 10s;
 
 // Every object type the Scene database holds; arrays ride the Structural
 // Mirror as descriptors, so they count too.
@@ -198,7 +151,7 @@ struct RunningServer
 
 struct Client
 {
-  Client() : connection(&mirror, fastTimings())
+  Client() : connection(&mirror, e2eTimings())
   {
     counter = mirror.updateDelegate().emplace<StructureCounter>();
     connection.onBootstrapComplete = [this]() { bootstraps++; };
@@ -214,17 +167,22 @@ struct Client
 
   bool waitConnectedAndBootstrapped(int expectedBootstraps)
   {
-    return pollUntil(connection, [&] {
-      return connection.state() == ConnectionState::Connected
-          && bootstraps == expectedBootstraps;
-    });
+    return pollUntil(
+        connection,
+        [&] {
+          return connection.state() == ConnectionState::Connected
+              && bootstraps == expectedBootstraps;
+        },
+        E2E_TIMEOUT);
   }
 
   // Polls until a Frame is taken; false on timeout.
   bool waitForFrame(vsr::network::Message &frame)
   {
     return pollUntil(
-        connection, [&] { return connection.takeLatestFrame(frame); });
+        connection,
+        [&] { return connection.takeLatestFrame(frame); },
+        E2E_TIMEOUT);
   }
 
   // The replica and the mirror agree with the given server after a bootstrap.
@@ -312,19 +270,26 @@ SCENARIO("scivisStudioServer and the client core run a session end to end",
           REQUIRE(pixels.size() == 64 * 48 * 4);
 
           // The FrameConfig ack follows the size change.
-          REQUIRE(pollUntil(client.connection, [&] {
-            return client.connection.frameConfig().width == 64
-                && client.connection.frameConfig().height == 48;
-          }));
+          REQUIRE(pollUntil(
+              client.connection,
+              [&] {
+                return client.connection.frameConfig().width == 64
+                    && client.connection.frameConfig().height == 48;
+              },
+              E2E_TIMEOUT));
 
           AND_THEN("a mirror camera edit reaches the server without an echo")
           {
             // Reading the server scene is only safe while it is not
             // rendering.
             client.connection.stopRendering();
-            REQUIRE(pollUntil(client.connection, [&] {
-              return server->server->sessionState() == SessionState::Connected;
-            }));
+            REQUIRE(pollUntil(
+                client.connection,
+                [&] {
+                  return server->server->sessionState()
+                      == SessionState::Connected;
+                },
+                E2E_TIMEOUT));
 
             const auto cameraIndex = shot->camera.objectIndex;
             REQUIRE(cameraIndex != VSR_INVALID_INDEX);
@@ -335,11 +300,14 @@ SCENARIO("scivisStudioServer and the client core run a session end to end",
             mirrorCamera->setParameter("fovy", 0.5f);
 
             auto &scene = server->scene();
-            REQUIRE(pollUntil(client.connection, [&] {
-              auto *camera = scene.getObject(ANARI_CAMERA, cameraIndex);
-              const auto fovy = camera->parameterValueAs<float>("fovy");
-              return fovy && *fovy == 0.5f;
-            }));
+            REQUIRE(pollUntil(
+                client.connection,
+                [&] {
+                  auto *camera = scene.getObject(ANARI_CAMERA, cameraIndex);
+                  const auto fovy = camera->parameterValueAs<float>("fovy");
+                  return fovy && *fovy == 0.5f;
+                },
+                E2E_TIMEOUT));
 
             pollFor(client.connection, 200ms);
             REQUIRE(client.counter->mutations == 0);
@@ -351,9 +319,12 @@ SCENARIO("scivisStudioServer and the client core run a session end to end",
               const auto objectsBefore = totalObjects(client.mirror);
               server->stop();
               REQUIRE(server->finished.load());
-              REQUIRE(pollUntil(client.connection, [&] {
-                return client.connection.state() == ConnectionState::Lost;
-              }));
+              REQUIRE(pollUntil(
+                  client.connection,
+                  [&] {
+                    return client.connection.state() == ConnectionState::Lost;
+                  },
+                  E2E_TIMEOUT));
               REQUIRE(client.connection.autoRetrying());
               REQUIRE(totalObjects(client.mirror) == objectsBefore);
               REQUIRE(client.connection.project() != nullptr);

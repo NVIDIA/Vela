@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // catch
+#include "StudioRemoteTestHelpers.h"
 #include "catch.hpp"
 // vsr_scivis_studio_client_core
 #include "ServerConnection.h"
@@ -48,45 +49,6 @@ void populate(vsr::scene::Scene &scene)
   geometry->setName(GEOMETRY_NAME);
   geometry->setParameter("radius", 0.25f);
   scene.insertChildObjectNode(layer->root(), geometry);
-}
-
-// Timings small enough to exercise every timer inside a test, generous
-// enough not to flake under ctest parallelism.
-ConnectionTimings fastTimings()
-{
-  ConnectionTimings t;
-  t.pingAfterQuiet = 100ms;
-  t.lossAfterSilence = 400ms;
-  t.retryInitialDelay = 50ms;
-  t.retryMaxDelay = 200ms;
-  t.autoRetryFor = 10s;
-  return t;
-}
-
-// Drives poll() until `done` holds or the deadline passes.
-bool pollUntil(ServerConnection &connection,
-    const std::function<bool()> &done,
-    std::chrono::milliseconds timeout = 5s)
-{
-  const auto deadline = std::chrono::steady_clock::now() + timeout;
-  while (std::chrono::steady_clock::now() < deadline) {
-    connection.poll();
-    if (done())
-      return true;
-    std::this_thread::sleep_for(1ms);
-  }
-  connection.poll();
-  return done();
-}
-
-// Keeps polling for a fixed span; for asserting that nothing happens.
-void pollFor(ServerConnection &connection, std::chrono::milliseconds span)
-{
-  const auto deadline = std::chrono::steady_clock::now() + span;
-  while (std::chrono::steady_clock::now() < deadline) {
-    connection.poll();
-    std::this_thread::sleep_for(1ms);
-  }
 }
 
 /*
