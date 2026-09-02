@@ -741,8 +741,8 @@ void Application::watchTasks()
       std::string text = label + " completed";
       if (task.framesCompleted != 0)
         text += " (" + std::to_string(task.framesCompleted) + " frames)";
-      if (!task.lastProgress.message.empty())
-        text += ": " + task.lastProgress.message;
+      if (!task.outcome.empty())
+        text += ": " + task.outcome;
       notify(text, false);
     } else if (task.state == TaskState::Failed) {
       std::string text = label + " failed";

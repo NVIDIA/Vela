@@ -671,14 +671,19 @@ SCENARIO(
           REQUIRE(f.ops().task(42)->state == TaskState::Failed);
         }
 
-        AND_THEN("a completion without a message clears the phase text")
+        AND_THEN("a completion without a message records no outcome")
         {
+          TaskProgress phase;
+          phase.taskId = 42;
+          phase.message = "writing";
+          f.server.send(encode(phase));
           TaskCompleted completed;
           completed.taskId = 42;
           f.server.send(encode(completed));
           REQUIRE(pollUntil(f.connection,
               [&] { return f.ops().task(42)->state == TaskState::Completed; }));
-          REQUIRE(f.ops().task(42)->lastProgress.message.empty());
+          REQUIRE(f.ops().task(42)->lastProgress.message == "writing");
+          REQUIRE(f.ops().task(42)->outcome.empty());
         }
 
         AND_THEN("cancelTask sends CancelTask for that id")
@@ -890,6 +895,7 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
         REQUIRE_FALSE(task->stale);
         REQUIRE(task->label == "Open project '/d/p'");
         REQUIRE(task->lastProgress.message == "/d/p/renders/shot_0001");
+        REQUIRE(task->outcome == "/d/p/renders/shot_0001");
         REQUIRE(task->framesCompleted == 3);
         REQUIRE(task->error.empty());
       }

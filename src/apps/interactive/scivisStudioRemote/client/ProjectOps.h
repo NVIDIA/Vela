@@ -77,7 +77,8 @@ struct TaskRecord
   uint64_t taskId{0};
   std::string label; // from the launching request, for the task panel
   TaskState state{TaskState::Queued};
-  TaskProgressInfo lastProgress;
+  TaskProgressInfo lastProgress; // keeps the last phase text once finished
+  std::string outcome; // TaskCompleted::message (an output directory, a name)
   std::string error; // TaskFailed::error
   // Frames a render wrote, from TaskCompleted or TaskFailed (a cancelled or
   // failed render leaves its partial frames on disk).
