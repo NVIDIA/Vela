@@ -87,18 +87,24 @@ struct FinishedTask
   std::string error;
   std::string message;
   uint64_t framesCompleted{0};
-  // A cancel was asked for while it ran: the CancelTask dispatched after the
-  // body returns is answered "ok" whatever the body then reported.
-  bool cancelRequested{false};
+  // A cancel was asked for while it ran and the body did not complete: the
+  // CancelTask dispatched after the body returns is answered "ok". A body
+  // that ignored the flag and completed leaves this false, and that cancel
+  // is refused with "task already finished".
+  bool cancelled{false};
+  // Its ending went out in a bootstrap replay; the next one skips it.
+  bool replayed{false};
 };
 
-// What the replay says about the task running right now.
+// The task running right now: what the replay says of it, and whether it is
+// the exclusive one (the shot render) the dispatcher refuses mutations for.
 struct RunningTask
 {
   uint64_t taskId{0};
   std::string description;
   uint64_t current{0};
   uint64_t total{0};
+  bool exclusive{false};
 };
 
 /*
@@ -114,17 +120,20 @@ struct RunningTask
  * Cancel is cooperative: a task still in the queue is dropped and reported
  * as TaskFailed{"cancelled"}; for the running one the IO thread raises the
  * cancel flag (requestCancelRunning) that a body polls through its
- * TaskControl, and the CancelTask itself, dispatched once the body has
- * returned, is answered "ok" because the flag was raised for that task. An
- * exclusive task (the shot render) makes the dispatcher refuse mutating
- * requests while it is queued or running.
+ * TaskControl. The CancelTask itself, dispatched once the body has
+ * returned, is answered "ok" when the body stopped short of completing (the
+ * render at its next frame) and "task already finished" when it ignored the
+ * flag and completed anyway (every other body today). An exclusive task
+ * (the shot render) makes the dispatcher refuse mutating requests while it
+ * is queued or running.
  *
- * The runner remembers every task that ended since the last replayTo() (up
- * to HISTORY_CAP), so a client that connects after a task finished with
- * nobody listening still hears how it ended: the bootstrap replays each
- * ending verbatim, then a TaskProgress describing the running task if there
- * is one. Task ids increase monotonically for the life of the runner and
- * are never reused.
+ * The runner remembers the last HISTORY_CAP tasks that ended, so a client
+ * that connects after a task finished with nobody listening still hears how
+ * it ended: the bootstrap replays each ending not replayed before, verbatim,
+ * then a TaskProgress describing the running task if there is one. A
+ * replayed ending stays known, so a CancelTask naming it is still told the
+ * task finished rather than that it never existed. Task ids increase
+ * monotonically for the life of the runner and are never reused.
  *
  * Example:
  *   const auto taskId = runner.enqueue("import 'a.obj'", [&](auto &task) {
@@ -153,9 +162,9 @@ struct ServerTaskRunner
       std::string description, TaskBody body, bool exclusive = false);
 
   // Loop thread. Removes a queued task (TaskFailed{"cancelled"} is sent), or
-  // acknowledges the cancel of a task that was asked to stop while running.
-  // False with `error` for the running task, a task that already finished
-  // without a cancel, or an unknown id.
+  // acknowledges the cancel of a task that stopped when asked to while
+  // running. False with `error` for the running task, a task that finished
+  // (completed, or failed on its own), or an unknown id.
   bool cancel(uint64_t taskId, std::string *error = nullptr);
 
   // Any thread. Raises the cancel flag when `taskId` is the running task;
@@ -174,9 +183,9 @@ struct ServerTaskRunner
   // and the next bootstrap's replay reports how it ended.
   void dropQueued();
 
-  // The task-status replay: every ending since the last replay, verbatim,
-  // then the running task as a TaskProgress whose message is its
-  // description. Forgets the endings it sent.
+  // The task-status replay: every ending not replayed before, verbatim, then
+  // the running task as a TaskProgress whose message is its description.
+  // The endings stay in finished(), marked replayed.
   void replayTo(const SendFunction &send);
 
   size_t queued() const;
@@ -196,12 +205,14 @@ struct ServerTaskRunner
   };
 
   const FinishedTask *findFinished(uint64_t taskId) const;
+  // Sends the ending and keeps it for the replay, forgetting the oldest
+  // beyond HISTORY_CAP.
+  void recordEnding(FinishedTask finished);
 
   SendFunction m_send;
   std::deque<QueuedTask> m_queue;
   uint64_t m_nextTaskId{1};
   std::optional<RunningTask> m_running;
-  bool m_runningExclusive{false};
   std::deque<FinishedTask> m_finished;
 
   // Shared with the IO thread: the running task's id (0 = none) and the id a
