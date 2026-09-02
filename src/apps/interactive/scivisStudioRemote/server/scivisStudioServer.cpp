@@ -7,6 +7,7 @@
 #include "vsr/core/Logging.hpp"
 // std
 #include <csignal>
+#include <cstdio>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -42,7 +43,10 @@ int main(int argc, const char **argv)
     return 0;
   }
 
-  // Without a logging callback every status and error line is dropped.
+  // Without a logging callback every status and error line is dropped. Line
+  // buffering keeps the lines flowing when stdout is a pipe or a file, so a
+  // launcher can wait for "Listening on port" instead of probing the socket.
+  std::setvbuf(stdout, nullptr, _IOLBF, 0);
   vsr::core::setLogToStdout();
 
   StudioServer server(options);
