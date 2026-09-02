@@ -252,6 +252,7 @@ own except those a fresh server mints deterministically (`shot_0001`,
 | `tasks.studio` | a task's progress and completion, two imports queued with the second cancelled before it runs (`no-wait`, `await-reply`), cancel errors |
 | `browse.studio` | `list-roots`, listings inside the root (a saved project marked `ProjectDirectory`), refusals outside the roots, on a file and on a missing directory |
 | `errors_project.studio` | unknown ids of every collection, paths outside the Data Roots, an unsaved project's `save-project`, an `open-project` task that fails; nothing changes |
+| `all_m5.studio` | the milestone-5 surface in one session: a project with a dataset, rigs, a color map and a bound second shot is saved, replaced by `new-project`, reopened and checked collection by collection; a sync op queued behind an import waits for it (the new shot binds the imported dataset); a cancelled task ahead of a sync op does not hold it up; frames follow the active shot throughout |
 
 ### By hand
 
