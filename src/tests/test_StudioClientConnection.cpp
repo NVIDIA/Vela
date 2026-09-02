@@ -460,6 +460,43 @@ SCENARIO("ServerConnection watches liveness", "[StudioClient]")
   }
 }
 
+SCENARIO("ServerConnection rejects messages outside the Studio set",
+    "[StudioClient]")
+{
+  GIVEN("a connected client")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+
+    WHEN("the server sends the type bytes the enum never assigns")
+    {
+      // 0 is the sentinel, 255 the transport's MESSAGE_TYPE_INVALID.
+      for (int outsideType : {0, 255}) {
+        Message outside;
+        outside.header.type = uint8_t(outsideType);
+        f.server.send(std::move(outside));
+      }
+
+      THEN("each is answered with an Error naming the type")
+      {
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.server.count(StudioMessageType::Error) == 2; }));
+        const auto errors = f.server.messagesOf(StudioMessageType::Error);
+        std::vector<std::string> texts;
+        for (const auto &msg : errors) {
+          const auto error = decode<Error>(msg);
+          REQUIRE(error);
+          texts.push_back(error->message);
+        }
+        REQUIRE(texts[0].find("unknown message type 0") != std::string::npos);
+        REQUIRE(texts[1].find("unknown message type 255") != std::string::npos);
+        REQUIRE(f.connection.state() == ConnectionState::Connected);
+      }
+    }
+  }
+}
+
 SCENARIO("ServerConnection keeps only the latest frame", "[StudioClient]")
 {
   GIVEN("a connected client")

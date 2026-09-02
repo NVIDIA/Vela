@@ -418,22 +418,29 @@ SCENARIO("StudioServer runs a viewer-parity session", "[StudioServer]")
 
           AND_THEN("unknown and unimplemented messages are refused loudly")
           {
-            client.clear();
-            Message outside;
-            outside.header.type = 200;
-            client.channel->send(std::move(outside));
-            REQUIRE(client.waitForCount(StudioMessageType::Error, 1));
-            auto refused = decode<Error>(client.last(StudioMessageType::Error));
-            REQUIRE(refused);
-            REQUIRE(refused->message.find("unknown message type 200")
-                != std::string::npos);
+            // 0 and 255 are the type bytes the enum never assigns (255 is the
+            // transport's MESSAGE_TYPE_INVALID); 200 is a gap in the middle.
+            for (int outsideType : {200, 0, 255}) {
+              client.clear();
+              Message outside;
+              outside.header.type = uint8_t(outsideType);
+              client.channel->send(std::move(outside));
+              REQUIRE(client.waitForCount(StudioMessageType::Error, 1));
+              const auto refused =
+                  decode<Error>(client.last(StudioMessageType::Error));
+              REQUIRE(refused);
+              REQUIRE(refused->message.find(
+                          "unknown message type " + std::to_string(outsideType))
+                  != std::string::npos);
+            }
 
             client.clear();
             Message newProject;
             newProject.header.type = uint8_t(StudioMessageType::NewProject);
             client.channel->send(std::move(newProject));
             REQUIRE(client.waitForCount(StudioMessageType::Error, 1));
-            refused = decode<Error>(client.last(StudioMessageType::Error));
+            const auto refused =
+                decode<Error>(client.last(StudioMessageType::Error));
             REQUIRE(refused);
             REQUIRE(refused->message.find("not implemented in this server")
                 != std::string::npos);
