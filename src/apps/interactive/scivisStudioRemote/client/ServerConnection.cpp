@@ -3,11 +3,14 @@
 
 #include "ServerConnection.h"
 #include "MirrorUpdateDelegate.h"
+#include "ProjectOps.h"
 // vsr_scivis_studio_protocol
+#include "ProjectOpReply.h"
 #include "ProjectSnapshot.h"
 #include "SceneMessages.h"
 #include "SessionMessages.h"
 #include "StudioProtocol.h"
+#include "TaskMessages.h"
 // vsr_scivis_studio_model
 #include "Project.h"
 // vsr_network
@@ -64,6 +67,8 @@ ServerConnection::ServerConnection(
       m_channel(std::make_shared<vsr::network::NetworkClient>()),
       m_status("not connected")
 {
+  m_projectOps = std::make_unique<ProjectOps>(
+      [this](vsr::network::Message &&msg) { return trySend(std::move(msg)); });
   if (m_mirror) {
     m_delegate = m_mirror->updateDelegate().emplace<MirrorUpdateDelegate>(
         [this](vsr::network::Message &&msg) { sendMessage(std::move(msg)); });
@@ -144,6 +149,32 @@ bool ServerConnection::takeLatestFrame(vsr::network::Message &out)
   return true;
 }
 
+ProjectOps &ServerConnection::projectOps()
+{
+  return *m_projectOps;
+}
+
+const ProjectOps &ServerConnection::projectOps() const
+{
+  return *m_projectOps;
+}
+
+const std::optional<TimeAdvanceWarning> &
+ServerConnection::lastTimeAdvanceWarning() const
+{
+  return m_timeAdvanceWarning;
+}
+
+void ServerConnection::clearTimeAdvanceWarning()
+{
+  m_timeAdvanceWarning.reset();
+}
+
+const SubtreePtr &ServerConnection::uiState() const
+{
+  return m_uiState;
+}
+
 // User intentions ////////////////////////////////////////////////////////////
 
 void ServerConnection::connect(const std::string &host, short port)
@@ -180,9 +211,13 @@ void ServerConnection::disconnect()
   closeChannel();
   m_autoRetryEnabled = false;
   m_bootstrapping = false;
+  m_projectOps->failAllPending("connection lost");
+  m_projectOps->clearTasks();
   clearMirror();
   m_project.reset();
   m_frameConfig = {};
+  m_timeAdvanceWarning.reset();
+  m_uiState.reset();
   {
     std::lock_guard lock(m_inboundMutex);
     m_latestFrame.reset();
@@ -239,6 +274,7 @@ void ServerConnection::poll()
       break; // handled message tore the connection down; drop the rest
     handleMessage(msg);
   }
+  m_projectOps->poll();
 
   // 3. Completed sends that failed mean the link is gone.
   checkSendFailures();
@@ -301,9 +337,15 @@ void ServerConnection::stopRendering()
 
 void ServerConnection::sendMessage(vsr::network::Message &&msg)
 {
+  trySend(std::move(msg));
+}
+
+bool ServerConnection::trySend(vsr::network::Message &&msg)
+{
   if (m_phase != Phase::Established)
-    return;
+    return false;
   m_sendFutures.push_back(m_channel->send(std::move(msg)));
+  return true;
 }
 
 void ServerConnection::replyError(const std::string &text)
@@ -438,6 +480,9 @@ void ServerConnection::declareLoss(const std::string &reason)
   m_phase = Phase::Idle;
   m_bootstrapping = false;
   closeChannel();
+  // Connection-scoped request failure: nothing waits on a reply that can no
+  // longer come.
+  m_projectOps->failAllPending("connection lost");
   const auto now = Clock::now();
   m_lostAt = now;
   m_retryDelay = m_timings.retryInitialDelay;
@@ -546,6 +591,68 @@ void ServerConnection::handleMessage(const vsr::network::Message &msg)
       return;
     }
     m_project = std::make_unique<Project>(std::move(snapshot->project));
+    if (onProjectReplaced)
+      onProjectReplaced();
+    return;
+  }
+  case StudioMessageType::ProjectOpReply: {
+    const auto reply = decode<ProjectOpReply>(msg);
+    if (!reply) {
+      vsr::core::logError("[ServerConnection] undecodable ProjectOpReply");
+      return;
+    }
+    m_projectOps->handleReply(*reply);
+    return;
+  }
+  case StudioMessageType::TaskProgress: {
+    const auto progress = decode<TaskProgress>(msg);
+    if (!progress) {
+      vsr::core::logError("[ServerConnection] undecodable TaskProgress");
+      return;
+    }
+    m_projectOps->handleTaskProgress(*progress);
+    return;
+  }
+  case StudioMessageType::TaskCompleted: {
+    const auto completed = decode<TaskCompleted>(msg);
+    if (!completed) {
+      vsr::core::logError("[ServerConnection] undecodable TaskCompleted");
+      return;
+    }
+    m_projectOps->handleTaskCompleted(*completed);
+    return;
+  }
+  case StudioMessageType::TaskFailed: {
+    const auto failed = decode<TaskFailed>(msg);
+    if (!failed) {
+      vsr::core::logError("[ServerConnection] undecodable TaskFailed");
+      return;
+    }
+    m_projectOps->handleTaskFailed(*failed);
+    return;
+  }
+  case StudioMessageType::TimeAdvanceWarning: {
+    const auto warning = decode<TimeAdvanceWarning>(msg);
+    if (!warning) {
+      vsr::core::logError("[ServerConnection] undecodable TimeAdvanceWarning");
+      return;
+    }
+    vsr::core::logWarning(
+        "[ServerConnection] time advance warning (%s @ %d):"
+        " %s",
+        warning->shotId.c_str(),
+        warning->frame,
+        warning->message.c_str());
+    m_timeAdvanceWarning = *warning;
+    return;
+  }
+  case StudioMessageType::UIState: {
+    const auto state = decode<UIState>(msg);
+    if (!state) {
+      vsr::core::logError("[ServerConnection] undecodable UIState");
+      return;
+    }
+    m_uiState = state->tree;
     return;
   }
   default:
