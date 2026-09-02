@@ -72,6 +72,7 @@ class Application : public vsr::ui::imgui::Application
   void onStateChanged(ConnectionState from, ConnectionState to);
   void onMirrorReplaceBegin();
   void onBootstrapComplete();
+  void onProjectReplaced();
   void releaseMirror();
   void enterHomeState();
   void resolveActiveShotCamera();

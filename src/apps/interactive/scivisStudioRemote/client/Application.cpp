@@ -154,6 +154,7 @@ Application::Application(int argc, const char **argv)
   };
   m_connection->onMirrorReplaceBegin = [this] { onMirrorReplaceBegin(); };
   m_connection->onBootstrapComplete = [this] { onBootstrapComplete(); };
+  m_connection->onProjectReplaced = [this] { onProjectReplaced(); };
   m_connection->onServerError = [](const std::string &message) {
     vsr::core::logError("[Client] server reported: %s", message.c_str());
   };
@@ -403,6 +404,16 @@ void Application::onStateChanged(ConnectionState from, ConnectionState to)
 void Application::onMirrorReplaceBegin()
 {
   releaseMirror();
+}
+
+// Any snapshot may have swapped the active shot or its camera object
+// (NewProject, OpenProject, CreateShot, SetActiveShot, RemoveShot); the
+// bootstrap's own snapshot is covered by onBootstrapComplete.
+void Application::onProjectReplaced()
+{
+  if (m_connection->bootstrapping())
+    return;
+  resolveActiveShotCamera();
 }
 
 void Application::onBootstrapComplete()
