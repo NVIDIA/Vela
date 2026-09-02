@@ -106,9 +106,10 @@ dispatch a task op checks only the paths it names against the Data Roots;
 whatever it reads from the Project (a dataset id, the project's own directory
 for a `SaveProject` without one) it reads when the task runs, since a task
 queued ahead of it may still change the Project. A sync op the client sent
-after a task waits until that task has run; task requests do not wait, and
-`CancelTask` and Remote Browse are served even from behind a waiting sync op
-(they touch neither Project nor Scene).
+after a task waits until that task has run; task requests do not wait --
+except `RenderShot`, whose sync prelude reads the Project and so waits like
+a sync op -- and `CancelTask` and Remote Browse are served even from behind
+a waiting sync op (they touch neither Project nor Scene).
 
 Server Tasks (`server/ServerTaskRunner`) run on the render loop, one per
 iteration, to completion; frames pause while one runs (the client keeps its
@@ -119,17 +120,20 @@ frame/frames). `CancelTask` removes a task still queued
 body that polls its cancel flag (today the shot render, see milestone 7) --
 the flag is raised on the IO thread the moment the `CancelTask` is decoded,
 the body stops at its next frame, and the `CancelTask` itself, dispatched
-once the body has returned, is answered "ok". A `CancelTask` for a task that
-already ended without a cancel is refused with "task already finished", one
-for an id never issued with "unknown task N". A body that throws (a filesystem
+once the body has returned, is answered "ok" because the body stopped short.
+A body that completed regardless of the flag (every other task) was not
+cancelled: that `CancelTask`, like one for any task that already ended, is
+refused with "task already finished" for as long as the runner's history
+holds the ending (the last 32); one for an id never issued gets "unknown
+task N". A body that throws (a filesystem
 error on a path the roots admitted) fails its task rather than the server.
 Queued tasks die with the session they were sent on -- except a queued shot
 render, which like a running one outlives its session and runs with nobody
 listening -- and the client fails its open task records with "connection
 lost" at every `BootstrapBegin` for the same reason; the task-status replay
 inside the bracket revives the ones the server finished or is still running:
-the runner keeps every ending since the last bootstrap (at most 32) and the
-bootstrap sends each `TaskCompleted`/`TaskFailed` verbatim between `UIState`
+the runner keeps the last 32 endings and the bootstrap sends each one not
+replayed before, `TaskCompleted`/`TaskFailed` verbatim, between `UIState`
 and the `ProjectSnapshot`, then a `TaskProgress{message = description}` for a
 task running at that moment. `OpenProject` goes through `stageProjectOpen` then
 `ProjectContext::openStagedProject`, both on the loop thread, so a later
@@ -293,8 +297,10 @@ no control stays greyed until the connection is lost. `PROTOCOL_VERSION` is
   runner's cancel flag on the IO thread; the body stops before its next frame
   (granularity: one frame times `samples` renders), the task ends
   `TaskFailed{"cancelled", framesCompleted}`, and the `CancelTask` reply is
-  "ok" once dispatched after the body returns. Frames already written stay
-  on disk. `Shutdown` stops a running render the same way. A `CancelTask`
+  "ok" once dispatched after the body returns (for a task that completed
+  regardless of the flag it is "task already finished"). Frames already
+  written stay on disk. `Shutdown` stops a running render the same way. A
+  `CancelTask`
   that reaches the IO thread in the instant between the render leaving the
   queue and its body starting misses the flag and is answered "task already
   finished" after the render completes; the window is a few microseconds.
@@ -304,12 +310,17 @@ no control stays greyed until the connection is lost. `PROTOCOL_VERSION` is
   task -- including a second `RenderShot` -- is refused with "render in
   progress" when dispatched, and is not held back behind the render to be
   served later; `ListRoots`, `ListDirectory`, `RequestArrayHistogram` and
-  `CancelTask` are served. Requests that *arrive* while the body runs are
-  latched and dispatched after it, when the render is over, so they are
-  served normally. Scene edits, `SetTime` and `Pick` latched during the body
-  targeted a scene the render was mutating: the edits and the scrub are
-  dropped with a log line, the pick is answered `Error{"Pick N refused:
-  render in progress"}`.
+  `CancelTask` are served. A `RenderShot` sent behind queued tasks (a
+  `SaveProject`, an `OpenProject`) waits for them like a sync op, since its
+  prelude reads the Project; its body fails with "shot 'X' is no longer
+  active" should the shot it named not be the active one when it runs.
+  Requests that *arrive* while the body runs are latched and dispatched
+  after it, when the render is over, so they are served normally. Scene
+  edits, `SetTime` and `Pick` latched during the body targeted a scene the
+  render was mutating: the edits and the scrub are dropped with a log line,
+  the pick is answered `Error{"Pick N refused: render in progress"}` -- the
+  moment the body returns, before its ending goes out, so anything sent on
+  hearing the ending is served.
 - **Sessions.** A render survives its session, queued or running: the body
   runs with nobody listening and the next bootstrap's task-status replay
   reports how it ended. A client that connects mid-render is bootstrapped
@@ -417,12 +428,15 @@ reconnects; a replayed `TaskCompleted`/`TaskFailed` of a task nobody here
 launched is labelled "Task N". At `BootstrapBegin` every Queued or Running
 record is failed with "connection lost" and marked `stale`; the replay
 inside the bracket revives a stale record the server speaks of again (same
-label, state starts over), and a restarted server reusing the id does the
-same through the new request's reply. Stale records the server never
+label, state starts over). A `TaskStarted` reply, and a `TaskProgress` for a
+record that finished, start the record over instead (label, state, progress
+and outcome): a restarted server counts ids from 1 again, so an id that
+already finished here names a new task. Stale records the server never
 mentions again stay Failed until "Clear finished" -- they were queued tasks
 the server dropped with the old session. Completion toasts fire once per
 state change, replayed outcomes included; the client's own "connection
-lost" failures do not toast (the banner said it).
+lost" failures do not toast (the banner said it) and do not count as
+announced, so the ending the replay brings for that task still does.
 
 **UI state.** The bootstrap's `UIState` is applied in `onBootstrapComplete`
 exactly as the monolith applies a loaded project's: `windows/<name>` through
@@ -445,7 +459,8 @@ once with "connection lost"; task records are handled at the next
 `BootstrapBegin` as above. Between a reconnect's Hello and its
 `BootstrapBegin` the client is `Connected` but not `bootstrapped()`: the
 replica on screen is the previous session's, so the editors stay read-only
-(`EditorContext::canSend`) -- a wait that lasts as long as the render a busy
+(`EditorContext::canSend`; the Object and Database editors' lock is released
+in `onBootstrapComplete`) -- a wait that lasts as long as the render a busy
 server finishes before it bootstraps anyone. A loss *during* a bootstrap empties the mirror
 instead of leaving the part that arrived (the replica is still the previous
 session's, since its snapshot comes last in the bracket). A retry greeted
@@ -525,7 +540,9 @@ reason. Nothing is silently open.
   client sends an empty name and the server numbers the shot.
 - **`CancelTask` on a finished task said "unknown task N"** (M5) --
   *fixed*: the runner's finished-task history distinguishes "task already
-  finished" from an id never issued.
+  finished" from an id never issued. The M7 fix-up keeps that history across
+  bootstraps (each replay used to clear it, so the distinction held only
+  until the next one), up to its 32-entry cap.
 - **Cancelling a lone queued task races the loop iteration that runs it**
   (M5) -- *v1 behaviour.* Single-lane, one task per iteration: a task queued
   by one iteration runs in the same one, so a `CancelTask` sent right after
@@ -558,6 +575,30 @@ reason. Nothing is silently open.
 - **Duplicated request-type lists and small copies across client files**
   (M5 review) -- *deferred* to a cleanup ticket; each list gained
   `RenderShot` in this milestone.
+
+### Milestone 7 review fix-ups
+
+Findings of the M7 review, all *fixed* on `m7/fixups`:
+
+- `CancelTask` on a running task whose body ignores the flag (every task
+  but the render) was answered "ok" after the task completed; now "task
+  already finished" -- a cancel counts only when the body stopped short.
+- The finished-task history was cleared by each replay; it is kept (marked
+  replayed) so a cancel of an ended task is told so after a bootstrap too.
+- Inputs latched during a render were discarded at the next loop iteration,
+  a window that also swallowed a `SetTime` or `Pick` sent on hearing
+  `TaskCompleted`; the discard now happens the moment the body returns.
+- `RenderShot` was dispatched ahead of tasks sent before it (a never-saved
+  project's `SaveProject`; an `OpenProject` that would replace the shot); it
+  waits for them, and the body checks the shot it named is still active.
+- A throw from the render's frame loop leaked the render index and a device
+  retain and left the shot's time and playing unrestored; scope guards.
+- Both clients: a restarted server reusing a finished record's task id left
+  the new task showing as finished; the launch reply or first progress
+  starts the record over.
+- GUI: the Object and Database editors unlocked at Hello, before the
+  reconnect's bootstrap; a replayed real failure could go un-toasted when
+  the bootstrap batch split across polls.
 
 ### Spec conformance
 
