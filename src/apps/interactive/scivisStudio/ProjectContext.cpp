@@ -9,6 +9,7 @@
 #include "ProjectPersistence.h"
 #include "ProjectSerialization.h"
 
+#include "vsr/core/ColorMapUtil.hpp"
 #include "vsr/core/DataTree.hpp"
 #include "vsr/core/Logging.hpp"
 #include "vsr/io/archives/LayerSubtreeArchive.hpp"
@@ -16,6 +17,7 @@
 #include "vsr/scene/objects/Array.hpp"
 #include "vsr/scene/objects/Camera.hpp"
 #include "vsr/scene/objects/Light.hpp"
+#include "vsr/scene/objects/Renderer.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -29,6 +31,14 @@ namespace vsr::scivis_studio {
 // Subtree Archive rather than a foreign-format importer. It is recorded as the
 // dataset's provenance and routes reimport back through the subtree loader.
 static constexpr const char *SUBTREE_IMPORTER_TYPE = "VSR_SUBTREE";
+
+// Samples in the Array a color map record names.
+static constexpr size_t COLOR_MAP_SAMPLES = 256;
+
+static std::string colorMapArrayName(const ColorMapID &id)
+{
+  return id + "_colormap";
+}
 
 static vsr::scene::LayerNodeRef findDirectChild(
     vsr::scene::LayerNodeRef parent, const std::string &name)
@@ -545,6 +555,86 @@ CameraRig *ProjectContext::activeShotCameraRig()
   return camera_rig::findCameraRig(m_project, shot->cameraRigId);
 }
 
+ColorMapRecord *ProjectContext::createColorMap(const std::string &name)
+{
+  if (!m_ctx)
+    return nullptr;
+
+  ColorMapRecord record;
+  record.id = project::nextColorMapId(m_project);
+  record.name = makeValidUniqueAssetName(m_project.colorMaps,
+      name.empty()
+          ? ("Color Map " + std::to_string(m_project.colorMaps.size() + 1))
+          : name);
+  createColorMapArray(record.id);
+  m_project.colorMaps.push_back(std::move(record));
+  m_project.markDirty();
+  return &m_project.colorMaps.back();
+}
+
+bool ProjectContext::renameColorMap(
+    const ColorMapID &id, const std::string &newName, std::string *error)
+{
+  if (!renameAssetImpl(m_project.colorMaps, id, newName, "color map", error))
+    return false;
+  m_project.markDirty();
+  return true;
+}
+
+bool ProjectContext::removeColorMap(const ColorMapID &id, std::string *error)
+{
+  auto itr = std::find_if(m_project.colorMaps.begin(),
+      m_project.colorMaps.end(),
+      [&](const ColorMapRecord &record) { return record.id == id; });
+  if (itr == m_project.colorMaps.end())
+    return fail("color map not found", error);
+
+  if (m_ctx) {
+    if (auto array = resolveColorMapArray(id))
+      m_ctx->vsr.scene.removeObject(array.data());
+  }
+  m_project.colorMaps.erase(itr);
+  m_project.markDirty();
+  return true;
+}
+
+vsr::scene::ArrayRef ProjectContext::resolveColorMapArray(
+    const ColorMapID &id) const
+{
+  if (!m_ctx)
+    return {};
+
+  const auto arrayName = colorMapArrayName(id);
+  size_t index = VSR_INVALID_INDEX;
+  vsr::core::foreach_item_const(
+      m_ctx->vsr.scene.objectDB().array, [&](const vsr::scene::Array *array) {
+        if (array && array->name() == arrayName)
+          index = array->index();
+      });
+  if (index == VSR_INVALID_INDEX)
+    return {};
+  return m_ctx->vsr.scene.getObject<vsr::scene::Array>(index);
+}
+
+vsr::scene::ArrayRef ProjectContext::createColorMapArray(const ColorMapID &id)
+{
+  auto array =
+      m_ctx->vsr.scene.createArray(ANARI_FLOAT32_VEC4, COLOR_MAP_SAMPLES);
+  array->setData(vsr::core::makeDefaultColorMap(COLOR_MAP_SAMPLES));
+  array->setName(colorMapArrayName(id));
+  return array;
+}
+
+void ProjectContext::ensureColorMapArrays()
+{
+  if (!m_ctx)
+    return;
+  for (const auto &record : m_project.colorMaps) {
+    if (!resolveColorMapArray(record.id))
+      createColorMapArray(record.id);
+  }
+}
+
 bool ProjectContext::saveCameraRigArchive(const CameraRigID &id,
     const std::filesystem::path &file,
     std::string *error)
@@ -819,6 +909,102 @@ bool ProjectContext::addShot(const std::string &name)
   m_project.activeShotId = shot.id;
   m_project.shots.push_back(std::move(shot));
   m_project.markDirty();
+  syncAnimationManagerToActiveShot();
+  applyActiveShot();
+  return true;
+}
+
+bool ProjectContext::removeShot(const ShotID &id, std::string *error)
+{
+  auto itr = std::find_if(m_project.shots.begin(),
+      m_project.shots.end(),
+      [&](const Shot &shot) { return shot.id == id; });
+  if (itr == m_project.shots.end())
+    return fail("shot not found", error);
+  if (m_project.shots.size() == 1)
+    return fail("cannot remove the last shot", error);
+
+  if (m_ctx) {
+    auto &scene = m_ctx->vsr.scene;
+    if (auto *camera = resolveShotCamera(*itr))
+      scene.removeObject(camera);
+    if (auto *layer = scene.layer("studio")) {
+      auto shotsRoot = findDirectChild(layer->root(), "shots");
+      if (auto shotNode = findDirectChild(shotsRoot, id))
+        scene.removeNode(shotNode, true);
+    }
+  }
+
+  const bool wasActive = m_project.activeShotId == id;
+  m_project.shots.erase(itr);
+  if (wasActive)
+    m_project.activeShotId = m_project.shots.front().id;
+  m_project.markDirty();
+  if (wasActive) {
+    syncAnimationManagerToActiveShot();
+    applyActiveShot();
+  }
+  return true;
+}
+
+bool ProjectContext::updateShot(const Shot &incoming, std::string *error)
+{
+  auto *existing = project::findShot(m_project, incoming.id);
+  if (!existing)
+    return fail("shot not found", error);
+  if (!incoming.lightRigId.empty()
+      && !light_rig::findLightRig(m_project, incoming.lightRigId))
+    return fail("light rig not found", error);
+  if (!incoming.cameraRigId.empty()
+      && !camera_rig::findCameraRig(m_project, incoming.cameraRigId))
+    return fail("camera rig not found", error);
+
+  const auto &settings = incoming.renderSettings;
+  if (m_ctx && settings.rendererObjectIndex != VSR_INVALID_INDEX) {
+    auto renderer = m_ctx->vsr.scene.getObject<vsr::scene::Renderer>(
+        settings.rendererObjectIndex);
+    if (!renderer || renderer->rendererDeviceName() != settings.rendererLibrary)
+      return fail("renderer " + std::to_string(settings.rendererObjectIndex)
+              + " does not belong to ANARI library '" + settings.rendererLibrary
+              + "'",
+          error);
+  }
+
+  Shot shot = incoming;
+  shot.camera = existing->camera;
+  shot.playing = existing->playing;
+  shot.frameCount = std::max(1, shot.frameCount);
+  shot.currentFrame = std::clamp(shot.currentFrame, 0, shot.frameCount - 1);
+  shot.fps = std::max(1.f, shot.fps);
+  shot.renderSettings.width = std::max(1u, shot.renderSettings.width);
+  shot.renderSettings.height = std::max(1u, shot.renderSettings.height);
+  shot.renderSettings.samples = std::max(1u, shot.renderSettings.samples);
+  shot.datasetBindings.erase(std::remove_if(shot.datasetBindings.begin(),
+                                 shot.datasetBindings.end(),
+                                 [&](const DatasetBinding &binding) {
+                                   return !project::findDataset(
+                                       m_project, binding.datasetId);
+                                 }),
+      shot.datasetBindings.end());
+
+  *existing = std::move(shot);
+  m_project.markDirty();
+  if (existing->id == m_project.activeShotId) {
+    syncAnimationManagerToActiveShot();
+    applyActiveShot();
+  }
+  return true;
+}
+
+bool ProjectContext::setActiveShot(const ShotID &id, std::string *error)
+{
+  if (!project::findShot(m_project, id))
+    return fail("shot not found", error);
+
+  if (m_project.activeShotId != id) {
+    m_project.activeShotId = id;
+    m_project.markDirty();
+  }
   syncAnimationManagerToActiveShot();
   applyActiveShot();
   return true;
@@ -1731,6 +1917,7 @@ bool ProjectContext::openProject(const std::filesystem::path &directory,
 
   m_project = std::move(stage.project);
   m_pendingAssetRemovals.clear();
+  ensureColorMapArrays();
   if (!m_project.shots.empty()) {
     if (m_project.cameraRigs.empty()) {
       CameraRig rig;
