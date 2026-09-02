@@ -3,8 +3,10 @@
 
 #pragma once
 
+// scivisStudioClient
 #include "EditorWindow.h"
 #include "RemoteBrowseDialog.h"
+#include "UICommon.h"
 // vsr_scivis_studio_model
 #include "LightRig.h"
 // vsr_scene
@@ -57,10 +59,7 @@ struct LightRigEditor : public EditorWindow
   RequestHandle m_pendingRename;
   RequestHandle m_pendingLightOp;
 
-  LightRigID m_nameBufferRig;
-  std::string m_nameBuffer;
-  std::string m_nameError;
-  bool m_nameStale{false};
+  ui::BufferedNameField m_nameField;
 
   LightRigID m_rigToRemove;
   RemoteBrowseDialog m_browse;

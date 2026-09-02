@@ -20,7 +20,6 @@ using namespace protocol;
 namespace {
 
 constexpr const char *REMOVE_POPUP = "Delete Camera Rig?";
-const std::vector<std::string> ARCHIVE_EXTENSIONS = {".vsr", ".tsd"};
 
 const char *interpolationLabel(CameraInterpolation interpolation)
 {
@@ -48,7 +47,8 @@ const char *upAxisLabel(int upAxis)
 void poseRows(const ManipulatorState &state)
 {
   const auto &pose = state.orbit;
-  ImGui::Text("Look at: %.3f %.3f %.3f", pose.lookat.x, pose.lookat.y, pose.lookat.z);
+  ImGui::Text(
+      "Look at: %.3f %.3f %.3f", pose.lookat.x, pose.lookat.y, pose.lookat.z);
   ImGui::Text("Azimuth / elevation / distance: %.3f %.3f %.3f",
       pose.azeldist.x,
       pose.azeldist.y,
@@ -73,7 +73,7 @@ CameraRigEditor::~CameraRigEditor() = default;
 
 void CameraRigEditor::onProjectReplaced()
 {
-  m_nameStale = true;
+  m_nameField.markStale();
 }
 
 // Selection //////////////////////////////////////////////////////////////////
@@ -174,7 +174,7 @@ void CameraRigEditor::buildUI_toolbar(const Project &project)
     BrowseRequest request;
     request.mode = BrowseMode::OpenFile;
     request.title = "Load Camera Rig Archive";
-    request.extensions = ARCHIVE_EXTENSIONS;
+    request.extensions = ui::archiveExtensions();
     request.startDirectory = project.projectDirectory;
     request.onAccept = [this, createdReply](
                            const std::vector<std::filesystem::path> &paths) {
@@ -187,39 +187,15 @@ void CameraRigEditor::buildUI_toolbar(const Project &project)
 
 void CameraRigEditor::buildUI_nameField(const CameraRig &rig)
 {
-  const bool refresh = m_nameStale && !ImGui::IsAnyItemActive()
-      && !pending(m_pendingRename);
-  if (m_nameBufferRig != rig.id || refresh) {
-    if (m_nameBufferRig != rig.id)
-      m_nameError.clear();
-    m_nameBufferRig = rig.id;
-    m_nameBuffer = rig.name;
-    m_nameStale = false;
-  }
-
-  ImGui::BeginDisabled(pending(m_pendingRename));
-  const bool entered = ImGui::InputText(
-      "Name", &m_nameBuffer, ImGuiInputTextFlags_EnterReturnsTrue);
-  const bool commit = entered || ImGui::IsItemDeactivatedAfterEdit();
-  ImGui::EndDisabled();
-
-  if (commit && m_nameBuffer != rig.name) {
-    const CameraRigID id = rig.id;
-    m_pendingRename = ops().renameCameraRig(
-        id, m_nameBuffer, [this, id](const ProjectOpReply &reply) {
-          if (reply.ok) {
-            m_nameError.clear();
-          } else {
-            m_nameError = reply.error;
-            if (m_nameBufferRig == id)
-              m_nameStale = true;
-          }
-        });
-  } else if (commit) {
-    m_nameError.clear();
-  }
-  if (!m_nameError.empty())
-    ui::errorText("Invalid name: " + m_nameError);
+  const auto newName = m_nameField.draw(
+      rig.id, rig.name, pending(m_pendingRename), "Invalid name: ");
+  if (!newName)
+    return;
+  const CameraRigID id = rig.id;
+  m_pendingRename = ops().renameCameraRig(
+      id, *newName, [this, id](const ProjectOpReply &reply) {
+        m_nameField.onReply(id, reply.ok, reply.error);
+      });
 }
 
 void CameraRigEditor::buildUI_rigActions(
@@ -243,7 +219,7 @@ void CameraRigEditor::buildUI_rigActions(
     BrowseRequest request;
     request.mode = BrowseMode::SaveFile;
     request.title = "Save Camera Rig Archive";
-    request.extensions = ARCHIVE_EXTENSIONS;
+    request.extensions = ui::archiveExtensions();
     request.startDirectory = project.projectDirectory;
     request.defaultName = (rig.name.empty() ? rig.id : rig.name) + ".vsr";
     const CameraRigID id = rig.id;
@@ -323,7 +299,8 @@ void CameraRigEditor::buildUI_keyframes(const CameraRig &rig)
     ImGui::EndTable();
   }
 
-  if (m_selectedKeyframe >= 0 && m_selectedKeyframe < int(rig.keyframes.size())) {
+  if (m_selectedKeyframe >= 0
+      && m_selectedKeyframe < int(rig.keyframes.size())) {
     const auto &keyframe = rig.keyframes[m_selectedKeyframe];
     const auto label = keyframe.name.empty()
         ? ("Keyframe pose: frame " + std::to_string(keyframe.frame))
@@ -343,30 +320,18 @@ void CameraRigEditor::buildPopups(const Project &project)
 
 void CameraRigEditor::buildUI_removeConfirmation(const Project &project)
 {
-  if (!ImGui::BeginPopupModal(
-          REMOVE_POPUP, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
-    return;
-
   const CameraRig *rig = replica::findCameraRig(project, m_rigToRemove);
   const size_t useCount = replica::cameraRigUseCount(project, m_rigToRemove);
-  ImGui::Text("Delete '%s' and clear %zu shot reference%s?",
-      rig ? rig->name.c_str() : m_rigToRemove.c_str(),
-      useCount,
-      useCount == 1 ? "" : "s");
-
-  ImGui::BeginDisabled(!canSend());
-  if (ImGui::Button("Delete")) {
+  const auto choice = ui::confirmModal(REMOVE_POPUP,
+      "Delete '" + (rig ? rig->name : m_rigToRemove) + "' and clear "
+          + std::to_string(useCount) + " shot reference"
+          + (useCount == 1 ? "" : "s") + "?",
+      "Delete",
+      canSend());
+  if (choice == ui::ConfirmChoice::Confirmed)
     m_pendingOp = ops().removeCameraRig(m_rigToRemove, errorReporter());
+  if (choice != ui::ConfirmChoice::Pending)
     m_rigToRemove.clear();
-    ImGui::CloseCurrentPopup();
-  }
-  ImGui::EndDisabled();
-  ImGui::SameLine();
-  if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-    m_rigToRemove.clear();
-    ImGui::CloseCurrentPopup();
-  }
-  ImGui::EndPopup();
 }
 
 } // namespace vsr::scivis_studio::client

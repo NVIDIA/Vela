@@ -3,8 +3,10 @@
 
 #pragma once
 
+// scivisStudioClient
 #include "EditorWindow.h"
 #include "RemoteBrowseDialog.h"
+#include "UICommon.h"
 // vsr_scivis_studio_model
 #include "CameraRig.h"
 // std
@@ -48,10 +50,7 @@ struct CameraRigEditor : public EditorWindow
   RequestHandle m_pendingOp;
   RequestHandle m_pendingRename;
 
-  CameraRigID m_nameBufferRig;
-  std::string m_nameBuffer;
-  std::string m_nameError;
-  bool m_nameStale{false};
+  ui::BufferedNameField m_nameField;
 
   CameraRigID m_rigToRemove;
   RemoteBrowseDialog m_browse;
