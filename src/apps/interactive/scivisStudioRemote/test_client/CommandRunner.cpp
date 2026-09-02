@@ -218,7 +218,8 @@ bool storeFloat(const std::string &text, std::byte *dst)
   return true;
 }
 
-bool storeComponent(Component component, const std::string &text, std::byte *dst)
+bool storeComponent(
+    Component component, const std::string &text, std::byte *dst)
 {
   switch (component) {
   case Component::Float32:
@@ -330,8 +331,9 @@ bool anyFromTokens(anari::DataType type,
   }
   std::vector<std::byte> bytes(anari::sizeOf(type));
   for (size_t i = 0; i < count; ++i) {
-    if (!storeComponent(
-            component->component, tokens[i], bytes.data() + i * component->size)) {
+    if (!storeComponent(component->component,
+            tokens[i],
+            bytes.data() + i * component->size)) {
       error = "not a " + shortTypeName(type) + " component: " + tokens[i];
       return false;
     }
@@ -352,8 +354,7 @@ std::string anyText(const Any &value)
   if (type == ANARI_BOOL)
     return value.get<bool>() ? "true" : "false";
   if (anari::isObject(type)) {
-    return shortTypeName(type) + ":"
-        + std::to_string(value.getAsObjectIndex());
+    return shortTypeName(type) + ":" + std::to_string(value.getAsObjectIndex());
   }
   const auto *component = componentOf(type);
   if (!component)
@@ -411,8 +412,7 @@ bool compareValues(const std::string &lhs,
   else if (op == ">=")
     result = cmp >= 0;
   else {
-    error = "unknown operator '" + op
-        + "'; valid: == != < <= > >= contains";
+    error = "unknown operator '" + op + "'; valid: == != < <= > >= contains";
     return false;
   }
   return true;
@@ -919,7 +919,8 @@ CommandRunner::Outcome CommandRunner::saveFrame(const Command &command)
 CommandRunner::Outcome CommandRunner::setParam(const Command &command)
 {
   if (command.args.size() < 5)
-    return argCountError(command, "<type> <index> <name> <anariType> <value...>");
+    return argCountError(
+        command, "<type> <index> <name> <anariType> <value...>");
   SceneObjectRef ref;
   std::string error;
   if (!parseObjectRef(command.args[0], command.args[1], ref, error))
@@ -992,8 +993,8 @@ CommandRunner::Outcome CommandRunner::dumpScene(const Command &command)
       if (!obj)
         return;
       printRecord("EVT Object type=" + shortTypeName(type)
-          + " index=" + std::to_string(obj->index()) + " subtype="
-          + obj->subtype().str() + " name=" + quoted(obj->name())
+          + " index=" + std::to_string(obj->index())
+          + " subtype=" + obj->subtype().str() + " name=" + quoted(obj->name())
           + " params=" + std::to_string(obj->numParameters()));
     });
   };
@@ -1053,12 +1054,13 @@ CommandRunner::Outcome CommandRunner::dumpFrame(const Command &command)
   const auto &header = m_session->lastFrameHeader();
   if (!header)
     return "no frame received yet";
+  const auto view = decodeFrame(m_session->lastFrame());
   printRecord("EVT Frame width=" + std::to_string(header->width)
       + " height=" + std::to_string(header->height)
       + " encoding=" + toString(header->encoding)
       + " pixelFormat=" + toString(header->pixelFormat)
       + " shotId=" + header->shotId + " frame=" + std::to_string(header->frame)
-      + " bytes=" + std::to_string(m_session->lastFrame().payload.size()));
+      + " bytes=" + std::to_string(view ? view->size : 0));
   return {};
 }
 
