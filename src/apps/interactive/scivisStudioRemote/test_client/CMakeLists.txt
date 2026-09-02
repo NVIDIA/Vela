@@ -100,3 +100,11 @@ add_studio_scenario(scrub)
 add_studio_scenario(pick)
 add_studio_scenario(viewport)
 add_studio_scenario(histogram)
+# Milestone 7: offline shot rendering, its cancel and pause-and-refuse, the
+# task-status replay, the UI state round trip, and loss while a task runs
+# (kill-restart mode). All but ui_state import the fixture OBJ.
+add_studio_scenario(render_shot)
+add_studio_scenario(render_cancel)
+add_studio_scenario(task_replay)
+add_studio_scenario(ui_state)
+add_studio_scenario(loss_during_task)

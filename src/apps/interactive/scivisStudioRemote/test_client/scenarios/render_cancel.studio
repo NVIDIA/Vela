@@ -1,0 +1,52 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# runner: fixture fixtures/triangle.obj
+#
+# Cancelling a running render, and pause-and-refuse while it runs. The cancel
+# is cooperative: the server honours a CancelTask naming the running render at
+# the next frame boundary, the task ends as TaskFailed "cancelled" carrying
+# the frames written so far, and the CancelTask's reply is ok. A mutating
+# request that reaches the server while the render runs is refused with
+# "render in progress"; it is sent no-wait ahead of the cancel so it is
+# answered while the render is still the running task.
+
+connect
+list-roots
+import-static-dataset $dataRoot/triangle.obj Tri OBJ
+await-task
+await-snapshot
+
+# Enough frames that the cancel lands well before the end.
+update-shot active frameCount=400 renderSettings.width=32 renderSettings.height=24 renderSettings.samples=1
+await-snapshot
+save-project $dataRoot/cancelproj
+await-task
+await-snapshot
+
+no-wait render-shot active
+await-reply
+await-task-progress
+assert task.last.state == Running
+assert task.last.total == 400
+
+# Refused while the render runs; collected after the cancel's own reply.
+no-wait expect-fail create-shot Late
+cancel-task $lastTaskId
+expect-fail await-reply
+assert lastReplyError contains progress
+
+await-task $lastTaskId expect-fail
+assert task.last.state == Failed
+assert task.last.message == cancelled
+assert task.last.framesCompleted >= 1
+assert task.last.framesCompleted < 400
+assert tasks.failed == 1
+assert project.shots == 1
+
+# Nothing is running any more: edits go through again.
+create-shot After
+await-snapshot
+assert project.shots == 2
+
+disconnect

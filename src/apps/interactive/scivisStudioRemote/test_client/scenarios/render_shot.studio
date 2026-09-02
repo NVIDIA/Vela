@@ -1,0 +1,49 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# runner: fixture fixtures/triangle.obj
+#
+# Offline shot rendering: RenderShot is a Server Task that walks the active
+# shot's frames, reporting determinate progress (current of total) and ending
+# with the frame count and the output directory; it needs a saved project, and
+# the refusal on an unsaved one is a reply, not a failed task.
+
+connect
+list-roots
+import-static-dataset $dataRoot/triangle.obj Tri OBJ
+await-task
+await-snapshot
+
+# Three tiny frames, one sample each: quick, and enough to count.
+update-shot active frameCount=3 renderSettings.width=32 renderSettings.height=24 renderSettings.samples=1
+await-snapshot
+save-project $dataRoot/renderproj
+await-task
+await-snapshot
+assert project.dirty == false
+
+# The render: the reply names the task, the progress prints frame by frame,
+# the end carries framesCompleted and the directory the frames went to.
+render-shot active
+await-task
+await-snapshot
+assert task.last.state == Completed
+assert task.last.framesCompleted == 3
+assert task.last.total == 3
+assert task.last.message contains renderproj
+assert tasks.completed == 3
+assert tasks.failed == 0
+# One file per frame in the output directory.
+list-directory $lastTaskMessage
+assert browse.entries == 3
+
+# An unsaved project has nowhere to render to: refused at once.
+new-project
+await-snapshot
+expect-fail render-shot active
+assert lastReplyError contains saved
+expect-fail render-shot shot_9999
+assert replies.failed == 2
+assert tasks.completed == 3
+
+disconnect
