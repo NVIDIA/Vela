@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "FrameCodec.h"
+// vsr_core
+#include "vsr/core/TypeMacros.hpp"
 #ifdef VSR_USE_TURBOJPEG
 // turbojpeg
 #include <turbojpeg.h>
@@ -26,8 +28,8 @@ struct TurboJpegHandle
 {
   explicit TurboJpegHandle(int initType);
   ~TurboJpegHandle();
-  TurboJpegHandle(const TurboJpegHandle &) = delete;
-  TurboJpegHandle &operator=(const TurboJpegHandle &) = delete;
+
+  VSR_NOT_COPYABLE(TurboJpegHandle)
 
   tjhandle handle{nullptr};
 };
