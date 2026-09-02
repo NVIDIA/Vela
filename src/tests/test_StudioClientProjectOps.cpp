@@ -63,6 +63,7 @@ std::optional<uint64_t> requestIdOf(const Message &msg)
 struct Fixture
 {
   Fixture(ConnectionTimings timings = fastTimings());
+  ~Fixture();
 
   void connect();
   bool waitConnectedAndBootstrapped(int expectedBootstraps = 1);
@@ -95,6 +96,14 @@ Fixture::Fixture(ConnectionTimings timings) : connection(&mirror, timings)
   };
   connection.onBootstrapComplete = [this]() { bootstraps++; };
   connection.onProjectReplaced = [this]() { projectReplaced++; };
+}
+
+Fixture::~Fixture()
+{
+  // The server's IO thread appends to `seen` from onRequest (a Disconnect
+  // the test sent last still counts), so it is joined before the members
+  // it writes to go away.
+  server.channel->stop();
 }
 
 void Fixture::connect()
