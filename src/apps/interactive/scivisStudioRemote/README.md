@@ -553,7 +553,8 @@ reason. Nothing is silently open.
   it is ever wanted.
 - **A cancelled render toasts as "failed: cancelled"** (M7 notes) -- *v1
   behaviour*: the task ended as `TaskFailed{"cancelled"}` and the toast says
-  so; the record keeps the frames written (`TaskRecord::framesCompleted`).
+  so; the Tasks panel row shows the frames written (the client core now
+  takes `framesCompleted` from `TaskFailed` as well as `TaskCompleted`).
 - **Duplicated request-type lists and small copies across client files**
   (M5 review) -- *deferred* to a cleanup ticket; each list gained
   `RenderShot` in this milestone.
