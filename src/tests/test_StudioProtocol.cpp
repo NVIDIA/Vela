@@ -103,6 +103,40 @@ SCENARIO("StudioMessageType enum", "[StudioProtocol]")
       REQUIRE(std::string(toString(StudioMessageType(0))) == "Unknown");
       REQUIRE(std::string(toString(StudioMessageType(255))) == "Unknown");
     }
+
+    THEN("isServerToClient() marks exactly the server-only types")
+    {
+      constexpr std::array SERVER_TO_CLIENT = {
+          StudioMessageType::BootstrapBegin,
+          StudioMessageType::BootstrapEnd,
+          StudioMessageType::ProjectOpReply,
+          StudioMessageType::ProjectSnapshot,
+          StudioMessageType::TaskProgress,
+          StudioMessageType::TaskCompleted,
+          StudioMessageType::TaskFailed,
+          StudioMessageType::TimeAdvanceWarning,
+          StudioMessageType::PickReply,
+          StudioMessageType::UIState,
+          StudioMessageType::TransferScene,
+          StudioMessageType::TransferLayer,
+          StudioMessageType::ObjectAdded,
+          StudioMessageType::ObjectRemoved,
+          StudioMessageType::FrameConfig,
+          StudioMessageType::Frame};
+      const std::set<StudioMessageType> serverOnly(
+          SERVER_TO_CLIENT.begin(), SERVER_TO_CLIENT.end());
+      for (auto t : ALL_MESSAGE_TYPES)
+        REQUIRE(isServerToClient(t) == (serverOnly.count(t) == 1));
+      // The session messages go both ways; the optimistic edits and the
+      // rendering controls are client-to-server.
+      static_assert(!isServerToClient(StudioMessageType::Hello));
+      static_assert(!isServerToClient(StudioMessageType::Error));
+      static_assert(!isServerToClient(StudioMessageType::SetObjectParameter));
+      static_assert(!isServerToClient(StudioMessageType::SetFrameConfig));
+      static_assert(isServerToClient(StudioMessageType::Frame));
+      REQUIRE_FALSE(isServerToClient(StudioMessageType(0)));
+      REQUIRE_FALSE(isServerToClient(StudioMessageType(255)));
+    }
   }
 }
 

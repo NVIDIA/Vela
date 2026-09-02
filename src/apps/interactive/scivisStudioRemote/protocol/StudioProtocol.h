@@ -114,6 +114,11 @@ enum class StudioMessageType : uint8_t
 // True only for values the enum defines; receivers reject anything else.
 constexpr bool isStudioMessageType(uint8_t value);
 
+// Types only the server emits: the bootstrap bracket, project and task
+// replies, scene pushes, FrameConfig and Frame. A client sending one is
+// confused, and a server tells it so rather than guessing.
+constexpr bool isServerToClient(StudioMessageType type);
+
 // Enumerator name, or "Unknown" for values outside the set.
 const char *toString(StudioMessageType type);
 
@@ -196,6 +201,31 @@ constexpr bool isStudioMessageType(uint8_t value)
   case StudioMessageType::SetEncodings:
   case StudioMessageType::StartRendering:
   case StudioMessageType::StopRendering:
+  case StudioMessageType::Frame:
+    return true;
+  default:
+    return false;
+  }
+}
+
+constexpr bool isServerToClient(StudioMessageType type)
+{
+  switch (type) {
+  case StudioMessageType::BootstrapBegin:
+  case StudioMessageType::BootstrapEnd:
+  case StudioMessageType::ProjectOpReply:
+  case StudioMessageType::ProjectSnapshot:
+  case StudioMessageType::TaskProgress:
+  case StudioMessageType::TaskCompleted:
+  case StudioMessageType::TaskFailed:
+  case StudioMessageType::TimeAdvanceWarning:
+  case StudioMessageType::PickReply:
+  case StudioMessageType::UIState:
+  case StudioMessageType::TransferScene:
+  case StudioMessageType::TransferLayer:
+  case StudioMessageType::ObjectAdded:
+  case StudioMessageType::ObjectRemoved:
+  case StudioMessageType::FrameConfig:
   case StudioMessageType::Frame:
     return true;
   default:
