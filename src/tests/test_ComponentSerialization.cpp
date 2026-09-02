@@ -177,3 +177,89 @@ SCENARIO("Layer components preserve their DataNode representation",
   REQUIRE(sawGroup);
   REQUIRE(sawInstance);
 }
+
+SCENARIO(
+    "Layer serialization can preserve node indices", "[ComponentSerialization]")
+{
+  GIVEN("a layer whose node slots are sparse")
+  {
+    vsr::scene::Scene sourceScene;
+    auto *sourceLayer = sourceScene.defaultLayer();
+    auto root = sourceLayer->root();
+    sourceScene.insertChildTransformNode(
+        root, vsr::math::IDENTITY_MAT4, "first");
+    auto doomed = sourceScene.insertChildTransformNode(
+        root, vsr::math::IDENTITY_MAT4, "doomed");
+    auto group = sourceScene.insertChildTransformNode(
+        root, vsr::math::IDENTITY_MAT4, "group");
+    auto leaf = sourceScene.insertChildTransformNode(
+        group, vsr::math::IDENTITY_MAT4, "leaf");
+    sourceScene.removeNode(doomed);
+    REQUIRE(group.index() == 3);
+    REQUIRE(leaf.index() == 4);
+
+    WHEN("it is serialized with Archive numbering")
+    {
+      vsr::core::DataTree tree;
+      vsr::io::serialize_Layer(*sourceLayer, tree.root());
+
+      THEN("no node records an index and reload numbers densely")
+      {
+        REQUIRE(tree.root().child("index") == nullptr);
+        REQUIRE(tree.root()["children"].child(0)->child("index") == nullptr);
+
+        vsr::scene::Scene targetScene;
+        auto *targetLayer = targetScene.defaultLayer();
+        vsr::io::deserialize_Layer(tree.root(), *targetLayer, targetScene);
+        REQUIRE(targetLayer->size() == 4);
+        REQUIRE(targetLayer->capacity() == 4);
+        REQUIRE((*targetLayer->at(2))->name() == "group");
+        REQUIRE((*targetLayer->at(3))->name() == "leaf");
+      }
+    }
+
+    WHEN("it is serialized with Preserved numbering")
+    {
+      vsr::core::DataTree tree;
+      vsr::io::serialize_Layer(
+          *sourceLayer, tree.root(), vsr::io::LayerNodeNumbering::Preserved);
+
+      THEN("every node records its index")
+      {
+        REQUIRE(tree.root()["index"].getValueAs<size_t>() == 0);
+        auto &groupNode = *tree.root()["children"].child(1);
+        REQUIRE(groupNode["index"].getValueAs<size_t>() == 3);
+        auto &leafNode = *groupNode["children"].child(0);
+        REQUIRE(leafNode["index"].getValueAs<size_t>() == 4);
+      }
+
+      THEN("reload places each node in its recorded slot")
+      {
+        vsr::scene::Scene targetScene;
+        auto *targetLayer = targetScene.defaultLayer();
+        vsr::io::deserialize_Layer(tree.root(), *targetLayer, targetScene);
+        REQUIRE(targetLayer->size() == 4);
+        REQUIRE(targetLayer->capacity() == 5);
+        REQUIRE(!targetLayer->at(2));
+        REQUIRE((*targetLayer->at(1))->name() == "first");
+        REQUIRE((*targetLayer->at(3))->name() == "group");
+        REQUIRE((*targetLayer->at(4))->name() == "leaf");
+        REQUIRE(targetLayer->at(4)->parent() == targetLayer->at(3));
+      }
+
+      THEN("reloading over a previously filled layer still agrees")
+      {
+        vsr::scene::Scene targetScene;
+        auto *targetLayer = targetScene.defaultLayer();
+        for (int i = 0; i < 3; ++i)
+          targetScene.insertChildTransformNode(
+              targetLayer->root(), vsr::math::IDENTITY_MAT4, "stale");
+        vsr::io::deserialize_Layer(tree.root(), *targetLayer, targetScene);
+        REQUIRE(targetLayer->size() == 4);
+        REQUIRE(!targetLayer->at(2));
+        REQUIRE((*targetLayer->at(3))->name() == "group");
+        REQUIRE((*targetLayer->at(4))->name() == "leaf");
+      }
+    }
+  }
+}
