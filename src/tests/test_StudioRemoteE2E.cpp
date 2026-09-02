@@ -231,7 +231,8 @@ struct Client
   void requireMirrorsServer(RunningServer &server)
   {
     REQUIRE(connection.project() != nullptr);
-    REQUIRE(connection.project()->activeShotId == server.project().activeShotId);
+    REQUIRE(
+        connection.project()->activeShotId == server.project().activeShotId);
     REQUIRE(totalObjects(mirror) == totalObjects(server.scene()));
     REQUIRE(mirror.numberOfLayers() == server.scene().numberOfLayers());
   }
@@ -283,9 +284,9 @@ SCENARIO("scivisStudioServer and the client core run a session end to end",
         AND_THEN("negotiated frames stream at the requested size")
         {
           const auto &supported = supportedFrameEncodings();
-          const bool jpeg = std::find(supported.begin(),
-                                supported.end(),
-                                FrameEncoding::TurboJpeg)
+          const bool jpeg =
+              std::find(
+                  supported.begin(), supported.end(), FrameEncoding::TurboJpeg)
               != supported.end();
           std::vector<FrameEncoding> preferred;
           if (jpeg)
@@ -327,7 +328,8 @@ SCENARIO("scivisStudioServer and the client core run a session end to end",
 
             const auto cameraIndex = shot->camera.objectIndex;
             REQUIRE(cameraIndex != VSR_INVALID_INDEX);
-            auto *mirrorCamera = client.mirror.getObject(ANARI_CAMERA, cameraIndex);
+            auto *mirrorCamera =
+                client.mirror.getObject(ANARI_CAMERA, cameraIndex);
             REQUIRE(mirrorCamera);
             client.counter->mutations = 0;
             mirrorCamera->setParameter("fovy", 0.5f);
@@ -362,7 +364,8 @@ SCENARIO("scivisStudioServer and the client core run a session end to end",
               REQUIRE(client.waitConnectedAndBootstrapped(2));
               client.requireMirrorsServer(*server);
               // The new server never saw the edit: the fresh bootstrap wins.
-              auto *rebuilt = client.mirror.getObject(ANARI_CAMERA, cameraIndex);
+              auto *rebuilt =
+                  client.mirror.getObject(ANARI_CAMERA, cameraIndex);
               REQUIRE(rebuilt);
               REQUIRE(rebuilt->parameterValueAs<float>("fovy") != 0.5f);
 
@@ -379,7 +382,8 @@ SCENARIO("scivisStudioServer and the client core run a session end to end",
                     && std::chrono::steady_clock::now() < deadline)
                   std::this_thread::sleep_for(1ms);
                 REQUIRE(server->finished.load());
-                REQUIRE(server->server->sessionState() == SessionState::Shutdown);
+                REQUIRE(
+                    server->server->sessionState() == SessionState::Shutdown);
               }
             }
           }
