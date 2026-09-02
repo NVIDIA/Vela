@@ -946,10 +946,10 @@ void ProjectOpDispatcher::handle(const RequestArrayHistogram &req)
 {
   auto *appContext = context().appContext();
   const auto &ref = req.array;
-  vsr::scene::Object *obj = nullptr;
+  vsr::scene::ArrayRef array;
   if (appContext && ref.type == ANARI_ARRAY)
-    obj = appContext->vsr.scene.getObject(ref.type, ref.objectIndex);
-  if (!obj) {
+    array = appContext->vsr.scene.getObject<vsr::scene::Array>(ref.objectIndex);
+  if (!array) {
     fail(req.requestId,
         std::string("(") + anari::toString(ref.type) + ", "
             + std::to_string(ref.objectIndex) + ") is not an array");
@@ -958,10 +958,7 @@ void ProjectOpDispatcher::handle(const RequestArrayHistogram &req)
 
   ArrayHistogramResult result;
   std::string error;
-  if (!computeArrayHistogram(*static_cast<const vsr::scene::Array *>(obj),
-          req.binCount,
-          result,
-          &error)) {
+  if (!computeArrayHistogram(*array, req.binCount, result, &error)) {
     fail(req.requestId, error);
     return;
   }
