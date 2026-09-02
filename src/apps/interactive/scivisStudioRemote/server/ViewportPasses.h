@@ -19,14 +19,48 @@
 
 namespace vsr::scivis_studio::server {
 
+// The fovy a perspective camera object renders with when it sets none.
+constexpr float DEFAULT_CAMERA_FOVY = vsr::math::radians(40.f);
+
+// The shot camera object's view as the passes and the pick read it: pose
+// with the camera's defaults, and either the vertical field of view
+// (perspective) or the image-plane height (orthographic; the position is the
+// eye on that plane, see vsr::rendering::updateCameraObject).
+struct CameraView
+{
+  vsr::math::float3 position{0.f, 0.f, 0.f};
+  vsr::math::float3 direction{0.f, 0.f, -1.f};
+  vsr::math::float3 up{0.f, 1.f, 0.f};
+  bool orthographic{false};
+  float fovy{DEFAULT_CAMERA_FOVY}; // radians
+  float height{1.f};
+};
+
+CameraView readCameraView(const vsr::scene::Object &camera);
+
 // What one serviced Pick read out of the id and depth buffers. objectId is
-// the RenderIndex's packed id (pool index, volume bit 0x80000000), ~0u on
+// the RenderIndex's packed id (pool index plus a volume bit), ~0u on
 // background; depth is the ANARI ray distance at that pixel.
 struct PickSample
 {
   uint32_t objectId{~0u};
   float depth{0.f};
+
+  // The (ANARI_SURFACE or ANARI_VOLUME, pool index) the packed id names;
+  // empty on background. The inverse of the packing setOutline() does.
+  std::optional<SceneObjectRef> identity() const;
 };
+
+// Where the ray through frame pixel (x, y) -- x right, y down from the
+// top-left of a width x height frame -- ends after `depth` units, for `view`.
+// The ray construction mirrors the monolith Viewport's focus pick; an
+// orthographic view offsets the origin across its image plane instead.
+vsr::math::float3 pickWorldPosition(const CameraView &view,
+    uint32_t width,
+    uint32_t height,
+    int x,
+    int y,
+    float depth);
 
 /*
  * The server's Viewport Pass suite: the monolith Viewport's id-driven passes

@@ -28,7 +28,6 @@
 // std
 #include <algorithm>
 #include <chrono>
-#include <cmath>
 #include <iterator>
 #include <thread>
 
@@ -77,56 +76,6 @@ anari::Device loadFirstAvailableDevice(
 
   libName.clear();
   return nullptr;
-}
-
-constexpr uint32_t VOLUME_ID_BIT = 0x80000000u;
-
-// Where the ray through frame pixel (x, y) -- x right, y down from the
-// top-left -- ends after `depth` units, for the shot camera object's pose. The
-// ray construction mirrors the monolith Viewport's focus pick; an
-// orthographic camera offsets the origin across its image plane instead.
-vsr::math::float3 pickWorldPosition(const vsr::scene::Object &camera,
-    uint32_t width,
-    uint32_t height,
-    int x,
-    int y,
-    float depth)
-{
-  using vsr::math::float3;
-  const auto position =
-      camera.parameterValueAs<float3>("position").value_or(float3(0.f));
-  const auto direction =
-      vsr::math::normalize(camera.parameterValueAs<float3>("direction")
-                               .value_or(float3(0.f, 0.f, -1.f)));
-  const auto up =
-      camera.parameterValueAs<float3>("up").value_or(float3(0.f, 1.f, 0.f));
-  const auto du = vsr::math::normalize(vsr::math::cross(direction, up));
-  const auto dv = vsr::math::normalize(vsr::math::cross(du, direction));
-
-  const float px = float(std::clamp(x, 0, int(width) - 1)) + 0.5f;
-  const float py = float(std::clamp(y, 0, int(height) - 1)) + 0.5f;
-  const float sx = px / float(width);
-  const float sy = 1.f - py / float(height); // ANARI's image plane is bottom-up
-  const float aspect = float(width) / float(height);
-
-  if (camera.subtype() == vsr::scene::tokens::camera::orthographic) {
-    const float planeHeight =
-        camera.parameterValueAs<float>("height").value_or(1.f);
-    const float planeWidth = planeHeight * aspect;
-    const auto origin = position + (sx - 0.5f) * planeWidth * du
-        + (sy - 0.5f) * planeHeight * dv;
-    return origin + depth * direction;
-  }
-
-  const float fovy =
-      camera.parameterValueAs<float>("fovy").value_or(vsr::math::radians(40.f));
-  const float planeHeight = 2.f * std::tan(0.5f * fovy);
-  const float planeWidth = planeHeight * aspect;
-  const auto dirDu = du * planeWidth;
-  const auto dirDv = dv * planeHeight;
-  const auto dir00 = direction - 0.5f * dirDu - 0.5f * dirDv;
-  const auto ray = vsr::math::normalize(dir00 + sx * dirDu + sy * dirDv);
-  return position + depth * ray;
 }
 
 } // namespace
@@ -1093,24 +1042,24 @@ bool StudioServer::servicePendingPick()
 
   PickReply reply;
   reply.requestId = pick.requestId;
-  reply.hit = sample && sample->objectId != ~0u;
+  reply.objectIdentity = sample ? sample->identity() : std::nullopt;
+  reply.hit = reply.objectIdentity.has_value();
   if (reply.hit) {
-    SceneObjectRef identity;
-    identity.type =
-        (sample->objectId & VOLUME_ID_BIT) ? ANARI_VOLUME : ANARI_SURFACE;
-    identity.objectIndex = sample->objectId & ~VOLUME_ID_BIT;
-    reply.objectIdentity = identity;
     if (const auto *camera = shotCameraObject()) {
-      reply.worldPosition = pickWorldPosition(
-          *camera, m_frameWidth, m_frameHeight, pick.x, pick.y, sample->depth);
+      reply.worldPosition = pickWorldPosition(readCameraView(*camera),
+          m_frameWidth,
+          m_frameHeight,
+          pick.x,
+          pick.y,
+          sample->depth);
     }
     vsr::core::logStatus(
         "[StudioServer] Pick %llu at (%d, %d): %s %zu, depth %f",
         static_cast<unsigned long long>(pick.requestId),
         pick.x,
         pick.y,
-        anari::toString(identity.type),
-        identity.objectIndex,
+        anari::toString(reply.objectIdentity->type),
+        reply.objectIdentity->objectIndex,
         sample->depth);
   } else {
     vsr::core::logStatus("[StudioServer] Pick %llu at (%d, %d): background",
