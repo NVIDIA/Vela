@@ -36,23 +36,6 @@ constexpr std::chrono::milliseconds COURTESY_SEND_TIMEOUT{200};
 constexpr std::chrono::milliseconds POLL_INTERVAL{1};
 constexpr const char *BUILD_INFO = "scivisStudioTestClient";
 
-size_t totalObjects(const vsr::scene::Scene &scene)
-{
-  size_t n = 0;
-  for (auto type : {ANARI_ARRAY,
-           ANARI_SURFACE,
-           ANARI_GEOMETRY,
-           ANARI_MATERIAL,
-           ANARI_SAMPLER,
-           ANARI_VOLUME,
-           ANARI_SPATIAL_FIELD,
-           ANARI_LIGHT,
-           ANARI_CAMERA,
-           ANARI_RENDERER})
-    n += scene.numberOfObjects(type);
-  return n;
-}
-
 std::string endpointText(const std::string &host, int port)
 {
   return host + ":" + std::to_string(port);
@@ -91,6 +74,27 @@ std::string Event::text() const
     out += value;
   }
   return out;
+}
+
+Event frameEvent(const FrameHeader &header, size_t bytes)
+{
+  Event event{"Frame", {}};
+  event.fields.emplace_back("width", std::to_string(header.width));
+  event.fields.emplace_back("height", std::to_string(header.height));
+  event.fields.emplace_back("encoding", toString(header.encoding));
+  event.fields.emplace_back("pixelFormat", toString(header.pixelFormat));
+  event.fields.emplace_back("shotId", header.shotId);
+  event.fields.emplace_back("frame", std::to_string(header.frame));
+  event.fields.emplace_back("bytes", std::to_string(bytes));
+  return event;
+}
+
+size_t totalObjects(const vsr::scene::Scene &scene)
+{
+  size_t n = 0;
+  forEachObjectPool(scene.objectDB(),
+      [&](anari::DataType, const auto &pool) { n += pool.size(); });
+  return n;
 }
 
 // Construction ///////////////////////////////////////////////////////////////
@@ -419,7 +423,6 @@ bool TestSession::setParameter(const SceneObjectRef &object,
   auto *obj = mirrorObject(object, error);
   if (!obj)
     return false;
-  }
   obj->addParameter(name).setValue(value);
   SetObjectParameter edit;
   edit.object = object;
@@ -434,7 +437,6 @@ bool TestSession::removeParameter(
   auto *obj = mirrorObject(object, error);
   if (!obj)
     return false;
-  }
   obj->removeParameter(name);
   RemoveObjectParameter edit;
   edit.object = object;
@@ -624,8 +626,6 @@ bool TestSession::requireConnected(std::string *error) const
   return false;
 }
 
-void TestSession::pushEvent(Event event)
-{
 vsr::scene::Object *TestSession::mirrorObject(
     const SceneObjectRef &object, std::string *error)
 {
@@ -637,6 +637,8 @@ vsr::scene::Object *TestSession::mirrorObject(
   return obj;
 }
 
+void TestSession::pushEvent(Event event)
+{
   m_events.push_back(std::move(event));
 }
 
@@ -825,18 +827,10 @@ void TestSession::consumeFrame()
     pushEvent(std::move(event));
     return;
   }
-  const auto &h = view->header;
-  event.fields.emplace_back("width", std::to_string(h.width));
-  event.fields.emplace_back("height", std::to_string(h.height));
-  event.fields.emplace_back("encoding", toString(h.encoding));
-  event.fields.emplace_back("pixelFormat", toString(h.pixelFormat));
-  event.fields.emplace_back("shotId", h.shotId);
-  event.fields.emplace_back("frame", std::to_string(h.frame));
-  event.fields.emplace_back("bytes", std::to_string(view->size));
-  m_lastFrameHeader = h;
+  m_lastFrameHeader = view->header;
   m_lastFrame = std::move(*frame);
   ++m_framesReceived;
-  pushEvent(std::move(event));
+  pushEvent(frameEvent(view->header, view->size));
 }
 
 } // namespace vsr::scivis_studio::test_client
