@@ -18,9 +18,12 @@ TransferLayer::TransferLayer(
     return;
   }
 
+  // Preserved numbering: the receiver's layer must name every node by the
+  // sender's index, since protocol node references carry those indices.
   auto &root = m_tree.root();
   root["n"] = scene->getLayerName(layer).str();
-  vsr::io::serialize_Layer(*layer, root["l"]);
+  vsr::io::serialize_Layer(
+      *layer, root["l"], vsr::io::LayerNodeNumbering::Preserved);
 }
 
 TransferLayer::TransferLayer(const Message &msg, vsr::scene::Scene *scene)

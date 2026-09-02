@@ -17,10 +17,13 @@ TransferScene::TransferScene(vsr::scene::Scene *scene, bool includeArrayData)
     return;
   }
 
+  // Preserved numbering: the receiver's layers must name every node by the
+  // sender's index, since protocol node references carry those indices.
   if (!vsr::io::serialize_SceneArchive(*scene,
           m_tree.root(),
           includeArrayData ? vsr::io::ArrayDataPolicy::IncludeData
-                           : vsr::io::ArrayDataPolicy::ProxyOnly)) {
+                           : vsr::io::ArrayDataPolicy::ProxyOnly,
+          vsr::io::LayerNodeNumbering::Preserved)) {
     vsr::core::logError(
         "[message::TransferScene] Failed to serialize Scene Archive");
   }
