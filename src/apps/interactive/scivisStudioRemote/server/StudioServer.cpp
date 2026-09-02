@@ -442,25 +442,32 @@ void StudioServer::applyControlState()
     m_control = ControlState{};
   }
 
-  // Session events first, in causal order: a loss belongs to the session in
-  // progress, an accept opens the next one, and a Hello or a close request
-  // can only concern that newest connection (all of them may share a batch).
-  if (control.disconnected && m_state != SessionState::Listening)
-    endSession(control.disconnectReason);
+  // Session events first, in causal order. Each names its connection: a loss
+  // of the session in progress ends it, an accept opens the next one, and a
+  // loss, Hello or close request for that newest connection is applied to it
+  // (all of these may share one batch). Events for a connection that is
+  // neither are stale and dropped.
+  const auto lossOfCurrent = [&] {
+    return control.disconnected && m_state != SessionState::Listening
+        && *control.disconnected == m_sessionSerial;
+  };
+  if (lossOfCurrent())
+    endSession(control.disconnectReason, false);
   if (control.accepted)
-    beginSession();
-  if (m_state == SessionState::AwaitingHello && m_server
-      && !m_server->isConnected()) {
-    // The accept and its loss both landed since the last iteration.
-    endSession("connection closed before Hello");
-  }
-  if (control.closeRequested && m_state != SessionState::Listening) {
+    beginSession(*control.accepted);
+  if (lossOfCurrent())
+    endSession(control.disconnectReason, false);
+  if (control.closeRequested && m_state != SessionState::Listening
+      && *control.closeRequested == m_sessionSerial) {
     if (control.farewell.valid())
       control.farewell.wait_for(FAREWELL_TIMEOUT);
-    endSession(control.closeReason);
+    endSession(control.closeReason, true);
   }
   if (control.helloReceived) {
-    if (m_state == SessionState::AwaitingHello) {
+    if (*control.helloReceived != m_sessionSerial) {
+      vsr::core::logWarning(
+          "[StudioServer] Hello from a connection that is gone; ignored");
+    } else if (m_state == SessionState::AwaitingHello) {
       m_bootstrapPending = true;
     } else {
       vsr::core::logWarning(
@@ -518,7 +525,7 @@ void StudioServer::applyControlState()
   }
 }
 
-void StudioServer::beginSession()
+void StudioServer::beginSession(uint64_t serial)
 {
   if (m_state != SessionState::Listening) {
     // The transport accepted a second socket over the first; the old client
@@ -527,6 +534,7 @@ void StudioServer::beginSession()
         "[StudioServer] new connection replaces the current session (%s)",
         toString(m_state));
   }
+  m_sessionSerial = serial;
   setPushEnabled(false);
   m_encoding = FrameEncoding::Raw;
   m_renderingRequested = false;
@@ -537,19 +545,21 @@ void StudioServer::beginSession()
   vsr::core::logStatus("[StudioServer] client connected, awaiting Hello");
 }
 
-void StudioServer::endSession(const std::string &reason)
+void StudioServer::endSession(const std::string &reason, bool closeSocket)
 {
   vsr::core::logStatus("[StudioServer] session ended: %s", reason.c_str());
   setPushEnabled(false);
-  m_helloAccepted.store(false);
   m_encoding = FrameEncoding::Raw;
   m_renderingRequested = false;
   m_bootstrapPending = false;
   m_sceneResendPending = false;
   m_frameInFlight = {};
-  // Closes whatever socket is left and re-arms the accept; the disconnect
-  // this reports (if any) lands in the latch and is ignored while Listening.
-  m_server->restart();
+  if (closeSocket) {
+    // Closes the socket and re-arms the accept; the disconnect this reports
+    // lands in the latch and is dropped as stale. A peer-closed socket needs
+    // neither: the transport re-arms its accept after every connection.
+    m_server->restart();
+  }
   setState(SessionState::Listening);
   vsr::core::logStatus("[StudioServer] Listening on port %u", port());
 }
@@ -718,19 +728,20 @@ void StudioServer::setPushEnabled(bool enabled)
 
 void StudioServer::onConnected()
 {
-  m_helloAccepted.store(false);
+  ++m_connectionSerial;
+  m_helloAccepted = false;
   Hello hello;
   hello.version = PROTOCOL_VERSION;
   hello.buildInfo = "scivisStudioServer/" + m_libraryName;
   m_server->send(encode(hello));
   std::lock_guard lock(m_controlMutex);
-  m_control.accepted = true;
+  m_control.accepted = m_connectionSerial;
 }
 
 void StudioServer::onDisconnected(const boost::system::error_code &error)
 {
   std::lock_guard lock(m_controlMutex);
-  m_control.disconnected = true;
+  m_control.disconnected = m_connectionSerial;
   m_control.disconnectReason =
       error ? error.message() : std::string("connection closed");
 }
@@ -758,17 +769,14 @@ void StudioServer::onMessage(const Message &msg)
         error ? error->message.c_str() : "(undecodable Error)");
     return;
   }
-  case StudioMessageType::Disconnect: {
-    std::lock_guard lock(m_controlMutex);
-    m_control.closeRequested = true;
-    m_control.closeReason = "client sent Disconnect";
+  case StudioMessageType::Disconnect:
+    requestClose("client sent Disconnect");
     return;
-  }
   default:
     break;
   }
 
-  if (!m_helloAccepted.load()) {
+  if (!m_helloAccepted) {
     replyError(std::string(toString(*type)) + " received before Hello");
     return;
   }
@@ -870,17 +878,22 @@ void StudioServer::onHello(const Message &msg)
         + std::to_string(hello->version) + ", this server v"
         + std::to_string(PROTOCOL_VERSION);
     vsr::core::logWarning("[StudioServer] %s", error.message.c_str());
-    auto sent = m_server->send(encode(error));
-    std::lock_guard lock(m_controlMutex);
-    m_control.closeRequested = true;
-    m_control.closeReason = error.message;
-    m_control.farewell = std::move(sent);
+    requestClose(error.message, m_server->send(encode(error)));
     return;
   }
 
-  m_helloAccepted.store(true);
+  m_helloAccepted = true;
   std::lock_guard lock(m_controlMutex);
-  m_control.helloReceived = true;
+  m_control.helloReceived = m_connectionSerial;
+}
+
+void StudioServer::requestClose(
+    const std::string &reason, vsr::network::MessageFuture farewell)
+{
+  std::lock_guard lock(m_controlMutex);
+  m_control.closeRequested = m_connectionSerial;
+  m_control.closeReason = reason;
+  m_control.farewell = std::move(farewell);
 }
 
 void StudioServer::replyError(const std::string &text)
