@@ -517,7 +517,7 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
         REQUIRE(runner.cancel(render, &error));
         REQUIRE(runner.cancel(render, &error)); // idempotent
         REQUIRE(runner.finished().size() == 1);
-        REQUIRE(runner.finished().front().cancelRequested);
+        REQUIRE(runner.finished().front().cancelled);
       }
 
       AND_WHEN("the next bootstrap replays the history")
@@ -537,13 +537,52 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
           const auto completed = decode<TaskCompleted>(replayed[1]);
           REQUIRE(completed);
           REQUIRE(completed->taskId == after);
-          REQUIRE(runner.finished().empty());
           REQUIRE(sent.empty());
 
           replayed.clear();
           runner.replayTo([&](Message &&msg) { replayed.push_back(msg); });
           REQUIRE(replayed.empty());
         }
+
+        THEN("the endings stay known: a cancel is told they finished")
+        {
+          REQUIRE(runner.finished().size() == 2);
+          std::string error;
+          REQUIRE(runner.cancel(render, &error)); // still acknowledged
+          REQUIRE_FALSE(runner.cancel(after, &error));
+          REQUIRE(error == "task already finished");
+        }
+      }
+    }
+  }
+
+  GIVEN("a task that never polls its cancel flag")
+  {
+    uint64_t import = 0;
+    import = runner.enqueue("import", [&](const TaskControl &task) {
+      // The IO thread raises the flag while the body runs; the body neither
+      // looks at it nor stops.
+      REQUIRE(runner.requestCancelRunning(import));
+      REQUIRE(task.cancelRequested());
+      TaskResult result;
+      result.message = "dataset_0001";
+      return result;
+    });
+
+    WHEN("it completes despite the flag")
+    {
+      const auto ran = runner.runOne();
+      REQUIRE(ran);
+      REQUIRE(ran->result.ok);
+
+      THEN("the CancelTask dispatched after it is refused, not acknowledged")
+      {
+        std::string error;
+        REQUIRE_FALSE(runner.cancel(import, &error));
+        REQUIRE(error == "task already finished");
+        REQUIRE_FALSE(runner.finished().front().cancelled);
+        REQUIRE(sent.size() == 1);
+        REQUIRE(decode<TaskCompleted>(sent.back()));
       }
     }
   }

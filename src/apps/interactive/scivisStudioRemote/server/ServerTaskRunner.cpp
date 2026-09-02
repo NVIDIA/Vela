@@ -104,9 +104,8 @@ bool ServerTaskRunner::cancel(uint64_t taskId, std::string *error)
       [&](const QueuedTask &task) { return task.id == taskId; });
   if (itr == m_queue.end()) {
     if (const auto *finished = findFinished(taskId)) {
-      // The cancel this request asked for on the IO thread already took
-      // effect (or the body ended first): either way it is acknowledged.
-      if (finished->cancelRequested)
+      // The cancel this request asked for on the IO thread took effect.
+      if (finished->cancelled)
         return true;
       if (error)
         *error = "task already finished";
@@ -125,10 +124,7 @@ bool ServerTaskRunner::cancel(uint64_t taskId, std::string *error)
   finished.description = std::move(itr->description);
   finished.error = "cancelled";
   m_queue.erase(itr);
-  m_send(endingOf(finished));
-  m_finished.push_back(std::move(finished));
-  if (m_finished.size() > HISTORY_CAP)
-    m_finished.pop_front();
+  recordEnding(std::move(finished));
   return true;
 }
 
@@ -154,8 +150,7 @@ std::optional<RanTask> ServerTaskRunner::runOne()
 
   QueuedTask task = std::move(m_queue.front());
   m_queue.pop_front();
-  m_running = RunningTask{task.id, task.description, 0, 0};
-  m_runningExclusive = task.exclusive;
+  m_running = RunningTask{task.id, task.description, 0, 0, task.exclusive};
   m_cancelRequested.store(0);
   m_runningId.store(task.id);
   vsr::core::logStatus("[StudioServer] task %llu started: %s",
@@ -199,10 +194,11 @@ std::optional<RanTask> ServerTaskRunner::runOne()
   finished.error = ran.result.error;
   finished.message = ran.result.message;
   finished.framesCompleted = ran.result.framesCompleted;
-  finished.cancelRequested = m_cancelRequested.load() == task.id;
+  // A body that completed despite the flag was not cancelled: only the shot
+  // render polls it, and then reports "cancelled" when it stopped.
+  finished.cancelled = m_cancelRequested.load() == task.id && !finished.ok;
   m_runningId.store(0);
   m_running.reset();
-  m_runningExclusive = false;
 
   if (finished.ok) {
     vsr::core::logStatus("[StudioServer] task %llu completed: %s",
@@ -214,10 +210,7 @@ std::optional<RanTask> ServerTaskRunner::runOne()
         finished.description.c_str(),
         finished.error.c_str());
   }
-  m_send(endingOf(finished));
-  m_finished.push_back(std::move(finished));
-  if (m_finished.size() > HISTORY_CAP)
-    m_finished.pop_front();
+  recordEnding(std::move(finished));
   return ran;
 }
 
@@ -242,9 +235,12 @@ void ServerTaskRunner::dropQueued()
 
 void ServerTaskRunner::replayTo(const SendFunction &send)
 {
-  for (const auto &finished : m_finished)
+  for (auto &finished : m_finished) {
+    if (finished.replayed)
+      continue;
     send(endingOf(finished));
-  m_finished.clear();
+    finished.replayed = true;
+  }
   if (m_running) {
     TaskProgress event;
     event.taskId = m_running->taskId;
@@ -267,7 +263,7 @@ bool ServerTaskRunner::running() const
 
 bool ServerTaskRunner::exclusivePending() const
 {
-  if (m_running && m_runningExclusive)
+  if (m_running && m_running->exclusive)
     return true;
   return std::any_of(m_queue.begin(), m_queue.end(), [](const QueuedTask &t) {
     return t.exclusive;
@@ -290,6 +286,14 @@ const FinishedTask *ServerTaskRunner::findFinished(uint64_t taskId) const
       m_finished.end(),
       [&](const FinishedTask &task) { return task.taskId == taskId; });
   return itr == m_finished.end() ? nullptr : &*itr;
+}
+
+void ServerTaskRunner::recordEnding(FinishedTask finished)
+{
+  m_send(endingOf(finished));
+  m_finished.push_back(std::move(finished));
+  if (m_finished.size() > HISTORY_CAP)
+    m_finished.pop_front();
 }
 
 } // namespace vsr::scivis_studio::server
