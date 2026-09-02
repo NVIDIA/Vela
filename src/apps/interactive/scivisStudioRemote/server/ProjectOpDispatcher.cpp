@@ -255,8 +255,8 @@ void ProjectOpDispatcher::startTask(uint64_t requestId,
     bool projectChanged,
     bool rebind)
 {
-  const auto taskId = m_host.tasks->enqueue(
-      std::move(description), std::move(body), exclusive);
+  const auto taskId =
+      m_host.tasks->enqueue(std::move(description), std::move(body), exclusive);
   auto reply = makeOkReply(requestId);
   setResults(reply, TaskStartedResult{taskId});
   finish(reply, projectChanged, rebind);
@@ -362,8 +362,7 @@ void ProjectOpDispatcher::handle(const SaveProject &req)
   startTask(req.requestId,
       named ? "save project to '" + named->string() + "'"
             : std::string("save project"),
-      [this, named, uiState = req.uiState](
-          const TaskControl &progress) {
+      [this, named, uiState = req.uiState](const TaskControl &progress) {
         return runTaskBody(
             [&] {
               TaskResult result;
@@ -450,8 +449,7 @@ void ProjectOpDispatcher::handle(const ImportFileAnimationDataset &req)
   startTask(req.requestId,
       "import " + std::to_string(sources.size()) + " animation frame(s) from '"
           + sources.front().string() + "'",
-      [this, req, sources = std::move(sources)](
-          const TaskControl &progress) {
+      [this, req, sources = std::move(sources)](const TaskControl &progress) {
         return runTaskBody(
             [&] {
               progress("importing");
@@ -580,8 +578,7 @@ void ProjectOpDispatcher::handle(const SaveDatasetArchive &req)
   }
   startTask(req.requestId,
       "save dataset '" + req.datasetId + "' to '" + file->string() + "'",
-      [this, id = req.datasetId, file = *file](
-          const TaskControl &progress) {
+      [this, id = req.datasetId, file = *file](const TaskControl &progress) {
         return runTaskBody(
             [&] {
               TaskResult result;

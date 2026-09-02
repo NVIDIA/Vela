@@ -1315,8 +1315,8 @@ void StudioServer::onMessage(const Message &msg)
   } else {
     // Every client-to-server type is handled above; a new one added to the
     // protocol without a handler is refused loudly, never dropped.
-    refuseRequest(msg,
-        std::string(toString(*type)) + " is not served by this server");
+    refuseRequest(
+        msg, std::string(toString(*type)) + " is not served by this server");
   }
 }
 

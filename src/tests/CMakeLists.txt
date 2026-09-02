@@ -68,6 +68,7 @@ if (TARGET vsr_scivis_studio_server_core)
     test_StudioServer.cpp
     test_StudioServerPlayback.cpp
     test_StudioServerProjectOps.cpp
+    test_StudioServerRenderShot.cpp
     test_StudioServerViewport.cpp
   )
 endif()

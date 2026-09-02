@@ -52,7 +52,9 @@ struct TestClient
   void send(const T &payload);
 
   size_t count(StudioMessageType type);
-  bool waitForCount(StudioMessageType type, size_t n);
+  bool waitForCount(StudioMessageType type,
+      size_t n,
+      std::chrono::milliseconds timeout = std::chrono::seconds(5));
   std::vector<Message> messages();
   // The last message of a type, or an invalid Message.
   Message last(StudioMessageType type);
@@ -127,9 +129,10 @@ inline size_t TestClient::count(StudioMessageType type)
   return n;
 }
 
-inline bool TestClient::waitForCount(StudioMessageType type, size_t n)
+inline bool TestClient::waitForCount(
+    StudioMessageType type, size_t n, std::chrono::milliseconds timeout)
 {
-  return waitFor([&] { return count(type) >= n; });
+  return waitFor([&] { return count(type) >= n; }, timeout);
 }
 
 inline std::vector<TestClient::Message> TestClient::messages()
