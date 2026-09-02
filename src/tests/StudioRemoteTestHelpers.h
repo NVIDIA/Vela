@@ -20,6 +20,7 @@
 #include <atomic>
 #include <chrono>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <string>
 #include <thread>
@@ -75,10 +76,13 @@ inline vsr::scivis_studio::client::ConnectionTimings fastTimings(
 // A StudioServer on the helide device, on its own loop thread. Stopping it is
 // what a client sees as the server going away: run() tears the listening
 // socket down. The studio layer gets one transform node so tests have a
-// node to address; a fresh project has none of its own.
+// node to address; a fresh project has none of its own. `beforeRun` gets the
+// scene between start() and the loop thread, the last moment the caller may
+// touch it, so a test can seed objects the bootstrap will then mirror.
 struct RunningServer
 {
-  explicit RunningServer(int port);
+  explicit RunningServer(
+      int port, const std::function<void(vsr::scene::Scene &)> &beforeRun = {});
   ~RunningServer();
 
   void stop();
@@ -94,7 +98,8 @@ struct RunningServer
   std::thread thread;
 };
 
-inline RunningServer::RunningServer(int port)
+inline RunningServer::RunningServer(
+    int port, const std::function<void(vsr::scene::Scene &)> &beforeRun)
 {
   vsr::scivis_studio::server::ServerOptions options;
   options.port = port;
@@ -112,6 +117,8 @@ inline RunningServer::RunningServer(int port)
         layer->root(), vsr::math::IDENTITY_MAT4, "test transform");
     transformNode = node.index();
   }
+  if (beforeRun)
+    beforeRun(s);
   thread = std::thread([this] {
     server->run();
     finished.store(true);
