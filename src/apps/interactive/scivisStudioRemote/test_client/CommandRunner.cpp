@@ -847,7 +847,8 @@ const std::vector<std::string> &CommandRunner::commandHelp()
       "viewport-settings keys: highlightSelection outlinePrimitives showWorldBounds",
       "                             worldBoundsColor=r,g,b,a worldBoundsWidth visualizeAOV",
       "                             depthVisualMinimum depthVisualMaximum edgeInvert",
-      "assert VALUE OP RHS          OP in == != < <= > >= contains; VALUE one of the names below",
+      "assert VALUE OP RHS          OP in == != < <= > >= contains; VALUE one of the names",
+      "                             below; RHS a literal, or @NAME for another named value",
       "",
       "Project Ops (each sends one request, awaits its ProjectOpReply and prints it):",
       "new-project | open-project DIR | save-project [DIR]",
@@ -875,6 +876,7 @@ const std::vector<std::string> &CommandRunner::commandHelp()
       "await-task [TASKID] [expect-fail]",
       "                             wait for the task (default $lastTaskId) to end",
       "await-snapshot               wait for a ProjectSnapshot newer than the last request",
+      "                             (or than the previous await-snapshot; one per await)",
       "await-reply [REQUESTID]      collect the reply of a no-wait request (default the oldest)",
       "",
       "Prefixes: `expect-fail <request>` makes ok=false the OK outcome;",
@@ -1683,12 +1685,24 @@ CommandRunner::Failure CommandRunner::assertValue(const Command &command)
   const auto lhs = namedValue(command.args[0], error);
   if (!lhs)
     return error;
+  // `@name` on the right compares two named values (the rest frame against
+  // the last header's); anything else is the literal it reads as.
+  std::optional<std::string> resolved;
+  if (command.args[2].size() > 1 && command.args[2][0] == '@') {
+    resolved = namedValue(command.args[2].substr(1), error);
+    if (!resolved)
+      return error;
+  }
+  const std::string rhs = resolved ? *resolved : command.args[2];
   bool holds = false;
-  if (!compareValues(*lhs, command.args[1], command.args[2], holds, error))
+  if (!compareValues(*lhs, command.args[1], rhs, holds, error))
     return error;
   if (!holds) {
+    std::string expected = quoted(command.args[2]);
+    if (rhs != command.args[2])
+      expected += " (" + quoted(rhs) + ")";
     return command.args[0] + " is " + quoted(*lhs) + ", not " + command.args[1]
-        + " " + quoted(command.args[2]);
+        + " " + expected;
   }
   return {};
 }
@@ -2639,8 +2653,9 @@ CommandRunner::Failure CommandRunner::awaitSnapshot(
           deadline);
   if (wait != Wait::Done)
     return waitFailure(wait, "ProjectSnapshot", deadline);
-  // The next await-snapshot waits for the one after this.
-  m_snapshotMark = m_session->snapshotsReceived();
+  // One snapshot per await: two that land in the same poll (a SetPlaying's
+  // and the auto-stop's, say) are awaited one at a time, the second at once.
+  ++m_snapshotMark;
   return {};
 }
 

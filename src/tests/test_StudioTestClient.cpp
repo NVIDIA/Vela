@@ -208,7 +208,8 @@ unsigned short ScriptedServer::port() const
  * usually in the client's queue before the script awaits it.
  *
  * Milestone 6: SetPlaying flips the active shot's `playing` (another shot id
- * is refused); StartRendering streams four 2x2 frames at frames 0, 1, 2, 0
+ * is refused) and, like a shot that auto-stops at once, follows its snapshot
+ * with a second one at rest on frame 5; StartRendering streams four 2x2 frames at frames 0, 1, 2, 0
  * (a loop wrap), spaced so the client's latest-wins slot sees each; SetTime
  * answers with one frame at the scrubbed frame, or with a TimeAdvanceWarning
  * when the frame is 99; Pick misses at (0,0) and hits surface 4 elsewhere,
@@ -603,9 +604,16 @@ void ProjectOpsServer::onMessage(const Message &msg)
           "shot '" + req.shotId + "' is not the active shot");
       return;
     }
-    project::findShot(project, req.shotId)->playing = req.playing;
+    auto *shot = project::findShot(project, req.shotId);
+    shot->playing = req.playing;
     replyOk(req.requestId);
     sendSnapshot();
+    if (req.playing) {
+      // The auto-stop, right behind: two snapshots in one poll.
+      shot->playing = false;
+      shot->currentFrame = 5;
+      sendSnapshot();
+    }
     return;
   }
   case StudioMessageType::StartRendering: {
@@ -1383,10 +1391,15 @@ SCENARIO("the test client drives project ops against a fake server",
       const std::string script =
           "connect " + endpoint + "\n"
           "assert shot.active.playing == false\n"
+          "assert shot.active.frameCount == @shot.shot_0001.frameCount\n"
+          // The SetPlaying's snapshot and the auto-stop's arrive together;
+          // each await-snapshot consumes one.
           "set-playing active on\n"
           "await-snapshot\n"
-          "assert shot.active.playing == true\n"
-          "assert shot.shot_0001.playing == true\n"
+          "await-snapshot\n"
+          "assert snapshots.received == 3\n"
+          "assert shot.active.playing == false\n"
+          "assert shot.shot_0001.currentFrame == 5\n"
           "expect-fail set-playing shot_9999 on\n"
           "assert lastReplyError contains active\n"
           "assert replies.failed == 1\n"
@@ -1445,6 +1458,10 @@ SCENARIO("the test client drives project ops against a fake server",
             "EVT ProjectSnapshot activeShot=shot_0001 shots=1 datasets=0"
             " lightRigs=1 cameraRigs=1 colorMaps=0 dirty=true playing=true"
             " currentFrame=0"));
+        REQUIRE(hasLine(r,
+            "EVT ProjectSnapshot activeShot=shot_0001 shots=1 datasets=0"
+            " lightRigs=1 cameraRigs=1 colorMaps=0 dirty=true playing=false"
+            " currentFrame=5"));
         REQUIRE(hasLine(r,
             "EVT ProjectOpReply requestId=2 ok=false error=\"shot 'shot_9999'"
             " is not the active shot\""));
@@ -1551,6 +1568,8 @@ SCENARIO("the test client drives project ops against a fake server",
           "expect-fail request-array-histogram array 9 4\n"
           "assert histogram.bins == 0\n"
           "assert shot.active.bogus == 1\n"
+          "assert frames.advanced == @nosuch\n"
+          "assert frames.advanced == @frames.received\n"
           "assert frames.advanced == 0\n"
           "disconnect\n",
           [] {
@@ -1563,7 +1582,7 @@ SCENARIO("the test client drives project ops against a fake server",
       {
         REQUIRE_FALSE(result.ok);
         const auto fails = failLines(result.records);
-        REQUIRE(fails.size() == 19);
+        REQUIRE(fails.size() == 20);
         REQUIRE(fails[0].find("usage: set-playing") != std::string::npos);
         REQUIRE(fails[1].find("usage: set-playing") != std::string::npos);
         REQUIRE(fails[2].find("usage: set-time") != std::string::npos);
@@ -1593,6 +1612,9 @@ SCENARIO("the test client drives project ops against a fake server",
         REQUIRE(
             fails[17].find("no histogram has been answered") != std::string::npos);
         REQUIRE(fails[18].find("unknown shot field 'bogus'") != std::string::npos);
+        REQUIRE(fails[19].find("unknown value 'nosuch'") != std::string::npos);
+        REQUIRE(hasLine(
+            result.records, "OK assert frames.advanced == @frames.received"));
         REQUIRE(hasLine(result.records, "OK assert frames.advanced == 0"));
         REQUIRE(server.requests<SetPlaying>().empty());
         REQUIRE(server.requests<SetTime>().empty());

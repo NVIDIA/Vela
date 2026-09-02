@@ -278,7 +278,9 @@ struct CommandRunner
   // awaited thing arrived -- a request's reply (or, until a no-wait reply is
   // collected, its send), a task's end message, the previous await-snapshot.
   // Taken at the reply rather than the send, since the previous request's
-  // snapshot may still be on the wire at the send.
+  // snapshot may still be on the wire at the send. Each await-snapshot then
+  // moves the mark on by one, so consecutive awaits consume consecutive
+  // snapshots.
   size_t m_snapshotMark{0};
   // What the last list-directory returned (`browse.entries`).
   std::vector<protocol::DirectoryEntry> m_browseEntries;
