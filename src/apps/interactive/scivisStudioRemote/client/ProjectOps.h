@@ -5,11 +5,13 @@
 
 // vsr_scivis_studio_protocol
 #include "BrowseMessages.h"
+#include "PlaybackMessages.h"
 #include "ProjectOpReply.h"
 #include "ProjectRequests.h"
 #include "ShotRigRequests.h"
 #include "StudioCodec.h"
 #include "TaskMessages.h"
+#include "ViewportMessages.h"
 // vsr_scivis_studio_model
 #include "Shot.h"
 // vsr_network
@@ -35,6 +37,11 @@ using ReplyCallback = std::function<void(const protocol::ProjectOpReply &)>;
 template <typename R>
 using ResultCallback = std::function<void(
     const protocol::ProjectOpReply &, const std::optional<R> &)>;
+
+// The server's PickReply for one Pick, matched by request id; absent when the
+// reply can no longer come (the connection dropped the request or was lost).
+using PickCallback =
+    std::function<void(const std::optional<protocol::PickReply> &)>;
 
 // Names one request in flight; valid() only for a request that was minted.
 struct RequestHandle
@@ -91,7 +98,9 @@ struct TaskRecord
  * The typed wrappers cover every request type so UI code never builds a
  * payload by hand. Ops whose reply carries a *Result payload take a
  * ResultCallback<R>; task-launching ops report TaskStartedResult and register
- * the task, labelled after the request, in tasks().
+ * the task, labelled after the request, in tasks(). A Pick shares the id
+ * space but is answered by a plain PickReply, so it has its own callback
+ * type; pending() and the connection-loss failure cover it all the same.
  *
  * Example:
  *   auto &ops = connection.projectOps();
@@ -127,6 +136,7 @@ struct ProjectOps
   RequestHandle sendForResult(
       Req req, ResultCallback<R> callback, std::string taskLabel = {});
 
+  // Project ops and picks awaiting their reply.
   size_t pendingCount() const;
   bool pending(RequestHandle handle) const;
   // Drops the callback; the reply, if it comes, is still used for task
@@ -252,6 +262,25 @@ struct ProjectOps
   RequestHandle listDirectory(const std::filesystem::path &directory,
       ResultCallback<protocol::ListDirectoryResult> callback);
 
+  // Playback (58) ////////////////////////////////////////////////////////////
+
+  // shotId must be the active shot; the server confirms with a snapshot.
+  RequestHandle setPlaying(
+      const ShotID &shotId, bool playing, ReplyCallback callback);
+
+  // Array histogram (59) /////////////////////////////////////////////////////
+
+  // Sync on the server: scalar element types only, binCount clamped to
+  // [1, 4096] there.
+  RequestHandle requestArrayHistogram(const SceneObjectRef &array,
+      uint32_t binCount,
+      ResultCallback<protocol::ArrayHistogramResult> callback);
+
+  // Pick (62) ////////////////////////////////////////////////////////////////
+
+  // x right, y down from the top-left of the frame, in frame-header pixels.
+  RequestHandle pick(int x, int y, PickCallback callback);
+
   // Server Tasks (61) ////////////////////////////////////////////////////////
 
   // Cooperative: removes a queued task; the running one is refused.
@@ -274,13 +303,16 @@ struct ProjectOps
   // was. Servers answer such requests with a ProjectOpReply when the payload
   // carried an id; this covers the ones that cannot.
   bool failOldestNamed(const std::string &message);
+  // Matches a PickReply to its pick() callback; unknown ids are logged.
+  void handlePickReply(const protocol::PickReply &reply);
   // Task events create a record when the task is unknown (a task-status
   // replay during bootstrap, or one another client launched).
   void handleTaskProgress(const protocol::TaskProgress &progress);
   void handleTaskCompleted(const protocol::TaskCompleted &completed);
   void handleTaskFailed(const protocol::TaskFailed &failed);
-  // Every pending callback runs once with an error reply carrying `error`,
-  // and the pending map is emptied first so a callback may send anew.
+  // Every pending callback runs once with an error reply carrying `error`
+  // (picks with an absent reply), and the pending lists are emptied first so
+  // a callback may send anew.
   void failAllPending(const std::string &error);
   void clearTasks();
   // Delivers the failures of sends the connection dropped.
@@ -295,6 +327,12 @@ struct ProjectOps
     std::string taskLabel;
   };
 
+  struct PendingPick
+  {
+    uint64_t requestId{0};
+    PickCallback callback;
+  };
+
   RequestHandle submit(uint64_t requestId,
       protocol::StudioMessageType type,
       vsr::network::Message &&msg,
@@ -305,14 +343,17 @@ struct ProjectOps
   TaskRecord &recordFor(uint64_t taskId);
   Pending *findPending(uint64_t requestId);
   const Pending *findPending(uint64_t requestId) const;
+  bool pickPending(uint64_t requestId) const;
 
   Sender m_sender;
   uint64_t m_nextRequestId{1};
   // A handful of requests at most; insertion order is the send order.
   std::vector<Pending> m_pending;
+  std::vector<PendingPick> m_pendingPicks;
   // Error replies for requests the connection would not send, delivered on
   // the next poll() so callbacks never run from inside send().
   std::vector<protocol::ProjectOpReply> m_undeliverable;
+  std::vector<uint64_t> m_undeliverablePicks;
   std::vector<TaskRecord> m_tasks;
 };
 

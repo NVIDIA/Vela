@@ -113,20 +113,32 @@ const ProjectOps::Pending *ProjectOps::findPending(uint64_t requestId) const
   return it == m_pending.end() ? nullptr : &*it;
 }
 
+bool ProjectOps::pickPending(uint64_t requestId) const
+{
+  return std::any_of(m_pendingPicks.begin(),
+      m_pendingPicks.end(),
+      [&](const auto &p) { return p.requestId == requestId; });
+}
+
 size_t ProjectOps::pendingCount() const
 {
-  return m_pending.size();
+  return m_pending.size() + m_pendingPicks.size();
 }
 
 bool ProjectOps::pending(RequestHandle handle) const
 {
-  return findPending(handle.requestId) != nullptr;
+  return findPending(handle.requestId) != nullptr
+      || pickPending(handle.requestId);
 }
 
 void ProjectOps::forget(RequestHandle handle)
 {
   if (auto *entry = findPending(handle.requestId))
     entry->callback = nullptr;
+  for (auto &pick : m_pendingPicks) {
+    if (pick.requestId == handle.requestId)
+      pick.callback = nullptr;
+  }
 }
 
 // Project ////////////////////////////////////////////////////////////////////
@@ -499,6 +511,48 @@ RequestHandle ProjectOps::listDirectory(const std::filesystem::path &directory,
   return sendForResult(std::move(req), std::move(callback));
 }
 
+// Playback ///////////////////////////////////////////////////////////////////
+
+RequestHandle ProjectOps::setPlaying(
+    const ShotID &shotId, bool playing, ReplyCallback callback)
+{
+  SetPlaying req;
+  req.shotId = shotId;
+  req.playing = playing;
+  return send(std::move(req), std::move(callback));
+}
+
+// Array histogram ////////////////////////////////////////////////////////////
+
+RequestHandle ProjectOps::requestArrayHistogram(const SceneObjectRef &array,
+    uint32_t binCount,
+    ResultCallback<ArrayHistogramResult> callback)
+{
+  RequestArrayHistogram req;
+  req.array = array;
+  req.binCount = binCount;
+  return sendForResult(std::move(req), std::move(callback));
+}
+
+// Pick ///////////////////////////////////////////////////////////////////////
+
+RequestHandle ProjectOps::pick(int x, int y, PickCallback callback)
+{
+  Pick req;
+  req.requestId = m_nextRequestId++;
+  req.x = x;
+  req.y = y;
+  RequestHandle handle;
+  handle.requestId = req.requestId;
+  const bool sent = m_sender && m_sender(encode(req));
+  if (!callback)
+    return handle;
+  m_pendingPicks.push_back(PendingPick{req.requestId, std::move(callback)});
+  if (!sent)
+    m_undeliverablePicks.push_back(req.requestId);
+  return handle;
+}
+
 // Server Tasks ///////////////////////////////////////////////////////////////
 
 RequestHandle ProjectOps::cancelTask(uint64_t taskId, ReplyCallback callback)
@@ -576,6 +630,23 @@ void ProjectOps::handleReply(const ProjectOpReply &reply)
     entry.callback(reply);
 }
 
+void ProjectOps::handlePickReply(const PickReply &reply)
+{
+  auto it = std::find_if(m_pendingPicks.begin(),
+      m_pendingPicks.end(),
+      [&](const auto &p) { return p.requestId == reply.requestId; });
+  if (it == m_pendingPicks.end()) {
+    vsr::core::logWarning("[ProjectOps] PickReply to unknown request %llu",
+        static_cast<unsigned long long>(reply.requestId));
+    return;
+  }
+  // Out before running: the callback may pick again.
+  PendingPick entry = std::move(*it);
+  m_pendingPicks.erase(it);
+  if (entry.callback)
+    entry.callback(reply);
+}
+
 void ProjectOps::handleTaskProgress(const TaskProgress &progress)
 {
   TaskRecord &record = recordFor(progress.taskId);
@@ -624,11 +695,18 @@ void ProjectOps::failAllPending(const std::string &error)
 {
   // Swap the map out first so a callback that sends anew is not swept up.
   std::vector<Pending> pending = std::move(m_pending);
+  std::vector<PendingPick> picks = std::move(m_pendingPicks);
   m_pending.clear();
+  m_pendingPicks.clear();
   m_undeliverable.clear();
+  m_undeliverablePicks.clear();
   for (auto &entry : pending) {
     if (entry.callback)
       entry.callback(makeErrorReply(entry.requestId, error));
+  }
+  for (auto &pick : picks) {
+    if (pick.callback)
+      pick.callback(std::nullopt);
   }
 }
 
@@ -639,12 +717,27 @@ void ProjectOps::clearTasks()
 
 void ProjectOps::poll()
 {
-  if (m_undeliverable.empty())
-    return;
-  std::vector<ProjectOpReply> replies = std::move(m_undeliverable);
-  m_undeliverable.clear();
-  for (const auto &reply : replies)
-    handleReply(reply);
+  if (!m_undeliverable.empty()) {
+    std::vector<ProjectOpReply> replies = std::move(m_undeliverable);
+    m_undeliverable.clear();
+    for (const auto &reply : replies)
+      handleReply(reply);
+  }
+  if (!m_undeliverablePicks.empty()) {
+    std::vector<uint64_t> ids = std::move(m_undeliverablePicks);
+    m_undeliverablePicks.clear();
+    for (uint64_t id : ids) {
+      auto it = std::find_if(m_pendingPicks.begin(),
+          m_pendingPicks.end(),
+          [&](const auto &p) { return p.requestId == id; });
+      if (it == m_pendingPicks.end())
+        continue;
+      PendingPick entry = std::move(*it);
+      m_pendingPicks.erase(it);
+      if (entry.callback)
+        entry.callback(std::nullopt);
+    }
+  }
 }
 
 } // namespace vsr::scivis_studio::client
