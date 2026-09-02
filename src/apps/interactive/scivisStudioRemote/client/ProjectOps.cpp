@@ -637,6 +637,7 @@ TaskRecord &ProjectOps::recordFor(uint64_t taskId)
       it->stale = false;
       it->state = TaskState::Queued;
       it->lastProgress = {};
+      it->outcome.clear();
       it->error.clear();
       it->framesCompleted = 0;
     }
@@ -709,9 +710,11 @@ void ProjectOps::handleTaskCompleted(const TaskCompleted &completed)
 {
   TaskRecord &record = recordFor(completed.taskId);
   record.state = TaskState::Completed;
-  // The outcome's message replaces the last phase text: an empty one means
-  // nothing to report, not "still writing".
-  record.lastProgress.message = completed.message;
+  // The last phase text stays for the panel row; the outcome, when the task
+  // has one, replaces it there and is what the completion toast quotes.
+  record.outcome = completed.message;
+  if (!completed.message.empty())
+    record.lastProgress.message = completed.message;
   record.framesCompleted = completed.framesCompleted;
   record.error.clear();
 }
