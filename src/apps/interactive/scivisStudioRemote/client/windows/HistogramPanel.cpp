@@ -17,7 +17,10 @@ namespace vsr::scivis_studio::client {
 
 namespace {
 
-constexpr int MAX_BINS = 4096; // the server's clamp
+// The wire contract's clamp, applied here too so the field shows what the
+// server will bin.
+constexpr int MIN_BINS = int(protocol::MIN_HISTOGRAM_BINS);
+constexpr int MAX_BINS = int(protocol::MAX_HISTOGRAM_BINS);
 
 bool sameRef(const SceneObjectRef &a, const SceneObjectRef &b)
 {
@@ -93,7 +96,7 @@ void HistogramPanel::refresh(const ArrayChoice &choice)
 {
   if (!canSend())
     return;
-  m_binCount = std::clamp(m_binCount, 1, MAX_BINS);
+  m_binCount = std::clamp(m_binCount, MIN_BINS, MAX_BINS);
   const std::string label = choice.label;
   m_pending = ops().requestArrayHistogram(choice.ref,
       uint32_t(m_binCount),
@@ -148,7 +151,7 @@ void HistogramPanel::buildEditorUI(const Project &)
       }
       ImGui::SetNextItemWidth(180.f * ImGui::GetIO().FontGlobalScale);
       if (ImGui::InputInt("Bins", &m_binCount, 1, 16))
-        m_binCount = std::clamp(m_binCount, 1, MAX_BINS);
+        m_binCount = std::clamp(m_binCount, MIN_BINS, MAX_BINS);
       ImGui::SameLine();
       ImGui::BeginDisabled(pending(m_pending));
       if (ImGui::Button(pending(m_pending) ? "Waiting..." : "Refresh"))
@@ -173,10 +176,15 @@ void HistogramPanel::buildEditorUI(const Project &)
       m_result->minValue,
       m_result->maxValue,
       m_plot.size());
+  if (m_result->nonFinite > 0) {
+    ImGui::SameLine();
+    ImGui::TextDisabled("(%llu NaN/inf elements left out)",
+        static_cast<unsigned long long>(m_result->nonFinite));
+  }
   const float maxCount =
       m_plot.empty() ? 0.f : *std::max_element(m_plot.begin(), m_plot.end());
-  const ImVec2 size(
-      ImGui::GetContentRegionAvail().x, std::max(80.f, ImGui::GetContentRegionAvail().y));
+  const ImVec2 size(ImGui::GetContentRegionAvail().x,
+      std::max(80.f, ImGui::GetContentRegionAvail().y));
   ImGui::PlotHistogram("##histogram",
       m_plot.data(),
       int(m_plot.size()),

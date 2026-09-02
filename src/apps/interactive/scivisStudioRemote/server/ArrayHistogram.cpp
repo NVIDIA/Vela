@@ -34,22 +34,25 @@ void histogram(const vsr::scene::Array &array,
   result.bins.assign(binCount, 0);
   result.minValue = 0.f;
   result.maxValue = 0.f;
+  result.nonFinite = 0;
   if (count == 0)
     return;
 
+  // Non-finite elements would swallow the range (one inf makes every scale
+  // zero), so they stay out of it and of the bins alike.
   float minValue = std::numeric_limits<float>::max();
   float maxValue = std::numeric_limits<float>::lowest();
   for (size_t i = 0; i < count; ++i) {
     const float v = elementAsFloat<ANARI_ENUM_T>(array, i);
-    if (std::isnan(v))
+    if (!std::isfinite(v)) {
+      ++result.nonFinite;
       continue;
+    }
     minValue = std::min(minValue, v);
     maxValue = std::max(maxValue, v);
   }
-  if (minValue > maxValue) { // every element was NaN
-    result.bins[0] = count;
+  if (result.nonFinite == count)
     return;
-  }
   result.minValue = minValue;
   result.maxValue = maxValue;
 
@@ -58,8 +61,10 @@ void histogram(const vsr::scene::Array &array,
   const size_t lastBin = binCount - 1;
   for (size_t i = 0; i < count; ++i) {
     const float v = elementAsFloat<ANARI_ENUM_T>(array, i);
+    if (!std::isfinite(v))
+      continue;
     size_t bin = 0;
-    if (!std::isnan(v) && scale > 0.f) {
+    if (scale > 0.f) {
       const float scaled = (v - minValue) * scale;
       bin = scaled <= 0.f ? 0 : std::min(size_t(scaled), lastBin);
     }
@@ -90,7 +95,8 @@ bool computeArrayHistogram(const vsr::scene::Array &array,
         + " is not scalar");
   }
 
-  binCount = std::clamp(binCount, MIN_HISTOGRAM_BINS, MAX_HISTOGRAM_BINS);
+  binCount = std::clamp(
+      binCount, protocol::MIN_HISTOGRAM_BINS, protocol::MAX_HISTOGRAM_BINS);
 
   switch (type) {
   case ANARI_INT8:

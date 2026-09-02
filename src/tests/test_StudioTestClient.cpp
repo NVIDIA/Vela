@@ -1487,7 +1487,7 @@ SCENARIO("the test client drives project ops against a fake server",
             " objectType=surface objectIndex=4"));
         REQUIRE(hasLine(r,
             "EVT ProjectOpReply requestId=5 ok=true error=\"\" bins=3 min=0"
-            " max=1"));
+            " max=1 nonFinite=0"));
         REQUIRE(hasLine(r, "OK set-outline $lastPickType $lastPickIndex"));
       }
 

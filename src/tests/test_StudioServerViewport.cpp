@@ -32,6 +32,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <numeric>
 #include <optional>
@@ -663,6 +664,60 @@ SCENARIO("computeArrayHistogram bins host arrays", "[StudioServer]")
       REQUIRE(result.minValue == 3.f);
       REQUIRE(result.maxValue == 3.f);
       REQUIRE(result.bins == std::vector<uint64_t>{5, 0, 0, 0});
+    }
+  }
+
+  GIVEN("a float32 array with NaN and infinite elements")
+  {
+    auto array = scene.createArray(ANARI_FLOAT32, 6);
+    const float inf = std::numeric_limits<float>::infinity();
+    const float values[] = {
+        0.f, 0.5f, 1.f, inf, -inf, std::numeric_limits<float>::quiet_NaN()};
+    array->setData(values, 6);
+
+    THEN("the finite elements set the range and fill the bins alone")
+    {
+      ArrayHistogramResult result;
+      REQUIRE(computeArrayHistogram(*array, 2, result));
+      REQUIRE(result.minValue == 0.f);
+      REQUIRE(result.maxValue == 1.f);
+      REQUIRE(result.bins == std::vector<uint64_t>{1, 2});
+      REQUIRE(result.nonFinite == 3);
+    }
+  }
+
+  GIVEN("a float64 array whose values exceed float range")
+  {
+    auto array = scene.createArray(ANARI_FLOAT64, 3);
+    const double values[] = {1.0, 2.0, 1e300};
+    array->setData(values, 3);
+
+    THEN("the overflowing element is left out")
+    {
+      ArrayHistogramResult result;
+      REQUIRE(computeArrayHistogram(*array, 2, result));
+      REQUIRE(result.minValue == 1.f);
+      REQUIRE(result.maxValue == 2.f);
+      REQUIRE(result.bins == std::vector<uint64_t>{1, 1});
+      REQUIRE(result.nonFinite == 1);
+    }
+  }
+
+  GIVEN("an array with no finite element")
+  {
+    auto array = scene.createArray(ANARI_FLOAT32, 2);
+    const float values[] = {std::numeric_limits<float>::quiet_NaN(),
+        std::numeric_limits<float>::infinity()};
+    array->setData(values, 2);
+
+    THEN("the range is empty and so are the bins")
+    {
+      ArrayHistogramResult result;
+      REQUIRE(computeArrayHistogram(*array, 3, result));
+      REQUIRE(result.minValue == 0.f);
+      REQUIRE(result.maxValue == 0.f);
+      REQUIRE(result.bins == std::vector<uint64_t>{0, 0, 0});
+      REQUIRE(result.nonFinite == 2);
     }
   }
 
