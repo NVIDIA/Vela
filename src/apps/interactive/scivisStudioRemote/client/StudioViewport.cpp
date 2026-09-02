@@ -186,11 +186,8 @@ void StudioViewport::ui_menubar_View()
     ImGui::EndCombo();
   }
   ImGui::BeginDisabled(s.visualizeAOV != AOVType::DEPTH);
-  changed |= ImGui::DragFloat("Depth Minimum",
-      &s.depthVisualMinimum,
-      0.1f,
-      0.f,
-      s.depthVisualMaximum);
+  changed |= ImGui::DragFloat(
+      "Depth Minimum", &s.depthVisualMinimum, 0.1f, 0.f, s.depthVisualMaximum);
   changed |= ImGui::DragFloat("Depth Maximum",
       &s.depthVisualMaximum,
       0.1f,
@@ -212,9 +209,8 @@ void StudioViewport::ui_menubar_View()
       "Needs a server device with primitive ids; silently off otherwise");
   changed |= ImGui::Checkbox("World Bounds", &s.showWorldBounds);
   ImGui::BeginDisabled(!s.showWorldBounds);
-  changed |= ImGui::ColorEdit4("Bounds Color",
-      &s.worldBoundsColor.x,
-      ImGuiColorEditFlags_NoInputs);
+  changed |= ImGui::ColorEdit4(
+      "Bounds Color", &s.worldBoundsColor.x, ImGuiColorEditFlags_NoInputs);
   if (ImGui::InputInt("Bounds Width", &s.worldBoundsWidth)) {
     s.worldBoundsWidth = std::max(1, s.worldBoundsWidth);
     changed = true;
@@ -308,8 +304,7 @@ void StudioViewport::ui_picking()
   const bool focus = ImGui::IsKeyDown(ImGuiKey_LeftShift)
       || ImGui::IsKeyDown(ImGuiKey_RightShift);
   if (focus
-      && m_camera.current->subtype()
-          != vsr::scene::tokens::camera::perspective)
+      && m_camera.current->subtype() != vsr::scene::tokens::camera::perspective)
     return;
   pick(x, y, !focus);
 }
