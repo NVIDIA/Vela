@@ -17,6 +17,7 @@
 #include "StudioProtocol.h"
 // vsr_network
 #include "vsr/network/NetworkChannel.hpp"
+#include "vsr/network/messages/TransferLayer.hpp"
 #include "vsr/network/messages/TransferScene.hpp"
 // vsr_scene
 #include "vsr/scene/Scene.hpp"
@@ -519,6 +520,144 @@ SCENARIO("StudioServer runs a viewer-parity session", "[StudioServer]")
             }
           }
         }
+      }
+    }
+  }
+}
+
+namespace {
+
+// The names of a layer's nodes by forest index; empty slots stay empty.
+std::vector<std::string> namesByIndex(const vsr::scene::Layer &layer)
+{
+  std::vector<std::string> names(layer.capacity());
+  for (size_t i = 0; i < layer.capacity(); ++i) {
+    if (auto node = layer.at(i))
+      names[i] = (*node)->name();
+  }
+  return names;
+}
+
+// Where a node falls in the layer's traversal order.
+size_t traversalPosition(
+    const vsr::scene::Layer &layer, vsr::scene::LayerNodeRef target)
+{
+  size_t position = 0;
+  size_t found = VSR_INVALID_INDEX;
+  layer.traverse_const(
+      layer.root(), [&](const vsr::scene::LayerNode &node, int) {
+        if (node.index() == target.index())
+          found = position;
+        ++position;
+        return true;
+      });
+  return found;
+}
+
+// Rebuild a mirror from the scene and layer transfers of one bootstrap.
+void applySceneTransfers(
+    vsr::scene::Scene &mirror, const std::vector<Message> &msgs)
+{
+  for (const auto &msg : msgs) {
+    switch (StudioMessageType(msg.header.type)) {
+    case StudioMessageType::TransferScene:
+      vsr::network::messages::TransferScene(msg, &mirror).execute();
+      break;
+    case StudioMessageType::TransferLayer:
+      vsr::network::messages::TransferLayer(msg, &mirror).execute();
+      break;
+    default:
+      break;
+    }
+  }
+}
+
+} // namespace
+
+SCENARIO("StudioServer applies SetNodeTransform to the addressed node",
+    "[StudioServer]")
+{
+  if (!helideAvailable()) {
+    WARN("helide ANARI library unavailable, skipping the node transform test");
+    return;
+  }
+
+  GIVEN("a started server whose studio layer is sparse")
+  {
+    ServerOptions options;
+    options.port = 0;
+    options.library = "helide";
+    options.dataRoots = {std::filesystem::temp_directory_path()};
+    StudioServer server(options);
+    std::string error;
+    REQUIRE(server.start(&error));
+
+    // Before run(): start() is the last thing on this thread that may touch
+    // the scene. Two transform nodes bracket a removed one so the addressed
+    // node's forest index is not its traversal position.
+    auto &scene = server.appContext().vsr.scene;
+    auto *layer = scene.layer("studio");
+    REQUIRE(layer != nullptr);
+    auto first = scene.insertChildTransformNode(
+        layer->root(), vsr::math::IDENTITY_MAT4, "first");
+    auto doomed = scene.insertChildTransformNode(
+        layer->root(), vsr::math::IDENTITY_MAT4, "doomed");
+    auto target = scene.insertChildTransformNode(
+        layer->root(), vsr::math::IDENTITY_MAT4, "target");
+    scene.removeNode(doomed);
+    const size_t targetIndex = target.index();
+    const size_t firstIndex = first.index();
+    REQUIRE(traversalPosition(*layer, target) != targetIndex);
+    const auto serverNames = namesByIndex(*layer);
+    const SceneNodeRef targetRef{"studio", targetIndex};
+
+    ServerLoop loop(&server);
+    TestClient client;
+    client.connect(server.port());
+    REQUIRE(client.waitForCount(StudioMessageType::Hello, 1));
+    client.send(Hello{});
+    REQUIRE(client.waitForCount(StudioMessageType::BootstrapEnd, 1));
+    REQUIRE(waitFor(
+        [&] { return server.sessionState() == SessionState::Connected; }));
+
+    WHEN("the bootstrap is applied to a mirror")
+    {
+      vsr::scene::Scene mirror;
+      applySceneTransfers(mirror, client.messages());
+
+      THEN("the mirror names every studio node by the server's index")
+      {
+        const auto *mirrorLayer = mirror.layer("studio");
+        REQUIRE(mirrorLayer != nullptr);
+        REQUIRE(namesByIndex(*mirrorLayer) == serverNames);
+        auto mirrored = mirrorLayer->at(targetRef.nodeIndex);
+        REQUIRE(mirrored);
+        REQUIRE((*mirrored)->name() == "target");
+      }
+    }
+
+    WHEN("the client sets the transform of the addressed node")
+    {
+      client.clear();
+      SetNodeTransform edit;
+      edit.node = targetRef;
+      edit.transform = vsr::math::mat4{{2.f, 0.f, 0.f, 0.f},
+          {0.f, 2.f, 0.f, 0.f},
+          {0.f, 0.f, 2.f, 0.f},
+          {5.f, 6.f, 7.f, 1.f}};
+      client.send(edit);
+
+      THEN("that node, and no other, takes the transform on the server")
+      {
+        REQUIRE(waitFor([&] {
+          return (*layer->at(targetIndex))->getTransform() == edit.transform;
+        }));
+        REQUIRE((*layer->at(firstIndex))->getTransform()
+            == vsr::math::IDENTITY_MAT4);
+        REQUIRE(client.count(StudioMessageType::Error) == 0);
+        // Origin-based echo suppression: the client's own edit is not pushed
+        // back as a layer transfer.
+        REQUIRE(client.count(StudioMessageType::TransferLayer) == 0);
       }
     }
   }

@@ -147,7 +147,9 @@ void toNode(
 bool fromNode(
     const vsr::core::DataNode &node, vsr::scivis_studio::SceneObjectRef &ref);
 
-// SceneNodeRef: {layerName: string, nodeIndex: uint64}
+// SceneNodeRef: {layerName: string, nodeIndex: uint64}. nodeIndex is the
+// server's layer forest index; the layer transfers rebuild the Structural
+// Mirror with the same numbering, so it names the same node on both sides.
 void toNode(
     const vsr::scivis_studio::SceneNodeRef &ref, vsr::core::DataNode &node);
 bool fromNode(
