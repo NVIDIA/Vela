@@ -14,6 +14,7 @@ add_library(vsr_scivis_studio_protocol OBJECT
   SceneMessages.cpp
   SessionMessages.cpp
   ShotRigRequests.cpp
+  StudioEndpoint.cpp
   StudioProtocol.cpp
   TaskMessages.cpp
   ViewportMessages.cpp

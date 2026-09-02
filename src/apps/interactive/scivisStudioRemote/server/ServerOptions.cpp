@@ -3,7 +3,6 @@
 
 #include "ServerOptions.h"
 // std
-#include <charconv>
 #include <sstream>
 
 namespace vsr::scivis_studio::server {
@@ -14,20 +13,6 @@ void setError(std::string *error, const std::string &text)
 {
   if (error)
     *error = text;
-}
-
-bool parsePort(const std::string &text, int &port)
-{
-  int value = 0;
-  const auto *begin = text.data();
-  const auto *end = text.data() + text.size();
-  const auto result = std::from_chars(begin, end, value);
-  if (result.ec != std::errc{} || result.ptr != end)
-    return false;
-  if (value < 1 || value > 65535)
-    return false;
-  port = value;
-  return true;
 }
 
 } // namespace
@@ -63,7 +48,7 @@ bool parseServerOptions(const std::vector<std::string> &args,
     }
 
     if (arg == "--port") {
-      if (!parsePort(value, options.port)) {
+      if (!protocol::parsePort(value, options.port)) {
         setError(
             error, "--port requires an integer in 1..65535, got: " + value);
         return false;
@@ -107,7 +92,7 @@ std::string serverUsage(const std::string &programName)
          " [--project DIR]\n"
          "\n"
          "  --port N          TCP port to listen on (default "
-      << DEFAULT_PORT
+      << protocol::DEFAULT_PORT
       << ")\n"
          "  --library NAME    ANARI library to render with (default: first"
          " entry of the\n"
