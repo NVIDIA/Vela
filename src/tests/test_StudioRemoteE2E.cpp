@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // catch
+#include "StudioFakeServer.h"
 #include "StudioRemoteTestHelpers.h"
 #include "catch.hpp"
 // vsr_scivis_studio_server_core
@@ -14,7 +15,9 @@
 #include "BrowseMessages.h"
 #include "FrameCodec.h"
 #include "FrameMessages.h"
+#include "PayloadCommon.h"
 #include "ProjectOpReply.h"
+#include "StudioProtocol.h"
 #include "TaskMessages.h"
 #include "ViewportMessages.h"
 // vsr_scivis_studio_model
@@ -24,7 +27,10 @@
 #include "vsr/scene/Scene.hpp"
 #include "vsr/scene/UpdateDelegate.hpp"
 #include "vsr/scene/objects/Array.hpp"
+// vsr_network
+#include "vsr/network/NetworkChannel.hpp"
 // vsr_core
+#include "vsr/core/DataTree.hpp"
 #include "vsr/core/VSRMath.hpp"
 // std
 #include <algorithm>
@@ -36,12 +42,14 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <memory>
 #include <numeric>
 #include <optional>
 #include <string>
 #include <system_error>
 #include <thread>
+#include <utility>
 #include <vector>
 
 using namespace vsr::scivis_studio;
@@ -312,12 +320,18 @@ const Shot &activeReplicaShot(Client &client)
   return *shot;
 }
 
-// Sends UpdateShot with `edit` applied to the replica's active shot and waits
-// for its reply and snapshot.
-void updateActiveShot(
-    Client &client, int &replaced, const std::function<void(Shot &)> &edit)
+// Sends UpdateShot with `edit` applied to the replica's copy of `shotId` and
+// waits for its reply and snapshot.
+void updateShot(Client &client,
+    int &replaced,
+    const ShotID &shotId,
+    const std::function<void(Shot &)> &edit)
 {
-  Shot shot = activeReplicaShot(client);
+  const auto *project = client.connection.project();
+  REQUIRE(project);
+  const auto *replica = project::findShot(*project, shotId);
+  REQUIRE(replica);
+  Shot shot = *replica;
   edit(shot);
   std::vector<ProjectOpReply> replies;
   const int snapshots = replaced;
@@ -327,6 +341,13 @@ void updateActiveShot(
       client.connection, [&] { return replies.size() == 1; }, E2E_TIMEOUT));
   REQUIRE(replies[0].ok);
   REQUIRE(waitForSnapshots(client, replaced, snapshots + 1));
+}
+
+// updateShot() on the replica's active shot.
+void updateActiveShot(
+    Client &client, int &replaced, const std::function<void(Shot &)> &edit)
+{
+  updateShot(client, replaced, activeReplicaShot(client).id, edit);
 }
 
 // Sends SetPlaying for the active shot; the reply must be ok.
@@ -389,6 +410,80 @@ std::optional<SceneObjectRef> findArray(
       return SceneObjectRef{ANARI_ARRAY, i};
   }
   return {};
+}
+
+// Entries of `directory`: the frames a render wrote there; 0 when it is
+// missing.
+size_t fileCount(const std::filesystem::path &directory)
+{
+  std::error_code ec;
+  std::filesystem::directory_iterator it(directory, ec);
+  if (ec)
+    return 0;
+  return size_t(std::distance(it, std::filesystem::directory_iterator()));
+}
+
+// Sends RenderShot; `taskId` is the caller's slot the reply fills, so a wait
+// on the record can start before the reply is in.
+void renderShot(Client &client, const ShotID &shotId, uint64_t &taskId)
+{
+  client.connection.projectOps().renderShot(shotId,
+      [&](const ProjectOpReply &r,
+          const std::optional<TaskStartedResult> &started) {
+        REQUIRE(r.ok);
+        REQUIRE(started);
+        taskId = started->taskId;
+      });
+}
+
+// Polls until the render named by `taskId` (a slot a reply fills) has
+// reported at least one frame; false on timeout.
+bool waitForRenderUnderWay(Client &client, const uint64_t &taskId)
+{
+  return pollUntil(
+      client.connection,
+      [&] {
+        if (taskId == 0)
+          return false;
+        const auto *task = client.connection.projectOps().task(taskId);
+        return task && task->state == TaskState::Running
+            && task->lastProgress.current >= 1;
+      },
+      E2E_TIMEOUT);
+}
+
+// Polls until `n` replies were collected; false on timeout.
+bool waitForReplies(
+    Client &client, const std::vector<ProjectOpReply> &replies, size_t n)
+{
+  return pollUntil(
+      client.connection, [&] { return replies.size() >= n; }, E2E_TIMEOUT);
+}
+
+// Saves the project in place, with `uiState` when given, and waits for the
+// task and the clean replica behind it.
+void saveInPlace(Client &client, protocol::SubtreePtr uiState = {})
+{
+  uint64_t taskId = 0;
+  client.connection.projectOps().saveProject(std::nullopt,
+      std::move(uiState),
+      [&](const ProjectOpReply &r,
+          const std::optional<TaskStartedResult> &started) {
+        REQUIRE(r.ok);
+        REQUIRE(started);
+        taskId = started->taskId;
+      });
+  const auto states = waitForTaskEnd(client, taskId);
+  REQUIRE(taskId != 0);
+  REQUIRE_FALSE(states.empty());
+  REQUIRE(states.back() == TaskState::Completed);
+  REQUIRE(pollUntil(
+      client.connection,
+      [&] {
+        const auto *p = client.connection.project();
+        return p && !p->dirty;
+      },
+      E2E_TIMEOUT));
 }
 
 } // namespace
@@ -1099,6 +1194,367 @@ SCENARIO("scivisStudioServer and the client core pick, outline and bin",
                     refused[0].error.find("not scalar") != std::string::npos);
                 REQUIRE(waitForFrames(client, 2));
                 REQUIRE(client.errors.empty());
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+SCENARIO("scivisStudioServer and the client core render shots and recover",
+    "[StudioRemote]")
+{
+  if (!helideAvailable()) {
+    WARN("helide ANARI library unavailable, skipping the shot render test");
+    return;
+  }
+
+  GIVEN("a client core on a saved project with a triangle and a 3-frame shot")
+  {
+    ProjectScratch scratch;
+    const auto mesh = scratch.base / "triangle.obj";
+    std::ofstream(mesh) << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+
+    auto server = std::make_unique<RunningServer>(0);
+    REQUIRE(server->started);
+    const auto port = server->port();
+    Client client;
+    int replaced = 0;
+    std::vector<SubtreePtr> uiStates;
+    client.connection.onProjectReplaced = [&] { replaced++; };
+    client.connection.onUIState = [&](const SubtreePtr &tree) {
+      uiStates.push_back(tree);
+    };
+    client.connection.connect("127.0.0.1", short(port));
+    REQUIRE(client.waitConnectedAndBootstrapped(1));
+    REQUIRE(uiStates.size() == 1); // every bootstrap carries one, null here
+    REQUIRE_FALSE(uiStates[0]);
+    auto &ops = client.connection.projectOps();
+    importMesh(client, mesh);
+
+    // Shot A renders three tiny frames; shot B, which CreateShot makes
+    // active, is what the render must switch away from.
+    const ShotID shotA = activeReplicaShot(client).id;
+    updateActiveShot(client, replaced, [](Shot &shot) {
+      shot.frameCount = 3;
+      shot.renderSettings.width = 32;
+      shot.renderSettings.height = 24;
+      shot.renderSettings.samples = 1;
+    });
+    std::optional<ShotID> shotB;
+    ops.createShot({},
+        [&](const ProjectOpReply &r,
+            const std::optional<ShotCreatedResult> &result) {
+          REQUIRE(r.ok);
+          REQUIRE(result);
+          shotB = result->shotId;
+        });
+    REQUIRE(pollUntil(
+        client.connection,
+        [&] {
+          return shotB && client.connection.project()->activeShotId == *shotB;
+        },
+        E2E_TIMEOUT));
+
+    uint64_t saveTask = 0;
+    ops.saveProject(scratch.saved,
+        nullptr,
+        [&](const ProjectOpReply &r,
+            const std::optional<TaskStartedResult> &started) {
+          REQUIRE(r.ok);
+          REQUIRE(started);
+          saveTask = started->taskId;
+        });
+    const auto saveStates = waitForTaskEnd(client, saveTask);
+    REQUIRE_FALSE(saveStates.empty());
+    REQUIRE(saveStates.back() == TaskState::Completed);
+    REQUIRE(pollUntil(
+        client.connection,
+        [&] {
+          const auto *p = client.connection.project();
+          return p && p->projectDirectory == scratch.saved && !p->dirty;
+        },
+        E2E_TIMEOUT));
+
+    client.connection.setEncodings({FrameEncoding::Raw});
+    client.connection.setFrameConfig(32, 24);
+    client.connection.startRendering();
+    REQUIRE(waitForFrameOf(client, *shotB));
+    const auto outputDirectory = scratch.saved / "renders" / shotA;
+
+    WHEN("RenderShot names the shot that is not active")
+    {
+      uint64_t render = 0;
+      renderShot(client, shotA, render);
+      const auto states = waitForTaskEnd(client, render);
+
+      THEN("the task completes with determinate progress and the shot active")
+      {
+        REQUIRE(render != 0);
+        REQUIRE_FALSE(states.empty());
+        REQUIRE(std::is_sorted(states.begin(), states.end()));
+        REQUIRE(states.back() == TaskState::Completed);
+        const TaskRecord *task = ops.task(render);
+        REQUIRE(task);
+        REQUIRE(task->render);
+        REQUIRE(task->error.empty());
+        REQUIRE(task->framesCompleted == 3);
+        // The last TaskProgress was "frame 3 of 3"; TaskCompleted's message
+        // then names the output directory.
+        REQUIRE(task->lastProgress.total == 3);
+        REQUIRE(task->lastProgress.current == 3);
+        REQUIRE(task->lastProgress.message == outputDirectory.string());
+        REQUIRE(fileCount(outputDirectory) == 3);
+        REQUIRE_FALSE(ops.renderActive());
+        REQUIRE_FALSE(ops.tasksActive());
+
+        // Rendering a shot makes it active, and that sticks: the switch is
+        // an edit (the project is dirty), the render itself restores the
+        // dirty flag it found.
+        REQUIRE(pollUntil(
+            client.connection,
+            [&] {
+              const auto *p = client.connection.project();
+              return p && p->activeShotId == shotA && p->dirty;
+            },
+            E2E_TIMEOUT));
+        // Interactive frames resume, of the shot the render made active.
+        REQUIRE(waitForFrameOf(client, shotA));
+        REQUIRE(client.errors.empty());
+
+        AND_THEN("a request meeting a queued render is refused; cancel stops "
+                 "the running one at a frame boundary")
+        {
+          // Large enough that helide takes a second or more over 400 frames.
+          updateShot(client, replaced, shotA, [](Shot &shot) {
+            shot.frameCount = 400;
+            shot.renderSettings.width = 512;
+            shot.renderSettings.height = 384;
+          });
+          saveInPlace(client);
+          uint64_t first = 0;
+          renderShot(client, shotA, first);
+          REQUIRE(waitForRenderUnderWay(client, first));
+          REQUIRE(ops.renderActive());
+
+          // All three reach the server while the body holds the loop thread
+          // and are dispatched together once it returns: the second render
+          // queues, the CreateShot behind it meets that queued render and is
+          // refused, and the CancelTask -- whose flag the IO thread raised
+          // the moment it arrived -- is answered ok. (A mutating request
+          // dispatched with no render queued would simply be served.)
+          uint64_t second = 0;
+          renderShot(client, shotA, second);
+          std::vector<ProjectOpReply> lateReplies;
+          ops.createShot(
+              "Late", [&](const ProjectOpReply &r, const auto &) {
+                lateReplies.push_back(r);
+              });
+          std::vector<ProjectOpReply> cancelReplies;
+          ops.cancelTask(
+              first, [&](const ProjectOpReply &r) { cancelReplies.push_back(r); });
+
+          const auto firstStates = waitForTaskEnd(client, first);
+          REQUIRE_FALSE(firstStates.empty());
+          REQUIRE(firstStates.back() == TaskState::Failed);
+          const TaskRecord *cancelled = ops.task(first);
+          REQUIRE(cancelled);
+          REQUIRE(cancelled->error == "cancelled");
+          REQUIRE(cancelled->framesCompleted >= 1);
+          REQUIRE(cancelled->framesCompleted < 400);
+          // Partial frames stay on disk (the 3-frame render's files are
+          // overwritten, not added to).
+          REQUIRE(fileCount(outputDirectory)
+              == std::max<size_t>(3, cancelled->framesCompleted));
+          REQUIRE(waitForReplies(client, cancelReplies, 1));
+          REQUIRE(cancelReplies[0].ok);
+          REQUIRE(waitForReplies(client, lateReplies, 1));
+          REQUIRE_FALSE(lateReplies[0].ok);
+          REQUIRE(lateReplies[0].error == "render in progress");
+
+          // The second render runs now; it is cancelled the same way.
+          REQUIRE(waitForRenderUnderWay(client, second));
+          std::vector<ProjectOpReply> cancelSecond;
+          ops.cancelTask(second,
+              [&](const ProjectOpReply &r) { cancelSecond.push_back(r); });
+          const auto secondStates = waitForTaskEnd(client, second);
+          REQUIRE_FALSE(secondStates.empty());
+          REQUIRE(secondStates.back() == TaskState::Failed);
+          REQUIRE(ops.task(second)->error == "cancelled");
+          REQUIRE(waitForReplies(client, cancelSecond, 1));
+          REQUIRE(cancelSecond[0].ok);
+          REQUIRE_FALSE(ops.renderActive());
+
+          // Nothing is queued or running any more: edits go through again
+          // and frames resume.
+          std::vector<ProjectOpReply> afterReplies;
+          ops.createShot(
+              "After", [&](const ProjectOpReply &r, const auto &) {
+                afterReplies.push_back(r);
+              });
+          REQUIRE(waitForReplies(client, afterReplies, 1));
+          REQUIRE(afterReplies[0].ok);
+          REQUIRE(pollUntil(
+              client.connection,
+              [&] { return client.connection.project()->shots.size() == 3; },
+              E2E_TIMEOUT));
+          REQUIRE(waitForFrames(client, 2));
+          REQUIRE(client.errors.empty());
+
+          AND_THEN("a client evicted mid-render is bootstrapped after it and "
+                   "hears how it ended from the replay")
+          {
+            // Shot A still has its 400 frames: under way for a second or
+            // more when the eviction lands, done well inside the wait.
+            // CreateShot made "After" active; the render switches back.
+            constexpr uint64_t FRAMES = 400;
+            saveInPlace(client);
+            uint64_t third = 0;
+            renderShot(client, shotA, third);
+            REQUIRE(waitForRenderUnderWay(client, third));
+            REQUIRE(pollUntil(
+                client.connection,
+                [&] {
+                  return client.connection.project()->activeShotId == shotA;
+                },
+                E2E_TIMEOUT));
+
+            // A second connection replaces this one; the server says why
+            // before closing the socket.
+            {
+              vsr::network::NetworkClient intruder("127.0.0.1", short(port));
+              REQUIRE(pollUntil(
+                  client.connection,
+                  [&] {
+                    return client.connection.state() == ConnectionState::Lost;
+                  },
+                  E2E_TIMEOUT));
+              REQUIRE(client.connection.statusText().find(
+                          "replaced by another client")
+                  != std::string::npos);
+              intruder.disconnect();
+            }
+            // The farewell is the one bare Error of the session so far.
+            REQUIRE(client.errors
+                == std::vector<std::string>{"replaced by another client"});
+            client.errors.clear();
+            // The frozen record is what the loss found.
+            REQUIRE(ops.task(third));
+            REQUIRE(ops.task(third)->state == TaskState::Running);
+
+            // The retry is accepted at once but bootstrapped only once the
+            // body returns; the bootstrap fails the open record and the
+            // replay then delivers the TaskCompleted the render sent to a
+            // closed socket.
+            REQUIRE(client.waitConnectedAndBootstrapped(2));
+            const TaskRecord *replayed = ops.task(third);
+            REQUIRE(replayed);
+            REQUIRE(replayed->state == TaskState::Completed);
+            REQUIRE_FALSE(replayed->stale);
+            REQUIRE(replayed->framesCompleted == FRAMES);
+            REQUIRE(replayed->lastProgress.message == outputDirectory.string());
+            REQUIRE(fileCount(outputDirectory) >= FRAMES);
+            // One record per id, and nothing left Running.
+            REQUIRE(std::count_if(ops.tasks().begin(),
+                        ops.tasks().end(),
+                        [&](const TaskRecord &t) { return t.taskId == third; })
+                == 1);
+            REQUIRE_FALSE(ops.tasksActive());
+            REQUIRE_FALSE(ops.renderActive());
+            // The bootstrap's snapshot shows the project the render left:
+            // shot A active again, which is an edit.
+            REQUIRE(client.connection.project()->activeShotId == shotA);
+            REQUIRE(client.connection.project()->dirty);
+            client.requireMirrorsServer(*server);
+            REQUIRE(uiStates.size() == 2);
+            REQUIRE_FALSE(uiStates[1]); // still no UI state saved
+
+            AND_THEN("the UI state saved with the project returns on open")
+            {
+              auto tree = makeSubtree();
+              tree->root()["windows"]["viewport"] = std::string("abc");
+              saveInPlace(client, tree);
+
+              std::vector<ProjectOpReply> newReplies;
+              ops.newProject(
+                  [&](const ProjectOpReply &r) { newReplies.push_back(r); });
+              REQUIRE(waitForReplies(client, newReplies, 1));
+              REQUIRE(newReplies[0].ok);
+              REQUIRE(pollUntil(
+                  client.connection,
+                  [&] {
+                    return client.connection.project()
+                        ->projectDirectory.empty();
+                  },
+                  E2E_TIMEOUT));
+
+              uiStates.clear();
+              uint64_t open = 0;
+              ops.openProject(scratch.saved,
+                  [&](const ProjectOpReply &r,
+                      const std::optional<TaskStartedResult> &started) {
+                    REQUIRE(r.ok);
+                    REQUIRE(started);
+                    open = started->taskId;
+                  });
+              const auto openStates = waitForTaskEnd(client, open);
+              REQUIRE_FALSE(openStates.empty());
+              REQUIRE(openStates.back() == TaskState::Completed);
+              // The UIState precedes the task's end and the snapshot.
+              REQUIRE(uiStates.size() == 1);
+              REQUIRE(uiStates[0]);
+              const auto *windows = uiStates[0]->root().child("windows");
+              REQUIRE(windows);
+              const auto *leaf = windows->child("viewport");
+              REQUIRE(leaf);
+              REQUIRE(leaf->getValueAs<std::string>() == "abc");
+              REQUIRE(client.connection.uiState() == uiStates[0]);
+              REQUIRE(pollUntil(
+                  client.connection,
+                  [&] {
+                    const auto *p = client.connection.project();
+                    return p && p->projectDirectory == scratch.saved;
+                  },
+                  E2E_TIMEOUT));
+              REQUIRE(client.errors.empty());
+
+              AND_THEN("a retry greeted by another protocol version ends "
+                       "Disconnected")
+              {
+                server->stop();
+                REQUIRE(server->finished.load());
+                REQUIRE(pollUntil(
+                    client.connection,
+                    [&] {
+                      return client.connection.state()
+                          == ConnectionState::Lost;
+                    },
+                    E2E_TIMEOUT));
+                REQUIRE(client.connection.autoRetrying());
+
+                // What comes back on the port speaks the wrong version.
+                FakeStudioServer imposter(PROTOCOL_VERSION + 1, int(port));
+                REQUIRE(pollUntil(
+                    client.connection,
+                    [&] {
+                      return client.connection.state()
+                          == ConnectionState::Disconnected;
+                    },
+                    E2E_TIMEOUT));
+                REQUIRE(client.connection.statusText().find("mismatch")
+                    != std::string::npos);
+                REQUIRE_FALSE(client.connection.autoRetrying());
+                REQUIRE(client.connection.project() == nullptr);
+                REQUIRE(totalObjects(client.mirror) == 0);
+                REQUIRE(ops.tasks().empty());
+                const int accepts = imposter.accepts;
+                REQUIRE(accepts == 1);
+                pollFor(client.connection, 300ms);
+                REQUIRE(
+                    client.connection.state() == ConnectionState::Disconnected);
+                REQUIRE(imposter.accepts == accepts); // no retry fight
               }
             }
           }
