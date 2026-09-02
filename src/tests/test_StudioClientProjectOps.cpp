@@ -671,6 +671,16 @@ SCENARIO(
           REQUIRE(f.ops().task(42)->state == TaskState::Failed);
         }
 
+        AND_THEN("a completion without a message clears the phase text")
+        {
+          TaskCompleted completed;
+          completed.taskId = 42;
+          f.server.send(encode(completed));
+          REQUIRE(pollUntil(f.connection,
+              [&] { return f.ops().task(42)->state == TaskState::Completed; }));
+          REQUIRE(f.ops().task(42)->lastProgress.message.empty());
+        }
+
         AND_THEN("cancelTask sends CancelTask for that id")
         {
           Recorded cancel;
