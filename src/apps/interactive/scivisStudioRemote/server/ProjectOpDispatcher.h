@@ -190,8 +190,8 @@ struct ProjectOpDispatcher
   void fail(uint64_t requestId, const std::string &error);
   // Queues `body` and answers with its task id.
   void startTask(uint64_t requestId, std::string description, TaskBody body);
-  // Runs `body`, then rebinds (if asked) and flushes scene pushes so the
-  // completion report follows them.
+  // Runs `body`, then -- however it ended -- rebinds (if asked) and flushes
+  // scene pushes so the completion report follows them.
   TaskResult runTaskBody(const std::function<TaskResult()> &body, bool rebind);
   void sendSnapshot();
 

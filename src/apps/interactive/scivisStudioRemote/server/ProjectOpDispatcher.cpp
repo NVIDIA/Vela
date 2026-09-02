@@ -251,10 +251,22 @@ void ProjectOpDispatcher::startTask(
 TaskResult ProjectOpDispatcher::runTaskBody(
     const std::function<TaskResult()> &body, bool rebind)
 {
-  auto result = body();
-  if (rebind && result.ok)
-    m_host.rebindActiveShot();
-  m_host.flushScenePushes();
+  // The rebind and the flush follow the body whatever its outcome: a failed
+  // (or throwing) open may have reset the scene already, and the pipeline
+  // must not keep handles into the scene that was.
+  const auto follow = [&] {
+    if (rebind)
+      m_host.rebindActiveShot();
+    m_host.flushScenePushes();
+  };
+  TaskResult result;
+  try {
+    result = body();
+  } catch (...) {
+    follow();
+    throw;
+  }
+  follow();
   return result;
 }
 
