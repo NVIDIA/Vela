@@ -105,6 +105,20 @@ latches the newest value, the loop applies it once per iteration. The latch
 is simultaneously the latest-wins coalescer and the thread-safety seam.
 _Avoid_: message queue (it holds one value, not a history)
 
+**Origin-Based Echo Suppression**:
+The rule that an edit never returns to the end it came from: each end
+disables its own outbound delegate while applying what the other end sent
+(the server while applying client edits, the client while applying pushes
+and the Bootstrap). Suppression is decided by where a mutation originated,
+never by comparing values.
+_Avoid_: change filtering, loop detection
+
+**Latest-Frame-Wins**:
+The frame pacing rule: at most one Frame is in flight, and while it is the
+server skips rendering rather than queueing pictures, so the client always
+shows the newest state and a slow link never builds a backlog.
+_Avoid_: frame queue, frame buffer depth
+
 **Pick**:
 A request naming a viewport pixel, answered by the server against its current
 camera and scene with `{hit, worldPosition, objectIdentity?}`. What the
