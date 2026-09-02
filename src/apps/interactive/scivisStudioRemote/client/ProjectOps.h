@@ -24,6 +24,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace vsr::scivis_studio::client {
@@ -100,7 +101,9 @@ struct TaskRecord
  * ResultCallback<R>; task-launching ops report TaskStartedResult and register
  * the task, labelled after the request, in tasks(). A Pick shares the id
  * space but is answered by a plain PickReply, so it has its own callback
- * type; pending() and the connection-loss failure cover it all the same.
+ * type but shares the pending list, so pending(), forget() and the
+ * connection-loss failure cover it all the same; a server Error naming a
+ * Pick ("Pick 7 refused: ...") fails the oldest pending one.
  *
  * Example:
  *   auto &ops = connection.projectOps();
@@ -140,7 +143,8 @@ struct ProjectOps
   size_t pendingCount() const;
   bool pending(RequestHandle handle) const;
   // Drops the callback; the reply, if it comes, is still used for task
-  // tracking and otherwise ignored.
+  // tracking and otherwise ignored. A pick is retired outright: the server
+  // answers only the surviving Pick, so nothing would ever retire it.
   void forget(RequestHandle handle);
 
   // Project (20..22) /////////////////////////////////////////////////////////
@@ -298,10 +302,11 @@ struct ProjectOps
   // Matches the reply to its callback and registers a started task.
   void handleReply(const protocol::ProjectOpReply &reply);
   // A bare Error from the server that names a request type ("malformed
-  // CreateShot payload", "Pick is not implemented ...") retires the oldest
-  // pending request of that type with `message` as its error; true when one
-  // was. Servers answer such requests with a ProjectOpReply when the payload
-  // carried an id; this covers the ones that cannot.
+  // CreateShot payload", "Pick 7 refused: ...") retires the oldest pending
+  // request of that type with `message` as its error (a pick with an absent
+  // reply); true when one was. Servers answer such requests with a
+  // ProjectOpReply when the payload carried an id; this covers the ones that
+  // cannot, and picks, which have no reply to carry an error.
   bool failOldestNamed(const std::string &message);
   // Matches a PickReply to its pick() callback; unknown ids are logged.
   void handlePickReply(const protocol::PickReply &reply);
@@ -311,49 +316,51 @@ struct ProjectOps
   void handleTaskCompleted(const protocol::TaskCompleted &completed);
   void handleTaskFailed(const protocol::TaskFailed &failed);
   // Every pending callback runs once with an error reply carrying `error`
-  // (picks with an absent reply), and the pending lists are emptied first so
-  // a callback may send anew.
+  // (picks with an absent reply), and the pending list is emptied first so a
+  // callback may send anew.
   void failAllPending(const std::string &error);
   void clearTasks();
   // Delivers the failures of sends the connection dropped.
   void poll();
 
  private:
+  // A project op's or a pick's callback; a pick is answered by a PickReply
+  // and fails with an absent one.
+  using Callback = std::variant<ReplyCallback, PickCallback>;
+
   struct Pending
   {
     uint64_t requestId{0};
     protocol::StudioMessageType type{};
-    ReplyCallback callback;
+    Callback callback;
     std::string taskLabel;
-  };
 
-  struct PendingPick
-  {
-    uint64_t requestId{0};
-    PickCallback callback;
+    bool hasCallback() const;
+    bool isPick() const;
   };
 
   RequestHandle submit(uint64_t requestId,
       protocol::StudioMessageType type,
       vsr::network::Message &&msg,
-      ReplyCallback callback,
+      Callback callback,
       std::string taskLabel);
   // Takes the entry out of the pending list, if it is there.
   std::optional<Pending> takePending(uint64_t requestId);
+  // Runs the entry's callback with a failed reply: the reply itself for a
+  // project op, an absent PickReply for a pick.
+  static void fail(Pending &entry, const protocol::ProjectOpReply &reply);
   TaskRecord &recordFor(uint64_t taskId);
   Pending *findPending(uint64_t requestId);
   const Pending *findPending(uint64_t requestId) const;
-  bool pickPending(uint64_t requestId) const;
 
   Sender m_sender;
   uint64_t m_nextRequestId{1};
-  // A handful of requests at most; insertion order is the send order.
+  // A handful of requests and picks at most; insertion order is the send
+  // order.
   std::vector<Pending> m_pending;
-  std::vector<PendingPick> m_pendingPicks;
   // Error replies for requests the connection would not send, delivered on
   // the next poll() so callbacks never run from inside send().
   std::vector<protocol::ProjectOpReply> m_undeliverable;
-  std::vector<uint64_t> m_undeliverablePicks;
   std::vector<TaskRecord> m_tasks;
 };
 

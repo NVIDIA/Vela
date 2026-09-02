@@ -66,25 +66,47 @@ ProjectOps::ProjectOps(Sender sender) : m_sender(std::move(sender)) {}
 
 // Generic sends //////////////////////////////////////////////////////////////
 
+bool ProjectOps::Pending::hasCallback() const
+{
+  return std::visit([](const auto &cb) { return bool(cb); }, callback);
+}
+
+bool ProjectOps::Pending::isPick() const
+{
+  return type == StudioMessageType::Pick;
+}
+
 RequestHandle ProjectOps::submit(uint64_t requestId,
     StudioMessageType type,
     vsr::network::Message &&msg,
-    ReplyCallback callback,
+    Callback callback,
     std::string taskLabel)
 {
   RequestHandle handle;
   handle.requestId = requestId;
+  Pending entry{requestId, type, std::move(callback), {}};
   const bool sent = m_sender && m_sender(std::move(msg));
   if (!sent) {
-    if (callback) {
+    if (entry.hasCallback()) {
       m_undeliverable.push_back(makeErrorReply(requestId, "not connected"));
-      m_pending.push_back(Pending{requestId, type, std::move(callback), {}});
+      m_pending.push_back(std::move(entry));
     }
     return handle;
   }
-  m_pending.push_back(
-      Pending{requestId, type, std::move(callback), std::move(taskLabel)});
+  entry.taskLabel = std::move(taskLabel);
+  m_pending.push_back(std::move(entry));
   return handle;
+}
+
+void ProjectOps::fail(Pending &entry, const ProjectOpReply &reply)
+{
+  if (auto *cb = std::get_if<ReplyCallback>(&entry.callback)) {
+    if (*cb)
+      (*cb)(reply);
+  } else if (auto *pick = std::get_if<PickCallback>(&entry.callback)) {
+    if (*pick)
+      (*pick)(std::nullopt);
+  }
 }
 
 std::optional<ProjectOps::Pending> ProjectOps::takePending(uint64_t requestId)
@@ -113,32 +135,34 @@ const ProjectOps::Pending *ProjectOps::findPending(uint64_t requestId) const
   return it == m_pending.end() ? nullptr : &*it;
 }
 
-bool ProjectOps::pickPending(uint64_t requestId) const
-{
-  return std::any_of(m_pendingPicks.begin(),
-      m_pendingPicks.end(),
-      [&](const auto &p) { return p.requestId == requestId; });
-}
-
 size_t ProjectOps::pendingCount() const
 {
-  return m_pending.size() + m_pendingPicks.size();
+  return m_pending.size();
 }
 
 bool ProjectOps::pending(RequestHandle handle) const
 {
-  return findPending(handle.requestId) != nullptr
-      || pickPending(handle.requestId);
+  return findPending(handle.requestId) != nullptr;
 }
 
 void ProjectOps::forget(RequestHandle handle)
 {
-  if (auto *entry = findPending(handle.requestId))
-    entry->callback = nullptr;
-  for (auto &pick : m_pendingPicks) {
-    if (pick.requestId == handle.requestId)
-      pick.callback = nullptr;
+  auto *entry = findPending(handle.requestId);
+  if (!entry)
+    return;
+  if (!entry->isPick()) {
+    entry->callback = ReplyCallback{};
+    return;
   }
+  // A superseded pick is never answered (latest-wins on the server); a late
+  // reply for it just logs as unknown.
+  takePending(handle.requestId);
+  m_undeliverable.erase(std::remove_if(m_undeliverable.begin(),
+                            m_undeliverable.end(),
+                            [&](const auto &reply) {
+                              return reply.requestId == handle.requestId;
+                            }),
+      m_undeliverable.end());
 }
 
 // Project ////////////////////////////////////////////////////////////////////
@@ -542,15 +566,8 @@ RequestHandle ProjectOps::pick(int x, int y, PickCallback callback)
   req.requestId = m_nextRequestId++;
   req.x = x;
   req.y = y;
-  RequestHandle handle;
-  handle.requestId = req.requestId;
-  const bool sent = m_sender && m_sender(encode(req));
-  if (!callback)
-    return handle;
-  m_pendingPicks.push_back(PendingPick{req.requestId, std::move(callback)});
-  if (!sent)
-    m_undeliverablePicks.push_back(req.requestId);
-  return handle;
+  return submit(
+      req.requestId, Pick::MESSAGE_TYPE, encode(req), std::move(callback), {});
 }
 
 // Server Tasks ///////////////////////////////////////////////////////////////
@@ -618,33 +635,32 @@ void ProjectOps::handleReply(const ProjectOpReply &reply)
         reply.ok ? "ok" : reply.error.c_str());
   }
 
-  if (reply.ok) {
-    if (auto started = results<TaskStartedResult>(reply)) {
-      TaskRecord &record = recordFor(started->taskId);
-      if (!entry.taskLabel.empty())
-        record.label = entry.taskLabel;
-    }
+  if (!reply.ok) {
+    // For a pick this can only be its failure (undeliverable or refused):
+    // it fails with an absent reply.
+    fail(entry, reply);
+    return;
   }
-
-  if (entry.callback)
-    entry.callback(reply);
+  if (auto started = results<TaskStartedResult>(reply)) {
+    TaskRecord &record = recordFor(started->taskId);
+    if (!entry.taskLabel.empty())
+      record.label = entry.taskLabel;
+  }
+  if (auto *cb = std::get_if<ReplyCallback>(&entry.callback); cb && *cb)
+    (*cb)(reply);
 }
 
 void ProjectOps::handlePickReply(const PickReply &reply)
 {
-  auto it = std::find_if(m_pendingPicks.begin(),
-      m_pendingPicks.end(),
-      [&](const auto &p) { return p.requestId == reply.requestId; });
-  if (it == m_pendingPicks.end()) {
+  // Out before running: the callback may pick again.
+  auto entry = takePending(reply.requestId);
+  if (!entry || !entry->isPick()) {
     vsr::core::logWarning("[ProjectOps] PickReply to unknown request %llu",
         static_cast<unsigned long long>(reply.requestId));
     return;
   }
-  // Out before running: the callback may pick again.
-  PendingPick entry = std::move(*it);
-  m_pendingPicks.erase(it);
-  if (entry.callback)
-    entry.callback(reply);
+  if (auto *cb = std::get_if<PickCallback>(&entry->callback); cb && *cb)
+    (*cb)(reply);
 }
 
 void ProjectOps::handleTaskProgress(const TaskProgress &progress)
@@ -685,29 +701,19 @@ bool ProjectOps::failOldestNamed(const std::string &message)
       static_cast<unsigned long long>(requestId),
       toString(it->type),
       message.c_str());
-  auto entry = takePending(requestId);
-  if (entry && entry->callback)
-    entry->callback(makeErrorReply(requestId, message));
+  if (auto entry = takePending(requestId))
+    fail(*entry, makeErrorReply(requestId, message));
   return true;
 }
 
 void ProjectOps::failAllPending(const std::string &error)
 {
-  // Swap the map out first so a callback that sends anew is not swept up.
+  // Swap the list out first so a callback that sends anew is not swept up.
   std::vector<Pending> pending = std::move(m_pending);
-  std::vector<PendingPick> picks = std::move(m_pendingPicks);
   m_pending.clear();
-  m_pendingPicks.clear();
   m_undeliverable.clear();
-  m_undeliverablePicks.clear();
-  for (auto &entry : pending) {
-    if (entry.callback)
-      entry.callback(makeErrorReply(entry.requestId, error));
-  }
-  for (auto &pick : picks) {
-    if (pick.callback)
-      pick.callback(std::nullopt);
-  }
+  for (auto &entry : pending)
+    fail(entry, makeErrorReply(entry.requestId, error));
 }
 
 void ProjectOps::clearTasks()
@@ -717,27 +723,12 @@ void ProjectOps::clearTasks()
 
 void ProjectOps::poll()
 {
-  if (!m_undeliverable.empty()) {
-    std::vector<ProjectOpReply> replies = std::move(m_undeliverable);
-    m_undeliverable.clear();
-    for (const auto &reply : replies)
-      handleReply(reply);
-  }
-  if (!m_undeliverablePicks.empty()) {
-    std::vector<uint64_t> ids = std::move(m_undeliverablePicks);
-    m_undeliverablePicks.clear();
-    for (uint64_t id : ids) {
-      auto it = std::find_if(m_pendingPicks.begin(),
-          m_pendingPicks.end(),
-          [&](const auto &p) { return p.requestId == id; });
-      if (it == m_pendingPicks.end())
-        continue;
-      PendingPick entry = std::move(*it);
-      m_pendingPicks.erase(it);
-      if (entry.callback)
-        entry.callback(std::nullopt);
-    }
-  }
+  if (m_undeliverable.empty())
+    return;
+  std::vector<ProjectOpReply> replies = std::move(m_undeliverable);
+  m_undeliverable.clear();
+  for (const auto &reply : replies)
+    handleReply(reply);
 }
 
 } // namespace vsr::scivis_studio::client
