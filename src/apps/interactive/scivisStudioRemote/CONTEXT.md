@@ -100,10 +100,15 @@ by the per-frame image header (`shotId`, `frame`) and never by the replica.
 
 **Control-State Latch**:
 The server pattern marshalling interactive inputs (time, camera, pick,
-viewport settings) from the network IO thread to the render loop: the handler
-latches the newest value, the loop applies it once per iteration. The latch
-is simultaneously the latest-wins coalescer and the thread-safety seam.
-_Avoid_: message queue (it holds one value, not a history)
+viewport settings, frame config) from the network IO thread to the render
+loop: the handler latches the newest value, the loop applies it once per
+iteration. The latch is simultaneously the latest-wins coalescer and the
+thread-safety seam. Inputs that must not coalesce — scene edits, and Project
+Ops when they arrive — do not go through the latch: they ride an **edit drain
+queue** alongside it, kept in arrival order and drained by the same loop
+iteration, so nothing is lost and nothing runs off the IO thread.
+_Avoid_: message queue for the latch itself (it holds one value, not a
+history); latch for the drain queue (it keeps every edit, in order)
 
 **Origin-Based Echo Suppression**:
 The rule that an edit never returns to the end it came from: each end
