@@ -7,6 +7,7 @@
 # nothing from client/: the protocol library is all it shares with the GUI.
 add_library(vsr_scivis_studio_test_client_core OBJECT
   Script.cpp
+  TestSession.cpp
 )
 
 target_include_directories(vsr_scivis_studio_test_client_core
