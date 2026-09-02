@@ -232,7 +232,8 @@ ScriptedServer::ScriptedServer(Behaviour behaviour)
           refusing.store(true);
         });
     closer = std::thread([this] {
-      if (!waitFor([&] { return refusing.load(); }))
+      // Also woken by the destructor, with no farewell to flush.
+      if (!waitFor([&] { return refusing.load(); }) || !farewell.valid())
         return;
       farewell.wait_for(1s);
       channel->restart();
@@ -535,6 +536,26 @@ SCENARIO("the test client refuses a server speaking another protocol version",
               + " buildInfo=\"scripted server\"");
       REQUIRE(result.records[1].rfind("FAIL connect", 0) == 0);
       REQUIRE(result.records[1].find("protocol version mismatch")
+          != std::string::npos);
+      REQUIRE(session.state() == test_client::SessionState::NeverConnected);
+    }
+  }
+
+  GIVEN("a server that answers the client's Hello with an Error and closes")
+  {
+    ScriptedServer server(ScriptedServer::Behaviour::RefuseOnHello);
+    TestSession session;
+    const auto result = runScript(
+        session, "connect 127.0.0.1 " + std::to_string(server.port()) + "\n");
+
+    THEN("the Error is heard before the close: connect FAILs as refused")
+    {
+      REQUIRE_FALSE(result.ok);
+      REQUIRE(hasLine(
+          result.records, "EVT Error message=\"the scripted server refuses\""));
+      REQUIRE(result.records.back().rfind("FAIL connect", 0) == 0);
+      REQUIRE(result.records.back().find(
+                  "server refused: the scripted server refuses")
           != std::string::npos);
       REQUIRE(session.state() == test_client::SessionState::NeverConnected);
     }
