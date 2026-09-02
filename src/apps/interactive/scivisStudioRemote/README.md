@@ -286,7 +286,9 @@ no control stays greyed until the connection is lost. `PROTOCOL_VERSION` is
   Preconditions the engine finds (a dataset that cannot be made resident, a
   missing camera) fail the task with the engine's text. A snapshot follows
   either way: the render restores residency, the dirty flag and the frame
-  time it found.
+  time it found -- so rendering a shot that was already active leaves a saved
+  project saved, while the switch to a shot that was not active is an edit
+  like any `SetActiveShot` and leaves the project dirty.
 - **Cancel and Shutdown.** `CancelTask` naming the running render raises the
   runner's cancel flag on the IO thread; the body stops before its next frame
   (granularity: one frame times `samples` renders), the task ends
@@ -456,50 +458,179 @@ says so before closing (otherwise the reason is the socket's, "End of
 file"). Inbound messages are handled before the close latch in each poll
 so such an Error is never lost to the close it explains.
 
-## Open design questions
+## Hardening dispositions (milestone 7)
 
-- **Color map objects.** No scene object type today carries a color map as
-  *parameters*: vsr_ui_imgui's TransferFunctionEditor edits a
-  `vsr::scene::Array` of RGBA samples (`colormap_<name>`). The server
-  therefore pairs each `ColorMapRecord` with a `vsr::scene::Array` of
-  `ANARI_FLOAT32_VEC4` (256 samples, default color map) named
-  `<colorMapId>_colormap`; the name is the only link, as with
-  `<shotId>_camera`. Consequences the transfer-function work must resolve:
-  the samples are array data, not parameters, so `SetObjectParameter` cannot
-  edit them and the bootstrap's descriptor-only `TransferScene` does not
-  carry them; project saves persist the record but not the Array, so an
-  opened project recreates each record's Array with default samples. Rename
-  touches the record only.
-- **Renderer library switches.** `UpdateShot` accepts a
+Every question left open by the earlier milestones has a disposition here:
+**fixed**, **v1 behaviour** (kept and documented), or **deferred** with the
+reason. Nothing is silently open.
+
+### Design questions
+
+- **Color map objects** -- *deferred.* No scene object type carries a color
+  map as parameters: vsr_ui_imgui's TransferFunctionEditor edits a
+  `vsr::scene::Array` of RGBA samples (`colormap_<name>`), so the server
+  pairs each `ColorMapRecord` with an `ANARI_FLOAT32_VEC4` Array of 256
+  default samples named `<colorMapId>_colormap`; the name is the only link.
+  The samples are array data, not parameters, so `SetObjectParameter` cannot
+  edit them, the descriptor-only `TransferScene` does not carry them, and an
+  opened project recreates each record's Array with default samples. The v1
+  message set has no array-data upload (the spec's "Not in the set"), so
+  transfer-function editing waits for a `SetArrayData`-style addition and a
+  version bump; the client shows color maps read-only.
+- **Renderer library switches** -- *v1 behaviour.* `UpdateShot` accepts a
   `renderSettings.rendererObjectIndex` only when it names a Renderer of
-  `renderSettings.rendererLibrary` (or is unset). The server renders with
-  its own library regardless and rewrites the active shot's renderer
-  settings to match when they disagree, as `setupRendering` always did, so
-  a client choosing another library sees its choice overridden in the next
-  snapshot rather than a device switch.
-- **Task threading.** Moving the disk phases of tasks to a worker thread
-  (the split `stageProjectOpen`/`openStagedProject` prepares) is deferred;
-  see the notes on which `ProjectContext` calls are staging-safe.
-
-- **Light rename, camera-rig clone, camera-rig keyframe editing.** The v1
-  message set has no op for renaming a light node (node and object names are
-  not parameters), cloning a camera rig, or editing a camera rig's keyframes
-  and current pose (the monolith's Set View, Capture, Update, Delete, pose
-  editor and inline frame/name/interpolation edits). The client shows these
-  read-only with a tooltip saying so. Candidates: `RenameLightNode{lightRigId,
-  lightNode, name}`, `CloneCameraRig{cameraRigId}`, and an
-  `UpdateCameraRig{rig}` whole-value replace mirroring `UpdateShot`; the
-  viewport's manipulator pose is what Set View/Capture would send.
-  `UpdateShot` covers every Shot field except `playing`, which stays with
-  playback (`SetPlaying`, milestone 6).
-- **Naming a loaded Dataset Archive.** `LoadDatasetArchive` carries no name,
-  so the Add Static Dataset dialog applies a typed name with a follow-up
-  `RenameDataset` once the snapshot after the load shows exactly one new
-  dataset id. A `name` field on the request would remove the heuristic.
-- **Renderer libraries in the Shot Editor.** The client offers only the
-  device names of the Renderer objects in the Structural Mirror (plus the
+  `renderSettings.rendererLibrary` (or is unset). The server renders with its
+  own library regardless and rewrites the active shot's renderer settings to
+  match when they disagree, as `setupRendering` always did, so a client
+  choosing another library sees its choice overridden in the next snapshot
+  rather than a device switch. `RenderShot` is safe under this rule because
+  its prelude rebinds (`finish(..., rebind)`) before the body reads the
+  shot's library.
+- **Task threading** -- *deferred.* Tasks run on the loop thread (frames
+  pause) rather than on a worker; the split `stageProjectOpen` /
+  `openStagedProject` prepares the move of the disk phases and nothing on the
+  wire changes when it happens.
+- **Light rename, camera-rig clone, camera-rig keyframe editing** --
+  *deferred.* The v1 message set has no op for renaming a light node (node
+  and object names are not parameters), cloning a camera rig, or editing a
+  camera rig's keyframes and current pose (the monolith's Set View, Capture,
+  Update, Delete, pose editor and inline frame/name/interpolation edits). The
+  client shows these read-only with a tooltip saying so. Candidates for the
+  next version bump: `RenameLightNode{lightRigId, lightNode, name}`,
+  `CloneCameraRig{cameraRigId}`, and an `UpdateCameraRig{rig}` whole-value
+  replace mirroring `UpdateShot`. `UpdateShot` covers every Shot field except
+  `playing`, which stays with `SetPlaying`.
+- **Naming a loaded Dataset Archive** -- *deferred.* `LoadDatasetArchive`
+  carries no name, so the Add Static Dataset dialog applies a typed name with
+  a follow-up `RenameDataset` once the snapshot after the load shows exactly
+  one new dataset id (`client/ArchiveRenameFollowUp`). A `name` field is a
+  wire change; it rides the next version bump together with the rig ops
+  above.
+- **Renderer libraries in the Shot Editor** -- *deferred.* The client offers
+  the device names of the Renderer objects in the Structural Mirror (plus the
   shot's current value); the server's loadable-library list is not in the
-  protocol.
+  protocol. A `ServerInfo` bootstrap message (or `Hello.buildInfo` structure)
+  would carry it -- same bump.
+
+### Issues carried across milestones
+
+- **`SceneNodeRef.nodeIndex` on sparse layers** (M3, found in M4) --
+  *fixed* in the M4 fix-up: `TransferLayer` preserves the server's node
+  indices, so a `SetNodeTransform` from either side names the same node.
+- **Bare `Error` left a GUI request pending** (M5) -- *fixed* in M5 T5:
+  the server answers with `ProjectOpReply{ok=false}` whenever the payload
+  carried a request id, and the client retires the oldest pending request a
+  bare Error names.
+- **Client-generated `CreateShot` name** (M5) -- *fixed* in M5 T5: the
+  client sends an empty name and the server numbers the shot.
+- **`CancelTask` on a finished task said "unknown task N"** (M5) --
+  *fixed*: the runner's finished-task history distinguishes "task already
+  finished" from an id never issued.
+- **Cancelling a lone queued task races the loop iteration that runs it**
+  (M5) -- *v1 behaviour.* Single-lane, one task per iteration: a task queued
+  by one iteration runs in the same one, so a `CancelTask` sent right after
+  the `TaskStarted` reply usually finds it running (honoured by a render,
+  "task already finished" for the rest). Scenarios shield a task they cancel
+  behind a running one; the GUI's Cancel simply reports what the server said.
+- **Frame headers skipping at fps 1000 over a socket** (M6) -- *v1
+  behaviour*, see "Wire pacing" above: never-skip is a guarantee about
+  rendering and time advance, not wire delivery.
+- **`StudioScenario.playback` flake under `ctest -j 8`** (M6) -- *fixed*
+  in the M6 fix-up: the scenario runs at 25 fps and the strict never-skip
+  check lives in the in-process E2E test.
+- **`vsr::CameraArchive` failed once under `ctest -j 8`** (M4) --
+  *deferred (watch)*: unrelated to networking, never reproduced since.
+- **`vsr::StudioClient` heap corruption once under `ctest -j 8`** (M5) --
+  *deferred (watch)*: the fixture joins the fake server before destroying
+  client state; not reproduced in the five-run Studio-tag sweeps of M6 and
+  M7.
+- **Second client evicts the first, then both fight through auto-retry**
+  (M6 notes) -- *v1 behaviour*, narrowed: the server still takes the newest
+  connection, but tells the evicted client why (`Error{"replaced by another
+  client"}`) so its banner names the cause; two clients pointed at one
+  server will still take turns. Refusing the second connection instead is a
+  one-line policy change in `NetworkServer::setReplaceHandler`'s caller if
+  it is ever wanted.
+- **A cancelled render toasts as "failed: cancelled"** (M7 notes) -- *v1
+  behaviour*: the task ended as `TaskFailed{"cancelled"}` and the toast says
+  so; the record keeps the frames written (`TaskRecord::framesCompleted`).
+- **Duplicated request-type lists and small copies across client files**
+  (M5 review) -- *deferred* to a cleanup ticket; each list gained
+  `RenderShot` in this milestone.
+
+### Spec conformance
+
+Every bullet of the spec sections named below, against the tree at
+milestone 7. *Implemented* means as written; *partial* means part of the
+bullet is deliberately not there yet; *deviates* means the behaviour differs
+and the difference is a recorded decision (the milestone 7 README's numbered
+decisions, `M7-n`).
+
+| Spec bullet | Status | Where | Note |
+|-------------|--------|-------|------|
+| **Message inventory (v1)** | | | |
+| Session: `Hello`, `Ping`/`Pong`, `Disconnect`, `Shutdown`, `BootstrapBegin`/`End` | implemented | `protocol/SessionMessages.h`, `server/StudioServer.cpp` | `Error` (2) is the bare error the spec's "rejected with an error" needs |
+| Project: `NewProject`, `OpenProject`, `SaveProject(dir?, uiState)` | implemented | `server/ProjectOpDispatcher.cpp` | plus `UIState` server-to-client (107), sent in every bootstrap and by `OpenProject`'s body |
+| Dataset ops (imports, declare, reimport, rename/remove/unload/refresh, load, archive save/load, incorporate, discover) | implemented | `ProjectOpDispatcher.cpp` types 23..35 | task/sync split as listed |
+| Shot: `CreateShot`, `RemoveShot`, `UpdateShot`, `SetActiveShot` | implemented | types 36..39 | `UpdateShot` never honours `playing` |
+| Rig: light rig create/clone/remove/rename, add/remove light, camera rig create/remove/rename, archives | implemented | types 40..52 | |
+| Color map: `CreateColorMap` both halves atomically, `RenameColorMap`, `RemoveColorMap`; values optimistic parameter edits | **partial** | types 53..55, `ColorMapCreatedResult` | the samples are Array data, not parameters, so no optimistic edit reaches them; see "Color map objects" (deferred) |
+| Remote Browse: `ListRoots`, `ListDirectory` | implemented | `server/RemoteBrowse.cpp` | |
+| Server Task family: task-id reply, `TaskProgress`, `TaskCompleted`/`TaskFailed`, `CancelTask` | implemented | `server/ServerTaskRunner.cpp`, `protocol/TaskMessages.h` | `TaskFailed.framesCompleted` added (v2); the bootstrap replays endings since the previous bootstrap, not only the running task (M7-4; spec paragraph tightened) |
+| Playback: `SetPlaying`, `SetTime`, `TimeAdvanceWarning{frame, message}` | implemented | `protocol/PlaybackMessages.h` | the warning also names the `shotId` |
+| Scene client-to-server: `SetObjectParameter`, `RemoveObjectParameter`, `SetNodeTransform` | implemented | `protocol/SceneEditMessages.h` | |
+| Scene server-to-client: `TransferScene`, `TransferLayer`, object added/removed, `ProjectSnapshot` | implemented | `protocol/SceneMessages.h`, `ProjectSnapshot.h` | |
+| Viewport: `Pick`, `SetOutline`, `ViewportSettings` | implemented | `protocol/ViewportMessages.h` | |
+| On-demand: `RequestArrayHistogram` | implemented | `server/ArrayHistogram.cpp` | |
+| Rendering/frames: frame config, start/stop, header, encoding negotiation | implemented | `protocol/FrameMessages.h`, `FrameCodec.h` | |
+| Reserved, not implemented: subtree expansion, typed channels, NVENC | implemented (reserved) | `FrameMessages.h` comment | no value defined for any of the three |
+| **File access** | | | |
+| No file bytes cross the wire | implemented | -- | no upload/download/export message exists |
+| Data Roots: `--data-root`, absolute paths validated at use | implemented | `server/DataRoots.cpp` | canonicalized, compared by component; `--project` is implicitly a root |
+| Remote Browse replaces the SDL dialogs; server lists, client filters; project directories marked | implemented | `server/RemoteBrowse.cpp`, `client/RemoteBrowseDialog.cpp` | `{name, kind, size, mtimeSeconds}` |
+| Server Tasks: immediate id, progress, one ending, cooperative cancel, snapshot on completion, single-lane | implemented | `server/ServerTaskRunner.cpp` | tasks run on the loop thread, not a worker thread: frames pause (M5 design, "Task threading" deferred) |
+| Shot outputs stay in `<project>/renders/<shotId>/` | implemented | `scivisStudio/RenderShot.cpp` | listable with `ListDirectory` |
+| **Frame delivery** | | | |
+| Two encodings: raw and turbojpeg (quality 85-95, 4:4:4) | implemented | `protocol/FrameCodec.cpp` | quality fixed at 90, `TJSAMP_444` |
+| Every frame carries a header (size, format, encoding, shotId, frame) | implemented | `FrameMessages.h` | |
+| Encoding negotiated at session setup, may switch per frame via the tag | implemented | `SetEncodings`, `StudioServer.cpp` | `SetEncodings` is accepted at any time; the server never switches on its own in v1 |
+| Latest-frame-wins, one in flight | implemented | `StudioServer::renderAndSendFrame` | also a single slot in the client core |
+| Reserved for v2: NVENC, typed-channel framing | implemented (reserved) | -- | |
+| **Playback and time** | | | |
+| Server advances time on its own clock; client predicts nothing | implemented | `StudioServer::tickPlayback` | |
+| Wire unit is integer frames plus shot id | implemented | `PlaybackMessages.h` | |
+| Time rides the frame header | implemented | `FrameHeader.frame` | |
+| Time at rest in the replica, in motion in headers | implemented | `StudioServer.cpp`, `client/windows/Timeline.cpp` | |
+| `SetPlaying` sync op; auto-stop is a server-originated snapshot | implemented | `ProjectOpDispatcher.cpp`, `ProjectContext` callback | |
+| Scrubbing is optimistic `SetTime` through the latch; seek while playing keeps playing | implemented | `StudioServer::applyTime` | rest commit debounced 250 ms |
+| Never skip frames | implemented | `AnimationManager::tick` | about rendering and time advance; wire delivery is latest-wins (v1 behaviour, "Wire pacing") |
+| Load failure keeps playing, `TimeAdvanceWarning` | implemented | `StudioServer::pushLoadFailures` | |
+| The client has no `AnimationManager` | implemented | `client/` | |
+| **Picking, selection, and viewport passes** | | | |
+| One `Pick{x, y}` against the current camera and scene | implemented | `StudioServer::servicePendingPick` | pixels y-down from the top-left (spec now says so) |
+| Reply `{hit, worldPosition, objectIdentity?}` | implemented | `PickReply` | |
+| Latched, serviced next iteration with id channels forced; one in flight; refused during `RenderShot` | implemented | `StudioServer.cpp` | a Pick latched during the render body is answered `Error{"Pick N refused: render in progress"}` |
+| Selection is client state; `SetOutline` informs the server | implemented | `client/Application.cpp`, `server/ViewportPasses.cpp` | |
+| Pass suite server-side behind `ViewportSettings` | implemented | `server/ViewportPasses.cpp` | `PRIMITIVE_ID` silently off without the extension |
+| Wire carries explicit `(type, index)` | implemented | `SceneObjectRef` | |
+| v2 room for client-side compositing | n/a | -- | nothing precludes it |
+| **Offline shot rendering** | | | |
+| `RenderShot` is an ordinary Server Task: id reply, determinate progress, one ending, cancel at the next frame | implemented | `ProjectOpDispatcher::handle(RenderShot)` | exclusive task (M7-1, M7-2) |
+| Rendering a shot makes it active, and that sticks | implemented | same | the switch is an edit (dirty), as `SetActiveShot` is |
+| Interactive frame delivery pauses and resumes | implemented | by construction: the body holds the loop | |
+| Mutating ops refused while the render runs; read-only fine | **deviates** | `ProjectOpDispatcher::dispatch`, `StudioServer::dispatchPendingRequests` | refused when they reach dispatch while a render is queued or running (M7-3); a request that *arrives* while the body holds the loop is dispatched after it returns and, the render being over, served. The spec sentence now says so. |
+| No frame preview in v1 | implemented | -- | |
+| Outputs `<project>/renders/<shotId>/<prefix>_%04d.png`; partial frames kept; frame count in the ending; preconditions as task failure | implemented | `RenderShot.cpp`, `TaskFailed.framesCompleted` | |
+| `scivisStudioRenderShot` unchanged, shares the engine path | implemented | `scivisStudio/RenderShot.cpp` | result struct extended, CLI behaviour kept |
+| **Client behavior on server loss** | | | |
+| Client declares loss: socket error, or Ping after ~5 s quiet and ~15 s silence | implemented | `client/ServerConnection.cpp` | `ConnectionTimings` defaults 5 s / 15 s |
+| Single IO-thread-safe disconnect hook, UI thread polls | implemented | `ServerConnection::onChannelClosed`/`poll` | |
+| Freeze in place under a banner | implemented | `client/Application.cpp` | mirror, replica and last frame kept; a loss during a bootstrap empties the mirror (M7-6, item 8) |
+| Auto-retry with backoff for ~a minute, then manual | implemented | `ServerConnection::poll` | a retry greeted by another protocol version ends `Disconnected` with the mismatch text and no retry offer (M7-6, item 12) |
+| Reconnect does nothing special; a restarted server is a first connect | implemented | bootstrap | task records are failed at `BootstrapBegin` and revived by the replay (M7-4); the UI layout is not re-applied on the re-bootstrap after Lost |
+| No v1 autosave | implemented | -- | |
+| Connection-scoped request failure only; no UI-thread blocking | implemented | `ProjectOps::failAllPending` | |
+| Crisp states `NeverConnected`/`Connected`/`Lost`/`Disconnected` | implemented | `ConnectionState` | an evicted client is `Lost` with the server's reason as status (M7-6, item 13) |
 
 ## Tests
 

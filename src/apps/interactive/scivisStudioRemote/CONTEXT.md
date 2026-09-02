@@ -40,11 +40,38 @@ _Avoid_: background job, async request
 
 **Bootstrap**:
 The bracketed message sequence a server sends on every accepted connection —
-structural scene, layer snapshots, frame config, UI state, task-status
-replay, then a Project Snapshot — leaving the client fully populated.
+structural scene, layer snapshots, frame config, UI State, Task-Status
+Replay, then a Project Snapshot — leaving the client fully populated.
 Connecting and reconnecting are the same act; the server's authoritative
 state is the session.
 _Avoid_: session restore, resync
+
+**Task-Status Replay**:
+The part of the Bootstrap that tells a client how every Server Task ended
+since the previous Bootstrap (each `TaskCompleted`/`TaskFailed` verbatim) and
+which one is running now (one `TaskProgress` naming it). It is what lets a
+task outlive the session that launched it: the client fails its open task
+records at `BootstrapBegin` and the replay revives the ones the server still
+speaks of. Idempotent — an ending heard live may be replayed once more.
+_Avoid_: task history sync, task resume
+
+**Exclusive Server Task**:
+A Server Task that owns the Project and the Scene while it is queued or
+running — in v1 the shot render. Its **pause-and-refuse** rule: interactive
+frames pause because the task holds the render loop, and any request that
+would mutate the Project or Scene or launch another task is refused with
+"render in progress" when it reaches dispatch, rather than held back to run
+afterwards; browse, histogram and cancel still go through. An exclusive task
+also outlives its session when it is merely queued.
+_Avoid_: blocking task, render lock
+
+**UI State**:
+The opaque `{windows, layout, settings}` tree a client attaches to
+`SaveProject` and receives back in every Bootstrap and after an
+`OpenProject` (`UIState`). The server stores and returns it without reading
+it, so a layout saved with a project follows the project to whichever client
+opens it next.
+_Avoid_: layout sync, window settings message
 
 ### Client-held state
 
