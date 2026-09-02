@@ -416,12 +416,8 @@ bool TestSession::setParameter(const SceneObjectRef &object,
     const vsr::core::Any &value,
     std::string *error)
 {
-  if (!requireConnected(error))
-    return false;
-  auto *obj = m_mirror.getObject(object.type, object.objectIndex);
-  if (!obj) {
-    if (error)
-      *error = "no " + objectText(object) + " in the mirror";
+  auto *obj = mirrorObject(object, error);
+  if (!obj)
     return false;
   }
   obj->addParameter(name).setValue(value);
@@ -435,12 +431,8 @@ bool TestSession::setParameter(const SceneObjectRef &object,
 bool TestSession::removeParameter(
     const SceneObjectRef &object, const std::string &name, std::string *error)
 {
-  if (!requireConnected(error))
-    return false;
-  auto *obj = m_mirror.getObject(object.type, object.objectIndex);
-  if (!obj) {
-    if (error)
-      *error = "no " + objectText(object) + " in the mirror";
+  auto *obj = mirrorObject(object, error);
+  if (!obj)
     return false;
   }
   obj->removeParameter(name);
@@ -634,6 +626,17 @@ bool TestSession::requireConnected(std::string *error) const
 
 void TestSession::pushEvent(Event event)
 {
+vsr::scene::Object *TestSession::mirrorObject(
+    const SceneObjectRef &object, std::string *error)
+{
+  if (!requireConnected(error))
+    return nullptr;
+  auto *obj = m_mirror.getObject(object.type, object.objectIndex);
+  if (!obj && error)
+    *error = "no " + objectText(object) + " in the mirror";
+  return obj;
+}
+
   m_events.push_back(std::move(event));
 }
 
