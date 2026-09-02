@@ -55,6 +55,18 @@ struct ProjectContext
   bool removeShot(const ShotID &id, std::string *error = nullptr);
   bool updateShot(const Shot &shot, std::string *error = nullptr);
   bool setActiveShot(const ShotID &id, std::string *error = nullptr);
+  // Playback as whole operations (the monolith's transport pokes the
+  // AnimationManager and the Shot inline). setPlaying accepts the active shot
+  // only, starts or stops the manager and writes shot.playing.
+  // setActiveShotFrame seeks the active shot to `frame` (clamped); the
+  // manager's time-changed callback lands it in shot.currentFrame and applies
+  // the shot. When a non-looping shot plays off its end, the manager's
+  // stopped callback writes playing=false and currentFrame=last. None of
+  // these dirty the project: the playback position is transient state, as
+  // when the monolith's tick writes it.
+  bool setPlaying(
+      const ShotID &id, bool playing, std::string *error = nullptr);
+  void setActiveShotFrame(int frame);
   Dataset *addStaticDataset(const std::string &name,
       const std::filesystem::path &sourcePath,
       vsr::io::ImporterType importerType);
@@ -206,6 +218,7 @@ struct ProjectContext
   void ensureColorMapArrays();
   void installAnimationManagerCallback();
   void updateActiveShotFromAnimationTime();
+  void onAnimationPlaybackStopped();
 
   vsr::app::Context *m_ctx{nullptr};
   Project m_project;
