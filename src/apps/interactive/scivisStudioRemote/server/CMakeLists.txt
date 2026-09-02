@@ -8,6 +8,7 @@ add_library(vsr_scivis_studio_server_core OBJECT
   RemoteBrowse.cpp
   ServerOptions.cpp
   ServerPushDelegate.cpp
+  ServerTaskRunner.cpp
   StudioServer.cpp
 )
 
