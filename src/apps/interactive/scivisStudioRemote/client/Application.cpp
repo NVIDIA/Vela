@@ -182,10 +182,10 @@ Application::Application(int argc, const char **argv)
   m_connection->onServerError = [](const std::string &message) {
     vsr::core::logError("[Client] server reported: %s", message.c_str());
   };
-  m_connection->onTimeAdvanceWarning =
-      [this](const TimeAdvanceWarning &warning) {
-        onTimeAdvanceWarning(warning);
-      };
+  m_connection->onTimeAdvanceWarning = [this](
+                                           const TimeAdvanceWarning &warning) {
+    onTimeAdvanceWarning(warning);
+  };
 
   m_editorContext.connection = m_connection.get();
   m_editorContext.reportError = [this](const std::string &message) {
@@ -701,9 +701,8 @@ void Application::pushToast(const std::string &text, bool isError)
 void Application::onTimeAdvanceWarning(const TimeAdvanceWarning &warning)
 {
   const Project *project = m_connection->project();
-  const std::string shot = project
-      ? replica::shotLabel(*project, warning.shotId)
-      : warning.shotId;
+  const std::string shot =
+      project ? replica::shotLabel(*project, warning.shotId) : warning.shotId;
   pushToast("Frame " + std::to_string(warning.frame) + " of " + shot
           + " failed to load: " + warning.message,
       true);

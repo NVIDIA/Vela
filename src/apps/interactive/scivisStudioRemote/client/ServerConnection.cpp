@@ -9,10 +9,10 @@
 #include "ProjectOpReply.h"
 #include "ProjectSnapshot.h"
 #include "SceneMessages.h"
-#include "ViewportMessages.h"
 #include "SessionMessages.h"
 #include "StudioProtocol.h"
 #include "TaskMessages.h"
+#include "ViewportMessages.h"
 // vsr_scivis_studio_model
 #include "Project.h"
 // vsr_network
