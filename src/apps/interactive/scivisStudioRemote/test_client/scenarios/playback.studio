@@ -12,8 +12,13 @@
 connect
 assert shot.active.playing == false
 
-# A short looping shot at a high fps ceiling, so the frames advance quickly.
-update-shot active frameCount=12 fps=1000 loop=on
+# A short looping shot at an fps ceiling well below the loop rate. Ticking
+# goes on while a Frame is still on the wire (time must not freeze on a slow
+# link) and the frame rendered meanwhile is dropped, latest-frame-wins; at a
+# period near the wire's round trip (fps 1000 over a socket) that shows up
+# as a header skipping a frame. At 100 fps the loop iterates several times
+# per frame, so a skip here could only come from the tick catching up.
+update-shot active frameCount=12 fps=100 loop=on
 await-snapshot
 assert shot.active.frameCount == 12
 assert shot.active.loop == true
@@ -27,10 +32,11 @@ set-playing active on
 await-snapshot
 assert shot.active.playing == true
 
-# Five frames whose header frame differs from the previous one's. Playback
-# never catches up by skipping, so no forward step between two consecutive
-# headers exceeds 1. The loop wrap 11 -> 0 is a step backwards, which
-# frames.maxStep ignores by design (see the README's assert values).
+# Five frames whose header frame differs from the previous one's. The tick
+# advances at most one frame per loop iteration and never catches up by
+# skipping, so no forward step between two consecutive headers exceeds 1.
+# The loop wrap 11 -> 0 is a step backwards, which frames.maxStep ignores by
+# design (see the README's assert values).
 await-frame-advance 5 timeout=10000
 assert frames.advanced >= 5
 assert frames.maxStep <= 1
@@ -45,9 +51,10 @@ assert shot.active.playing == false
 await-frame 2
 assert shot.active.currentFrame == @frame.frame
 
-# Playing a shot that is not the active one is refused.
+# Playing a shot the project does not have is refused (an existing shot that
+# is not the active one is refused too: "only the active shot can play").
 expect-fail set-playing shot_9999 on
-assert lastReplyError contains shot_9999
+assert lastReplyError contains "shot not found"
 
 stop-rendering
 disconnect
