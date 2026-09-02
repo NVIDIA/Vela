@@ -3,8 +3,9 @@
 
 # The rejection paths of the project surface: unknown ids of every
 # collection, paths outside the Data Roots, and requests that need a saved
-# project. Each is an error reply with the request's id, never an Error
-# message, and none of them changes the replica.
+# project. A sync op is refused with an error reply carrying the request's
+# id, never an Error message; a task op checks the Project only when its task
+# runs, so it is accepted and then fails. None of them changes the replica.
 
 connect
 list-roots
@@ -18,11 +19,8 @@ expect-fail remove-shot shot_9999
 expect-fail set-active-shot shot_9999
 expect-fail rename-dataset dataset_9999 x
 expect-fail remove-dataset dataset_9999
-expect-fail load-dataset dataset_9999
 expect-fail unload-dataset dataset_9999
 expect-fail refresh-dataset-availability dataset_9999
-expect-fail reimport-dataset dataset_9999
-expect-fail save-dataset-archive dataset_9999 $dataRoot/x.vsr
 expect-fail clone-light-rig lightRig_9999
 expect-fail remove-light-rig lightRig_9999
 expect-fail rename-light-rig lightRig_9999 x
@@ -35,7 +33,7 @@ expect-fail save-camera-rig-archive cameraRig_9999 $dataRoot/x.vsr
 expect-fail rename-color-map colorMap_9999 x
 expect-fail remove-color-map colorMap_9999
 expect-fail cancel-task 9999
-assert replies.failed == 21
+assert replies.failed == 18
 
 # Paths outside every Data Root are refused before anything is touched.
 expect-fail open-project /nonexistent/project
@@ -48,19 +46,28 @@ expect-fail save-camera-rig-archive cameraRig_0001 /nonexistent/rig.vsr
 expect-fail load-camera-rig-archive /nonexistent/rig.vsr
 expect-fail incorporate-dataset-candidate /nonexistent/data.vsr
 expect-fail list-directory /nonexistent
-assert replies.failed == 31
+assert replies.failed == 28
 
-# An unsaved project has no directory to save to, and no candidates.
-expect-fail save-project
+# An unsaved project has no candidates.
 discover-dataset-candidates
-assert replies.failed == 32
+assert replies.failed == 28
 
-# A path inside the root that holds no project is accepted as a task, which
-# then fails.
+# Task ops read the Project when they run: an unknown dataset id, a project
+# with no directory to save to, and a path inside the root that holds no
+# project are all accepted as tasks, which then fail.
+load-dataset dataset_9999
+await-task expect-fail
+reimport-dataset dataset_9999
+await-task expect-fail
+save-dataset-archive dataset_9999 $dataRoot/x.vsr
+await-task expect-fail
+save-project
+await-task expect-fail
 open-project $dataRoot/nowhere
 await-task expect-fail
-assert tasks.failed == 1
+assert tasks.failed == 5
 assert tasks.completed == 0
+assert replies.failed == 28
 
 # Nothing moved.
 assert project.shots == 1

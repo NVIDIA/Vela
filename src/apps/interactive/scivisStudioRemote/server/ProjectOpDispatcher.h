@@ -86,10 +86,14 @@ bool waitsForQueuedTasks(const ProjectRequest &request);
  * ProjectContext. Sync ops call the context, send the ProjectOpReply, then a
  * ProjectSnapshot whenever the Project changed (including "failed" calls that
  * still mutate: an import that leaves an ImportFailed record, a load that
- * marks a dataset Unavailable). Task ops validate what is cheap -- paths
- * inside the Data Roots, ids that exist -- reply with a TaskStartedResult and
+ * marks a dataset Unavailable). Task ops reply with a TaskStartedResult and
  * enqueue their body on the ServerTaskRunner; runOneTask() runs one and
- * follows it with the snapshot. Before any reply the host flushes scene
+ * follows it with the snapshot. At dispatch a task op checks only what does
+ * not depend on the Project (the paths it names lie inside the Data Roots);
+ * whatever it reads from the Project -- a dataset id, the project's own
+ * directory -- it reads when the task runs, because a task queued ahead of
+ * it (an OpenProject, say) may still change the Project, and requests must
+ * take effect in the order sent. Before any reply the host flushes scene
  * pushes (the TransferScene a project reset asked for), so the client's
  * mirror never lags the snapshot that names its objects, and after an op
  * that changes which shot or camera renders the host rebinds its pipeline.
