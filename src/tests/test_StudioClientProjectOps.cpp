@@ -769,8 +769,8 @@ SCENARIO("ServerConnection applies snapshots outside the bootstrap",
       progress.taskId = 5;
       progress.message = "importing";
       f.server.send(encode(progress));
-      REQUIRE(pollUntil(
-          f.connection, [&] { return f.ops().tasks().size() == 1; }));
+      REQUIRE(
+          pollUntil(f.connection, [&] { return f.ops().tasks().size() == 1; }));
       REQUIRE(f.ops().tasksActive());
 
       f.server.sendBootstrap();
