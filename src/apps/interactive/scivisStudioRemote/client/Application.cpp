@@ -74,12 +74,6 @@ void requestQuit()
   SDL_PushEvent(&event);
 }
 
-} // namespace
-
-// Construction ///////////////////////////////////////////////////////////////
-
-namespace {
-
 // argv split into the client's own options and what vsr_ui_imgui parses.
 struct ParsedArguments
 {
@@ -128,6 +122,8 @@ ParsedArguments parseArguments(int argc, const char **argv)
 }
 
 } // namespace
+
+// Construction ///////////////////////////////////////////////////////////////
 
 Application::Application(int argc, const char **argv)
 {
