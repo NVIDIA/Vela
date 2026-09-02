@@ -1,0 +1,27 @@
+# The server's rejection paths: every message it does not handle is answered
+# with an Error, never dropped. `send-raw` skips the codec and puts an
+# arbitrary type byte on the wire; `expect-error` waits for the reply.
+
+connect
+
+# Type bytes outside the Studio Message Set.
+send-raw 0
+expect-error "unknown message type 0"
+send-raw 255
+expect-error "unknown message type 255"
+
+# A type byte in the range the server-to-client messages use, but unassigned.
+send-raw 200
+expect-error "unknown message type 200"
+
+# A milestone 5+ request (NewProject = 20) is refused loudly.
+send-raw 20
+expect-error "not implemented"
+assert lastError contains NewProject
+
+assert errors.received == 4
+
+# The session survived every rejection.
+ping
+assert state == Connected
+disconnect

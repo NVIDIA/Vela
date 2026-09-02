@@ -1,0 +1,29 @@
+# Raw frame streaming: negotiate the Raw encoding, request a frame size, run
+# the stream, check the frame header against the request and save a frame.
+#
+# `save-frame` writes relative to the working directory; run_scenario.sh runs
+# the client inside its temporary directory so the file lands there.
+
+connect
+
+set-encodings raw
+
+# The FrameConfig ack echoes the requested size into frameConfig.*.
+set-frame-config 64 48
+assert frameConfig.width == 64
+assert frameConfig.height == 48
+
+start-rendering
+await-frame 3
+assert frames.received >= 3
+
+# The header of the newest frame agrees with the negotiation.
+assert frame.width == 64
+assert frame.height == 48
+assert frame.encoding == Raw
+assert frame.shotId != ""
+dump-frame
+save-frame frames_raw.ppm
+
+stop-rendering
+disconnect

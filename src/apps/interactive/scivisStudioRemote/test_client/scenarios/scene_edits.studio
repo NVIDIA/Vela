@@ -1,0 +1,41 @@
+# Optimistic scene edits: parameters set on the active shot's camera land in
+# the Structural Mirror at once and on the wire; the server keeps rendering
+# with them applied.
+#
+# A fresh unsaved project (the runner starts the server without --project)
+# holds two cameras: camera 0 is the scene default, camera 1 is the active
+# shot's camera "shot_0001_camera". `dump-scene` lists them.
+
+connect
+assert scene.cameras >= 2
+dump-scene
+
+# Scalar and vector edits read back from the mirror exactly as written.
+set-param camera 1 fovy float32 0.9
+assert param.camera.1.fovy == 0.9
+set-param camera 1 position float32_vec3 1 2 3
+assert param.camera.1.position == "1 2 3"
+
+# remove-param: add a scratch parameter, then take it away again. Asserting on
+# a missing parameter is itself a FAIL, so the removal shows in dump-scene's
+# params count for camera 1 (the same 14 as before the scratch), not in an
+# assert.
+set-param camera 1 scratch string "to be removed"
+assert param.camera.1.scratch == "to be removed"
+remove-param camera 1 scratch
+dump-scene
+
+# The edits did not disturb the untouched parameters.
+assert param.camera.1.fovy == 0.9
+assert param.camera.1.position == "1 2 3"
+
+# Frames keep arriving after the edits.
+set-encodings raw
+set-frame-config 32 24
+start-rendering
+await-frame 2
+assert frames.received >= 2
+assert frame.width == 32
+stop-rendering
+
+disconnect

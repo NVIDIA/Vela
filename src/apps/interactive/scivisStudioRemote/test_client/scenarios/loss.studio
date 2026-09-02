@@ -1,0 +1,37 @@
+# runner: kill-restart-after 3
+#
+# Server loss and recovery. The server is killed *externally* while the client
+# is connected: the client notices the closed socket, goes Lost with the
+# Structural Mirror and Project Replica frozen, and a `reconnect` to a
+# restarted server bootstraps it again.
+#
+# The first line is a hint for run_scenario.sh: once the client has printed
+# three `OK` records (connect and the two asserts below), the runner kills the
+# server, waits for it to exit, and starts a fresh one on the same port. The
+# `sleep` gives the restart time to reach Listening before `reconnect`, which
+# makes one attempt and does not retry. Without the runner (a plain
+# `--script` run) `await-lost` FAILs after 20 s because nothing kills the
+# server; this scenario is registered with ctest through the runner only.
+
+connect
+assert state == Connected
+assert scene.objects >= 1
+
+# The runner kills the server now.
+await-lost timeout=20000
+assert state == Lost
+
+# Lost keeps the last known state as a frozen view...
+assert scene.objects >= 1
+assert project.shots >= 1
+
+# ...and the runner has restarted the server meanwhile.
+sleep 3000
+reconnect timeout=10000
+assert state == Connected
+assert scene.objects >= 1
+assert project.shots >= 1
+ping
+
+shutdown
+assert state == Disconnected
