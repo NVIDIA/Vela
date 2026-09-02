@@ -921,12 +921,19 @@ SCENARIO("scivisStudioServer and the client core play the active shot",
                   shot.loop = false;
                 });
                 REQUIRE(activeReplicaShot(client).currentFrame == 3);
+                // Two snapshots follow: the SetPlaying's (playing=true) and
+                // the auto-stop's, ~70 ms later. One poll can deliver both,
+                // so the sequence is recorded rather than asserted between
+                // waits.
+                std::vector<bool> playingSeen;
+                client.connection.onProjectReplaced = [&] {
+                  replaced++;
+                  playingSeen.push_back(activeReplicaShot(client).playing);
+                };
                 const int started = replaced;
                 setPlaying(client, true);
-                REQUIRE(waitForSnapshots(client, replaced, started + 1));
-                REQUIRE(activeReplicaShot(client).playing);
-
                 REQUIRE(waitForSnapshots(client, replaced, started + 2));
+                REQUIRE(playingSeen == std::vector<bool>{true, false});
                 const Shot &stopped = activeReplicaShot(client);
                 REQUIRE_FALSE(stopped.playing);
                 REQUIRE(stopped.currentFrame == 4);
