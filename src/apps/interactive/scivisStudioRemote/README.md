@@ -133,13 +133,59 @@ Remote Browse (`server/RemoteBrowse`) lists a directory inside the roots as
 manifest) with sizes and mtimes; a file, a missing directory or a path
 outside the roots is refused.
 
-Milestone 6, playback (item 6): `SetPlaying` is a Project Op and `SetTime` a
-Control-State Latch slot; the server free-runs the AnimationManager on its
-loop thread, commits Time at Rest through snapshots (auto-stop, debounced
-scrub) and reports frames a file binding cannot load as
-`TimeAdvanceWarning`. Picking and the viewport passes (item 6): `Pick`,
-`SetOutline` and `ViewportSettings` are latch slots (latest-wins);
-`RequestArrayHistogram` is a sync Project Op. See "Viewport" below.
+Milestone 6, time, picking and passes (item 6): `SetPlaying` is a Project
+Op and `SetTime` a Control-State Latch slot; the server free-runs the
+`AnimationManager` on its loop thread, commits Time at Rest through snapshots
+(auto-stop, debounced scrub) and reports frames a file binding cannot load
+as `TimeAdvanceWarning`. `Pick`, `SetOutline` and `ViewportSettings` are
+latch slots (latest-wins); `RequestArrayHistogram` is a sync Project Op. See
+"Playback" and "Viewport" below.
+
+### Playback
+
+- **One frame per tick.** Every loop iteration applies the latch, ticks the
+  `AnimationManager` with a steady-clock delta, renders, and sends a `Frame`
+  whose header carries the frame *after* the tick: the frame actually
+  rendered (Time in Motion travels in headers, never in snapshots).
+  `AnimationManager::tick` advances **at most one frame per call** and
+  returns whether time moved; the shot's `fps` is a ceiling, and the
+  accumulator is clamped so a slow render never catches up by skipping
+  frames. Ticking goes on while a `Frame` send is still in flight, so time
+  does not freeze on a slow link.
+- **Wire pacing (v1 behaviour).** "Never skip frames" is a guarantee about
+  rendering and time advance, not about wire delivery. Frames are
+  latest-frame-wins on the wire (a rendered frame whose send would overlap
+  the previous one is dropped) and again in the client core's single slot,
+  so at a period near the wire's round trip (fps 1000 over a real socket)
+  consecutive headers can read `1 2 4`. At the fps of a real shot (the
+  scenarios use 30-100) the loop iterates several times per frame and every
+  frame reaches the client.
+- **Time at Rest is committed by snapshot.** `SetPlaying{shotId, bool}`
+  (the active shot only, else an error reply) replies then snapshots;
+  stopping writes `playing=false` and the frame it stopped on into the Shot.
+  A non-looping shot that plays off its end auto-stops: the manager's
+  playback-stopped callback lets `ProjectContext` write `playing=false,
+  currentFrame=last` into the active Shot and the loop sends one unrequested
+  snapshot when it sees the flip. While paused, a `SetTime` shows in the
+  next frame at once and commits **debounced**: one snapshot once no
+  `SetTime` has arrived for 250 ms (`SCRUB_COMMIT_QUIET`) and the frame
+  differs from the one the scrub started from; a `SetTime` for a shot that
+  is not active is logged and ignored; while playing, `SetTime` moves time
+  but nothing is committed, and a pending scrub commit is dropped once the
+  shot plays.
+- **`TimeAdvanceWarning`.** A `FileBinding` that cannot load a frame reports
+  `{frame, message}` to its `AnimationManager`; after every tick or
+  `SetTime` the loop drains `takeLoadFailures()` and pushes one
+  `TimeAdvanceWarning{shotId, frame, message}` per failure. Load failure
+  never stops playback.
+- **The manipulator follows client camera edits.** A `SetObjectParameter`
+  landing on the active shot's camera object updates the server's
+  `m_ctx.view.manipulator` from the camera pose (`followCameraEdit`), and a
+  camera rig without keyframes has its `current` view follow too. So
+  `applyActiveShot()`, which re-samples the camera from the rig on every time
+  change, writes the client's own pose back instead of a stale one, and a
+  scrub or `SetPlaying` never snaps the view; a rig with keyframes drives the
+  camera during playback as designed.
 
 ### Viewport
 
@@ -177,8 +223,10 @@ scrub) and reports frames a file binding cannot load as
   arrays, proxy arrays (the mirror's descriptors), CUDA arrays and non-scalar
   element types (vectors, matrices, object handles). No snapshot follows.
 
-Not there yet (milestone 7): `RenderShot` (60). The server refuses it, and
-any request whose payload it cannot decode, loudly rather than dropping
+Not there yet: `RenderShot` (60) and the rest of milestone 7 (its
+pause-and-refuse semantics, the task-status replay in the bootstrap, the
+UI-state round-trip through save and open). The server refuses `RenderShot`,
+and any request whose payload it cannot decode, loudly rather than dropping
 them: with a `ProjectOpReply{ok=false}` carrying the request's id when the
 payload has a readable non-zero `requestId` (so a client's pending request
 retires), and with a bare `Error{"... not implemented in this server"}` /
@@ -309,6 +357,18 @@ Root marking the saved `ProjectDirectory`, `OpenProject` of it rebuilding
 mirror and replica, and a request pending across a server stop failing once
 with "connection lost".
 
+The same file drives milestone 6 through the client core: `setPlaying(true)`
+on a 12-frame looping shot at 30 fps with consecutive frame headers stepping
+by exactly one (or wrapping), `setPlaying(false)` with the replica resting on
+the frame the next headers show, a paused `setTime` seen in the header and
+committed by exactly one snapshot, a mirror camera edit surviving a `setTime`
+on the server, a non-looping shot auto-stopping with one snapshot on its last
+frame; and, on an imported triangle, a centre `pick` whose identity resolves
+in the mirror and a corner miss, `setOutline` and a `DEPTH`
+`setViewportSettings` with frames still arriving, and
+`requestArrayHistogram` summing a scalar array's bins to its element count
+and refusing the mesh's vector array.
+
 End to end, `ctest -R StudioScenario` runs each scenario script under
 [`test_client/scenarios/`](test_client/scenarios) against a freshly launched
 `scivisStudioServer`; see [`test_client/README.md`](test_client/README.md)
@@ -341,3 +401,31 @@ The scenarios under `test_client/scenarios/` (`project_lifecycle`, `rigs`,
 `color_maps`, `datasets`, `tasks`, `browse`, `errors_project`, and `all_m5`
 for the whole surface in one session) are the worked examples; the test
 client README lists every command, variable and assert value.
+
+### Driving playback, picking and the viewport from the test client
+
+Milestone 6 has the same shape: `set-playing SHOT on|off` is a request
+command (reply, then `await-snapshot` for the commit); `set-time SHOT FRAME`,
+`set-outline [TYPE INDEX|none]` and `viewport-settings KEY=VALUE...` are
+one-way latch sends (`viewport-settings` composes edits into the remembered
+struct and sends it whole); `pick X Y` waits for its `PickReply` and fills
+`$lastPickType`/`$lastPickIndex`; `request-array-histogram TYPE INDEX BINS`
+fills the `histogram.*` values; `await-warning` waits for a
+`TimeAdvanceWarning`. `await-frame-advance N` consumes frames until `N`
+header changes were seen and `frames.maxStep` reports the largest forward
+step between consecutive headers (a wrap or a scrub back does not count).
+
+```bash
+scivisStudioTestClient --port 12345 \
+  -e 'connect; update-shot active frameCount=12 fps=30 loop=on; await-snapshot' \
+  -e 'set-encodings raw; set-frame-config 32 24; start-rendering; await-frame' \
+  -e 'set-playing active on; await-snapshot; await-frame-advance 5' \
+  -e 'assert frames.maxStep <= 1; set-playing active off; await-snapshot' \
+  -e 'pick 16 12; set-outline $lastPickType $lastPickIndex; await-frame 2' \
+  -e 'viewport-settings visualizeAOV=DEPTH; await-frame 2; stop-rendering; disconnect'
+```
+
+The scenarios `playback`, `autostop`, `scrub`, `pick`, `viewport` and
+`histogram` under `test_client/scenarios/` cover the surface one behaviour
+each; `pick` and `histogram` copy `fixtures/triangle.obj` into the Data Root
+first.
