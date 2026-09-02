@@ -10,7 +10,8 @@ vocabulary: [`CONTEXT.md`](CONTEXT.md).
 scivisStudioRemote/
 ├── protocol/   vsr_scivis_studio_protocol   Studio Message Set, codecs, frame codec
 ├── server/     scivisStudioServer           headless render loop + Control-State Latch
-└── client/     scivisStudioClient           ImGui UI over the client core
+├── client/     scivisStudioClient           ImGui UI over the client core
+└── test_client/ scivisStudioTestClient      headless scripted client + scenario tests
 ```
 
 ## Build
@@ -95,6 +96,13 @@ messages with `Error{"... not implemented in this server"}`.
 
 `vsrTests "[StudioProtocol]"` (codecs), `"[StudioClient]"` (client core
 against a fake server), `"[StudioServer]"` (server against a raw
-`NetworkClient`) and `"[StudioRemote]"` (server and client core in one
-process). The last two render with `helide` and skip when it cannot be
-loaded.
+`NetworkClient`), `"[StudioRemote]"` (server and client core in one process)
+and `"[StudioTestClient]"` (the test client's script runner against an
+in-process server). Those that render use `helide` and skip when it cannot
+be loaded.
+
+End to end, `ctest -R StudioScenario` runs each scenario script under
+[`test_client/scenarios/`](test_client/scenarios) against a freshly launched
+`scivisStudioServer`; see [`test_client/README.md`](test_client/README.md)
+for the headless test client, its command vocabulary and how to run a
+scenario by hand.
