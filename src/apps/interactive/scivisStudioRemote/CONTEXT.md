@@ -52,7 +52,8 @@ _Avoid_: session restore, resync
 The client's copy of the scene's objects, parameters, and layers without bulk
 array contents. Arrays exist client-side as descriptors (type, shape, element
 count, value range); its size is a function of project structure, not data
-size.
+size. Objects and layer nodes keep the server's indices, so a wire identity
+(SceneObjectRef, SceneNodeRef) names the same thing on both sides.
 _Avoid_: scene copy, full mirror
 
 **Project Replica**:

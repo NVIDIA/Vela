@@ -462,10 +462,9 @@ bool TestSession::setNodeTransform(const SceneNodeRef &node,
       *error = "no layer '" + node.layerName + "' in the mirror";
     return false;
   }
-  // Node indices are the server's: TransferLayer rebuilds the mirror's
-  // forest in traversal order, so a sparse server layer numbers its nodes
-  // differently. The mirror is updated when it agrees; the server is the
-  // truth either way.
+  // Node indices are the server's, and the layer transfers rebuild the
+  // mirror with the same numbering, so a missing node means a stale or bad
+  // reference. The server is the truth either way: the edit is still sent.
   auto ref = layer->at(node.nodeIndex);
   if (ref && (*ref)->isTransform()) {
     (*ref)->setAsTransform(transform);
