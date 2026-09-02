@@ -255,10 +255,11 @@ struct CommandRunner
   // Requests sent under no-wait whose replies are still to be collected, in
   // send order, with the Describe each await-reply will use.
   std::deque<std::pair<uint64_t, Describe>> m_pendingReplies;
-  // Snapshots received when the last request's reply was (or, until a
-  // no-wait reply is collected, when the request went out); await-snapshot
-  // waits for one past that. Taken at the reply rather than the send, since
-  // the previous request's snapshot may still be on the wire at the send.
+  // What await-snapshot waits past: the snapshots received when the last
+  // awaited thing arrived -- a request's reply (or, until a no-wait reply is
+  // collected, its send), a task's end message, the previous await-snapshot.
+  // Taken at the reply rather than the send, since the previous request's
+  // snapshot may still be on the wire at the send.
   size_t m_snapshotMark{0};
   // What the last list-directory returned (`browse.entries`).
   std::vector<protocol::DirectoryEntry> m_browseEntries;

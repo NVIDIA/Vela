@@ -2120,6 +2120,9 @@ CommandRunner::Failure CommandRunner::awaitTask(
         wait, "the end of task " + std::to_string(taskId), deadline);
   }
   const auto &task = *m_session->task(taskId);
+  // The task's snapshot follows its end message: await-snapshot waits past
+  // whatever had arrived by then.
+  m_snapshotMark = task.snapshotsAtEnd;
   const bool failed = task.status == TaskRecord::Status::Failed;
   if (failed && !m_expectFail)
     return "task " + std::to_string(taskId) + " failed: " + task.message;
