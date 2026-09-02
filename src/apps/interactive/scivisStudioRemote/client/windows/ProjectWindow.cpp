@@ -83,6 +83,10 @@ void ProjectWindow::buildUI_shots(const Project &project)
     ImGui::TextDisabled("No shots");
 
   const bool busy = pending(m_pendingSetActive) || pending(m_pendingRemove);
+  // The popup is opened once the per-shot id is off the stack, since
+  // buildPopups() begins it at window scope and ImGui hashes popup ids with
+  // whatever is pushed at the time.
+  bool openRemove = false;
   ImGui::BeginDisabled(busy);
   for (const auto &shot : project.shots) {
     ImGui::PushID(shot.id.c_str());
@@ -97,11 +101,13 @@ void ProjectWindow::buildUI_shots(const Project &project)
     ImGui::SameLine();
     if (ImGui::SmallButton("Remove")) {
       m_shotToRemove = shot.id;
-      ImGui::OpenPopup(REMOVE_SHOT_POPUP);
+      openRemove = true;
     }
     ImGui::PopID();
   }
   ImGui::EndDisabled();
+  if (openRemove)
+    ImGui::OpenPopup(REMOVE_SHOT_POPUP);
 }
 
 void ProjectWindow::buildPopups(const Project &project)
