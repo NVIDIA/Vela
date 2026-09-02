@@ -209,13 +209,13 @@ unsigned short ScriptedServer::port() const
  *
  * Milestone 6: SetPlaying flips the active shot's `playing` (another shot id
  * is refused) and, like a shot that auto-stops at once, follows its snapshot
- * with a second one at rest on frame 5; StartRendering streams four 2x2 frames at frames 0, 1, 2, 0
- * (a loop wrap), spaced so the client's latest-wins slot sees each; SetTime
- * answers with one frame at the scrubbed frame, or with a TimeAdvanceWarning
- * when the frame is 99; Pick misses at (0,0) and hits surface 4 elsewhere,
- * after a stray PickReply nobody asked for; RequestArrayHistogram bins
- * array 0 and refuses every other array as not scalar. SetOutline and
- * ViewportSettings are only recorded.
+ * with a second one at rest on frame 5; StartRendering streams four 2x2 frames
+ * at frames 0, 1, 2, 0 (a loop wrap), spaced so the client's latest-wins slot
+ * sees each; SetTime answers with one frame at the scrubbed frame, or with a
+ * TimeAdvanceWarning when the frame is 99; Pick misses at (0,0) and hits
+ * surface 4 elsewhere, after a stray PickReply nobody asked for;
+ * RequestArrayHistogram bins array 0 and refuses every other array as not
+ * scalar. SetOutline and ViewportSettings are only recorded.
  */
 struct ProjectOpsServer
 {
@@ -600,8 +600,8 @@ void ProjectOpsServer::onMessage(const Message &msg)
   case StudioMessageType::SetPlaying: {
     const auto req = *decode<SetPlaying>(msg);
     if (req.shotId != project.activeShotId) {
-      replyError(req.requestId,
-          "shot '" + req.shotId + "' is not the active shot");
+      replyError(
+          req.requestId, "shot '" + req.shotId + "' is not the active shot");
       return;
     }
     auto *shot = project::findShot(project, req.shotId);
@@ -1592,8 +1592,7 @@ SCENARIO("the test client drives project ops against a fake server",
         REQUIRE(fails[5].find("usage: pick") != std::string::npos);
         REQUIRE(fails[6].find("usage: set-outline") != std::string::npos);
         REQUIRE(fails[7].find("usage: set-outline") != std::string::npos);
-        REQUIRE(
-            fails[8].find("usage: viewport-settings") != std::string::npos);
+        REQUIRE(fails[8].find("usage: viewport-settings") != std::string::npos);
         REQUIRE(fails[9].find("unknown viewport setting 'bogus'")
             != std::string::npos);
         REQUIRE(fails[10].find("not a valid worldBoundsColor")
@@ -1607,11 +1606,13 @@ SCENARIO("the test client drives project ops against a fake server",
         REQUIRE(fails[14].find("no camera named \"Main\" in the mirror")
             != std::string::npos);
         REQUIRE(fails[15].find("usage: find-object") != std::string::npos);
-        REQUIRE(fails[16].find("no pick has been answered") != std::string::npos);
-        // A refused histogram request leaves no histogram to assert on.
         REQUIRE(
-            fails[17].find("no histogram has been answered") != std::string::npos);
-        REQUIRE(fails[18].find("unknown shot field 'bogus'") != std::string::npos);
+            fails[16].find("no pick has been answered") != std::string::npos);
+        // A refused histogram request leaves no histogram to assert on.
+        REQUIRE(fails[17].find("no histogram has been answered")
+            != std::string::npos);
+        REQUIRE(
+            fails[18].find("unknown shot field 'bogus'") != std::string::npos);
         REQUIRE(fails[19].find("unknown value 'nosuch'") != std::string::npos);
         REQUIRE(hasLine(
             result.records, "OK assert frames.advanced == @frames.received"));

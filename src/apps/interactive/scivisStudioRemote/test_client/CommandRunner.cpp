@@ -1564,8 +1564,8 @@ CommandRunner::Failure CommandRunner::findObject(const Command &command)
   m_variables["lastObjectType"] = shortTypeName(*type);
   m_variables["lastObjectIndex"] = std::to_string(ref.objectIndex);
   printRecord("EVT Object type=" + shortTypeName(*type)
-      + " index=" + std::to_string(found->index()) + " subtype="
-      + found->subtype().str() + " name=" + quoted(found->name())
+      + " index=" + std::to_string(found->index())
+      + " subtype=" + found->subtype().str() + " name=" + quoted(found->name())
       + " params=" + std::to_string(found->numParameters()));
   return {};
 }
@@ -2464,7 +2464,8 @@ CommandRunner::Failure CommandRunner::requestArrayHistogram(
       || command.args.size() != consumed + 1
       || !parseNonNegative(command.args[consumed], bins)
       || bins > std::numeric_limits<uint32_t>::max())
-    return usageError(command, "<type> <index> <bins>  (or <type:index> <bins>)");
+    return usageError(
+        command, "<type> <index> <bins>  (or <type:index> <bins>)");
   request.binCount = uint32_t(bins);
   m_histogram.reset();
   return sendRequest(std::move(request),

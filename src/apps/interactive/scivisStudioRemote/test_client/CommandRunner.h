@@ -63,11 +63,11 @@ struct RunnerOptions
  * playback and the viewport (set-time, await-frame-at, await-frame-advance,
  * await-warning, pick, set-outline, viewport-settings), inspection
  * (dump-scene, dump-layers, dump-project, dump-frame, find-object) and
- * `assert <value> <op> <rhs>` over the named values assertNames() lists. Waiting commands take a trailing `timeout=<ms>`
- * and FAIL as soon as the connection is Lost. An Error the server sends while
- * any command but expect-error runs FAILs that command: only Project Ops
- * carry request ids, so for everything else the command in flight is the best
- * attribution there is.
+ * `assert <value> <op> <rhs>` over the named values assertNames() lists.
+ * Waiting commands take a trailing `timeout=<ms>` and FAIL as soon as the
+ * connection is Lost. An Error the server sends while any command but
+ * expect-error runs FAILs that command: only Project Ops carry request ids, so
+ * for everything else the command in flight is the best attribution there is.
  *
  * A request command mints a request id, sends, awaits the ProjectOpReply with
  * that id and prints it with the decoded result fields; `ok=false` is a FAIL
