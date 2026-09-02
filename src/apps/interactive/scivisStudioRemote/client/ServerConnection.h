@@ -112,6 +112,11 @@ struct ServerConnection
   const std::string &host() const;
   short port() const;
   bool bootstrapping() const;
+  // BootstrapEnd seen on the current connection: mirror and replica are the
+  // server's. False between a reconnect's Hello and its BootstrapBegin, when
+  // project() is still the previous session's frozen replica (a server busy
+  // with a render defers the bootstrap until the render ends).
+  bool bootstrapped() const;
 
   // Inbound state the UI reads //
 
