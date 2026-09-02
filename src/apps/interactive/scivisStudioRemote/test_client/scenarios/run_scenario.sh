@@ -42,6 +42,10 @@ server_args=("$@")
 if [ ! -x "$server_bin" ]; then echo "not executable: $server_bin" >&2; exit 2; fi
 if [ ! -x "$client_bin" ]; then echo "not executable: $client_bin" >&2; exit 2; fi
 if [ ! -r "$scenario" ]; then echo "not readable: $scenario" >&2; exit 2; fi
+# The client runs from the work directory, so relative paths must not stay so.
+server_bin=$(realpath "$server_bin")
+client_bin=$(realpath "$client_bin")
+scenario=$(realpath "$scenario")
 
 name=$(basename "$scenario" .studio)
 work=$(mktemp -d "${TMPDIR:-/tmp}/vsrStudioScenario-$name-XXXXXX")
@@ -153,7 +157,9 @@ start_server() {
 }
 
 count_ok() {
-  grep -c '^OK ' "$client_log" 2>/dev/null || true
+  local n
+  n=$(grep -c '^OK ' "$client_log" 2>/dev/null)
+  echo "${n:-0}"
 }
 
 # A port that was free when picked can be taken by the time the server binds
