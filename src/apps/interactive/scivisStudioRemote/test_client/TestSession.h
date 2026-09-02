@@ -77,23 +77,34 @@ struct Event
 // The Frame record, as both the event stream and dump-frame print it.
 Event frameEvent(const protocol::FrameHeader &header, size_t bytes);
 
-// A Server Task as the session has heard of it: Running from its first
-// TaskProgress until the one TaskCompleted (message) or TaskFailed (error).
-// A task whose completion arrives before any progress is known only once it
-// has ended.
+// A Server Task as the session has heard of it: Queued from the reply that
+// launched it (a TaskStartedResult), Running from its first TaskProgress,
+// until the one TaskCompleted (message) or TaskFailed (error). A task whose
+// end arrives before anything else of it -- another client's, or one a
+// Bootstrap replays -- is known only once it has ended. A BootstrapBegin
+// fails every unfinished record with "connection lost": the replay that
+// follows rebuilds the truth.
 struct TaskRecord
 {
   enum class Status
   {
+    Queued,
     Running,
     Completed,
     Failed
   };
-  Status status{Status::Running};
+  Status status{Status::Queued};
   std::string message; // the completion message, or the failure's error
+  // The newest TaskProgress: current of total (0 = indeterminate).
+  uint64_t current{0};
+  uint64_t total{0};
+  // Frames written, as the end message reported it (a RenderShot; 0 else).
+  uint64_t framesCompleted{0};
   // Snapshots applied when the end message arrived; the server sends a
   // task's snapshot after its TaskCompleted, so one past this count is it.
   size_t snapshotsAtEnd{0};
+
+  bool finished() const;
 };
 
 const char *toString(TaskRecord::Status status);
@@ -211,8 +222,14 @@ struct TestSession
   // What the session has heard of a task; null before its first message and
   // once the session is Disconnected.
   const TaskRecord *task(uint64_t taskId) const;
+  // TaskCompleted / TaskFailed messages received over the session's lifetime,
+  // reconnects and replays included; the "connection lost" failures a
+  // BootstrapBegin declares are not messages and do not count.
   size_t tasksCompleted() const;
   size_t tasksFailed() const;
+  // Task messages (progress or end) the newest Bootstrap carried between its
+  // Begin and End: the server's task-status replay.
+  size_t tasksReplayed() const;
   // Project Snapshots applied so far, the Bootstrap's included.
   size_t snapshotsReceived() const;
   // The error text of the newest reply with ok == false; empty until one.
@@ -223,6 +240,11 @@ struct TestSession
   // TimeAdvanceWarnings received, and the newest one (empty until the first).
   size_t warningsReceived() const;
   const std::optional<protocol::TimeAdvanceWarning> &lastWarning() const;
+  // The newest UIState tree the server sent (a Bootstrap's, or the one that
+  // follows an OpenProject); null until one, when it was null, and once the
+  // session is Disconnected. Opaque here as everywhere: asserts read
+  // `windows/<key>` leaves, nothing interprets them.
+  const protocol::SubtreePtr &uiState() const;
 
   // Session //
 
@@ -320,6 +342,12 @@ struct TestSession
   void handleHello(const vsr::network::Message &msg);
   void applySceneMessage(
       protocol::StudioMessageType type, const vsr::network::Message &msg);
+  void handleTaskEnd(uint64_t taskId,
+      TaskRecord::Status status,
+      std::string message,
+      uint64_t framesCompleted);
+  // The record of a task, made if the task is new.
+  TaskRecord &taskRecord(uint64_t taskId);
   void consumeFrame();
   void pushEvent(Event event);
   void replyError(const std::string &text);
@@ -367,6 +395,8 @@ struct TestSession
   vsr::core::FlatMap<uint64_t, TaskRecord> m_tasks;
   size_t m_tasksCompleted{0};
   size_t m_tasksFailed{0};
+  size_t m_tasksReplayed{0};
+  protocol::SubtreePtr m_uiState;
   size_t m_snapshotsReceived{0};
   std::deque<Event> m_events;
   std::vector<vsr::network::MessageFuture> m_sendFutures;
@@ -381,6 +411,11 @@ struct TestSession
 };
 
 // Inlined definitions ////////////////////////////////////////////////////////
+
+inline bool TaskRecord::finished() const
+{
+  return status == Status::Completed || status == Status::Failed;
+}
 
 template <typename T>
 inline bool TestSession::send(const T &payload, std::string *error)

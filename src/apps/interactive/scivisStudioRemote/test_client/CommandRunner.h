@@ -52,18 +52,20 @@ struct RunnerOptions
  * as the session consumes it. Every line is one record, so a shell script or
  * a reader can grep the output.
  *
- * The command vocabulary is the server surface through milestone 6: session
+ * The command vocabulary is the server surface through milestone 7: session
  * (connect, disconnect, shutdown, ping, expect-pong, await-lost, reconnect,
  * sleep, expect-error, send-raw), rendering (set-frame-config, set-encodings,
  * start-rendering, stop-rendering, await-frame, save-frame), scene edits
  * (set-param, remove-param, set-node-transform), one request command per
  * Project Op, Remote Browse and task message (new-project, create-shot,
- * list-directory, cancel-task, set-playing, request-array-histogram, ...),
- * the waits that go with them (await-task, await-snapshot, await-reply),
- * playback and the viewport (set-time, await-frame-at, await-frame-advance,
- * await-warning, pick, set-outline, viewport-settings), inspection
- * (dump-scene, dump-layers, dump-project, dump-frame, find-object) and
- * `assert <value> <op> <rhs>` over the named values assertNames() lists.
+ * list-directory, cancel-task, set-playing, request-array-histogram,
+ * render-shot, ...), the waits that go with them (await-task,
+ * await-task-progress, await-snapshot, await-reply), playback and the
+ * viewport (set-time, await-frame-at, await-frame-advance, await-warning,
+ * pick, set-outline, viewport-settings), the UI state round trip
+ * (set-ui-state, dump-ui-state), inspection (dump-scene, dump-layers,
+ * dump-project, dump-frame, find-object) and `assert <value> <op> <rhs>` over
+ * the named values assertNames() lists.
  * Waiting commands take a trailing `timeout=<ms>` and FAIL as soon as the
  * connection is Lost. An Error the server sends while any command but
  * expect-error runs FAILs that command: only Project Ops carry request ids, so
@@ -160,6 +162,8 @@ struct CommandRunner
   Failure dumpLayers(const Command &);
   Failure dumpProject(const Command &);
   Failure dumpFrame(const Command &);
+  Failure setUIState(const Command &);
+  Failure dumpUIState(const Command &);
   Failure assertValue(const Command &);
 
   // Request commands, waits and prefixes (the milestone-5 surface)
@@ -179,8 +183,10 @@ struct CommandRunner
   Failure removeLight(const Command &, Deadline);
   Failure listRoots(const Command &, Deadline);
   Failure listDirectory(const Command &, Deadline);
+  Failure renderShot(const Command &, Deadline);
   Failure cancelTask(const Command &, Deadline);
   Failure awaitTask(const Command &, Deadline);
+  Failure awaitTaskProgress(const Command &, Deadline);
   Failure awaitSnapshot(const Command &, Deadline);
   Failure awaitReply(const Command &, Deadline);
 
@@ -233,6 +239,10 @@ struct CommandRunner
   // empty with the reason when there is no replica to resolve it against.
   std::optional<std::string> shotIdArgument(
       const std::string &text, std::string &error) const;
+  // The task id a command named, or `$lastTaskId` when it named none; empty
+  // with the reason when neither is there.
+  std::optional<uint64_t> taskIdArgument(
+      const std::vector<std::string> &args, std::string &error) const;
 
   // The current text of a named value; empty with the reason when it is
   // unknown or not available yet (no frame, no replica, ...).
@@ -290,6 +300,10 @@ struct CommandRunner
   // The reply of the last pick, and the result of the last ok histogram.
   std::optional<protocol::PickReply> m_lastPick;
   std::optional<protocol::ArrayHistogramResult> m_histogram;
+  // The UI state tree set-ui-state builds (`windows/<key>` string leaves),
+  // sent with every save-project from then on; null until the first
+  // set-ui-state, and save-project then sends none.
+  protocol::SubtreePtr m_uiStateToSave;
 };
 
 } // namespace vsr::scivis_studio::test_client
