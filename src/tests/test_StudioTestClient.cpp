@@ -1803,17 +1803,23 @@ SCENARIO("the test client drives project ops against a fake server",
           "assert uiState.layout == abc\n"
           "assert uiState.theme == light\n"
           "dump-ui-state\n"
+          // A save that sends no tree leaves the retained one alone.
+          "set-ui-state none\n"
+          "save-project /data/p1\n"
+          "await-task\n"
+          "await-snapshot\n"
           "disconnect\n"
           "assert uiState.present == false\n"
           "reconnect\n"
           "assert uiState.theme == light\n"
           // The replay: every task that ended since the last bootstrap, the
           // ends heard live before the disconnect counted again.
-          "assert tasks.replayed == 4\n"
+          "assert tasks.replayed == 5\n"
           "assert task.3.state == Failed\n"
           "assert task.3.framesCompleted == 1\n"
           "assert task.2.framesCompleted == 3\n"
-          "assert tasks.completed == 6\n"
+          "assert task.5.state == Completed\n"
+          "assert tasks.completed == 8\n"
           "assert tasks.failed == 2\n"
           // Nothing ended since: an empty replay, and a disconnect forgets.
           "disconnect\n"
@@ -1867,8 +1873,8 @@ SCENARIO("the test client drives project ops against a fake server",
         REQUIRE(hasLine(r,
             "EVT UIStateEntry path=\"windows/theme\""
             " value=\"light\""));
-        REQUIRE(hasLine(r, "OK assert tasks.replayed == 4"));
-        REQUIRE(hasLine(r, "OK assert tasks.completed == 6"));
+        REQUIRE(hasLine(r, "OK assert tasks.replayed == 5"));
+        REQUIRE(hasLine(r, "OK assert tasks.completed == 8"));
         REQUIRE(hasLine(r, "OK assert tasks.replayed == 0"));
         REQUIRE(hasLine(r, "OK assert uiState.present == false"));
       }
@@ -1881,7 +1887,8 @@ SCENARIO("the test client drives project ops against a fake server",
         REQUIRE(renders[1].shotId == "shot_9999");
         REQUIRE(renders[3].shotId == "shot_0001");
         const auto saves = server.requests<SaveProject>();
-        REQUIRE(saves.size() == 1);
+        REQUIRE(saves.size() == 2);
+        REQUIRE_FALSE(saves[1].uiState);
         REQUIRE(saves[0].uiState);
         const auto *windows = saves[0].uiState->root().child("windows");
         REQUIRE(windows);

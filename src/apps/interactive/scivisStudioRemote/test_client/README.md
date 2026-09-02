@@ -55,10 +55,11 @@ under [Variables](#variables). In the value position of `assert`, write
 
 ## Commands
 
-The vocabulary is the server surface through milestone 6: the session,
+The vocabulary is the server surface through milestone 7: the session,
 rendering and scene-edit commands below, one request command per Project
 Op, Remote Browse and task message, the playback, picking and viewport
-commands, and the waits that go with them. An
+commands, the offline render and the UI state round trip, and the waits
+that go with them. An
 `Error` the server sends while any command but `expect-error` runs FAILs that
 command with the Error's text (only Project Ops carry request ids, so for
 everything else the command in flight is the attribution); a waiting command
@@ -96,6 +97,8 @@ command settle (`sleep`) before the next one if its Error is to land on it.
 | `dump-layers` | one `EVT Layer` line per mirror layer: index, name, nodes, active |
 | `dump-project` | one `EVT Project` line from the replica (name, activeShot, counts, dirty, directory), then one `EVT Shot`, `EVT Dataset`, `EVT LightRig`, `EVT CameraRig` and `EVT ColorMap` line per entity |
 | `dump-frame` | one `EVT Frame` line for the newest frame header |
+| `set-ui-state KEY=VALUE... \| none` | build the UI state tree the next `save-project`s send: one string leaf `windows/<key>` per edit, repeated commands composing (a key set again is overwritten); `none` drops the tree, so `save-project` sends none again and the server keeps the tree the project opened with |
+| `dump-ui-state` | one `EVT UIState present= children=` line for the newest tree the server sent, then one `EVT UIStateEntry path= value=` per leaf (`windows/layout`) |
 | `find-object TYPE [first\|name=NAME]` | the first mirror object of that type, or the first one so named: one `EVT Object` line, and `$lastObjectRef` (`type:index`), `$lastObjectType`, `$lastObjectIndex`; every array kind is looked up in the one `array` pool |
 | `assert VALUE OP RHS` | compare a named value; OP in `== != < <= > >= contains`; RHS is a literal, or `@NAME` for another named value (`assert shot.active.currentFrame == @frame.frame`) |
 
@@ -145,8 +148,19 @@ snapshot; some "failed" ops still mutate (an import that leaves an
 
 Task-launching ops answer at once with `taskId=` and run on the server's loop
 one at a time; `await-task` waits for the `TaskCompleted`/`TaskFailed`, the
-`TaskProgress` lines printing as they come. Imports report the new dataset's
-id as their completion message, which lands in `$lastDatasetId`.
+`TaskProgress` lines printing as they come (`current= total=`, determinate
+for a render, `total=0` otherwise), and the end line carrying
+`framesCompleted=` when the task wrote frames. The completion message lands
+in `$lastTaskMessage`: an import's is the new dataset's id (then also
+`$lastDatasetId`), a render's the output directory.
+
+A refused request FAILs the command with the server's reason; written as an
+expectation, the reason is still there to check:
+
+```
+expect-fail render-shot active
+assert lastReplyError contains saved
+```
 
 The `no-wait` prefix sends without awaiting the reply, so several requests
 can be in flight (two imports and the cancel of the second before it runs);
@@ -182,8 +196,10 @@ printed again.
 | `rename-color-map ID NAME`, `remove-color-map ID` | sync |
 | `list-roots` | one `EVT DataRoot path=` per Data Root; the first is `$dataRoot` |
 | `list-directory PATH` | one `EVT DirectoryEntry name= kind= size= mtime=` per entry (`File`, `Directory`, `ProjectDirectory`); FAIL (or `expect-fail`) outside every root |
-| `cancel-task TASKID` | sync; removes a queued task (it then ends as `TaskFailed "cancelled"`); a running or finished one is an error reply |
+| `render-shot SHOT` | task: render the shot's frames offline (`SHOT` an id or `active`); needs a saved project, refused while another render is queued or running. The shot becomes active first (a snapshot precedes the progress), the progress is determinate (`current=<frame> total=<frames>`), the end carries `framesCompleted=` and, when completed, the output directory as its message. While it runs, mutating requests are refused with "render in progress" and interactive frames pause |
+| `cancel-task TASKID` | sync; removes a queued task (it then ends as `TaskFailed "cancelled"`), or asks a running render to stop at its next frame (the reply is ok once it has; the task ends as `TaskFailed "cancelled"` with `framesCompleted=` the frames left on disk); a finished task is an error reply |
 | `await-task [TASKID] [expect-fail]` | wait for the task (default `$lastTaskId`) to end; FAIL on `TaskFailed` unless `expect-fail` follows, then FAIL on `TaskCompleted` |
+| `await-task-progress [TASKID]` | wait until the task (default `$lastTaskId`) has reported progress at least once (a report an earlier command already printed counts); FAIL at once when it ends without any |
 | `await-snapshot` | wait for a `ProjectSnapshot` newer than the last thing awaited: the reply to the last request command, the end of the last `await-task`, or the previous `await-snapshot`. Each `await-snapshot` consumes one snapshot, so two that land together (a `set-playing`'s and the auto-stop's) are awaited one at a time. A snapshot that arrived before the mark belongs to something earlier, so await a task that sends none (a cancelled one) before the one whose snapshot is wanted |
 | `await-reply [REQUESTID]` | collect the reply of a `no-wait` request, the oldest pending by default |
 
@@ -195,8 +211,9 @@ printed again.
 | `$lastObjectRef` (`type:index`), `$lastObjectType`, `$lastObjectIndex` | `create-color-map`'s scene-side object, and `find-object` |
 | `$lastPickType`, `$lastPickIndex` | the identity a `pick` hit (unset again by a miss) |
 | `$lastLightLayer`, `$lastLightNode` | `add-light` |
-| `$lastDatasetId` | `declare-file-animation-dataset`'s reply, and the completion message of an import, archive-load or incorporate task after `await-task` |
+| `$lastDatasetId` | `declare-file-animation-dataset`'s reply, and the completion message of an import, archive-load or incorporate task after `await-task` (a message that names a dataset id, `dataset_...`) |
 | `$lastTaskId` | every task-launching reply |
+| `$lastTaskMessage` | the completion message of the task `await-task` last saw complete (a render's output directory, an import's dataset id) |
 | `$lastRequestId` | every request sent |
 | `$dataRoot` | `list-roots`: the first Data Root |
 
@@ -219,7 +236,10 @@ bytes are exactly two hex digits each.
 | `shot.<id>.<field>` | `name`, `frameCount`, `fps`, `currentFrame`, `loop`, `playing`, `lightRigId`, `cameraRigId`, `camera` (`type:index`), `bindings` (count), `binding.<datasetId>` (`true`/`false`; FAIL when unbound), `renderSettings.{width,height,samples,rendererLibrary,rendererSubtype,outputFilePrefix}`; an unknown id is a FAIL; `shot.active.<field>` names the active shot |
 | `dataset.<id>.<field>` | `name`, `status` (`Available`, `Unavailable`, `Importing`, `ImportFailed`), `residency` (`Loaded`, `Unloaded`), `sourceKind`, `importerType`, `sourcePath`, `dirty`, `declared`, `rootNode` |
 | `lightRig.<id>.name`, `cameraRig.<id>.name`, `colorMap.<id>.name` | names in the replica |
-| `tasks.completed`, `tasks.failed` | Server Tasks ended so far, either way |
+| `tasks.completed`, `tasks.failed` | `TaskCompleted` / `TaskFailed` messages received since the session object was made, across reconnects, the ones a Bootstrap replays included (so an end heard live and then replayed counts twice). The "connection lost" failures a `BootstrapBegin` declares (below) are not messages and do not count |
+| `tasks.replayed` | task messages (progress or end) the newest Bootstrap carried between its Begin and End: the server's task-status replay of what ended since the previous Bootstrap, and the running task's status. 0 again at every `BootstrapBegin` |
+| `task.<id>.<field>`, `task.last.<field>` | a task record (`last` is `$lastTaskId`; FAIL when nothing has been heard of the id): `state` (`Queued` from the launching reply, `Running` from the first `TaskProgress`, `Completed`, `Failed`), `message` (the completion message or the failure's error), `framesCompleted`, `current`, `total` (the newest progress; 0 when indeterminate) |
+| `uiState.present`, `uiState.<key>` | the newest `UIState` tree the server sent (a Bootstrap's, or the one that follows an `open-project`): whether there is one, and the string leaf `windows/<key>` in it, as `set-ui-state` writes it (FAIL when there is no tree or no such leaf). `disconnect` forgets the tree |
 | `replies.failed`, `replies.pending`, `lastReplyError` | replies with `ok=false`, `no-wait` requests awaiting collection, and the error text of the newest failed reply |
 | `snapshots.received` | Project Snapshots applied, the Bootstrap's included |
 | `browse.entries` | entries of the last `list-directory` (0 after a refused one) |
@@ -233,6 +253,23 @@ bytes are exactly two hex digits each.
 | `frameConfig.width`, `frameConfig.height` | the last FrameConfig the server acknowledged |
 | `param.<type>.<index>.<name>` | a mirror parameter's value: strings verbatim, bools `true`/`false`, numbers space-separated per component (`"1 2 3"`), object references `type:index`; a missing parameter is a FAIL |
 | `errors.received`, `lastError` | Error messages received and the text of the newest one |
+
+### Task records across a session
+
+A task is known from the reply that launched it (`Queued`), moves to
+`Running` with its first `TaskProgress`, and ends with the one
+`TaskCompleted`/`TaskFailed`. A `BootstrapBegin` (a `reconnect` after a
+loss) fails every record still open with the message `connection lost`: its
+end, if any, went to a closed socket. The server's task-status replay inside
+that Bootstrap then rebuilds what it still knows -- the end of every task
+that finished since the previous Bootstrap, and one `TaskProgress` for a
+running one -- so `task.<id>.state` after a `reconnect` is the truth as the
+server has it, and a task the restarted server never heard of stays
+`Failed "connection lost"`. `disconnect` clears every record, so a task
+launched before it is known again only through the replay. Task ids count
+from 1 for the life of a server process: after a kill and restart, ids repeat,
+and a record of the old process with the same id is overwritten by the new
+task's messages.
 
 ## The record stream
 
@@ -293,6 +330,11 @@ own except those a fresh server mints deterministically (`shot_0001`,
 | `pick.studio` | the fixture triangle under an aimed camera: a centre pick hits a surface whose identity feeds `set-outline`, a corner pick misses, out-of-frame coordinates are clamped, the outline is cleared |
 | `viewport.studio` | `viewport-settings` composed step by step (depth view, world bounds, edges, primitive outlines, back to plain) with frames streaming through each |
 | `histogram.studio` | the fixture's vector array, a missing array and a camera each refused by `request-array-histogram`; the binning itself waits for a scalar fixture |
+| `render_shot.studio` | a three-frame render of the fixture at 32x24: determinate progress, `framesCompleted == 3`, the output directory as the message (listed: three files), then the refusals on an unsaved project and an unknown shot |
+| `render_cancel.studio` | a 400-frame render cancelled after its first progress: a `create-shot` sent meanwhile is refused with "render in progress", the cancel's reply is ok, the task ends `Failed "cancelled"` with the frames written so far, and edits go through again afterwards |
+| `task_replay.studio` | a 60-frame render left running by a `disconnect`: the `reconnect` is bootstrapped once the render is done and its Bootstrap replays the `TaskCompleted` (`tasks.replayed >= 1`, `task.last.state == Completed`); the next Bootstrap replays nothing |
+| `ui_state.studio` | `set-ui-state` leaves saved with the project, absent on a fresh project, back after `open-project` (a `UIState` before the task's end) and in every later Bootstrap, and kept by a save that sends no tree |
+| `loss_during_task.studio` | the server killed while a 400-frame render of this client runs (kill-restart mode): Lost keeps the record `Running`, the reconnect's Bootstrap fails it with `connection lost`, the restarted server replays nothing |
 
 ### By hand
 
@@ -321,12 +363,12 @@ test_client/scenarios/run_scenario.sh build/scivisStudioServer \
   build/scivisStudioTestClient test_client/scenarios/frames_raw.studio
 ```
 
-`datasets.studio`, `tasks.studio`, `pick.studio` and `histogram.studio` carry
-the hint `# runner: fixture fixtures/triangle.obj` in their opening comment
-block: the runner copies the
-file (relative to the scenario) into the data root before the server starts,
-so the script imports `$dataRoot/triangle.obj` without writing anything
-itself. The hint may repeat.
+`datasets.studio`, `tasks.studio`, `pick.studio`, `histogram.studio` and the
+render scenarios carry the hint `# runner: fixture fixtures/triangle.obj` in
+their opening comment block: the runner copies the file (relative to the
+scenario) into the data root before the server starts, so the script imports
+`$dataRoot/triangle.obj` without writing anything itself. The hint may
+repeat, and combine with the one below.
 
 `loss.studio` carries the hint `# runner: kill-restart-after 3` in its
 opening comment block: once the client has printed three `OK` records the
@@ -336,6 +378,10 @@ gives the restarted server 30 s to reach `Listening on port` and the
 script's `reconnect timeout=45000` outlasts that, retrying while the port is
 refused, so no fixed sleep is involved. Run without the runner, `await-lost`
 FAILs after its deadline because nothing kills the server.
+`loss_during_task.studio` uses the same mode with a count that lands right
+after its render has reported progress: the count is the number of `OK`
+records the script prints up to and including `await-task-progress`, so a
+command added before that point moves it.
 
 ### Under ctest
 
