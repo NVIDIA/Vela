@@ -180,35 +180,76 @@ vsr::scene::Scene &RunningServer::scene()
   return server->appContext().vsr.scene;
 }
 
-// A server that greets with the wrong protocol version and nothing else.
-struct MismatchedServer
+// A fake server on a bare NetworkServer that misbehaves in one scripted way,
+// so the client's failure paths run without a StudioServer.
+struct ScriptedServer
 {
-  MismatchedServer();
-  ~MismatchedServer();
+  enum class Behaviour
+  {
+    MismatchedHello, // a Hello of the wrong version, nothing else
+    HelloOnly, // the right Hello, then silence: no Bootstrap ever comes
+    RefuseOnHello, // answers the client's Hello with an Error and closes
+    SilentAfterBootstrap // an empty Bootstrap, then nothing, Pings included
+  };
+
+  explicit ScriptedServer(Behaviour behaviour);
+  ~ScriptedServer();
 
   unsigned short port() const;
 
   std::shared_ptr<vsr::network::NetworkServer> channel;
+  std::atomic<size_t> pingsReceived{0};
+  // RefuseOnHello: the Error is flushed and the socket closed off the IO
+  // thread, the way StudioServer's farewell works.
+  std::atomic<bool> refusing{false};
+  vsr::network::MessageFuture farewell;
+  std::thread closer;
 };
 
-MismatchedServer::MismatchedServer()
+ScriptedServer::ScriptedServer(Behaviour behaviour)
 {
   channel = std::make_shared<vsr::network::NetworkServer>(0);
-  channel->setConnectHandler([this]() {
+  channel->setConnectHandler([this, behaviour]() {
     Hello hello;
-    hello.version = PROTOCOL_VERSION + 1;
-    hello.buildInfo = "mismatched server";
+    hello.version = behaviour == Behaviour::MismatchedHello
+        ? PROTOCOL_VERSION + 1
+        : PROTOCOL_VERSION;
+    hello.buildInfo = "scripted server";
     channel->send(encode(hello));
+    if (behaviour == Behaviour::SilentAfterBootstrap) {
+      channel->send(encode(BootstrapBegin{}));
+      channel->send(encode(BootstrapEnd{}));
+    }
   });
+  channel->registerHandler(uint8_t(StudioMessageType::Ping),
+      [this](const vsr::network::Message &) { ++pingsReceived; });
+  if (behaviour == Behaviour::RefuseOnHello) {
+    channel->registerHandler(uint8_t(StudioMessageType::Hello),
+        [this](const vsr::network::Message &) {
+          Error error;
+          error.message = "the scripted server refuses";
+          farewell = channel->send(encode(error));
+          refusing.store(true);
+        });
+    closer = std::thread([this] {
+      if (!waitFor([&] { return refusing.load(); }))
+        return;
+      farewell.wait_for(1s);
+      channel->restart();
+    });
+  }
   channel->start();
 }
 
-MismatchedServer::~MismatchedServer()
+ScriptedServer::~ScriptedServer()
 {
+  refusing.store(true);
+  if (closer.joinable())
+    closer.join();
   channel->stop();
 }
 
-unsigned short MismatchedServer::port() const
+unsigned short ScriptedServer::port() const
 {
   return channel->port();
 }
@@ -479,7 +520,7 @@ SCENARIO("the test client refuses a server speaking another protocol version",
 {
   GIVEN("a server whose Hello carries the wrong version")
   {
-    MismatchedServer server;
+    ScriptedServer server(ScriptedServer::Behaviour::MismatchedHello);
     TestSession session;
     const auto result = runScript(session,
         "connect 127.0.0.1 " + std::to_string(server.port()) + "\n"
@@ -491,10 +532,51 @@ SCENARIO("the test client refuses a server speaking another protocol version",
       REQUIRE(result.records.size() == 2);
       REQUIRE(result.records[0]
           == "EVT Hello version=" + std::to_string(PROTOCOL_VERSION + 1)
-              + " buildInfo=\"mismatched server\"");
+              + " buildInfo=\"scripted server\"");
       REQUIRE(result.records[1].rfind("FAIL connect", 0) == 0);
       REQUIRE(result.records[1].find("protocol version mismatch")
           != std::string::npos);
+      REQUIRE(session.state() == test_client::SessionState::NeverConnected);
+    }
+  }
+}
+
+SCENARIO("the test client stays unconnected until the Bootstrap completes",
+    "[StudioTestClient]")
+{
+  GIVEN("a server that says Hello and never bootstraps")
+  {
+    ScriptedServer server(ScriptedServer::Behaviour::HelloOnly);
+    TestSession session;
+    const auto endpoint = "127.0.0.1 " + std::to_string(server.port());
+    const auto result = runScript(session,
+        "connect " + endpoint + " timeout=300\n"
+        "assert state == NeverConnected\n"
+        "ping\n"
+        "connect " + endpoint + " timeout=300\n"
+        "assert state == NeverConnected\n",
+        [] {
+          RunnerOptions o;
+          o.keepGoing = true;
+          return o;
+        }());
+
+    THEN(
+        "the deadline FAILs connect, the state is untouched, and connect"
+        " may be tried again")
+    {
+      REQUIRE_FALSE(result.ok);
+      const auto fails = failLines(result.records);
+      REQUIRE(fails.size() == 3);
+      REQUIRE(fails[0].rfind("FAIL connect", 0) == 0);
+      REQUIRE(fails[0].find("no complete Bootstrap") != std::string::npos);
+      REQUIRE(
+          fails[1].find("not connected (NeverConnected)") != std::string::npos);
+      REQUIRE(fails[2].rfind("FAIL connect", 0) == 0);
+      REQUIRE(fails[2].find("no complete Bootstrap") != std::string::npos);
+      REQUIRE(countStarting(result.records, "EVT Hello") == 2);
+      REQUIRE(countStarting(result.records, "OK assert state == NeverConnected")
+          == 2);
       REQUIRE(session.state() == test_client::SessionState::NeverConnected);
     }
   }

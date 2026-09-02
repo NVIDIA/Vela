@@ -188,35 +188,29 @@ bool TestSession::connect(const std::string &host,
     std::chrono::milliseconds deadline,
     std::string *error)
 {
-  if (m_phase != Phase::Idle) {
-    m_phase = Phase::Idle;
-    closeChannel();
-  }
+  // Connecting over an open link (or a half-open attempt) is an implicit
+  // disconnect first; the state then says so.
+  if (m_phase != Phase::Idle)
+    disconnect();
   m_host = host;
   m_port = port;
   beginAttempt();
 
-  const auto end = Clock::now() + deadline;
-  while (true) {
-    poll();
-    if (m_phase == Phase::Established && m_bootstrapped)
-      return true;
-    if (m_phase == Phase::Idle) {
-      if (error)
-        *error = m_failure;
-      return false;
-    }
-    if (Clock::now() >= end)
-      break;
-    std::this_thread::sleep_for(POLL_INTERVAL);
+  // Every way an attempt ends lands in Idle, except success.
+  pollUntil([&] { return m_bootstrapped || m_phase == Phase::Idle; }, deadline);
+  if (m_bootstrapped)
+    return true;
+  if (m_phase != Phase::Idle) {
+    // The deadline: Connected was never entered (that takes BootstrapEnd), so
+    // closing leaves the state as it was.
+    m_failure =
+        (m_phase == Phase::AwaitingHello ? "no Hello from "
+                                         : "no complete Bootstrap from ")
+        + endpointText(host, port) + " within "
+        + std::to_string(deadline.count()) + " ms";
+    m_phase = Phase::Idle;
+    closeChannel();
   }
-
-  m_failure = (m_phase == Phase::AwaitingHello ? "no Hello from "
-                                               : "no complete Bootstrap from ")
-      + endpointText(host, port) + " within " + std::to_string(deadline.count())
-      + " ms";
-  m_phase = Phase::Idle;
-  closeChannel();
   if (error)
     *error = m_failure;
   return false;
@@ -288,7 +282,7 @@ void TestSession::poll()
     const std::string reason = error ? error.message() : "connection closed";
     switch (m_phase) {
     case Phase::Established:
-      declareLoss(reason);
+      linkFailed(reason);
       break;
     case Phase::AwaitingHello:
       attemptFailed("connect failed: " + reason);
@@ -325,7 +319,7 @@ void TestSession::poll()
   if (m_phase == Phase::Established) {
     const auto quiet = now - lastTraffic();
     if (quiet > m_timings.lossAfterSilence) {
-      declareLoss("no traffic from server for "
+      linkFailed("no traffic from server for "
           + std::to_string(m_timings.lossAfterSilence.count()) + " ms");
     } else if (quiet > m_timings.pingAfterQuiet
         && m_pingSentAt < lastTraffic()) {
@@ -563,6 +557,16 @@ void TestSession::setState(SessionState to)
   m_state = to;
 }
 
+void TestSession::linkFailed(const std::string &reason)
+{
+  // Before BootstrapEnd the link was never Connected, so losing it is one more
+  // failed attempt and the state stays as it was.
+  if (m_bootstrapped)
+    declareLoss(reason);
+  else
+    attemptFailed("connect failed: " + reason);
+}
+
 void TestSession::declareLoss(const std::string &reason)
 {
   vsr::core::logWarning("[TestSession] connection lost: %s", reason.c_str());
@@ -610,7 +614,7 @@ void TestSession::checkSendFailures()
       });
   m_sendFutures.erase(ready, m_sendFutures.end());
   if (failure && m_phase == Phase::Established)
-    declareLoss("send failed: " + failure.message());
+    linkFailed("send failed: " + failure.message());
 }
 
 bool TestSession::requireConnected(std::string *error) const
@@ -696,6 +700,9 @@ void TestSession::handleMessage(const Message &msg)
   case StudioMessageType::BootstrapEnd:
     m_bootstrapping = false;
     m_bootstrapped = true;
+    // Connected means fully populated: only now are mirror and replica the
+    // server's.
+    setState(SessionState::Connected);
     break;
   case StudioMessageType::FrameConfig: {
     const auto config = decode<FrameConfig>(msg);
@@ -755,7 +762,6 @@ void TestSession::handleHello(const Message &msg)
   reply.version = PROTOCOL_VERSION;
   reply.buildInfo = BUILD_INFO;
   send(encode(reply));
-  setState(SessionState::Connected);
 }
 
 void TestSession::applySceneMessage(StudioMessageType type, const Message &msg)
