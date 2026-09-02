@@ -542,11 +542,8 @@ void StudioServer::run()
 
     // A pick renders its own frame, with ids, paused or not.
     bool frameSent = false;
-    if (m_pendingPick
-        && (m_state == SessionState::Connected
-            || m_state == SessionState::Rendering)) {
+    if (m_pendingPick && sessionEstablished())
       frameSent = servicePendingPick();
-    }
 
     switch (m_state.load()) {
     case SessionState::Rendering:
@@ -1075,6 +1072,18 @@ bool StudioServer::servicePendingPick()
 {
   const Pick pick = *m_pendingPick;
   m_pendingPick.reset();
+
+  // Nothing to render with (a project without an active shot), like
+  // renderAndSendFrame(): refused rather than answered as a miss, so the
+  // client does not clear its selection over it.
+  if (!m_renderer || m_frameWidth == 0 || m_frameHeight == 0) {
+    Error error;
+    error.message = "Pick " + std::to_string(pick.requestId)
+        + " refused: no active shot to render";
+    vsr::core::logWarning("[StudioServer] %s", error.message.c_str());
+    send(encode(error));
+    return false;
+  }
 
   m_viewport.armPick(pick.x, pick.y);
   prepareViewportPasses();

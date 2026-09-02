@@ -22,6 +22,7 @@
 #include "StudioCodec.h"
 #include "StudioProtocol.h"
 #include "TaskMessages.h"
+#include "ViewportMessages.h"
 // vsr_scivis_studio_model
 #include "ProjectSerialization.h"
 // vsr_scene
@@ -1103,6 +1104,22 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
         std::this_thread::sleep_for(200ms);
         REQUIRE(client.count(StudioMessageType::Frame) == 0);
         REQUIRE(session.server->sessionState() == SessionState::Rendering);
+
+        AND_THEN("a Pick is refused with an Error instead of a miss")
+        {
+          Pick pick;
+          pick.requestId = 777;
+          pick.x = 1;
+          pick.y = 1;
+          client.send(pick);
+          REQUIRE(client.waitForCount(StudioMessageType::Error, 1));
+          const auto error = client.lastDecoded<Error>();
+          REQUIRE(error);
+          REQUIRE(error->message.find("Pick 777") != std::string::npos);
+          REQUIRE(error->message.find("no active shot") != std::string::npos);
+          REQUIRE(client.count(StudioMessageType::PickReply) == 0);
+          REQUIRE(client.count(StudioMessageType::Frame) == 0);
+        }
 
         AND_THEN("creating a shot binds the pipeline and frames resume")
         {
