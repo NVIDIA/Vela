@@ -660,7 +660,8 @@ SCENARIO(
           REQUIRE(f.ops().task(42)->error == "project.vsr does not exist");
           REQUIRE(f.ops().task(42)->finished());
 
-          // A straggling progress event does not resurrect it.
+          // Progress after the end can only be a new task under a reused
+          // id (a restarted server): the record starts over as its own.
           TaskProgress late;
           late.taskId = 42;
           late.message = "late";
@@ -668,7 +669,10 @@ SCENARIO(
           REQUIRE(pollUntil(f.connection, [&] {
             return f.ops().task(42)->lastProgress.message == "late";
           }));
-          REQUIRE(f.ops().task(42)->state == TaskState::Failed);
+          REQUIRE(f.ops().task(42)->state == TaskState::Running);
+          REQUIRE(f.ops().task(42)->label == "late");
+          REQUIRE(f.ops().task(42)->error.empty());
+          REQUIRE(f.ops().tasksActive());
         }
 
         AND_THEN("a completion without a message records no outcome")
@@ -941,6 +945,76 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
           REQUIRE(f.ops().task(9)->framesCompleted == 10);
           REQUIRE_FALSE(f.ops().tasksActive());
         }
+      }
+    }
+
+    WHEN("a restarted server hands a new task the id of a finished record")
+    {
+      TaskCompleted done;
+      done.taskId = 5;
+      done.message = "/d/p";
+      f.server.send(encode(done));
+      REQUIRE(pollUntil(f.connection,
+          [&] { return f.ops().task(5)->state == TaskState::Completed; }));
+      REQUIRE_FALSE(f.ops().task(5)->stale);
+
+      const auto again = f.ops().importStaticDataset(
+          "n", "/d/f.obj", vsr::io::ImporterType::OBJ, false, nullptr);
+      REQUIRE(f.waitForRequests(2));
+      auto restarted = makeOkReply(again.requestId);
+      setResults(restarted, TaskStartedResult{5});
+      f.server.send(encode(restarted));
+
+      THEN("the launch reply starts the record over and it runs to its end")
+      {
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.ops().task(5)->state == TaskState::Queued; }));
+        const TaskRecord *task = f.ops().task(5);
+        REQUIRE(task->label == "Import '/d/f.obj'");
+        REQUIRE(task->outcome.empty());
+        REQUIRE(task->lastProgress.message.empty());
+        REQUIRE(f.ops().tasksActive());
+
+        TaskProgress progress2;
+        progress2.taskId = 5;
+        progress2.message = "importing";
+        f.server.send(encode(progress2));
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.ops().task(5)->state == TaskState::Running; }));
+        REQUIRE(f.ops().task(5)->lastProgress.message == "importing");
+
+        TaskCompleted done2;
+        done2.taskId = 5;
+        done2.message = "dataset_0001";
+        f.server.send(encode(done2));
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.ops().task(5)->outcome == "dataset_0001"; }));
+        REQUIRE(f.ops().task(5)->state == TaskState::Completed);
+      }
+    }
+
+    WHEN("progress arrives for a finished record without a launch reply")
+    {
+      TaskCompleted done;
+      done.taskId = 6;
+      f.server.send(encode(done));
+      REQUIRE(pollUntil(f.connection,
+          [&] { return f.ops().task(6)->state == TaskState::Completed; }));
+      TaskProgress progress;
+      progress.taskId = 6;
+      progress.current = 1;
+      progress.total = 4;
+      progress.message = "render shot 'shot_0002'";
+      f.server.send(encode(progress));
+
+      THEN("another client's task under a reused id starts a fresh record")
+      {
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.ops().task(6)->state == TaskState::Running; }));
+        const TaskRecord *task = f.ops().task(6);
+        REQUIRE(task->label == "render shot 'shot_0002'");
+        REQUIRE(task->lastProgress.total == 4);
+        REQUIRE(f.ops().tasksActive());
       }
     }
 

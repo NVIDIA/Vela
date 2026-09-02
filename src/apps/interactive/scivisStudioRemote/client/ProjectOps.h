@@ -88,7 +88,8 @@ struct TaskRecord
   bool render{false};
   // Failed by the client at the last BootstrapBegin ("connection lost"), not
   // by the server; the next event naming its id revives the record (the
-  // task-status replay, or a restarted server reusing the id).
+  // task-status replay). A TaskStarted reply, or progress for a record that
+  // finished, starts the record over instead: a restarted server reuses ids.
   bool stale{false};
 
   bool finished() const;
@@ -378,7 +379,11 @@ struct ProjectOps
   // Runs the entry's callback with a failed reply: the reply itself for a
   // project op, an absent PickReply for a pick.
   static void fail(Pending &entry, const protocol::ProjectOpReply &reply);
+  // The record of `taskId`, made if new; a stale one is revived.
   TaskRecord &recordFor(uint64_t taskId);
+  // The record of `taskId` started over as Queued "Task N": a new task was
+  // launched under the id (a restarted server counts from 1 again).
+  TaskRecord &freshRecordFor(uint64_t taskId);
   Pending *findPending(uint64_t requestId);
   const Pending *findPending(uint64_t requestId) const;
 
