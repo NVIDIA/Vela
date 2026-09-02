@@ -89,8 +89,33 @@ const char *toString(SessionState state)
 // Construction ///////////////////////////////////////////////////////////////
 
 StudioServer::StudioServer(const ServerOptions &options)
-    : m_options(options), m_projectContext(&m_ctx)
+    : m_options(options),
+      m_projectContext(&m_ctx),
+      m_tasks([this](Message &&msg) { send(std::move(msg)); }),
+      m_dispatcher(makeDispatcherHost())
 {}
+
+ProjectOpDispatcher::Host StudioServer::makeDispatcherHost()
+{
+  ProjectOpDispatcher::Host host;
+  host.projectContext = &m_projectContext;
+  host.dataRoots = &m_dataRoots;
+  host.tasks = &m_tasks;
+  host.send = [this](Message &&msg) { send(std::move(msg)); };
+  host.flushScenePushes = [this] {
+    if (m_sceneResendPending)
+      sendSceneSnapshot();
+  };
+  host.rebindActiveShot = [this] {
+    std::string error;
+    if (!bindActiveShotRendering(&error)) {
+      vsr::core::logError(
+          "[StudioServer] cannot render the active shot: %s", error.c_str());
+    }
+  };
+  host.uiState = &m_uiState;
+  return host;
+}
 
 StudioServer::~StudioServer()
 {
@@ -134,8 +159,10 @@ bool StudioServer::start(std::string *error)
     return false;
   }
 
-  for (const auto &root : m_options.dataRoots)
-    vsr::core::logStatus("[StudioServer] Data Root: %s", root.c_str());
+  m_dataRoots = DataRoots(m_options.dataRoots, m_options.projectDirectory);
+  for (const auto &root : m_dataRoots.roots()) {
+    vsr::core::logStatus("[StudioServer] Data Root: %s", root.string().c_str());
+  }
 
   if (!loadDevice(error) || !setupProject(error) || !setupRendering(error)
       || !setupNetwork(error)) {
@@ -219,17 +246,14 @@ bool StudioServer::setupProject(std::string *error)
   return true;
 }
 
-bool StudioServer::setupRendering(std::string *error)
+bool StudioServer::bindActiveShotRendering(std::string *error)
 {
   auto &scene = m_ctx.vsr.scene;
   auto &project = m_projectContext.project();
   auto *shot = project::activeShot(project);
-
-  m_renderIndex =
-      m_ctx.anari.acquireRenderIndex(scene, m_libraryName, m_device);
-  if (!m_renderIndex) {
+  if (!shot) {
     if (error)
-      *error = "failed to create the render index";
+      *error = "project has no active shot to render";
     return false;
   }
 
@@ -241,28 +265,31 @@ bool StudioServer::setupRendering(std::string *error)
   if (m_renderers.empty())
     m_renderers = scene.createStandardRenderers(m_libraryName, m_device);
   if (m_renderers.empty()) {
+    m_renderer = {};
     if (error)
       *error = "ANARI library '" + m_libraryName + "' offers no renderers";
     return false;
   }
 
+  vsr::scene::RendererAppRef renderer;
   if (settings.rendererObjectIndex != VSR_INVALID_INDEX) {
-    auto renderer =
+    auto candidate =
         scene.getObject<vsr::scene::Renderer>(settings.rendererObjectIndex);
-    if (renderer && renderer->rendererDeviceName() == m_libraryName)
-      m_renderer = renderer;
+    if (candidate && candidate->rendererDeviceName() == m_libraryName)
+      renderer = candidate;
   }
-  if (!m_renderer) {
-    m_renderer = m_renderers.front();
-    if (settings.rendererObjectIndex != m_renderer->index()
-        || settings.rendererSubtype != m_renderer->subtype().str()
+  if (!renderer) {
+    renderer = m_renderers.front();
+    if (settings.rendererObjectIndex != renderer->index()
+        || settings.rendererSubtype != renderer->subtype().str()
         || settings.rendererLibrary != m_libraryName) {
-      settings.rendererObjectIndex = m_renderer->index();
-      settings.rendererSubtype = m_renderer->subtype().str();
+      settings.rendererObjectIndex = renderer->index();
+      settings.rendererSubtype = renderer->subtype().str();
       settings.rendererLibrary = m_libraryName;
       project.markDirty();
     }
   }
+  m_renderer = renderer;
 
   // The shot camera is what the client orbits and what RenderShot renders
   // with; the scene's default camera is only a last resort.
@@ -276,6 +303,30 @@ bool StudioServer::setupRendering(std::string *error)
     m_cameraIndex = scene.defaultCamera().index();
   }
 
+  if (m_scenePass) {
+    m_scenePass->setRenderer(m_renderIndex->renderer(m_renderer->index()));
+    m_scenePass->setCamera(m_renderIndex->camera(m_cameraIndex));
+  }
+  return true;
+}
+
+bool StudioServer::setupRendering(std::string *error)
+{
+  auto &scene = m_ctx.vsr.scene;
+  auto *shot = project::activeShot(m_projectContext.project());
+
+  m_renderIndex =
+      m_ctx.anari.acquireRenderIndex(scene, m_libraryName, m_device);
+  if (!m_renderIndex) {
+    if (error)
+      *error = "failed to create the render index";
+    return false;
+  }
+
+  if (!bindActiveShotRendering(error))
+    return false;
+
+  const auto &settings = shot->renderSettings;
   m_frameWidth = settings.width;
   m_frameHeight = settings.height;
   m_pipeline.setDimensions(m_frameWidth, m_frameHeight);
@@ -384,6 +435,10 @@ void StudioServer::run()
       bootstrap();
     if (m_sceneResendPending)
       sendSceneSnapshot();
+    // One Server Task per iteration; frames wait while it runs.
+    if (m_state == SessionState::Connected
+        || m_state == SessionState::Rendering)
+      m_dispatcher.runOneTask();
 
     switch (m_state.load()) {
     case SessionState::Rendering:
@@ -455,7 +510,8 @@ void StudioServer::applyControlState()
       || m_state == SessionState::Rendering;
   if (!established) {
     const bool dropped = control.frameConfig || control.encoding
-        || control.rendering || !control.edits.empty();
+        || control.rendering || !control.edits.empty()
+        || !control.requests.empty();
     if (dropped) {
       vsr::core::logWarning(
           "[StudioServer] control messages dropped: no session (%s)",
@@ -492,11 +548,32 @@ void StudioServer::applyControlState()
     setPushEnabled(pushWasEnabled);
   }
 
+  for (auto &request : control.requests)
+    m_pendingRequests.push_back(std::move(request));
+  // Replies must not run ahead of the bootstrap bracket.
+  if (!m_bootstrapPending)
+    dispatchPendingRequests();
+
   if (control.rendering)
     m_renderingRequested = *control.rendering;
   if (!m_bootstrapPending) {
     setState(m_renderingRequested ? SessionState::Rendering
                                   : SessionState::Connected);
+  }
+}
+
+void StudioServer::dispatchPendingRequests()
+{
+  while (!m_pendingRequests.empty()) {
+    // A sync op the client sent after a task waits for that task to run, so
+    // the project sees requests in the order they were sent; task ops only
+    // queue (their TaskStarted goes out now), and cancel and browse touch
+    // nothing the task could.
+    if (m_tasks.queued() > 0 && waitsForQueuedTasks(m_pendingRequests.front()))
+      break;
+    auto request = std::move(m_pendingRequests.front());
+    m_pendingRequests.pop_front();
+    m_dispatcher.dispatch(request);
   }
 }
 
@@ -516,6 +593,8 @@ void StudioServer::beginSession(uint64_t serial)
   m_bootstrapPending = false;
   m_sceneResendPending = false;
   m_frameInFlight = {};
+  m_pendingRequests.clear();
+  m_tasks.dropQueued();
   setState(SessionState::AwaitingHello);
   vsr::core::logStatus("[StudioServer] client connected, awaiting Hello");
 }
@@ -529,6 +608,14 @@ void StudioServer::endSession(const std::string &reason, bool closeSocket)
   m_bootstrapPending = false;
   m_sceneResendPending = false;
   m_frameInFlight = {};
+  if (!m_pendingRequests.empty()) {
+    vsr::core::logWarning(
+        "[StudioServer] %zu pending project request(s) dropped with the"
+        " session",
+        m_pendingRequests.size());
+    m_pendingRequests.clear();
+  }
+  m_tasks.dropQueued();
   if (closeSocket) {
     // Closes the socket and re-arms the accept; the disconnect this reports
     // lands in the latch and is dropped as stale. A peer-closed socket needs
@@ -558,6 +645,7 @@ void StudioServer::bootstrap()
   config.width = m_frameWidth;
   config.height = m_frameHeight;
   send(encode(config));
+  send(encode(UIState{m_uiState}));
   send(encode(ProjectSnapshot{m_projectContext.project()}));
   send(encode(BootstrapEnd{}));
 
@@ -829,11 +917,22 @@ void StudioServer::onMessage(const Message &msg)
     break;
   }
 
+  if (isProjectRequestType(*type)) {
+    auto request = decodeProjectRequest(msg);
+    if (!request) {
+      replyError("malformed " + std::string(toString(*type)) + " payload");
+      return;
+    }
+    std::lock_guard lock(m_controlMutex);
+    m_control.requests.push_back(std::move(*request));
+    return;
+  }
+
   if (isServerToClient(*type)) {
     replyError(std::string(toString(*type)) + " is a server-to-client message");
   } else {
-    // Project Ops, Server Tasks, Remote Browse, playback, picking, RenderShot:
-    // milestones 4-6. Refused loudly, never dropped.
+    // Playback, picking, RenderShot: later milestones. Refused loudly, never
+    // dropped.
     replyError(
         std::string(toString(*type)) + " is not implemented in this server");
   }

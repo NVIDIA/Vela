@@ -346,17 +346,23 @@ SCENARIO("StudioServer runs a viewer-parity session", "[StudioServer]")
           ++layers;
         }
         REQUIRE(layers >= 1);
-        REQUIRE(i + 3 == types.size());
+        REQUIRE(i + 4 == types.size());
         REQUIRE(types[i] == StudioMessageType::FrameConfig);
-        REQUIRE(types[i + 1] == StudioMessageType::ProjectSnapshot);
-        REQUIRE(types[i + 2] == StudioMessageType::BootstrapEnd);
+        REQUIRE(types[i + 1] == StudioMessageType::UIState);
+        REQUIRE(types[i + 2] == StudioMessageType::ProjectSnapshot);
+        REQUIRE(types[i + 3] == StudioMessageType::BootstrapEnd);
 
         const auto config = decode<FrameConfig>(msgs[i]);
         REQUIRE(config);
         REQUIRE(config->width == shot->renderSettings.width);
         REQUIRE(config->height == shot->renderSettings.height);
 
-        const auto snapshot = decode<ProjectSnapshot>(msgs[i + 1]);
+        // A fresh project carries no UI state.
+        const auto uiState = decode<UIState>(msgs[i + 1]);
+        REQUIRE(uiState);
+        REQUIRE(uiState->tree == nullptr);
+
+        const auto snapshot = decode<ProjectSnapshot>(msgs[i + 2]);
         REQUIRE(snapshot);
         REQUIRE(snapshot->project.activeShotId == shotId);
         REQUIRE(snapshot->project.shots.size() == 1);
@@ -422,9 +428,9 @@ SCENARIO("StudioServer runs a viewer-parity session", "[StudioServer]")
             }
 
             client.clear();
-            Message newProject;
-            newProject.header.type = uint8_t(StudioMessageType::NewProject);
-            client.channel->send(std::move(newProject));
+            Message pick;
+            pick.header.type = uint8_t(StudioMessageType::Pick);
+            client.channel->send(std::move(pick));
             REQUIRE(client.waitForCount(StudioMessageType::Error, 1));
             const auto refused =
                 decode<Error>(client.last(StudioMessageType::Error));

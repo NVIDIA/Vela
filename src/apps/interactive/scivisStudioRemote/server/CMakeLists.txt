@@ -5,6 +5,7 @@
 # in-process.
 add_library(vsr_scivis_studio_server_core OBJECT
   DataRoots.cpp
+  ProjectOpDispatcher.cpp
   RemoteBrowse.cpp
   ServerOptions.cpp
   ServerPushDelegate.cpp
