@@ -88,16 +88,30 @@ SCENARIO(
 
     WHEN("a second client connects over the live first one")
     {
+      // The replace handler's farewell reaches the first client before the
+      // close does.
+      constexpr uint8_t FAREWELL = 42;
+      std::atomic<int> farewells{0};
+      client->registerHandler(FAREWELL, [&](const Message &) { farewells++; });
+      std::atomic<bool> farewellSent{false};
+      server->setReplaceHandler([&] {
+        Message farewell;
+        farewell.header.type = FAREWELL;
+        farewellSent = server->sendImmediately(farewell);
+      });
+
       auto second = std::make_shared<NetworkClient>();
       LifecycleCounters secondCounters;
       secondCounters.attach(*second);
       second->connect("127.0.0.1", port);
 
-      THEN("the first is reported lost, the second stays connected")
+      THEN("the first is told, reported lost, and the second stays connected")
       {
         REQUIRE(waitFor([&] { return serverCounters.connected == 2; }));
         REQUIRE(serverCounters.disconnected == 1);
         REQUIRE(waitFor([&] { return clientCounters.disconnected == 1; }));
+        REQUIRE(farewellSent.load());
+        REQUIRE(farewells == 1);
         REQUIRE(waitFor([&] { return secondCounters.connected == 1; }));
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
         REQUIRE(secondCounters.disconnected == 0);

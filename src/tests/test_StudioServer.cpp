@@ -460,6 +460,60 @@ SCENARIO("StudioServer runs a viewer-parity session", "[StudioServer]")
   }
 }
 
+SCENARIO(
+    "StudioServer tells a replaced client why it was closed", "[StudioServer]")
+{
+  if (!helideAvailable()) {
+    WARN("helide ANARI library unavailable, skipping the replace test");
+    return;
+  }
+
+  GIVEN("a server with one bootstrapped client")
+  {
+    ServerOptions options;
+    options.port = 0;
+    options.library = "helide";
+    StudioServer server(options);
+    std::string error;
+    REQUIRE(server.start(&error));
+    ServerLoop loop(&server);
+    const auto port = server.port();
+
+    TestClient first;
+    first.connect(port);
+    REQUIRE(first.waitForCount(StudioMessageType::Hello, 1));
+    first.send(Hello{});
+    REQUIRE(first.waitForCount(StudioMessageType::BootstrapEnd, 1));
+    first.clear();
+
+    WHEN("a second client connects")
+    {
+      TestClient second;
+      second.connect(port);
+      REQUIRE(second.waitForCount(StudioMessageType::Hello, 1));
+
+      THEN("the first hears the reason, then loses the connection")
+      {
+        REQUIRE(first.waitForCount(StudioMessageType::Error, 1));
+        const auto reason = decode<Error>(first.last(StudioMessageType::Error));
+        REQUIRE(reason);
+        REQUIRE(reason->message == "replaced by another client");
+        REQUIRE(waitFor([&] { return first.disconnects == 1; }));
+
+        AND_THEN("the second bootstraps as the session's client")
+        {
+          second.send(Hello{});
+          REQUIRE(second.waitForCount(StudioMessageType::BootstrapEnd, 1));
+          REQUIRE(second.count(StudioMessageType::Error) == 0);
+          REQUIRE(waitFor([&] {
+            return server.sessionState() == SessionState::Connected;
+          }));
+        }
+      }
+    }
+  }
+}
+
 namespace {
 
 // The names of a layer's nodes by forest index; empty slots stay empty.

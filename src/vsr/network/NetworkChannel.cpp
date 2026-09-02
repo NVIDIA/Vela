@@ -75,21 +75,46 @@ MessageFuture NetworkChannel::send(Message &&msg)
   auto pending = std::make_shared<PendingWrite>();
   pending->promise = promise;
   pending->completed = std::make_shared<std::atomic<bool>>(false);
-  const auto payloadLength = static_cast<size_t>(msg.header.payload_length);
-  assert(payloadLength == msg.payload.size());
-  pending->wireData.resize(sizeof(Message::Header) + payloadLength);
-  std::memcpy(pending->wireData.data(), &msg.header, sizeof(Message::Header));
-  if (payloadLength > 0) {
-    const auto bytesToCopy = std::min(payloadLength, msg.payload.size());
-    std::memcpy(pending->wireData.data() + sizeof(Message::Header),
-        msg.payload.data(),
-        bytesToCopy);
-  }
+  pending->wireData = frame(msg);
 
   boost::asio::post(m_io_context,
       [self, pending]() { self->enqueue_write(std::move(pending)); });
 
   return future;
+}
+
+std::vector<std::byte> NetworkChannel::frame(const Message &msg)
+{
+  const auto payloadLength = static_cast<size_t>(msg.header.payload_length);
+  assert(payloadLength == msg.payload.size());
+  std::vector<std::byte> wireData(sizeof(Message::Header) + payloadLength);
+  std::memcpy(wireData.data(), &msg.header, sizeof(Message::Header));
+  if (payloadLength > 0) {
+    const auto bytesToCopy = std::min(payloadLength, msg.payload.size());
+    std::memcpy(wireData.data() + sizeof(Message::Header),
+        msg.payload.data(),
+        bytesToCopy);
+  }
+  return wireData;
+}
+
+bool NetworkChannel::sendImmediately(const Message &msg)
+{
+  if (!m_messagingActive.load() || !isConnected())
+    return false;
+  {
+    std::lock_guard lock(m_writeMutex);
+    if (m_writeInProgress)
+      return false;
+  }
+  const auto wireData = frame(msg);
+  boost::system::error_code ec;
+  m_socket.non_blocking(true, ec);
+  if (ec)
+    return false;
+  const auto written = asio::write(m_socket, asio::buffer(wireData), ec);
+  m_socket.non_blocking(false, ec);
+  return !ec && written == wireData.size();
 }
 
 MessageFuture NetworkChannel::send(uint8_t type, StructuredMessage &&msg)
@@ -391,6 +416,11 @@ unsigned short NetworkServer::port() const
   return m_acceptor.local_endpoint().port();
 }
 
+void NetworkServer::setReplaceHandler(ReplaceHandler handler)
+{
+  m_replaceHandler = std::move(handler);
+}
+
 void NetworkServer::start()
 {
   start_messaging();
@@ -423,9 +453,12 @@ void NetworkServer::start_accept()
           if (m_socket.is_open()) {
             // A second client over a live one: the first connection ends
             // here, reported before the new one is announced, instead of
-            // dying silently under the move below.
+            // dying silently under the move below. The replace handler gets
+            // its word in first.
             vsr::core::logWarning(
                 "[NetworkServer] New connection replaces the current one");
+            if (m_replaceHandler)
+              m_replaceHandler();
             fail_pending_writes(asio::error::connection_aborted);
             close_socket(asio::error::connection_aborted);
           }

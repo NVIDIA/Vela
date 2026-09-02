@@ -101,7 +101,9 @@ const char *toString(SessionState state);
  * SetTime and Pick latched while the body ran targeted a scene the render
  * was mutating: they are dropped (the pick with an Error) once it returns.
  * The bootstrap replays how tasks ended since the last one (task-status
- * replay) between UIState and the ProjectSnapshot.
+ * replay) between UIState and the ProjectSnapshot. A second client connecting
+ * over a live session replaces it; the replaced client is sent
+ * Error{"replaced by another client"} before its socket closes.
  *
  * Example:
  *   StudioServer server(options);
