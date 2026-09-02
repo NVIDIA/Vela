@@ -48,14 +48,6 @@ std::string label(const Entity *entity, const std::string &id)
   return entity->name;
 }
 
-template <typename T>
-const T *findById(const std::vector<T> &items, const std::string &id)
-{
-  auto it = std::find_if(
-      items.begin(), items.end(), [&](const T &item) { return item.id == id; });
-  return it == items.end() ? nullptr : &*it;
-}
-
 } // namespace
 
 // Lookups ////////////////////////////////////////////////////////////////////
