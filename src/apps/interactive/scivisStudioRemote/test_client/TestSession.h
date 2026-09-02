@@ -37,8 +37,9 @@ struct Project;
 
 namespace vsr::scivis_studio::test_client {
 
-// The client's Connection State (CONTEXT.md). Lost is involuntary: the
-// Structural Mirror and Project Replica stay as a frozen view until a
+// The client's Connection State (CONTEXT.md). Connected is entered with
+// BootstrapEnd, when mirror and replica are the server's. Lost is involuntary:
+// the Structural Mirror and Project Replica stay as a frozen view until a
 // reconnect() or disconnect(). Disconnected is a completed intention: mirror
 // and replica are cleared.
 enum class SessionState
@@ -130,7 +131,8 @@ struct TestSession
 
   // Connects, exchanges Hellos and waits for the complete Bootstrap. False
   // with the reason on refusal, version mismatch, socket loss or the deadline;
-  // the state is then left as it was.
+  // the state is then left as it was, and another connect() may follow at
+  // once. Called on an open link it disconnect()s first.
   bool connect(const std::string &host,
       int port,
       std::chrono::milliseconds deadline,
@@ -210,6 +212,7 @@ struct TestSession
   void beginAttempt();
   void closeChannel();
   void setState(SessionState to);
+  void linkFailed(const std::string &reason);
   void declareLoss(const std::string &reason);
   void attemptFailed(const std::string &reason);
   void finishDisconnect();
