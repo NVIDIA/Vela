@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "ShotEditor.h"
+// scivisStudioClient
+#include "UICommon.h"
 // vsr_scivis_studio_client_core
 #include "ReplicaView.h"
 // vsr_scivis_studio_model
@@ -22,6 +24,7 @@ namespace vsr::scivis_studio::client {
 namespace {
 
 constexpr const char *NO_RENDERERS_LABEL = "<no renderers>";
+constexpr const char *RENDER_SHOT_POPUP = "Render Shot?";
 
 std::string rendererLabel(const vsr::scene::Renderer &renderer)
 {
@@ -224,10 +227,62 @@ void ShotEditor::buildEditorUI(const Project &project)
   buildUI_cameraRigSelector(project);
 
   ImGui::Text("Output: renders/%s/", shot.id.c_str());
+  buildUI_render(project, shot);
 
   buildUI_datasets(project);
 
   ImGui::EndDisabled();
+}
+
+void ShotEditor::buildUI_render(const Project &project, const Shot &shot)
+{
+  const bool busy = pending(m_pendingRender) || m_context->renderInProgress();
+  ImGui::BeginDisabled(busy);
+  if (ImGui::Button("Render Shot..."))
+    m_shotToRender = shot.id;
+  ImGui::EndDisabled();
+  if (project.dirty) {
+    ImGui::SameLine();
+    ImGui::TextDisabled("(save the project first)");
+  }
+}
+
+void ShotEditor::buildPopups(const Project &project)
+{
+  if (m_shotToRender.empty())
+    return;
+  const Shot *shot = replica::findShot(project, m_shotToRender);
+  if (!shot) {
+    m_shotToRender.clear(); // gone with a snapshot
+    return;
+  }
+  if (!ImGui::IsPopupOpen(RENDER_SHOT_POPUP))
+    ImGui::OpenPopup(RENDER_SHOT_POPUP);
+  const auto choice = ui::confirmModal(RENDER_SHOT_POPUP,
+      "Render " + std::to_string(std::max(0, shot->frameCount))
+          + " frame(s) of '" + shot->name + "' to renders/" + shot->id
+          + "/ on the server?",
+      "Render",
+      canSend(),
+      [&] {
+        if (project.dirty)
+          ui::warningText(
+              "The project has unsaved changes; the server will"
+              " refuse until it is saved.");
+        ImGui::TextDisabled(
+            "The shot becomes the active shot; edits are"
+            " refused while the render runs.");
+      });
+  if (choice == ui::ConfirmChoice::Confirmed) {
+    m_pendingRender = ops().renderShot(m_shotToRender,
+        [this](const protocol::ProjectOpReply &reply,
+            const std::optional<protocol::TaskStartedResult> &) {
+          if (!reply.ok)
+            reportError(reply.error);
+        });
+  }
+  if (choice != ui::ConfirmChoice::Pending)
+    m_shotToRender.clear();
 }
 
 void ShotEditor::buildUI_deviceSelector()

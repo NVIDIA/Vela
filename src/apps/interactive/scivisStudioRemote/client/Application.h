@@ -88,6 +88,10 @@ class Application : public vsr::ui::imgui::Application
   void onMirrorReplaceBegin();
   void onBootstrapComplete();
   void onProjectReplaced();
+  void onUIState(const protocol::SubtreePtr &tree);
+  // Windows, layout and settings from a project's UI-state tree, as the
+  // monolith applies them on open; a null tree keeps the current layout.
+  void applyUIState(const protocol::SubtreePtr &tree);
   void releaseMirror();
   void enterHomeState();
   void resolveActiveShotCamera();
@@ -144,6 +148,10 @@ class Application : public vsr::ui::imgui::Application
 
   // True while Lost: the panels show the frozen mirror but must not edit it.
   bool m_panelsReadOnly{false};
+  // The bootstrap's UIState is applied only when the client has no live
+  // layout of its own: the first bootstrap out of the home state, not the
+  // one a reconnect after Lost runs. Reset in enterHomeState().
+  bool m_layoutLive{false};
   // --connect waits until the dock layout has settled so the bootstrap
   // reports the viewport's real size, not the undocked first-frame size.
   int m_autoConnectInFrames{-1};
@@ -162,7 +170,8 @@ class Application : public vsr::ui::imgui::Application
     double expiresAt{0.0};
   };
   std::deque<Toast> m_toasts;
-  // Task states already announced, so each completion toasts once.
+  // Task states already announced, so each completion toasts once (a replay
+  // included).
   vsr::core::FlatMap<uint64_t, TaskState> m_announcedTasks;
 };
 

@@ -29,9 +29,13 @@ namespace vsr::scivis_studio::client {
  * Structural Mirror's Renderer objects, which is all the client can know
  * about the server's devices.
  *
+ * "Render Shot..." confirms the frame count and output directory, then
+ * sends RenderShot: the server makes the shot active and renders it as a
+ * Server Task the Tasks panel follows (and can cancel); it is refused
+ * unless the project is saved and no render is queued or running.
+ *
  * Not here: transport (Play/Stop, current frame, loop, fps) lives in the
- * Timeline window and Render Active Shot is milestone 7; `playing` is never
- * sent from here.
+ * Timeline window; `playing` is never sent from here.
  */
 struct ShotEditor : public EditorWindow
 {
@@ -42,8 +46,10 @@ struct ShotEditor : public EditorWindow
 
  private:
   void buildEditorUI(const Project &project) override;
+  void buildPopups(const Project &project) override;
 
   void syncDraft(const Project &project);
+  void buildUI_render(const Project &project, const Shot &shot);
   void sendDraft();
   void buildUI_deviceSelector();
   void buildUI_rendererSelector();
@@ -58,6 +64,9 @@ struct ShotEditor : public EditorWindow
   // The replica changed (or an edit was rejected) since the draft was taken.
   bool m_draftStale{true};
   RequestHandle m_pendingUpdate;
+  // The shot the Render confirmation is open for; empty when it is not.
+  ShotID m_shotToRender;
+  RequestHandle m_pendingRender;
 };
 
 } // namespace vsr::scivis_studio::client

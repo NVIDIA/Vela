@@ -25,6 +25,11 @@ bool EditorContext::canSend() const
       && !connection->bootstrapping() && connection->project() != nullptr;
 }
 
+bool EditorContext::renderInProgress() const
+{
+  return connection && connection->projectOps().renderActive();
+}
+
 ReplyCallback EditorContext::errorReporter() const
 {
   return [this](const protocol::ProjectOpReply &reply) {

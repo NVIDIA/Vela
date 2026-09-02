@@ -179,6 +179,7 @@ Application::Application(int argc, const char **argv)
   m_connection->onMirrorReplaceBegin = [this] { onMirrorReplaceBegin(); };
   m_connection->onBootstrapComplete = [this] { onBootstrapComplete(); };
   m_connection->onProjectReplaced = [this] { onProjectReplaced(); };
+  m_connection->onUIState = [this](const SubtreePtr &tree) { onUIState(tree); };
   m_connection->onServerError = [](const std::string &message) {
     vsr::core::logError("[Client] server reported: %s", message.c_str());
   };
@@ -731,11 +732,21 @@ void Application::watchTasks()
     if (announced && *announced == task.state)
       continue;
     m_announcedTasks[task.taskId] = task.state;
+    // The client failed a stale record itself at BootstrapBegin; the banner
+    // already said the connection was lost, and the replay may yet revive it.
+    if (task.stale)
+      continue;
     const std::string label = task.label.empty() ? "<task>" : task.label;
-    if (task.state == TaskState::Completed)
-      notify(label + " completed", false);
-    else if (task.state == TaskState::Failed)
+    if (task.state == TaskState::Completed) {
+      std::string text = label + " completed";
+      if (task.framesCompleted != 0)
+        text += " (" + std::to_string(task.framesCompleted) + " frames)";
+      if (!task.lastProgress.message.empty())
+        text += ": " + task.lastProgress.message;
+      notify(text, false);
+    } else if (task.state == TaskState::Failed) {
       notify(label + " failed: " + task.error, true);
+    }
   }
 }
 
@@ -808,6 +819,14 @@ void Application::onBootstrapComplete()
   appContext()->vsr.sceneLoadComplete = true;
   m_panelsReadOnly = false;
 
+  // The project's layout wins only over no layout: a reconnect after Lost
+  // keeps what the user has on screen. Before onServerReady(), which sends
+  // the viewport settings the tree may have just loaded.
+  if (!m_layoutLive) {
+    applyUIState(m_connection->uiState());
+    m_layoutLive = true;
+  }
+
   m_viewport->sendFrameConfig();
   m_connection->setEncodings(encodingPreference());
   m_connection->startRendering();
@@ -816,12 +835,43 @@ void Application::onBootstrapComplete()
   resolveActiveShotCamera();
 }
 
+// Inside a bootstrap the tree waits for onBootstrapComplete (the windows it
+// configures may still be pointing into the mirror being rebuilt); outside
+// one it follows an OpenProject and is the opened project's layout, applied
+// as the monolith applies it on open.
+void Application::onUIState(const SubtreePtr &tree)
+{
+  if (m_connection->bootstrapping())
+    return;
+  applyUIState(tree);
+}
+
+void Application::applyUIState(const SubtreePtr &tree)
+{
+  if (!tree)
+    return;
+  auto &root = tree->root();
+  if (auto *windows = root.child("windows")) {
+    for (auto *window : m_windows)
+      window->loadSettings((*windows)[window->name()]);
+  }
+  if (auto *layout = root.child("layout")) {
+    const auto ini = layout->getValueOr<std::string>("");
+    // Between NewFrame and Render, as the monolith does; ImGui applies the
+    // dock settings to the windows when they next Begin, later this frame.
+    if (!ini.empty())
+      ImGui::LoadIniSettingsFromMemory(ini.c_str());
+  }
+  loadApplicationSettings(root); // settings/{fontScale, uiRounding}
+}
+
 void Application::enterHomeState()
 {
   auto *ctx = appContext();
   ctx->vsr.sceneLoadComplete = false;
   ctx->clearSelected();
   m_panelsReadOnly = false;
+  m_layoutLive = false;
   if (m_viewport)
     m_viewport->reset();
 }
