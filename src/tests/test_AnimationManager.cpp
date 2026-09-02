@@ -137,6 +137,55 @@ SCENARIO(
         REQUIRE(mgr.takeLoadFailures().size() == 1);
       }
     }
+
+    WHEN("Nobody collects the failures")
+    {
+      for (int i = 0; i < 300; ++i)
+        mgr.setAnimationFrame(3 + (i % 2));
+
+      THEN("The record is capped, keeping the newest")
+      {
+        const auto failures = mgr.takeLoadFailures();
+        REQUIRE(failures.size() == AnimationManager::MAX_LOAD_FAILURES);
+        REQUIRE(failures.back().frame == 4);
+        REQUIRE(failures.back().message == "frame 4 is bad");
+      }
+    }
+  }
+
+  GIVEN("A clock longer than a binding that has only five files")
+  {
+    Scene scene;
+    AnimationManager mgr(&scene);
+    mgr.setAnimationTotalFrames(10);
+    auto &anim = mgr.addAnimation("files");
+    // Its own indices 0..4 span the clock; index 3 and 4 are bad.
+    anim.emplaceFileBinding<FailingFileBinding>(&scene, 5, 2);
+
+    WHEN("Time lands on a clock frame the binding maps to a bad file")
+    {
+      mgr.setAnimationFrame(9); // file index 4
+
+      THEN("The failure carries the clock frame, not the file index")
+      {
+        const auto failures = mgr.takeLoadFailures();
+        REQUIRE(failures.size() == 1);
+        REQUIRE(failures[0].frame == 9);
+        REQUIRE(failures[0].message == "frame 4 is bad");
+      }
+    }
+
+    WHEN("A failure is reported outside any time application")
+    {
+      mgr.reportLoadFailure(4, "late");
+
+      THEN("The binding's index passes through")
+      {
+        const auto failures = mgr.takeLoadFailures();
+        REQUIRE(failures.size() == 1);
+        REQUIRE(failures[0].frame == 4);
+      }
+    }
   }
 }
 
@@ -147,8 +196,7 @@ SCENARIO("A time change is one update batch", "[AnimationManager]")
     Scene scene;
     AnimationManager mgr(&scene);
 
-    auto *recorder =
-        scene.updateDelegate().emplace<BatchRecordingDelegate>();
+    auto *recorder = scene.updateDelegate().emplace<BatchRecordingDelegate>();
 
     std::vector<vsr::scene::ArrayRef> arrays;
     for (int i = 0; i < 3; ++i) {
