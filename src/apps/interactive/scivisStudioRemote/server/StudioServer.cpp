@@ -878,6 +878,10 @@ void StudioServer::tickPlayback()
     return;
 
   const bool wasPlaying = shot->playing;
+  // A play commits the frame with its own snapshot; a scrub window left open
+  // before it has nothing to add.
+  if (wasPlaying)
+    m_scrubPending = false;
   m_ctx.vsr.animationMgr.tick(elapsed);
   pushLoadFailures();
 
