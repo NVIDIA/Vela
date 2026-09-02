@@ -81,6 +81,12 @@ std::optional<ProjectRequest> decodeProjectRequest(
 // requests (they only queue), CancelTask and Remote Browse are not.
 bool waitsForQueuedTasks(const ProjectRequest &request);
 
+// CancelTask and Remote Browse: they touch neither Project nor Scene, so the
+// loop may serve one from behind a sync op that is waiting for a queued task
+// -- otherwise a queued task could never be cancelled once any sync op
+// followed it.
+bool independentOfQueuedTasks(const ProjectRequest &request);
+
 /*
  * Runs project requests on the loop thread against the server's
  * ProjectContext. Sync ops call the context, send the ProjectOpReply, then a
