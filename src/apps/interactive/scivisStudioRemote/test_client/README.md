@@ -159,7 +159,8 @@ server with `--library helide --data-root <mktemp -d>` in a temporary
 directory (where `save-frame` files land), waits for its `Listening on port`
 line, runs the client with `--script`, propagates the client's exit code,
 always stops the server, and prints both logs on failure. Extra arguments go
-to the server.
+to the server after `--library helide --data-root <tmp>` (a `--project`, say);
+do not pass `--port`, the runner owns it.
 
 ```bash
 test_client/scenarios/run_scenario.sh build/scivisStudioServer \
