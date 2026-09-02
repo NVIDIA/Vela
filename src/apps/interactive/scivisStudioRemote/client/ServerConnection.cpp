@@ -571,6 +571,10 @@ void ServerConnection::handleMessage(const vsr::network::Message &msg)
     setDelegateEnabled(false);
     announceMirrorReplace();
     clearMirror();
+    // Task records go with the mirror: the server dropped the old session's
+    // queue without a word, and a restarted server mints ids from 1 again.
+    // (Milestone 7's task-status replay will refill them inside the bracket.)
+    m_projectOps->clearTasks();
     return;
   case StudioMessageType::BootstrapEnd:
     m_bootstrapping = false;

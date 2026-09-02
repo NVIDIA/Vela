@@ -763,6 +763,26 @@ SCENARIO("ServerConnection applies snapshots outside the bootstrap",
       }
     }
 
+    WHEN("the server bootstraps again with a task record still open")
+    {
+      TaskProgress progress;
+      progress.taskId = 5;
+      progress.message = "importing";
+      f.server.send(encode(progress));
+      REQUIRE(pollUntil(
+          f.connection, [&] { return f.ops().tasks().size() == 1; }));
+      REQUIRE(f.ops().tasksActive());
+
+      f.server.sendBootstrap();
+
+      THEN("the record goes with the mirror: nothing of it survives")
+      {
+        REQUIRE(f.waitConnectedAndBootstrapped(2));
+        REQUIRE(f.ops().tasks().empty());
+        REQUIRE_FALSE(f.ops().tasksActive());
+      }
+    }
+
     WHEN("the server pushes a TimeAdvanceWarning")
     {
       REQUIRE_FALSE(f.connection.lastTimeAdvanceWarning());
