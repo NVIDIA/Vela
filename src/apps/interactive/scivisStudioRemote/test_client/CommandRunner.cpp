@@ -580,7 +580,7 @@ const std::vector<std::string> &CommandRunner::commandHelp()
       "await-lost                   wait until the connection is Lost",
       "reconnect                    connect again to the last host and port",
       "sleep MS                     keep polling for MS milliseconds",
-      "expect-error [SUBSTRING]     the next server message must be an Error",
+      "expect-error [SUBSTRING]     the next server message (Frames aside) must be an Error",
       "send-raw TYPE [HEX ...]      send a message of type byte TYPE with raw payload bytes",
       "set-frame-config W H         request a frame size, await the FrameConfig ack",
       "set-encodings NAME[,NAME]    offer frame encodings, most preferred first (raw, turbojpeg)",
@@ -768,8 +768,11 @@ CommandRunner::Outcome CommandRunner::expectError(
 {
   if (command.args.size() > 1)
     return argCountError(command, "[substring]");
+  // Frames are stream data, not replies: one still in flight after
+  // stop-rendering must not stand in for the answer.
   Event next;
-  if (!pumpUntilEvent([](const Event &) { return true; }, deadline, &next)) {
+  if (!pumpUntilEvent(
+          [](const Event &e) { return e.name != "Frame"; }, deadline, &next)) {
     return "no server message within " + std::to_string(deadline.count())
         + " ms";
   }
