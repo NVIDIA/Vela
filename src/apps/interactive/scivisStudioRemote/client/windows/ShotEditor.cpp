@@ -14,6 +14,7 @@
 #include <imgui.h>
 // std
 #include <algorithm>
+#include <vector>
 
 namespace vsr::scivis_studio::client {
 
@@ -56,6 +57,58 @@ std::vector<std::string> rendererLibraries(
   return libraries;
 }
 
+bool sameBindings(
+    const std::vector<DatasetBinding> &a, const std::vector<DatasetBinding> &b)
+{
+  return std::equal(a.begin(),
+      a.end(),
+      b.begin(),
+      b.end(),
+      [](const DatasetBinding &x, const DatasetBinding &y) {
+        return x.datasetId == y.datasetId && x.enabled == y.enabled;
+      });
+}
+
+// Copies into `target` every field of `draft` that differs from `base`, the
+// replica shot the draft was taken from: the user's edits and nothing else.
+void applyEdits(const Shot &base, const Shot &draft, Shot &target)
+{
+  const auto carry = [&](auto member) {
+    if (draft.*member != base.*member)
+      target.*member = draft.*member;
+  };
+  carry(&Shot::name);
+  carry(&Shot::frameCount);
+  carry(&Shot::fps);
+  carry(&Shot::loop);
+  carry(&Shot::lightRigId);
+  carry(&Shot::cameraRigId);
+  const auto carryRender = [&](auto member) {
+    if (draft.renderSettings.*member != base.renderSettings.*member)
+      target.renderSettings.*member = draft.renderSettings.*member;
+  };
+  carryRender(&ShotRenderSettings::width);
+  carryRender(&ShotRenderSettings::height);
+  carryRender(&ShotRenderSettings::samples);
+  carryRender(&ShotRenderSettings::outputFilePrefix);
+  // The renderer pick is one edit across three fields.
+  if (draft.renderSettings.rendererLibrary
+          != base.renderSettings.rendererLibrary
+      || draft.renderSettings.rendererObjectIndex
+          != base.renderSettings.rendererObjectIndex
+      || draft.renderSettings.rendererSubtype
+          != base.renderSettings.rendererSubtype) {
+    target.renderSettings.rendererLibrary =
+        draft.renderSettings.rendererLibrary;
+    target.renderSettings.rendererObjectIndex =
+        draft.renderSettings.rendererObjectIndex;
+    target.renderSettings.rendererSubtype =
+        draft.renderSettings.rendererSubtype;
+  }
+  if (!sameBindings(draft.datasetBindings, base.datasetBindings))
+    target.datasetBindings = draft.datasetBindings;
+}
+
 } // namespace
 
 ShotEditor::ShotEditor(vsr::ui::imgui::Application *app, EditorContext *context)
@@ -81,10 +134,11 @@ void ShotEditor::syncDraft(const Project &project)
   const bool switched = !m_draft || m_draft->id != shot->id;
   // A stale draft waits for the in-flight update and for the user to let go
   // of whatever control they are on, so a refresh never yanks an edit away.
-  const bool refresh = m_draftStale && !pending(m_pendingUpdate)
-      && !ImGui::IsAnyItemActive();
+  const bool refresh =
+      m_draftStale && !pending(m_pendingUpdate) && !ImGui::IsAnyItemActive();
   if (switched || refresh) {
     m_draft = *shot;
+    m_draftBase = *shot;
     m_draftStale = false;
   }
 }
@@ -94,9 +148,17 @@ void ShotEditor::sendDraft()
   if (!m_draft || !canSend())
     return;
 
-  Shot shot = *m_draft;
+  // Rebase on the replica as it is now: another editor's UpdateShot may have
+  // landed since the draft was taken, and a whole-Shot replace built from
+  // the stale copy would undo it. The user's own edits win over both.
+  const Project *current = project();
+  const Shot *latest =
+      current ? replica::findShot(*current, m_draft->id) : nullptr;
+  Shot shot = latest ? *latest : m_draftBase;
+  applyEdits(m_draftBase, *m_draft, shot);
   shot::clampToValidRanges(shot); // what the server will apply anyway
   *m_draft = shot;
+  m_draftBase = shot;
 
   m_pendingUpdate =
       ops().updateShot(shot, [this](const protocol::ProjectOpReply &reply) {
