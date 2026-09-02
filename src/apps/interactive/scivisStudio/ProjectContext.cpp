@@ -1035,14 +1035,13 @@ void ProjectContext::setActiveShotFrame(int frame)
   auto *shot = project::activeShot(m_project);
   if (!shot)
     return;
-  shot->frameCount = std::max(1, shot->frameCount);
-  frame = std::clamp(frame, 0, shot->frameCount - 1);
   if (m_ctx) {
-    // The time-changed callback writes shot->currentFrame and applies the
-    // shot, exactly as a tick does.
+    // The manager clamps to its clock; its time-changed callback writes
+    // shot->currentFrame and applies the shot, exactly as a tick does.
     m_ctx->vsr.animationMgr.setAnimationFrame(frame);
   } else {
     shot->currentFrame = frame;
+    shot::clampToValidRanges(*shot);
   }
 }
 
@@ -1889,11 +1888,7 @@ void ProjectContext::updateActiveShotFromAnimationTime()
   if (!shot)
     return;
 
-  const auto &animMgr = m_ctx->vsr.animationMgr;
-  shot->frameCount = std::max(1, shot->frameCount);
-  shot->currentFrame =
-      std::clamp(animMgr.getAnimationFrame(), 0, shot->frameCount - 1);
-  shot->playing = animMgr.isPlaying();
+  writeAnimationStateToShot(*shot);
   applyActiveShot();
 }
 
@@ -1906,11 +1901,16 @@ void ProjectContext::onAnimationPlaybackStopped()
   if (!shot)
     return;
 
+  // m_playing already flipped; the manager's frame is the last one.
+  writeAnimationStateToShot(*shot);
+}
+
+void ProjectContext::writeAnimationStateToShot(Shot &shot) const
+{
   const auto &animMgr = m_ctx->vsr.animationMgr;
-  shot->frameCount = std::max(1, shot->frameCount);
-  shot->currentFrame =
-      std::clamp(animMgr.getAnimationFrame(), 0, shot->frameCount - 1);
-  shot->playing = false;
+  shot.currentFrame = animMgr.getAnimationFrame();
+  shot.playing = animMgr.isPlaying();
+  shot::clampToValidRanges(shot);
 }
 
 bool ProjectContext::saveProject(const std::filesystem::path &directory,
