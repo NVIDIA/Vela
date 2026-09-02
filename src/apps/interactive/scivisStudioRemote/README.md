@@ -151,7 +151,10 @@ latch slots (latest-wins); `RequestArrayHistogram` is a sync Project Op. See
   returns whether time moved; the shot's `fps` is a ceiling, and the
   accumulator is clamped so a slow render never catches up by skipping
   frames. Ticking goes on while a `Frame` send is still in flight, so time
-  does not freeze on a slow link.
+  does not freeze on a slow link. The scene pass renders synchronously
+  (`AnariSceneRenderPass::setRunAsync(false)`: render, wait and composite in
+  one call), so the pixels are the scene after the tick, not the previous
+  iteration's; the same holds for the frame a pick reads its depth from.
 - **Wire pacing (v1 behaviour).** "Never skip frames" is a guarantee about
   rendering and time advance, not about wire delivery. Frames are
   latest-frame-wins on the wire (a rendered frame whose send would overlap
