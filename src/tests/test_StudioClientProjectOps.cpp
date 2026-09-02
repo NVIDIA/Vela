@@ -1021,6 +1021,55 @@ SCENARIO("ProjectOps flags the render it launched", "[StudioClient]")
   }
 }
 
+SCENARIO("ServerConnection reports each UIState it receives", "[StudioClient]")
+{
+  GIVEN("a connected client watching onUIState")
+  {
+    Fixture f;
+    std::vector<bool> trees; // non-null?
+    f.connection.onUIState = [&](const SubtreePtr &tree) {
+      trees.push_back(tree != nullptr);
+    };
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+    REQUIRE(trees.empty()); // the fake bootstrap carries none
+
+    WHEN("a UIState with a tree follows an open, then one without")
+    {
+      UIState state;
+      state.tree = makeSubtree();
+      state.tree->root()["layout"] = std::string("ini");
+      f.server.send(encode(state));
+      REQUIRE(pollUntil(f.connection, [&] { return trees.size() == 1; }));
+      f.server.send(encode(UIState{}));
+      REQUIRE(pollUntil(f.connection, [&] { return trees.size() == 2; }));
+
+      THEN("the callback saw both, and uiState() holds the latest")
+      {
+        REQUIRE(trees == std::vector<bool>{true, false});
+        REQUIRE_FALSE(f.connection.uiState());
+      }
+    }
+
+    WHEN("the bootstrap itself carries a UIState")
+    {
+      UIState state;
+      state.tree = makeSubtree();
+      state.tree->root()["layout"] = std::string("ini");
+      f.server.bootstrap.push_back(encode(state));
+      f.server.sendBootstrap();
+      REQUIRE(f.waitConnectedAndBootstrapped(2));
+
+      THEN("it is reported inside the bracket and held afterwards")
+      {
+        REQUIRE(trees == std::vector<bool>{true});
+        REQUIRE(f.connection.uiState());
+        REQUIRE(f.connection.uiState()->root().child("layout"));
+      }
+    }
+  }
+}
+
 SCENARIO("ArchiveRenameFollowUp names the dataset an archive load adds",
     "[StudioClient]")
 {

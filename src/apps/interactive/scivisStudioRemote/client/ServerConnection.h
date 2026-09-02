@@ -185,6 +185,9 @@ struct ServerConnection
   // the old one are dead). Fires for the bootstrap's snapshot too, before
   // onBootstrapComplete.
   std::function<void()> onProjectReplaced;
+  // A UIState arrived (uiState() holds it): inside every bootstrap, and
+  // after an OpenProject completed. The tree may be null.
+  std::function<void(const protocol::SubtreePtr &)> onUIState;
   std::function<void(const std::string &)> onServerError;
   // The server failed to load a frame's data and kept playing; non-modal.
   std::function<void(const protocol::TimeAdvanceWarning &)>
@@ -216,6 +219,9 @@ struct ServerConnection
   bool canEmitEdits() const;
   void setDelegateEnabled(bool enabled);
   void declareLoss(const std::string &reason);
+  // What disconnect() does once the socket is closed: drop the session's
+  // mirror, replica, tasks and frames -> Disconnected with `status`.
+  void dropSession(const std::string &status);
   void attemptFailed(const std::string &reason);
   void scheduleRetry();
   void sendMessage(vsr::network::Message &&msg);
@@ -259,6 +265,11 @@ struct ServerConnection
   std::optional<protocol::TimeAdvanceWarning> m_timeAdvanceWarning;
   std::optional<protocol::FrameHeader> m_lastFrameHeader;
   protocol::SubtreePtr m_uiState;
+  // The last bare Error the server sent: if it closes right after, that is
+  // the reason the banner shows (a server evicting this client for another
+  // one says so before closing).
+  std::string m_lastServerError;
+  Clock::time_point m_lastServerErrorAt{};
   std::vector<vsr::network::MessageFuture> m_sendFutures;
 
   // Shared with the IO thread

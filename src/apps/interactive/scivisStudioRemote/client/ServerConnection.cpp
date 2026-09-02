@@ -37,6 +37,8 @@ namespace {
 // Bound on the wait for a courtesy Disconnect/Shutdown to leave the socket;
 // the UI thread never waits longer than this on the network.
 constexpr std::chrono::milliseconds COURTESY_SEND_TIMEOUT{200};
+// A bare Error this close before the socket dies is taken as the reason.
+constexpr std::chrono::milliseconds SERVER_ERROR_EXPLAINS_CLOSE_FOR{2000};
 
 std::string endpointText(const std::string &host, short port)
 {
@@ -216,6 +218,11 @@ void ServerConnection::disconnect()
     auto sent = m_channel->send(encode(Disconnect{}));
     sent.wait_for(COURTESY_SEND_TIMEOUT);
   }
+  dropSession("disconnected");
+}
+
+void ServerConnection::dropSession(const std::string &status)
+{
   m_phase = Phase::Idle;
   closeChannel();
   m_autoRetryEnabled = false;
@@ -228,11 +235,12 @@ void ServerConnection::disconnect()
   m_timeAdvanceWarning.reset();
   m_lastFrameHeader.reset();
   m_uiState.reset();
+  m_lastServerError.clear();
   {
     std::lock_guard lock(m_inboundMutex);
     m_latestFrame.reset();
   }
-  m_status = "disconnected";
+  m_status = status;
   if (m_state != ConnectionState::NeverConnected)
     setState(ConnectionState::Disconnected);
 }
@@ -259,7 +267,22 @@ void ServerConnection::poll()
 {
   const auto now = Clock::now();
 
-  // 1. The IO thread's disconnect latch.
+  // 1. Inbound messages, on the UI thread only. What the server sent before
+  // closing is handled before the close is: an Error explaining the close
+  // (a client evicted for another one) must be read to become the reason.
+  std::vector<vsr::network::Message> batch;
+  {
+    std::lock_guard lock(m_inboundMutex);
+    batch.swap(m_inbound);
+  }
+  for (const auto &msg : batch) {
+    if (m_phase == Phase::Idle)
+      break; // handled message tore the connection down; drop the rest
+    handleMessage(msg);
+  }
+  m_projectOps->poll();
+
+  // 2. The IO thread's disconnect latch.
   if (m_ioDisconnected.exchange(false)) {
     boost::system::error_code error;
     {
@@ -272,19 +295,6 @@ void ServerConnection::poll()
     else if (m_phase == Phase::AwaitingHello)
       attemptFailed("connect failed: " + reason);
   }
-
-  // 2. Inbound messages, on the UI thread only.
-  std::vector<vsr::network::Message> batch;
-  {
-    std::lock_guard lock(m_inboundMutex);
-    batch.swap(m_inbound);
-  }
-  for (const auto &msg : batch) {
-    if (m_phase == Phase::Idle)
-      break; // handled message tore the connection down; drop the rest
-    handleMessage(msg);
-  }
-  m_projectOps->poll();
 
   // 3. Completed sends that failed mean the link is gone.
   checkSendFailures();
@@ -506,20 +516,34 @@ void ServerConnection::setDelegateEnabled(bool enabled)
 
 void ServerConnection::declareLoss(const std::string &reason)
 {
-  vsr::core::logWarning(
-      "[ServerConnection] connection lost: %s", reason.c_str());
+  const auto now = Clock::now();
+  std::string why = reason;
+  if (!m_lastServerError.empty()
+      && now - m_lastServerErrorAt < SERVER_ERROR_EXPLAINS_CLOSE_FOR) {
+    // The server said why before it closed.
+    why = m_lastServerError;
+    m_lastServerError.clear();
+  }
+  vsr::core::logWarning("[ServerConnection] connection lost: %s", why.c_str());
   m_phase = Phase::Idle;
-  m_bootstrapping = false;
+  if (m_bootstrapping) {
+    // The bootstrap was cut short: the mirror holds whatever part of the
+    // new scene arrived, which is nothing to show. Empty beats half-built;
+    // the replica is still the previous session's (its snapshot comes last
+    // in the bracket) and stays as display data.
+    m_bootstrapping = false;
+    announceMirrorReplace();
+    clearMirror();
+  }
   closeChannel();
   // Connection-scoped request failure: nothing waits on a reply that can no
   // longer come.
   m_projectOps->failAllPending("connection lost");
-  const auto now = Clock::now();
   m_lostAt = now;
   m_retryDelay = m_timings.retryInitialDelay;
   m_nextRetryAt = now + m_retryDelay;
   m_autoRetryEnabled = true;
-  m_status = "connection lost (" + reason + "); reconnecting...";
+  m_status = "connection lost (" + why + "); reconnecting...";
   setState(ConnectionState::Lost);
 }
 
@@ -592,6 +616,8 @@ void ServerConnection::handleMessage(const vsr::network::Message &msg)
       return;
     vsr::core::logError(
         "[ServerConnection] server error: %s", error->message.c_str());
+    m_lastServerError = error->message;
+    m_lastServerErrorAt = Clock::now();
     if (onServerError)
       onServerError(error->message);
     return;
@@ -704,6 +730,8 @@ void ServerConnection::handleMessage(const vsr::network::Message &msg)
       return;
     }
     m_uiState = state->tree;
+    if (onUIState)
+      onUIState(m_uiState);
     return;
   }
   default:
@@ -723,13 +751,21 @@ void ServerConnection::handleHello(const vsr::network::Message &msg)
   }
   if (hello->version != PROTOCOL_VERSION) {
     // A version mismatch will not heal by retrying.
+    const std::string mismatch = "protocol version mismatch: server speaks v"
+        + std::to_string(hello->version) + ", this client v"
+        + std::to_string(PROTOCOL_VERSION);
+    vsr::core::logError("[ServerConnection] %s", mismatch.c_str());
+    if (m_state == ConnectionState::Lost) {
+      // The server that came back is not one this client can talk to: the
+      // frozen view has no future, so this is a completed disconnect, not a
+      // loss the banner should keep offering to retry.
+      dropSession(mismatch);
+      return;
+    }
     m_phase = Phase::Idle;
     closeChannel();
     m_autoRetryEnabled = false;
-    m_status = "protocol version mismatch: server speaks v"
-        + std::to_string(hello->version) + ", this client v"
-        + std::to_string(PROTOCOL_VERSION);
-    vsr::core::logError("[ServerConnection] %s", m_status.c_str());
+    m_status = mismatch;
     return;
   }
 

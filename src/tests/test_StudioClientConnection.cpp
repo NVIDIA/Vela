@@ -306,6 +306,111 @@ SCENARIO("ServerConnection watches liveness", "[StudioClient]")
     }
   }
 
+  GIVEN("a connected client whose server comes back speaking another version")
+  {
+    auto timings = fastTimings();
+    timings.lossAfterSilence = 3s; // loss must come from the hook, not this
+    Fixture f(PROTOCOL_VERSION, timings);
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+    // The server drops the socket but keeps listening, like a restart.
+    f.server.channel->restart();
+    f.server.helloVersion = PROTOCOL_VERSION + 1;
+    REQUIRE(pollUntil(f.connection,
+        [&] { return f.connection.state() == ConnectionState::Lost; }));
+    REQUIRE(f.mirrorHasGeometry());
+
+    WHEN("the retry is greeted with a mismatched Hello")
+    {
+      THEN("the client is Disconnected with the mismatch as its status")
+      {
+        REQUIRE(pollUntil(f.connection, [&] {
+          return f.connection.state() == ConnectionState::Disconnected;
+        }));
+        REQUIRE(
+            f.connection.statusText().find("mismatch") != std::string::npos);
+        REQUIRE_FALSE(f.connection.autoRetrying());
+        REQUIRE(f.mirror.numberOfObjects(ANARI_GEOMETRY) == 0);
+        REQUIRE(f.connection.project() == nullptr);
+        const int accepts = f.server.accepts;
+        pollFor(f.connection, 300ms);
+        REQUIRE(f.connection.state() == ConnectionState::Disconnected);
+        REQUIRE(f.server.accepts == accepts); // no retry loop
+        REQUIRE(f.transitions
+            == std::vector<ConnectionState>{ConnectionState::Connected,
+                ConnectionState::Lost,
+                ConnectionState::Disconnected});
+      }
+    }
+  }
+
+  GIVEN("a client whose server drops it and returns with a slow bootstrap")
+  {
+    auto timings = fastTimings();
+    timings.lossAfterSilence = 3s; // loss must come from the hook, not this
+    Fixture f(PROTOCOL_VERSION, timings);
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+    f.server.holdBootstrapEnd = true;
+    f.server.channel->restart();
+    REQUIRE(pollUntil(f.connection,
+        [&] { return f.connection.state() == ConnectionState::Lost; }));
+
+    WHEN("the reconnect's bootstrap is cut short by a close")
+    {
+      REQUIRE(pollUntil(f.connection, [&] {
+        return f.connection.bootstrapping() && f.mirrorHasGeometry();
+      }));
+      REQUIRE(f.bootstraps == 1);
+      f.server.channel->stop();
+
+      THEN(
+          "loss leaves an empty mirror, no bootstrap in progress, and the"
+          " previous replica")
+      {
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.connection.state() == ConnectionState::Lost; }));
+        REQUIRE_FALSE(f.connection.bootstrapping());
+        REQUIRE(f.mirror.numberOfObjects(ANARI_GEOMETRY) == 0);
+        REQUIRE(f.connection.project() != nullptr);
+        REQUIRE(f.bootstraps == 1);
+        // The cut-short bracket announced its replacement once; the loss
+        // announced the emptying once more.
+        REQUIRE(f.mirrorReplaces == 3);
+      }
+    }
+  }
+
+  GIVEN("a connected client whose server explains itself before closing")
+  {
+    auto timings = fastTimings();
+    timings.lossAfterSilence = 3s; // loss must come from the hook, not this
+    Fixture f(PROTOCOL_VERSION, timings);
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+
+    WHEN("an Error arrives and the socket closes right after")
+    {
+      Error error;
+      error.message = "server accepted another client";
+      f.server.send(encode(error));
+      // The fake's send is asynchronous; a real server closes after the
+      // write has left, so wait for the Error to land before closing.
+      REQUIRE(pollUntil(f.connection, [&] { return f.errors.size() == 1; }));
+      f.server.channel->stop();
+
+      THEN("the Error's text is the reason the status shows")
+      {
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.connection.state() == ConnectionState::Lost; }));
+        REQUIRE(f.connection.statusText().find("server accepted another client")
+            != std::string::npos);
+        REQUIRE(f.errors == std::vector<std::string>{error.message});
+        REQUIRE(f.mirrorHasGeometry()); // frozen, as for any loss
+      }
+    }
+  }
+
   GIVEN("a connected client whose server closes the socket")
   {
     auto timings = fastTimings();
