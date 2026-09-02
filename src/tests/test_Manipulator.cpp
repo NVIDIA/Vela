@@ -54,11 +54,12 @@ SCENARIO("Manipulator look mode preserves the camera anchor", "[Manipulator]")
   }
 }
 
-SCENARIO("Manipulator adopts a pose given as eye, direction and up",
-    "[Manipulator]")
+SCENARIO(
+    "Manipulator adopts a pose given as eye, direction and up", "[Manipulator]")
 {
   rendering::Manipulator reference;
-  reference.setConfig(math::float3(1.f, 2.f, 3.f), 5.f, math::float2(30.f, 20.f));
+  reference.setConfig(
+      math::float3(1.f, 2.f, 3.f), 5.f, math::float2(30.f, 20.f));
 
   GIVEN("A manipulator looking somewhere else at another distance")
   {

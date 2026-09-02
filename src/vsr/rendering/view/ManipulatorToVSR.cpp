@@ -52,7 +52,8 @@ void updateManipulatorFromCamera(Manipulator &m, const vsr::scene::Camera &c)
   m.setFixedDistance(fd);
 }
 
-void updateManipulatorFromCameraPose(Manipulator &m, const vsr::scene::Camera &c)
+void updateManipulatorFromCameraPose(
+    Manipulator &m, const vsr::scene::Camera &c)
 {
   const auto *position = c.parameter("position");
   const auto *direction = c.parameter("direction");
