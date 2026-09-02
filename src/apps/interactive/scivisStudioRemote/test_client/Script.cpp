@@ -153,6 +153,44 @@ std::optional<std::chrono::milliseconds> takeTimeoutSuffix(
   return ms;
 }
 
+bool expandVariables(
+    Command &command, const VariableLookup &lookup, std::string *error)
+{
+  const auto isNameChar = [](char c) {
+    return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_';
+  };
+  std::vector<std::string> expanded;
+  expanded.reserve(command.args.size());
+  for (const auto &arg : command.args) {
+    std::string out;
+    for (size_t i = 0; i < arg.size();) {
+      if (arg[i] != '$') {
+        out.push_back(arg[i++]);
+        continue;
+      }
+      size_t end = i + 1;
+      while (end < arg.size() && isNameChar(arg[end]))
+        ++end;
+      if (end == i + 1) {
+        out.push_back(arg[i++]); // a bare `$` is text
+        continue;
+      }
+      const auto name = arg.substr(i + 1, end - i - 1);
+      const auto value = lookup(name);
+      if (!value) {
+        if (error)
+          *error = "unknown variable $" + name;
+        return false;
+      }
+      out += *value;
+      i = end;
+    }
+    expanded.push_back(std::move(out));
+  }
+  command.args = std::move(expanded);
+  return true;
+}
+
 bool parseInteger(std::string_view text, long long &out)
 {
   long long value = 0;

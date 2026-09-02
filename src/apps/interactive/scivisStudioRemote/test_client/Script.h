@@ -5,6 +5,7 @@
 
 // std
 #include <chrono>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -51,6 +52,20 @@ bool parseScript(std::string_view script,
 // timeout; a timeout with a malformed value is an error.
 std::optional<std::chrono::milliseconds> takeTimeoutSuffix(
     Command &command, std::string *error = nullptr);
+
+// The value of a script variable, or empty when there is no such variable.
+using VariableLookup =
+    std::function<std::optional<std::string>(const std::string &name)>;
+
+// Replaces every `$name` (letters, digits and underscores) inside the
+// command's arguments with the variable's value, so an id a reply minted
+// (`$lastShotId`) can name the target of a later command, alone or inside a
+// longer token (`$dataRoot/project`). A `$` that starts no name stays as it
+// is. False with the reason on a variable `lookup` does not know; the
+// arguments are then left as written.
+bool expandVariables(Command &command,
+    const VariableLookup &lookup,
+    std::string *error = nullptr);
 
 // Integer arguments, on the command line and in scripts: the whole text is
 // one decimal number that fits, no sign for parseNonNegative. False otherwise.
