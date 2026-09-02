@@ -4,6 +4,8 @@
 # Everything but main(), so vsrTests can drive a real StudioServer
 # in-process.
 add_library(vsr_scivis_studio_server_core OBJECT
+  DataRoots.cpp
+  RemoteBrowse.cpp
   ServerOptions.cpp
   ServerPushDelegate.cpp
   StudioServer.cpp
