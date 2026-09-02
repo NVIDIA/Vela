@@ -1,0 +1,52 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# The UI state round trip without a GUI: the tree a client sends with
+# SaveProject is stored with the project, opaque to the server, and comes
+# back as a UIState message after an OpenProject of that project and in the
+# Bootstrap of every later connection (the server retains the tree of the
+# project it has open).
+
+connect
+list-roots
+# A fresh unsaved project carries no UI state.
+assert uiState.present == false
+
+set-ui-state layout=abc theme=dark
+save-project $dataRoot/uiproj
+await-task
+await-snapshot
+
+# A new project forgets it; opening the saved one brings it back, before the
+# task's end.
+new-project
+await-snapshot
+open-project $dataRoot/uiproj
+await-task
+await-snapshot
+assert uiState.present == true
+assert uiState.layout == abc
+assert uiState.theme == dark
+dump-ui-state
+
+# The Bootstrap of a fresh connection carries the retained tree.
+disconnect
+assert uiState.present == false
+reconnect
+assert uiState.present == true
+assert uiState.theme == dark
+
+# A save that sends no tree keeps the one the project opened with: the file
+# still carries it after new-project and another open.
+set-ui-state none
+save-project
+await-task
+await-snapshot
+new-project
+await-snapshot
+open-project $dataRoot/uiproj
+await-task
+await-snapshot
+assert uiState.layout == abc
+
+disconnect

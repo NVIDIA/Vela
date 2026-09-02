@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# runner: fixture fixtures/triangle.obj
+#
+# Task-status replay: a render keeps running after its client disconnects,
+# its TaskCompleted goes to a closed socket, and the next client's Bootstrap
+# carries it (between UIState and the ProjectSnapshot) so the outcome is not
+# lost. The reconnect is bootstrapped only once the render body returns, so
+# `reconnect` waits for the whole render; the replayed end rebuilds the task
+# record the disconnect had cleared.
+
+connect
+list-roots
+import-static-dataset $dataRoot/triangle.obj Tri OBJ
+await-task
+await-snapshot
+
+update-shot active frameCount=60 renderSettings.width=16 renderSettings.height=12 renderSettings.samples=1
+await-snapshot
+save-project $dataRoot/replayproj
+await-task
+await-snapshot
+
+# Launch, make sure the render is under way, then leave.
+no-wait render-shot active
+await-reply
+await-task-progress
+assert task.last.state == Running
+disconnect
+sleep 200
+
+# The Bootstrap arrives after the render completes and replays its end.
+reconnect timeout=30000
+assert tasks.replayed >= 1
+assert task.last.state == Completed
+assert task.last.framesCompleted == 60
+assert project.dirty == false
+
+# Nothing ended since: the next Bootstrap replays nothing.
+disconnect
+reconnect
+assert tasks.replayed == 0
+
+disconnect
