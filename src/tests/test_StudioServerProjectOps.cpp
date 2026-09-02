@@ -15,6 +15,7 @@
 #include "FrameMessages.h"
 #include "ProjectOpReply.h"
 #include "ProjectRequests.h"
+#include "PlaybackMessages.h"
 #include "ProjectSnapshot.h"
 #include "SessionMessages.h"
 #include "ShotRigRequests.h"
@@ -28,12 +29,14 @@
 // std
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace vsr::scivis_studio;
@@ -686,6 +689,79 @@ SCENARIO("StudioServer serves project, shot, rig and color map ops",
         reply = session.request(RemoveColorMap{0, created->colorMapId});
         REQUIRE_FALSE(reply.ok);
         REQUIRE(reply.error == "color map not found");
+      }
+    }
+  }
+}
+
+SCENARIO("StudioServer refuses unserviceable requests with a matching reply",
+    "[StudioServer]")
+{
+  if (!helideAvailable()) {
+    WARN("helide ANARI library unavailable, skipping the refusal test");
+    return;
+  }
+
+  DataRootFixture data;
+  Session session(data.root);
+  auto &client = session.client;
+
+  GIVEN("a bootstrapped client")
+  {
+    WHEN("a project request carries its id but no other field")
+    {
+      vsr::core::DataTree tree;
+      writeChild(tree.root(), "requestId", uint64_t(501));
+      Message msg;
+      msg.header.type = uint8_t(StudioMessageType::CreateShot);
+      tree.write(msg.payload);
+      msg.header.payload_length = uint32_t(msg.payload.size());
+      client.channel->send(std::move(msg));
+
+      THEN("the refusal is a ProjectOpReply the client can retire")
+      {
+        const auto reply = client.waitForReply(501);
+        REQUIRE(reply);
+        REQUIRE_FALSE(reply->ok);
+        REQUIRE(reply->error.find("malformed CreateShot") != std::string::npos);
+        REQUIRE(client.count(StudioMessageType::Error) == 0);
+        REQUIRE(client.count(StudioMessageType::ProjectSnapshot) == 0);
+      }
+    }
+
+    WHEN("a request of a later milestone carries an id")
+    {
+      SetPlaying playing;
+      playing.requestId = 502;
+      playing.shotId = session.server->projectContext().project().activeShotId;
+      client.send(playing);
+
+      THEN("the not-implemented refusal is a ProjectOpReply too")
+      {
+        const auto reply = client.waitForReply(502);
+        REQUIRE(reply);
+        REQUIRE_FALSE(reply->ok);
+        REQUIRE(reply->error.find("SetPlaying is not implemented")
+            != std::string::npos);
+        REQUIRE(client.count(StudioMessageType::Error) == 0);
+      }
+    }
+
+    WHEN("a project request has no readable id")
+    {
+      Message msg;
+      msg.header.type = uint8_t(StudioMessageType::CreateShot);
+      msg.payload = {std::byte{0xff}, std::byte{0x00}, std::byte{0x13}};
+      msg.header.payload_length = uint32_t(msg.payload.size());
+      client.channel->send(std::move(msg));
+
+      THEN("a bare Error is all the server can send")
+      {
+        REQUIRE(client.waitForCount(StudioMessageType::Error, 1));
+        const auto error = client.lastDecoded<Error>();
+        REQUIRE(error);
+        REQUIRE(error->message.find("malformed CreateShot") != std::string::npos);
+        REQUIRE(client.count(StudioMessageType::ProjectOpReply) == 0);
       }
     }
   }

@@ -4,6 +4,8 @@
 #include "StudioServer.h"
 // vsr_scivis_studio_protocol
 #include "FrameCodec.h"
+#include "ProjectOpReply.h"
+#include "ProjectRequests.h"
 #include "ProjectSnapshot.h"
 #include "SceneMessages.h"
 #include "SessionMessages.h"
@@ -920,7 +922,8 @@ void StudioServer::onMessage(const Message &msg)
   if (isProjectRequestType(*type)) {
     auto request = decodeProjectRequest(msg);
     if (!request) {
-      replyError("malformed " + std::string(toString(*type)) + " payload");
+      refuseRequest(
+          msg, "malformed " + std::string(toString(*type)) + " payload");
       return;
     }
     std::lock_guard lock(m_controlMutex);
@@ -933,7 +936,7 @@ void StudioServer::onMessage(const Message &msg)
   } else {
     // Playback, picking, RenderShot: later milestones. Refused loudly, never
     // dropped.
-    replyError(
+    refuseRequest(msg,
         std::string(toString(*type)) + " is not implemented in this server");
   }
 }
@@ -976,6 +979,20 @@ void StudioServer::replyError(const std::string &text)
   Error error;
   error.message = text;
   m_server->send(encode(error));
+}
+
+void StudioServer::refuseRequest(const Message &msg, const std::string &text)
+{
+  // 0 is the never-minted id (RequestHandle::valid), so nobody waits on it.
+  const auto requestId = peekRequestId(msg);
+  if (!requestId || *requestId == 0) {
+    replyError(text);
+    return;
+  }
+  vsr::core::logWarning("[StudioServer] request %llu refused: %s",
+      static_cast<unsigned long long>(*requestId),
+      text.c_str());
+  m_server->send(encode(makeErrorReply(*requestId, text)));
 }
 
 } // namespace vsr::scivis_studio::server
