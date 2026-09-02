@@ -62,11 +62,11 @@ constexpr std::array<DatasetSourceChoice, 28> SOURCES = {{
     {"VSR Layer Subtree Archive", std::nullopt, true},
 }};
 
-// Advisory: the browse dialog greys files outside these; archives are .vsr.
+// Advisory: the browse dialog greys files outside these; archives only.
 std::vector<std::string> browseExtensions(const DatasetSourceChoice &choice)
 {
   if (!choice.importer)
-    return {".vsr", ".tsd"};
+    return ui::archiveExtensions();
   return {};
 }
 
@@ -74,7 +74,9 @@ std::vector<std::string> browseExtensions(const DatasetSourceChoice &choice)
 
 AddStaticDatasetDialog::AddStaticDatasetDialog(
     vsr::ui::imgui::Application *app, EditorContext *context)
-    : Modal(app, "Add Static Dataset"), m_context(context), m_browse(app, context)
+    : Modal(app, "Add Static Dataset"),
+      m_context(context),
+      m_browse(app, context)
 {}
 
 AddStaticDatasetDialog::~AddStaticDatasetDialog() = default;
@@ -92,8 +94,7 @@ void AddStaticDatasetDialog::onProjectReplaced()
   const Project *project = m_context->project();
   if (!project || !m_archiveRename.armed() || !m_context->canSend())
     return;
-  m_archiveRename.apply(
-      *project, m_context->ops(), m_context->errorReporter());
+  m_archiveRename.apply(*project, m_context->ops(), m_context->errorReporter());
 }
 
 void AddStaticDatasetDialog::submit()

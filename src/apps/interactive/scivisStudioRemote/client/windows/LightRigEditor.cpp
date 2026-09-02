@@ -23,7 +23,6 @@ namespace {
 
 constexpr const char *REMOVE_POPUP = "Delete Light Rig?";
 constexpr const char *ADD_LIGHT_POPUP = "Add Light";
-const std::vector<std::string> ARCHIVE_EXTENSIONS = {".vsr", ".tsd"};
 
 std::string lightName(vsr::scene::LayerNodeRef node)
 {
@@ -57,7 +56,7 @@ LightRigEditor::~LightRigEditor() = default;
 
 void LightRigEditor::onProjectReplaced()
 {
-  m_nameStale = true;
+  m_nameField.markStale();
 }
 
 // Selection //////////////////////////////////////////////////////////////////
@@ -179,7 +178,7 @@ void LightRigEditor::buildUI_toolbar(const Project &project)
     BrowseRequest request;
     request.mode = BrowseMode::OpenFile;
     request.title = "Load Light Rig Archive";
-    request.extensions = ARCHIVE_EXTENSIONS;
+    request.extensions = ui::archiveExtensions();
     request.startDirectory = project.projectDirectory;
     request.onAccept = [this, createdReply](
                            const std::vector<std::filesystem::path> &paths) {
@@ -190,43 +189,18 @@ void LightRigEditor::buildUI_toolbar(const Project &project)
   ImGui::EndDisabled();
 }
 
-// Buffered, reject-on-commit: the buffer travels as RenameLightRig and a
-// failed reply restores the replica's name.
+// The buffer travels as RenameLightRig; a refusal restores the replica's name.
 void LightRigEditor::buildUI_nameField(const LightRig &rig)
 {
-  const bool refresh = m_nameStale && !ImGui::IsAnyItemActive()
-      && !pending(m_pendingRename);
-  if (m_nameBufferRig != rig.id || refresh) {
-    if (m_nameBufferRig != rig.id)
-      m_nameError.clear();
-    m_nameBufferRig = rig.id;
-    m_nameBuffer = rig.name;
-    m_nameStale = false;
-  }
-
-  ImGui::BeginDisabled(pending(m_pendingRename));
-  const bool entered = ImGui::InputText(
-      "Name", &m_nameBuffer, ImGuiInputTextFlags_EnterReturnsTrue);
-  const bool commit = entered || ImGui::IsItemDeactivatedAfterEdit();
-  ImGui::EndDisabled();
-
-  if (commit && m_nameBuffer != rig.name) {
-    const LightRigID id = rig.id;
-    m_pendingRename = ops().renameLightRig(
-        id, m_nameBuffer, [this, id](const ProjectOpReply &reply) {
-          if (reply.ok) {
-            m_nameError.clear();
-          } else {
-            m_nameError = reply.error;
-            if (m_nameBufferRig == id)
-              m_nameStale = true;
-          }
-        });
-  } else if (commit) {
-    m_nameError.clear();
-  }
-  if (!m_nameError.empty())
-    ui::errorText("Invalid name: " + m_nameError);
+  const auto newName = m_nameField.draw(
+      rig.id, rig.name, pending(m_pendingRename), "Invalid name: ");
+  if (!newName)
+    return;
+  const LightRigID id = rig.id;
+  m_pendingRename = ops().renameLightRig(
+      id, *newName, [this, id](const ProjectOpReply &reply) {
+        m_nameField.onReply(id, reply.ok, reply.error);
+      });
 }
 
 void LightRigEditor::buildUI_rigActions(
@@ -250,7 +224,7 @@ void LightRigEditor::buildUI_rigActions(
     BrowseRequest request;
     request.mode = BrowseMode::SaveFile;
     request.title = "Save Light Rig Archive";
-    request.extensions = ARCHIVE_EXTENSIONS;
+    request.extensions = ui::archiveExtensions();
     request.startDirectory = project.projectDirectory;
     request.defaultName = (rig.name.empty() ? rig.id : rig.name) + ".vsr";
     const LightRigID id = rig.id;
@@ -382,30 +356,18 @@ void LightRigEditor::buildPopups(const Project &project)
 
 void LightRigEditor::buildUI_removeConfirmation(const Project &project)
 {
-  if (!ImGui::BeginPopupModal(
-          REMOVE_POPUP, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
-    return;
-
   const LightRig *rig = replica::findLightRig(project, m_rigToRemove);
   const size_t useCount = replica::lightRigUseCount(project, m_rigToRemove);
-  ImGui::Text("Delete '%s' and clear %zu shot reference%s?",
-      rig ? rig->name.c_str() : m_rigToRemove.c_str(),
-      useCount,
-      useCount == 1 ? "" : "s");
-
-  ImGui::BeginDisabled(!canSend());
-  if (ImGui::Button("Delete")) {
+  const auto choice = ui::confirmModal(REMOVE_POPUP,
+      "Delete '" + (rig ? rig->name : m_rigToRemove) + "' and clear "
+          + std::to_string(useCount) + " shot reference"
+          + (useCount == 1 ? "" : "s") + "?",
+      "Delete",
+      canSend());
+  if (choice == ui::ConfirmChoice::Confirmed)
     m_pendingOp = ops().removeLightRig(m_rigToRemove, errorReporter());
+  if (choice != ui::ConfirmChoice::Pending)
     m_rigToRemove.clear();
-    ImGui::CloseCurrentPopup();
-  }
-  ImGui::EndDisabled();
-  ImGui::SameLine();
-  if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-    m_rigToRemove.clear();
-    ImGui::CloseCurrentPopup();
-  }
-  ImGui::EndPopup();
 }
 
 } // namespace vsr::scivis_studio::client

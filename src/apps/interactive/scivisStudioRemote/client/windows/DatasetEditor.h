@@ -3,8 +3,10 @@
 
 #pragma once
 
+// scivisStudioClient
 #include "EditorWindow.h"
 #include "RemoteBrowseDialog.h"
+#include "UICommon.h"
 // vsr_scivis_studio_protocol
 #include "ProjectRequests.h"
 // vsr_scivis_studio_model
@@ -51,11 +53,7 @@ struct DatasetEditor : public EditorWindow
   RequestHandle m_pendingRefresh;
   RequestHandle m_pendingDiscover;
 
-  // Buffered, reject-on-commit name field.
-  DatasetID m_nameBufferDataset;
-  std::string m_nameBuffer;
-  std::string m_nameError;
-  bool m_nameStale{false};
+  ui::BufferedNameField m_nameField;
 
   DatasetID m_availabilityDataset;
   double m_lastAvailabilityCheck{0.0};

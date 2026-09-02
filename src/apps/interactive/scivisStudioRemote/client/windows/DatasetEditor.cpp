@@ -21,7 +21,6 @@ namespace {
 
 constexpr const char *REVIEW_POPUP = "Review Discovered Datasets";
 constexpr const char *REMOVE_POPUP = "Remove Dataset?";
-const std::vector<std::string> ARCHIVE_EXTENSIONS = {".vsr", ".tsd"};
 
 // Why an Unload is refused, or null when it is allowed.
 const char *unloadBlockedReason(const Dataset &dataset)
@@ -50,7 +49,7 @@ DatasetEditor::~DatasetEditor() = default;
 
 void DatasetEditor::onProjectReplaced()
 {
-  m_nameStale = true;
+  m_nameField.markStale();
 }
 
 // Selection //////////////////////////////////////////////////////////////////
@@ -129,7 +128,7 @@ void DatasetEditor::buildUI_toolbar(const Project &project)
     BrowseRequest request;
     request.mode = BrowseMode::OpenFile;
     request.title = "Load Dataset Archive";
-    request.extensions = ARCHIVE_EXTENSIONS;
+    request.extensions = ui::archiveExtensions();
     request.startDirectory = project.projectDirectory;
     request.onAccept = [this](const std::vector<std::filesystem::path> &paths) {
       m_pendingOp = ops().loadDatasetArchive(paths.front(),
@@ -177,38 +176,15 @@ void DatasetEditor::buildUI_nameField(const Dataset &dataset)
     return;
   }
 
-  const bool refresh = m_nameStale && !ImGui::IsAnyItemActive()
-      && !pending(m_pendingRename);
-  if (m_nameBufferDataset != dataset.id || refresh) {
-    m_nameBufferDataset = dataset.id;
-    m_nameBuffer = dataset.name;
-    m_nameStale = false;
-    if (m_nameBufferDataset != dataset.id)
-      m_nameError.clear();
-  }
-
-  ImGui::BeginDisabled(pending(m_pendingRename));
-  const bool submitted = ImGui::InputText(
-      "Name", &m_nameBuffer, ImGuiInputTextFlags_EnterReturnsTrue);
-  const bool commit = submitted || ImGui::IsItemDeactivatedAfterEdit();
-  ImGui::EndDisabled();
-
-  if (commit && m_nameBuffer != dataset.name) {
-    const DatasetID id = dataset.id;
-    m_pendingRename = ops().renameDataset(
-        id, m_nameBuffer, [this, id](const ProjectOpReply &reply) {
-          if (reply.ok) {
-            m_nameError.clear();
-          } else {
-            m_nameError = reply.error;
-            if (m_nameBufferDataset == id)
-              m_nameStale = true; // reject: back to the replica's name
-          }
-        });
-  } else if (commit) {
-    m_nameError.clear();
-  }
-  ui::errorText(m_nameError);
+  const auto newName =
+      m_nameField.draw(dataset.id, dataset.name, pending(m_pendingRename));
+  if (!newName)
+    return;
+  const DatasetID id = dataset.id;
+  m_pendingRename = ops().renameDataset(
+      id, *newName, [this, id](const ProjectOpReply &reply) {
+        m_nameField.onReply(id, reply.ok, reply.error);
+      });
 }
 
 void DatasetEditor::buildUI_details(const Dataset &dataset)
@@ -264,14 +240,14 @@ void DatasetEditor::buildUI_actions(
     BrowseRequest request;
     request.mode = BrowseMode::SaveFile;
     request.title = "Save Dataset Archive";
-    request.extensions = ARCHIVE_EXTENSIONS;
+    request.extensions = ui::archiveExtensions();
     request.startDirectory = project.projectDirectory;
     request.defaultName = dataset.name + ".vsr";
-    request.onAccept =
-        [this, id, taskReply](const std::vector<std::filesystem::path> &paths) {
-          m_pendingOp = ops().saveDatasetArchive(
-              id, ui::withVsrExtension(paths.front()), taskReply);
-        };
+    request.onAccept = [this, id, taskReply](
+                           const std::vector<std::filesystem::path> &paths) {
+      m_pendingOp = ops().saveDatasetArchive(
+          id, ui::withVsrExtension(paths.front()), taskReply);
+    };
     m_browse.open(std::move(request));
   }
   ImGui::EndDisabled();
@@ -381,29 +357,21 @@ void DatasetEditor::buildUI_discoveryReview()
 
 void DatasetEditor::buildUI_removeConfirmation(const Project &project)
 {
-  if (!ImGui::BeginPopupModal(
-          REMOVE_POPUP, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
-    return;
-
   const Dataset *dataset = replica::findDataset(project, m_datasetToRemove);
-  ImGui::TextWrapped("Remove '%s' from the inventory and every shot?",
-      dataset ? dataset->name.c_str() : m_datasetToRemove.c_str());
-  ImGui::Checkbox("Keep managed asset file", &m_keepRemovedAsset);
-
-  ImGui::BeginDisabled(!canSend());
-  if (ImGui::Button("Remove")) {
+  const auto choice = ui::confirmModal(REMOVE_POPUP,
+      "Remove '" + (dataset ? dataset->name : m_datasetToRemove)
+          + "' from the inventory and every shot?",
+      "Remove",
+      canSend(),
+      [this] {
+        ImGui::Checkbox("Keep managed asset file", &m_keepRemovedAsset);
+      });
+  if (choice == ui::ConfirmChoice::Confirmed) {
     m_pendingOp = ops().removeDataset(
         m_datasetToRemove, m_keepRemovedAsset, errorReporter());
-    m_datasetToRemove.clear();
-    ImGui::CloseCurrentPopup();
   }
-  ImGui::EndDisabled();
-  ImGui::SameLine();
-  if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+  if (choice != ui::ConfirmChoice::Pending)
     m_datasetToRemove.clear();
-    ImGui::CloseCurrentPopup();
-  }
-  ImGui::EndPopup();
 }
 
 } // namespace vsr::scivis_studio::client

@@ -99,16 +99,24 @@ are decoded on the IO thread, queued beside the edit drain queue and
 dispatched on the loop thread in the order sent: a sync op replies then
 snapshots when the Project changed (also after a "failed" call that still
 mutated it, such as an import that left an `ImportFailed` record); a task op
-replies with its task id and its body runs later as a Server Task. A sync op
-the client sent after a task waits until that task has run; task requests,
-`CancelTask` and Remote Browse do not wait.
+replies with its task id and its body runs later as a Server Task. At
+dispatch a task op checks only the paths it names against the Data Roots;
+whatever it reads from the Project (a dataset id, the project's own directory
+for a `SaveProject` without one) it reads when the task runs, since a task
+queued ahead of it may still change the Project. A sync op the client sent
+after a task waits until that task has run; task requests do not wait, and
+`CancelTask` and Remote Browse are served even from behind a waiting sync op
+(they touch neither Project nor Scene).
 
 Server Tasks (`server/ServerTaskRunner`) run on the render loop, one per
 iteration, to completion; frames pause while one runs (the client keeps its
 last frame). `TaskProgress` is indeterminate with phase text; `CancelTask`
 removes a task still queued (`TaskFailed{"cancelled"}`) and is refused for
-the running one ("task already running"). Queued tasks die with the session
-they were sent on. `OpenProject` goes through `stageProjectOpen` then
+the running one ("task already running"). A body that throws (a filesystem
+error on a path the roots admitted) fails its task rather than the server.
+Queued tasks die with the session they were sent on, and the client drops its
+task records at every `BootstrapBegin` for the same reason (milestone 7's
+task-status replay refills them). `OpenProject` goes through `stageProjectOpen` then
 `ProjectContext::openStagedProject`, both on the loop thread, so a later
 worker-thread staging phase is a mechanical move. Task ids increase for the
 life of the server; `TaskCompleted::message` of an import carries the new

@@ -3,6 +3,7 @@
 
 #include "Application.h"
 #include "StudioViewport.h"
+#include "UICommon.h"
 #include "modals/AddFileAnimationDatasetDialog.h"
 #include "modals/AddStaticDatasetDialog.h"
 #include "modals/ProjectLocationDialog.h"
@@ -560,8 +561,7 @@ void Application::uiToasts()
     ImGui::PushTextWrapPos(520.f);
     for (const Toast &toast : m_toasts) {
       if (toast.isError)
-        ImGui::TextColored(
-            ImVec4(1.f, 0.4f, 0.4f, 1.f), "%s", toast.text.c_str());
+        ImGui::TextColored(ui::ERROR_TEXT_COLOR, "%s", toast.text.c_str());
       else
         ImGui::TextUnformatted(toast.text.c_str());
     }

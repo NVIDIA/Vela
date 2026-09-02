@@ -53,9 +53,8 @@ void ProjectWindow::buildEditorUI(const Project &project)
       ImGui::PushStyleColor(
           ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
     }
-    ImGui::BulletText("%s  [%s]",
-        dataset.name.c_str(),
-        replica::datasetStatusText(dataset));
+    ImGui::BulletText(
+        "%s  [%s]", dataset.name.c_str(), replica::datasetStatusText(dataset));
     if (unloaded)
       ImGui::PopStyleColor();
   }
@@ -112,29 +111,19 @@ void ProjectWindow::buildUI_shots(const Project &project)
 
 void ProjectWindow::buildPopups(const Project &project)
 {
-  if (!ImGui::BeginPopupModal(
-          REMOVE_SHOT_POPUP, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
-    return;
-
   const Shot *shot = replica::findShot(project, m_shotToRemove);
-  ImGui::Text("Remove shot '%s'?",
-      shot ? shot->name.c_str() : m_shotToRemove.c_str());
-  if (project.shots.size() <= 1)
-    ui::warningText("This is the project's only shot.");
-
-  ImGui::BeginDisabled(!canSend());
-  if (ImGui::Button("Remove")) {
+  const auto choice = ui::confirmModal(REMOVE_SHOT_POPUP,
+      "Remove shot '" + (shot ? shot->name : m_shotToRemove) + "'?",
+      "Remove",
+      canSend(),
+      [&] {
+        if (project.shots.size() <= 1)
+          ui::warningText("This is the project's only shot.");
+      });
+  if (choice == ui::ConfirmChoice::Confirmed)
     m_pendingRemove = ops().removeShot(m_shotToRemove, errorReporter());
+  if (choice != ui::ConfirmChoice::Pending)
     m_shotToRemove.clear();
-    ImGui::CloseCurrentPopup();
-  }
-  ImGui::EndDisabled();
-  ImGui::SameLine();
-  if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-    m_shotToRemove.clear();
-    ImGui::CloseCurrentPopup();
-  }
-  ImGui::EndPopup();
 }
 
 } // namespace vsr::scivis_studio::client
