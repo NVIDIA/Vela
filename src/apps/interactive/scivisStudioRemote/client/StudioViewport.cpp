@@ -225,13 +225,18 @@ void StudioViewport::adoptRenderer(size_t rendererIndex)
     m_renderers.current = m_renderers.objects.front();
 }
 
-void StudioViewport::reset()
+void StudioViewport::dropMirrorReferences()
 {
   m_camera.current = {};
   m_camera.arcballToken = {};
   m_manipulatorSynchronized = false;
   m_renderers.objects.clear();
   m_renderers.current = {};
+}
+
+void StudioViewport::reset()
+{
+  dropMirrorReferences();
   m_hasFrame = false;
   m_lastHeader = {};
   m_sentFrameConfig = vsr::math::uint2(0, 0);

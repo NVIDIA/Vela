@@ -299,7 +299,7 @@ void Application::uiMenu_Server()
 
     if (ImGui::MenuItem("Shutdown Server")) {
       vsr::core::logStatus("[Client] asking the server to shut down");
-      appContext()->clearSelected();
+      releaseMirror();
       m_connection->shutdownServer(); // Shutdown, then a local disconnect
       enterHomeState();
     }
@@ -354,10 +354,21 @@ void Application::connect()
 void Application::disconnect()
 {
   vsr::core::logStatus("[Client] disconnecting");
-  // Selection points into the mirror that disconnect() is about to clear.
-  appContext()->clearSelected();
+  releaseMirror();
   m_connection->disconnect();
   enterHomeState();
+}
+
+// Everything the UI holds into the mirror must go before the mirror is
+// cleared: selection (LayerNodeRefs) and the viewport's use-counted camera
+// and renderer refs, which would otherwise release against recreated slots.
+void Application::releaseMirror()
+{
+  auto *ctx = appContext();
+  ctx->clearSelected();
+  ctx->vsr.sceneLoadComplete = false;
+  if (m_viewport)
+    m_viewport->dropMirrorReferences();
 }
 
 void Application::onStateChanged(ConnectionState from, ConnectionState to)
@@ -380,9 +391,7 @@ void Application::onStateChanged(ConnectionState from, ConnectionState to)
 
 void Application::onBootstrapBegin()
 {
-  auto *ctx = appContext();
-  ctx->clearSelected();
-  ctx->vsr.sceneLoadComplete = false;
+  releaseMirror();
 }
 
 void Application::onBootstrapComplete()
