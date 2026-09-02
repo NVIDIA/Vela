@@ -8,6 +8,7 @@
 #include "SceneMessages.h"
 #include "SessionMessages.h"
 #include "StudioProtocol.h"
+#include "TaskMessages.h"
 // vsr_scivis_studio_model
 #include "Project.h"
 // vsr_network
@@ -49,7 +50,30 @@ std::string objectText(const SceneObjectRef &ref)
       + std::to_string(ref.objectIndex);
 }
 
+std::string quotedText(const std::string &text)
+{
+  return "\"" + text + "\"";
+}
+
+const char *boolText(bool value)
+{
+  return value ? "true" : "false";
+}
+
 } // namespace
+
+const char *toString(TaskRecord::Status status)
+{
+  switch (status) {
+  case TaskRecord::Status::Running:
+    return "Running";
+  case TaskRecord::Status::Completed:
+    return "Completed";
+  case TaskRecord::Status::Failed:
+    return "Failed";
+  }
+  return "Unknown";
+}
 
 const char *toString(SessionState state)
 {
@@ -190,6 +214,43 @@ const std::string &TestSession::lastError() const
 const std::string &TestSession::failure() const
 {
   return m_failure;
+}
+
+uint64_t TestSession::nextRequestId()
+{
+  return m_nextRequestId++;
+}
+
+const ProjectOpReply *TestSession::reply(uint64_t requestId) const
+{
+  const auto it = m_replies.find(requestId);
+  return it == m_replies.end() ? nullptr : &it->second;
+}
+
+size_t TestSession::repliesFailed() const
+{
+  return m_repliesFailed;
+}
+
+const TaskRecord *TestSession::task(uint64_t taskId) const
+{
+  const auto it = m_tasks.find(taskId);
+  return it == m_tasks.end() ? nullptr : &it->second;
+}
+
+size_t TestSession::tasksCompleted() const
+{
+  return m_tasksCompleted;
+}
+
+size_t TestSession::tasksFailed() const
+{
+  return m_tasksFailed;
+}
+
+size_t TestSession::snapshotsReceived() const
+{
+  return m_snapshotsReceived;
 }
 
 // Session ////////////////////////////////////////////////////////////////////
@@ -596,6 +657,8 @@ void TestSession::finishDisconnect()
 {
   clearMirror();
   m_project.reset();
+  m_replies.clear();
+  m_tasks.clear();
   m_frameConfig = {};
   if (m_state != SessionState::NeverConnected)
     setState(SessionState::Disconnected);
@@ -679,7 +742,7 @@ void TestSession::handleMessage(const Message &msg)
     } else if (*type == StudioMessageType::Error) {
       const auto error = decode<Error>(msg);
       const std::string text = error ? error->message : "?";
-      event.fields.emplace_back("message", "\"" + text + "\"");
+      event.fields.emplace_back("message", quotedText(text));
       pushEvent(std::move(event));
       attemptFailed("server refused: " + text);
     } else {
@@ -705,7 +768,7 @@ void TestSession::handleMessage(const Message &msg)
   case StudioMessageType::Error: {
     const auto error = decode<Error>(msg);
     const std::string text = error ? error->message : "(undecodable Error)";
-    event.fields.emplace_back("message", "\"" + text + "\"");
+    event.fields.emplace_back("message", quotedText(text));
     if (!m_bootstrapped) {
       // Nothing of ours but the Hello is in flight before BootstrapEnd, so an
       // Error here is the server turning the attempt down (a version it does
@@ -752,12 +815,87 @@ void TestSession::handleMessage(const Message &msg)
       break;
     }
     m_project = std::make_unique<Project>(std::move(snapshot->project));
+    ++m_snapshotsReceived;
     event.fields.emplace_back("activeShot", m_project->activeShotId);
     event.fields.emplace_back("shots", std::to_string(m_project->shots.size()));
     event.fields.emplace_back(
         "datasets", std::to_string(m_project->datasets.size()));
+    event.fields.emplace_back(
+        "lightRigs", std::to_string(m_project->lightRigs.size()));
+    event.fields.emplace_back(
+        "cameraRigs", std::to_string(m_project->cameraRigs.size()));
+    event.fields.emplace_back(
+        "colorMaps", std::to_string(m_project->colorMaps.size()));
+    event.fields.emplace_back("dirty", boolText(m_project->dirty));
     break;
   }
+  case StudioMessageType::ProjectOpReply: {
+    auto reply = decode<ProjectOpReply>(msg);
+    if (!reply) {
+      vsr::core::logError("[TestSession] undecodable ProjectOpReply");
+      event.fields.emplace_back("malformed", "true");
+      break;
+    }
+    event.fields.emplace_back("requestId", std::to_string(reply->requestId));
+    event.fields.emplace_back("ok", boolText(reply->ok));
+    event.fields.emplace_back("error", quotedText(reply->error));
+    if (!reply->ok)
+      ++m_repliesFailed;
+    m_replies[reply->requestId] = std::move(*reply);
+    break;
+  }
+  case StudioMessageType::TaskProgress: {
+    const auto progress = decode<TaskProgress>(msg);
+    if (!progress) {
+      vsr::core::logError("[TestSession] undecodable TaskProgress");
+      event.fields.emplace_back("malformed", "true");
+      break;
+    }
+    event.fields.emplace_back("taskId", std::to_string(progress->taskId));
+    event.fields.emplace_back("current", std::to_string(progress->current));
+    event.fields.emplace_back("total", std::to_string(progress->total));
+    event.fields.emplace_back("message", quotedText(progress->message));
+    // Progress after the end would be the server's mistake; the end stands.
+    m_tasks.try_emplace(progress->taskId);
+    break;
+  }
+  case StudioMessageType::TaskCompleted: {
+    const auto completed = decode<TaskCompleted>(msg);
+    if (!completed) {
+      vsr::core::logError("[TestSession] undecodable TaskCompleted");
+      event.fields.emplace_back("malformed", "true");
+      break;
+    }
+    event.fields.emplace_back("taskId", std::to_string(completed->taskId));
+    event.fields.emplace_back("message", quotedText(completed->message));
+    if (completed->framesCompleted) {
+      event.fields.emplace_back(
+          "framesCompleted", std::to_string(completed->framesCompleted));
+    }
+    auto &record = m_tasks[completed->taskId];
+    record.status = TaskRecord::Status::Completed;
+    record.message = completed->message;
+    ++m_tasksCompleted;
+    break;
+  }
+  case StudioMessageType::TaskFailed: {
+    const auto failed = decode<TaskFailed>(msg);
+    if (!failed) {
+      vsr::core::logError("[TestSession] undecodable TaskFailed");
+      event.fields.emplace_back("malformed", "true");
+      break;
+    }
+    event.fields.emplace_back("taskId", std::to_string(failed->taskId));
+    event.fields.emplace_back("error", quotedText(failed->error));
+    auto &record = m_tasks[failed->taskId];
+    record.status = TaskRecord::Status::Failed;
+    record.message = failed->error;
+    ++m_tasksFailed;
+    break;
+  }
+  case StudioMessageType::UIState:
+    // Opaque to every client; the GUI keeps it, this one only notes it came.
+    break;
   default:
     vsr::core::logWarning(
         "[TestSession] %s is not handled by this client", toString(*type));
@@ -775,7 +913,7 @@ void TestSession::handleHello(const Message &msg)
   }
   Event event{"Hello", {}};
   event.fields.emplace_back("version", std::to_string(hello->version));
-  event.fields.emplace_back("buildInfo", "\"" + hello->buildInfo + "\"");
+  event.fields.emplace_back("buildInfo", quotedText(hello->buildInfo));
   pushEvent(std::move(event));
 
   if (hello->version != PROTOCOL_VERSION) {

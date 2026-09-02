@@ -5,6 +5,7 @@
 
 // vsr_scivis_studio_protocol
 #include "FrameMessages.h"
+#include "ProjectOpReply.h"
 #include "StudioCodec.h"
 // vsr_scivis_studio_model
 #include "Dataset.h"
@@ -24,6 +25,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -73,6 +75,24 @@ struct Event
 // The Frame record, as both the event stream and dump-frame print it.
 Event frameEvent(const protocol::FrameHeader &header, size_t bytes);
 
+// A Server Task as the session has heard of it: Running from its first
+// TaskProgress until the one TaskCompleted (message) or TaskFailed (error).
+// A task whose completion arrives before any progress is known only once it
+// has ended.
+struct TaskRecord
+{
+  enum class Status
+  {
+    Running,
+    Completed,
+    Failed
+  };
+  Status status{Status::Running};
+  std::string message; // the completion message, or the failure's error
+};
+
+const char *toString(TaskRecord::Status status);
+
 // Visits every object pool of a Scene as (ANARI type, pool), in the order
 // dump-scene lists them. Arrays ride the Structural Mirror as descriptors, so
 // they count too.
@@ -102,6 +122,12 @@ size_t totalObjects(const vsr::scene::Scene &scene);
  * and explicit disconnect, shutdown and reconnect. It is a second, independent
  * implementation of the client side of the protocol and shares no code with
  * the GUI client's session.
+ *
+ * Project Ops go out through send() with an id from nextRequestId(); the
+ * session keeps every ProjectOpReply by request id, applies every Project
+ * Snapshot to the replica, and tracks each Server Task's progress and end, so
+ * a caller can wait on state rather than on the order messages happen to
+ * arrive in.
  *
  * Threading: every public member runs on the caller's thread. The network
  * handlers run on the channel's IO thread and only queue messages (Frames
@@ -153,6 +179,23 @@ struct TestSession
   const std::string &lastError() const;
   // Why the last connect attempt failed or the link was Lost.
   const std::string &failure() const;
+
+  // Project Ops and Server Tasks (valid between polls) //
+
+  // A fresh client-minted request id for the next Project Op.
+  uint64_t nextRequestId();
+  // The reply the server sent to that request id; null until it arrives, and
+  // once the session is Disconnected.
+  const protocol::ProjectOpReply *reply(uint64_t requestId) const;
+  // Replies with ok == false, counted over the session's lifetime.
+  size_t repliesFailed() const;
+  // What the session has heard of a task; null before its first message and
+  // once the session is Disconnected.
+  const TaskRecord *task(uint64_t taskId) const;
+  size_t tasksCompleted() const;
+  size_t tasksFailed() const;
+  // Project Snapshots applied so far, the Bootstrap's included.
+  size_t snapshotsReceived() const;
 
   // Session //
 
@@ -280,6 +323,13 @@ struct TestSession
   size_t m_framesReceived{0};
   size_t m_errorsReceived{0};
   std::string m_lastError;
+  uint64_t m_nextRequestId{1};
+  std::map<uint64_t, protocol::ProjectOpReply> m_replies;
+  size_t m_repliesFailed{0};
+  std::map<uint64_t, TaskRecord> m_tasks;
+  size_t m_tasksCompleted{0};
+  size_t m_tasksFailed{0};
+  size_t m_snapshotsReceived{0};
   std::deque<Event> m_events;
   std::vector<vsr::network::MessageFuture> m_sendFutures;
 
