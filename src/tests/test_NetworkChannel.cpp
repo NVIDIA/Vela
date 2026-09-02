@@ -18,16 +18,18 @@ namespace {
 
 struct LifecycleCounters
 {
+  void attach(NetworkChannel &channel);
+
   std::atomic<int> connected{0};
   std::atomic<int> disconnected{0};
-
-  void attach(NetworkChannel &channel)
-  {
-    channel.setConnectHandler([this]() { connected++; });
-    channel.setDisconnectHandler(
-        [this](const boost::system::error_code &) { disconnected++; });
-  }
 };
+
+void LifecycleCounters::attach(NetworkChannel &channel)
+{
+  channel.setConnectHandler([this]() { connected++; });
+  channel.setDisconnectHandler(
+      [this](const boost::system::error_code &) { disconnected++; });
+}
 
 } // namespace
 

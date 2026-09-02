@@ -58,92 +58,18 @@ void populate(vsr::scene::Scene &scene)
  */
 struct FakeServer
 {
-  FakeServer(int helloVersion = PROTOCOL_VERSION) : helloVersion(helloVersion)
-  {
-    channel = std::make_shared<vsr::network::NetworkServer>(0);
-    channel->setConnectHandler([this]() {
-      accepts++;
-      Hello hello;
-      hello.version = this->helloVersion;
-      hello.buildInfo = "fake server";
-      channel->send(encode(hello));
-    });
-    for (int value = 1; value < vsr::network::MESSAGE_TYPE_INVALID; ++value) {
-      if (!isStudioMessageType(uint8_t(value)))
-        continue;
-      channel->registerHandler(
-          uint8_t(value), [this](const Message &msg) { onMessage(msg); });
-    }
-    channel->start();
-  }
+  FakeServer(int helloVersion = PROTOCOL_VERSION);
+  ~FakeServer();
 
-  ~FakeServer()
-  {
-    channel->stop();
-  }
+  unsigned short port() const;
+  size_t count(StudioMessageType type);
+  std::vector<Message> messagesOf(StudioMessageType type);
 
-  unsigned short port() const
-  {
-    return channel->port();
-  }
-
-  size_t count(StudioMessageType type)
-  {
-    std::lock_guard lock(mutex);
-    size_t n = 0;
-    for (const auto &msg : received)
-      n += msg.header.type == uint8_t(type);
-    return n;
-  }
-
-  std::vector<Message> messagesOf(StudioMessageType type)
-  {
-    std::lock_guard lock(mutex);
-    std::vector<Message> out;
-    for (const auto &msg : received)
-      if (msg.header.type == uint8_t(type))
-        out.push_back(msg);
-    return out;
-  }
-
-  void send(Message msg)
-  {
-    channel->send(std::move(msg));
-  }
-
-  void sendBootstrapEnd()
-  {
-    send(encode(BootstrapEnd{}));
-  }
-
+  void send(Message msg);
+  void sendBootstrapEnd();
   // The prebuilt bracket, then End unless it is being held back.
-  void sendBootstrap()
-  {
-    for (const auto &m : bootstrap)
-      channel->send(Message(m));
-    if (!holdBootstrapEnd)
-      sendBootstrapEnd();
-  }
-
-  void onMessage(const Message &msg)
-  {
-    {
-      std::lock_guard lock(mutex);
-      received.push_back(msg);
-    }
-    switch (StudioMessageType(msg.header.type)) {
-    case StudioMessageType::Hello:
-      if (!holdBootstrap)
-        sendBootstrap();
-      break;
-    case StudioMessageType::Ping:
-      if (!silent)
-        channel->send(encode(Pong{}));
-      break;
-    default:
-      break;
-    }
-  }
+  void sendBootstrap();
+  void onMessage(const Message &msg);
 
   int helloVersion{PROTOCOL_VERSION};
   std::shared_ptr<vsr::network::NetworkServer> channel;
@@ -155,6 +81,92 @@ struct FakeServer
   std::mutex mutex;
   std::vector<Message> received;
 };
+
+FakeServer::FakeServer(int helloVersion) : helloVersion(helloVersion)
+{
+  channel = std::make_shared<vsr::network::NetworkServer>(0);
+  channel->setConnectHandler([this]() {
+    accepts++;
+    Hello hello;
+    hello.version = this->helloVersion;
+    hello.buildInfo = "fake server";
+    channel->send(encode(hello));
+  });
+  for (int value = 1; value < vsr::network::MESSAGE_TYPE_INVALID; ++value) {
+    if (!isStudioMessageType(uint8_t(value)))
+      continue;
+    channel->registerHandler(
+        uint8_t(value), [this](const Message &msg) { onMessage(msg); });
+  }
+  channel->start();
+}
+
+FakeServer::~FakeServer()
+{
+  channel->stop();
+}
+
+unsigned short FakeServer::port() const
+{
+  return channel->port();
+}
+
+size_t FakeServer::count(StudioMessageType type)
+{
+  std::lock_guard lock(mutex);
+  size_t n = 0;
+  for (const auto &msg : received)
+    n += msg.header.type == uint8_t(type);
+  return n;
+}
+
+std::vector<Message> FakeServer::messagesOf(StudioMessageType type)
+{
+  std::lock_guard lock(mutex);
+  std::vector<Message> out;
+  for (const auto &msg : received)
+    if (msg.header.type == uint8_t(type))
+      out.push_back(msg);
+  return out;
+}
+
+void FakeServer::send(Message msg)
+{
+  channel->send(std::move(msg));
+}
+
+void FakeServer::sendBootstrapEnd()
+{
+  send(encode(BootstrapEnd{}));
+}
+
+void FakeServer::sendBootstrap()
+{
+  for (const auto &m : bootstrap)
+    channel->send(Message(m));
+  if (!holdBootstrapEnd)
+    sendBootstrapEnd();
+}
+
+void FakeServer::onMessage(const Message &msg)
+{
+  {
+    std::lock_guard lock(mutex);
+    received.push_back(msg);
+  }
+  switch (StudioMessageType(msg.header.type)) {
+  case StudioMessageType::Hello:
+    if (!holdBootstrap)
+      sendBootstrap();
+    break;
+  case StudioMessageType::Ping:
+    if (!silent)
+      channel->send(encode(Pong{}));
+    break;
+  default:
+    break;
+  }
+}
 
 // BootstrapBegin, scene, layer, frame config, snapshot; End is sent
 // separately so a test can hold it back.
@@ -190,44 +202,11 @@ Message makeFrame(int frame)
 struct Fixture
 {
   Fixture(int helloVersion = PROTOCOL_VERSION,
-      ConnectionTimings timings = fastTimings())
-      : server(helloVersion), connection(&mirror, timings)
-  {
-    populate(source);
-    server.bootstrap = makeBootstrap(source);
-    connection.onStateChanged = [this](ConnectionState, ConnectionState to) {
-      transitions.push_back(to);
-    };
-    connection.onMirrorReplaceBegin = [this]() {
-      mirrorReplaces++;
-      mirrorPopulatedAtReplace = mirror.numberOfObjects(ANARI_GEOMETRY) != 0;
-    };
-    connection.onBootstrapComplete = [this]() { bootstraps++; };
-    connection.onServerError = [this](const std::string &m) {
-      errors.push_back(m);
-    };
-  }
+      ConnectionTimings timings = fastTimings());
 
-  void connect()
-  {
-    connection.connect("127.0.0.1", short(server.port()));
-  }
-
-  bool waitConnectedAndBootstrapped(int expectedBootstraps = 1)
-  {
-    return pollUntil(connection, [&] {
-      return connection.state() == ConnectionState::Connected
-          && bootstraps == expectedBootstraps;
-    });
-  }
-
-  bool mirrorHasGeometry() const
-  {
-    if (mirror.numberOfObjects(ANARI_GEOMETRY) != 1)
-      return false;
-    auto geometry = mirror.getObject<vsr::scene::Geometry>(0);
-    return geometry && geometry->name() == GEOMETRY_NAME;
-  }
+  void connect();
+  bool waitConnectedAndBootstrapped(int expectedBootstraps = 1);
+  bool mirrorHasGeometry() const;
 
   vsr::scene::Scene source;
   vsr::scene::Scene mirror;
@@ -239,6 +218,44 @@ struct Fixture
   int bootstraps{0};
   std::vector<std::string> errors;
 };
+
+Fixture::Fixture(int helloVersion, ConnectionTimings timings)
+    : server(helloVersion), connection(&mirror, timings)
+{
+  populate(source);
+  server.bootstrap = makeBootstrap(source);
+  connection.onStateChanged = [this](ConnectionState, ConnectionState to) {
+    transitions.push_back(to);
+  };
+  connection.onMirrorReplaceBegin = [this]() {
+    mirrorReplaces++;
+    mirrorPopulatedAtReplace = mirror.numberOfObjects(ANARI_GEOMETRY) != 0;
+  };
+  connection.onBootstrapComplete = [this]() { bootstraps++; };
+  connection.onServerError = [this](
+                                 const std::string &m) { errors.push_back(m); };
+}
+
+void Fixture::connect()
+{
+  connection.connect("127.0.0.1", short(server.port()));
+}
+
+bool Fixture::waitConnectedAndBootstrapped(int expectedBootstraps)
+{
+  return pollUntil(connection, [&] {
+    return connection.state() == ConnectionState::Connected
+        && bootstraps == expectedBootstraps;
+  });
+}
+
+bool Fixture::mirrorHasGeometry() const
+{
+  if (mirror.numberOfObjects(ANARI_GEOMETRY) != 1)
+    return false;
+  auto geometry = mirror.getObject<vsr::scene::Geometry>(0);
+  return geometry && geometry->name() == GEOMETRY_NAME;
+}
 
 } // namespace
 

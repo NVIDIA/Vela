@@ -70,77 +70,51 @@ size_t totalObjects(const vsr::scene::Scene &scene)
 // land here.
 struct StructureCounter : public vsr::scene::EmptyUpdateDelegate
 {
-  void signalObjectAdded(const vsr::scene::Object *) override
-  {
-    mutations++;
-  }
-  void signalObjectRemoved(const vsr::scene::Object *) override
-  {
-    mutations++;
-  }
-  void signalRemoveAllObjects() override
-  {
-    mutations++;
-  }
-  void signalLayerAdded(const vsr::scene::Layer *) override
-  {
-    mutations++;
-  }
-  void signalLayerStructureUpdated(const vsr::scene::Layer *) override
-  {
-    mutations++;
-  }
+  void signalObjectAdded(const vsr::scene::Object *) override;
+  void signalObjectRemoved(const vsr::scene::Object *) override;
+  void signalRemoveAllObjects() override;
+  void signalLayerAdded(const vsr::scene::Layer *) override;
+  void signalLayerStructureUpdated(const vsr::scene::Layer *) override;
 
   int mutations{0};
 };
+
+void StructureCounter::signalObjectAdded(const vsr::scene::Object *)
+{
+  mutations++;
+}
+
+void StructureCounter::signalObjectRemoved(const vsr::scene::Object *)
+{
+  mutations++;
+}
+
+void StructureCounter::signalRemoveAllObjects()
+{
+  mutations++;
+}
+
+void StructureCounter::signalLayerAdded(const vsr::scene::Layer *)
+{
+  mutations++;
+}
+
+void StructureCounter::signalLayerStructureUpdated(const vsr::scene::Layer *)
+{
+  mutations++;
+}
 
 // A StudioServer on its own loop thread. Stopping it is what the client sees
 // as the server going away: run() tears the listening socket down.
 struct RunningServer
 {
-  explicit RunningServer(int port)
-  {
-    ServerOptions options;
-    options.port = port;
-    options.library = "helide";
-    options.dataRoots = {std::filesystem::temp_directory_path()};
-    server = std::make_unique<StudioServer>(options);
-    started = server->start(&startError);
-    if (started) {
-      thread = std::thread([this] {
-        server->run();
-        finished.store(true);
-      });
-    }
-  }
+  explicit RunningServer(int port);
+  ~RunningServer();
 
-  ~RunningServer()
-  {
-    stop();
-  }
-
-  void stop()
-  {
-    if (!thread.joinable())
-      return;
-    server->requestShutdown();
-    thread.join();
-  }
-
-  unsigned short port() const
-  {
-    return server->port();
-  }
-
-  vsr::scene::Scene &scene()
-  {
-    return server->appContext().vsr.scene;
-  }
-
-  const Project &project()
-  {
-    return server->projectContext().project();
-  }
+  void stop();
+  unsigned short port() const;
+  vsr::scene::Scene &scene();
+  const Project &project();
 
   std::unique_ptr<StudioServer> server;
   bool started{false};
@@ -149,51 +123,61 @@ struct RunningServer
   std::thread thread;
 };
 
+RunningServer::RunningServer(int port)
+{
+  ServerOptions options;
+  options.port = port;
+  options.library = "helide";
+  options.dataRoots = {std::filesystem::temp_directory_path()};
+  server = std::make_unique<StudioServer>(options);
+  started = server->start(&startError);
+  if (started) {
+    thread = std::thread([this] {
+      server->run();
+      finished.store(true);
+    });
+  }
+}
+
+RunningServer::~RunningServer()
+{
+  stop();
+}
+
+void RunningServer::stop()
+{
+  if (!thread.joinable())
+    return;
+  server->requestShutdown();
+  thread.join();
+}
+
+unsigned short RunningServer::port() const
+{
+  return server->port();
+}
+
+vsr::scene::Scene &RunningServer::scene()
+{
+  return server->appContext().vsr.scene;
+}
+
+const Project &RunningServer::project()
+{
+  return server->projectContext().project();
+}
+
+// The client core on a mirror that counts structural mutations.
 struct Client
 {
-  Client() : connection(&mirror, e2eTimings())
-  {
-    counter = mirror.updateDelegate().emplace<StructureCounter>();
-    connection.onBootstrapComplete = [this]() { bootstraps++; };
-    connection.onServerError = [this](const std::string &m) {
-      errors.push_back(m);
-    };
-  }
+  Client();
+  ~Client();
 
-  ~Client()
-  {
-    mirror.updateDelegate().erase(counter);
-  }
-
-  bool waitConnectedAndBootstrapped(int expectedBootstraps)
-  {
-    return pollUntil(
-        connection,
-        [&] {
-          return connection.state() == ConnectionState::Connected
-              && bootstraps == expectedBootstraps;
-        },
-        E2E_TIMEOUT);
-  }
-
+  bool waitConnectedAndBootstrapped(int expectedBootstraps);
   // Polls until a Frame is taken; false on timeout.
-  bool waitForFrame(vsr::network::Message &frame)
-  {
-    return pollUntil(
-        connection,
-        [&] { return connection.takeLatestFrame(frame); },
-        E2E_TIMEOUT);
-  }
-
+  bool waitForFrame(vsr::network::Message &frame);
   // The replica and the mirror agree with the given server after a bootstrap.
-  void requireMirrorsServer(RunningServer &server)
-  {
-    REQUIRE(connection.project() != nullptr);
-    REQUIRE(
-        connection.project()->activeShotId == server.project().activeShotId);
-    REQUIRE(totalObjects(mirror) == totalObjects(server.scene()));
-    REQUIRE(mirror.numberOfLayers() == server.scene().numberOfLayers());
-  }
+  void requireMirrorsServer(RunningServer &server);
 
   vsr::scene::Scene mirror;
   StructureCounter *counter{nullptr};
@@ -201,6 +185,46 @@ struct Client
   int bootstraps{0};
   std::vector<std::string> errors;
 };
+
+Client::Client() : connection(&mirror, e2eTimings())
+{
+  counter = mirror.updateDelegate().emplace<StructureCounter>();
+  connection.onBootstrapComplete = [this]() { bootstraps++; };
+  connection.onServerError = [this](
+                                 const std::string &m) { errors.push_back(m); };
+}
+
+Client::~Client()
+{
+  mirror.updateDelegate().erase(counter);
+}
+
+bool Client::waitConnectedAndBootstrapped(int expectedBootstraps)
+{
+  return pollUntil(
+      connection,
+      [&] {
+        return connection.state() == ConnectionState::Connected
+            && bootstraps == expectedBootstraps;
+      },
+      E2E_TIMEOUT);
+}
+
+bool Client::waitForFrame(vsr::network::Message &frame)
+{
+  return pollUntil(
+      connection,
+      [&] { return connection.takeLatestFrame(frame); },
+      E2E_TIMEOUT);
+}
+
+void Client::requireMirrorsServer(RunningServer &server)
+{
+  REQUIRE(connection.project() != nullptr);
+  REQUIRE(connection.project()->activeShotId == server.project().activeShotId);
+  REQUIRE(totalObjects(mirror) == totalObjects(server.scene()));
+  REQUIRE(mirror.numberOfLayers() == server.scene().numberOfLayers());
+}
 
 } // namespace
 
