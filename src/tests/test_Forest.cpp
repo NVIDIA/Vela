@@ -296,3 +296,59 @@ SCENARIO("vsr::core::Forest<> reparent operations", "[Forest]")
     }
   }
 }
+
+SCENARIO("vsr::core::Forest<> rebuild with chosen node indices", "[Forest]")
+{
+  GIVEN("A forest whose node slots are sparse")
+  {
+    vsr::core::Forest<int> source{-1};
+    source.insert_last_child(source.root(), 1);
+    auto doomed = source.insert_last_child(source.root(), 2);
+    auto kept = source.insert_last_child(source.root(), 3);
+    source.erase(doomed);
+    REQUIRE(kept.index() == 3);
+    REQUIRE(source.size() == 3);
+
+    WHEN("Another forest is built placing each child at the source's index")
+    {
+      vsr::core::Forest<int> rebuilt{-1};
+      auto first = rebuilt.insert_last_child_at(rebuilt.root(), 1, 1);
+      auto third = rebuilt.root()->insert_last_child_at(3, 3);
+
+      THEN("The node indices match the source")
+      {
+        REQUIRE(first.index() == 1);
+        REQUIRE(third.index() == 3);
+        REQUIRE(rebuilt.size() == 3);
+        REQUIRE(rebuilt.capacity() == 4);
+        REQUIRE(!rebuilt.at(2));
+        REQUIRE(rebuilt.at(3)->value() == kept->value());
+      }
+
+      THEN("The children are linked in insertion order under the root")
+      {
+        REQUIRE(third->parent() == rebuilt.root());
+        REQUIRE(rebuilt.root()->next() == first);
+        REQUIRE(first->sibling() == third);
+        REQUIRE(third->sibling() == rebuilt.root());
+      }
+
+      THEN("An occupied slot is refused without changing the tree")
+      {
+        REQUIRE(!rebuilt.insert_last_child_at(rebuilt.root(), 1, 9));
+        REQUIRE(rebuilt.size() == 3);
+        REQUIRE(*first == 1);
+      }
+
+      THEN("Erasing and re-placing round-trips the slot")
+      {
+        rebuilt.erase(first);
+        REQUIRE(!rebuilt.at(1));
+        auto again = rebuilt.insert_last_child_at(third, 1, 7);
+        REQUIRE(again.index() == 1);
+        REQUIRE(again->parent() == third);
+        REQUIRE(rebuilt.size() == 3);
+      }
+    }
+  }
+}
