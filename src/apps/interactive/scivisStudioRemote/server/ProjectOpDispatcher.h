@@ -14,6 +14,7 @@
 #include "ShotRigRequests.h"
 #include "StudioProtocol.h"
 #include "TaskMessages.h"
+#include "ViewportMessages.h"
 // vsr_scivis_studio_model
 #include "ProjectContext.h"
 // vsr_network
@@ -27,9 +28,9 @@
 namespace vsr::scivis_studio::server {
 
 // Every client->server project request the dispatcher serves: Project Ops
-// (SetPlaying among them), Remote Browse and CancelTask (types 20..58 and
-// 61), decoded on the IO thread and queued for the loop thread in arrival
-// order.
+// (SetPlaying and RequestArrayHistogram among them), Remote Browse and
+// CancelTask (types 20..59 and 61), decoded on the IO thread and queued for
+// the loop thread in arrival order.
 using ProjectRequest = std::variant<protocol::NewProject,
     protocol::OpenProject,
     protocol::SaveProject,
@@ -69,6 +70,7 @@ using ProjectRequest = std::variant<protocol::NewProject,
     protocol::RemoveColorMap,
     protocol::ListRoots,
     protocol::ListDirectory,
+    protocol::RequestArrayHistogram,
     protocol::CancelTask>;
 
 // True for the message types ProjectRequest covers. Derived from the
@@ -189,6 +191,8 @@ struct ProjectOpDispatcher
   void handle(const protocol::ListRoots &);
   void handle(const protocol::ListDirectory &);
   void handle(const protocol::CancelTask &);
+  // Viewport
+  void handle(const protocol::RequestArrayHistogram &);
 
   // Sends `reply` after flushing scene pushes (and rebinding the pipeline
   // when asked), then the snapshot when the project changed.
