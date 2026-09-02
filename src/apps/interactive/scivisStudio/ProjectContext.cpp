@@ -267,6 +267,8 @@ void ProjectContext::installAnimationManagerCallback()
 
   m_ctx->vsr.animationMgr.setTimeChangedCallback(
       [this](float) { updateActiveShotFromAnimationTime(); });
+  m_ctx->vsr.animationMgr.setPlaybackStoppedCallback(
+      [this] { onAnimationPlaybackStopped(); });
 }
 
 void ProjectContext::installDatasetDirtyDelegate()
@@ -1002,6 +1004,42 @@ bool ProjectContext::setActiveShot(const ShotID &id, std::string *error)
   syncAnimationManagerToActiveShot();
   applyActiveShot();
   return true;
+}
+
+bool ProjectContext::setPlaying(
+    const ShotID &id, bool playing, std::string *error)
+{
+  auto *shot = project::findShot(m_project, id);
+  if (!shot)
+    return fail("shot not found", error);
+  if (id != m_project.activeShotId)
+    return fail("only the active shot can play", error);
+
+  if (m_ctx) {
+    auto &animMgr = m_ctx->vsr.animationMgr;
+    if (playing)
+      animMgr.play();
+    else
+      animMgr.stop();
+  }
+  shot->playing = playing;
+  return true;
+}
+
+void ProjectContext::setActiveShotFrame(int frame)
+{
+  auto *shot = project::activeShot(m_project);
+  if (!shot)
+    return;
+  shot->frameCount = std::max(1, shot->frameCount);
+  frame = std::clamp(frame, 0, shot->frameCount - 1);
+  if (m_ctx) {
+    // The time-changed callback writes shot->currentFrame and applies the
+    // shot, exactly as a tick does.
+    m_ctx->vsr.animationMgr.setAnimationFrame(frame);
+  } else {
+    shot->currentFrame = frame;
+  }
 }
 
 static DatasetSourceMetadata collectSourceMetadata(
@@ -1854,6 +1892,22 @@ void ProjectContext::updateActiveShotFromAnimationTime()
       std::clamp(animMgr.getAnimationFrame(), 0, shot->frameCount - 1);
   shot->playing = animMgr.isPlaying();
   applyActiveShot();
+}
+
+void ProjectContext::onAnimationPlaybackStopped()
+{
+  if (!m_ctx || m_syncingAnimationManager)
+    return;
+
+  auto *shot = project::activeShot(m_project);
+  if (!shot)
+    return;
+
+  const auto &animMgr = m_ctx->vsr.animationMgr;
+  shot->frameCount = std::max(1, shot->frameCount);
+  shot->currentFrame =
+      std::clamp(animMgr.getAnimationFrame(), 0, shot->frameCount - 1);
+  shot->playing = false;
 }
 
 bool ProjectContext::saveProject(const std::filesystem::path &directory,
