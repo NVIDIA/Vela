@@ -67,6 +67,8 @@ scivisStudioClient [--host 127.0.0.1] [--port 12345] [--connect]
 starts and stops rendering, and shuts the server down. Losing the server
 freezes the last frame under a banner while the client retries with backoff;
 a restarted server is simply reconnected to and bootstraps the client again.
+Details of what a loss keeps and a reconnect rebuilds are under "Loss and
+reconnect" below.
 
 ### Over ssh
 
@@ -123,12 +125,13 @@ for an id never issued with "unknown task N". A body that throws (a filesystem
 error on a path the roots admitted) fails its task rather than the server.
 Queued tasks die with the session they were sent on -- except a queued shot
 render, which like a running one outlives its session and runs with nobody
-listening -- and the client drops its task records at every `BootstrapBegin`
-for the same reason; the task-status replay refills them: the runner keeps
-every ending since the last bootstrap (at most 32) and the bootstrap sends
-each `TaskCompleted`/`TaskFailed` verbatim between `UIState` and the
-`ProjectSnapshot`, then a `TaskProgress{message = description}` for a task
-running at that moment. `OpenProject` goes through `stageProjectOpen` then
+listening -- and the client fails its open task records with "connection
+lost" at every `BootstrapBegin` for the same reason; the task-status replay
+inside the bracket revives the ones the server finished or is still running:
+the runner keeps every ending since the last bootstrap (at most 32) and the
+bootstrap sends each `TaskCompleted`/`TaskFailed` verbatim between `UIState`
+and the `ProjectSnapshot`, then a `TaskProgress{message = description}` for a
+task running at that moment. `OpenProject` goes through `stageProjectOpen` then
 `ProjectContext::openStagedProject`, both on the loop thread, so a later
 worker-thread staging phase is a mechanical move. Task ids increase for the
 life of the server; `TaskCompleted::message` of an import carries the new
@@ -355,8 +358,8 @@ the op that consumes the path is the authority.
 *File* holds New/Open/Save/Save As (Ctrl+S saves; Save As and Open go
 through the Project Location dialog), *Studio* holds Add Dataset (Static,
 File Animation) and Add Shot. Save attaches the `{windows, layout, settings}`
-UI-state tree in the monolith's shape; restoring it on open is a later
-milestone.
+UI-state tree in the monolith's shape; see "UI state" below for how it comes
+back.
 
 ### Time, picking and passes (milestone 6)
 
@@ -387,6 +390,67 @@ The **Histogram** window (`client/windows/HistogramPanel.*`) lists the array
 parameters of the first selected object (and of a volume's spatial field),
 takes a bin count and asks the server with `RequestArrayHistogram`; the
 reply is plotted, a refusal shows the server's error text.
+
+### Rendering, task records, UI state, loss (milestone 7)
+
+**Render Shot.** The Shot Editor's *Render Shot...* confirms the frame count
+and the output directory (`renders/<shotId>/` under the project) and sends
+`RenderShot` (`ProjectOps::renderShot`). The server makes the shot active
+and renders it as a Server Task; the reply is refused, and toasted, when the
+project is unsaved or a render is already queued or running (the button
+also notes an unsaved project). While a render this client launched is
+active every editor shows a "Render in progress" note, since the server
+refuses edits until it ends; an edit that slips through is refused with the
+usual toast. The Tasks panel draws the render's per-frame progress as a
+determinate bar (`current/total`), shows the frame count and the output
+directory when it completes, and offers *Cancel* for Running tasks as well
+as Queued ones: the server decides, stopping a render at its next frame
+(the frames rendered so far stay on disk) and refusing anything else.
+
+**Task records** (`ProjectOps::TaskRecord`). A record is created by the
+reply that starts a task (labelled after the request) or by the first event
+naming an unknown id: a `TaskProgress` labels it with its message, which is
+how the bootstrap's replay names the task still running when a client
+reconnects; a replayed `TaskCompleted`/`TaskFailed` of a task nobody here
+launched is labelled "Task N". At `BootstrapBegin` every Queued or Running
+record is failed with "connection lost" and marked `stale`; the replay
+inside the bracket revives a stale record the server speaks of again (same
+label, state starts over), and a restarted server reusing the id does the
+same through the new request's reply. Stale records the server never
+mentions again stay Failed until "Clear finished" -- they were queued tasks
+the server dropped with the old session. Completion toasts fire once per
+state change, replayed outcomes included; the client's own "connection
+lost" failures do not toast (the banner said it).
+
+**UI state.** The bootstrap's `UIState` is applied in `onBootstrapComplete`
+exactly as the monolith applies a loaded project's: `windows/<name>` through
+each window's `loadSettings` (the window names match the monolith's, so a
+project saved by either restores the other's viewport and per-window
+settings), `layout` through `ImGui::LoadIniSettingsFromMemory`, and
+`settings/{fontScale, uiRounding}` through `loadApplicationSettings`. A null
+tree keeps the current layout. It is applied only when the client has no
+live layout of its own -- the first bootstrap out of the home state
+(NeverConnected or Disconnected) -- not on the re-bootstrap a reconnect after
+Lost runs, which would yank the layout the user is looking at. A `UIState`
+outside a bootstrap follows an `OpenProject` this session asked for and is
+applied at once, as opening a project in the monolith does. Save sends the
+current tree; the viewport settings the tree loads are sent to the server
+right after, by `onServerReady()`.
+
+**Loss and reconnect** (`ServerConnection`). A loss keeps the mirror,
+replica and last frame as a frozen read-only view; pending requests fail
+once with "connection lost"; task records are handled at the next
+`BootstrapBegin` as above. A loss *during* a bootstrap empties the mirror
+instead of leaving the part that arrived (the replica is still the previous
+session's, since its snapshot comes last in the bracket). A retry greeted
+with a mismatched protocol version ends in `Disconnected` with the mismatch
+as the status text -- the server that came back cannot be talked to, so the
+banner offers no retry. When the server sends a bare `Error` and closes
+within two seconds, the Error's text is the loss reason the banner shows;
+that is how a client evicted by a second client learns why, if the server
+says so before closing (otherwise the reason is the socket's, "End of
+file"). Inbound messages are handled before the close latch in each poll
+so such an Error is never lost to the close it explains.
 
 ## Open design questions
 
