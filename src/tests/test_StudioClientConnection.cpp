@@ -154,6 +154,15 @@ struct FakeServer
     send(encode(BootstrapEnd{}));
   }
 
+  // The prebuilt bracket, then End unless it is being held back.
+  void sendBootstrap()
+  {
+    for (const auto &m : bootstrap)
+      channel->send(Message(m));
+    if (!holdBootstrapEnd)
+      sendBootstrapEnd();
+  }
+
   void onMessage(const Message &msg)
   {
     {
@@ -162,10 +171,8 @@ struct FakeServer
     }
     switch (StudioMessageType(msg.header.type)) {
     case StudioMessageType::Hello:
-      for (const auto &m : bootstrap)
-        channel->send(Message(m));
-      if (!holdBootstrapEnd)
-        sendBootstrapEnd();
+      if (!holdBootstrap)
+        sendBootstrap();
       break;
     case StudioMessageType::Ping:
       if (!silent)
@@ -179,6 +186,7 @@ struct FakeServer
   int helloVersion{PROTOCOL_VERSION};
   std::shared_ptr<vsr::network::NetworkServer> channel;
   std::vector<Message> bootstrap; // sent on the client's Hello, in order
+  std::atomic<bool> holdBootstrap{false}; // answer Hello with nothing at all
   std::atomic<bool> holdBootstrapEnd{false};
   std::atomic<bool> silent{false};
   std::atomic<int> accepts{0};
@@ -424,6 +432,50 @@ SCENARIO("ServerConnection watches liveness", "[StudioClient]")
             == std::vector<ConnectionState>{ConnectionState::Connected,
                 ConnectionState::Lost,
                 ConnectionState::Connected});
+      }
+    }
+  }
+
+  GIVEN("a connected client whose server falls silent and comes back late")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+    f.server.silent = true;
+    REQUIRE(pollUntil(f.connection,
+        [&] { return f.connection.state() == ConnectionState::Lost; }));
+    REQUIRE(f.mirrorHasGeometry());
+
+    WHEN("the reconnect is greeted but its bootstrap has not started")
+    {
+      f.server.holdBootstrap = true;
+      f.server.silent = false;
+      REQUIRE(pollUntil(f.connection, [&] {
+        return f.connection.state() == ConnectionState::Connected
+            && f.server.count(StudioMessageType::Hello) == 2;
+      }));
+      REQUIRE(f.bootstraps == 1);
+      REQUIRE_FALSE(f.connection.bootstrapping());
+
+      THEN("an edit to the frozen mirror emits nothing")
+      {
+        auto geometry = f.mirror.getObject<vsr::scene::Geometry>(0);
+        REQUIRE(geometry);
+        geometry->setParameter("radius", 0.9f);
+        pollFor(f.connection, 50ms);
+        REQUIRE(f.server.count(StudioMessageType::SetObjectParameter) == 0);
+
+        AND_THEN("edits flow again once the bootstrap has completed")
+        {
+          f.server.sendBootstrap();
+          REQUIRE(f.waitConnectedAndBootstrapped(2));
+          auto rebuilt = f.mirror.getObject<vsr::scene::Geometry>(0);
+          REQUIRE(rebuilt);
+          rebuilt->setParameter("radius", 0.6f);
+          REQUIRE(pollUntil(f.connection, [&] {
+            return f.server.count(StudioMessageType::SetObjectParameter) == 1;
+          }));
+        }
       }
     }
   }
