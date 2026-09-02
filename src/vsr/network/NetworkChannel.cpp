@@ -133,11 +133,14 @@ void NetworkChannel::stop_messaging()
 {
   try {
     m_messagingActive.store(false);
-    fail_pending_writes(asio::error::operation_aborted);
-    close_socket(asio::error::operation_aborted);
+    // The IO thread goes first: it may be closing this very socket after a
+    // read error, and asio does not survive two threads closing one socket.
+    // Once it is joined the close below is the only party touching it.
     m_io_context.stop();
     if (m_io_thread.joinable())
       m_io_thread.join();
+    fail_pending_writes(asio::error::operation_aborted);
+    close_socket(asio::error::operation_aborted);
     m_work.reset();
 
     // Run the completions the stop cut off (aborted reads and writes on the
