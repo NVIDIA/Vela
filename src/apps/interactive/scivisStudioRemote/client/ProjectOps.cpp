@@ -6,6 +6,7 @@
 #include "vsr/core/Logging.hpp"
 // std
 #include <algorithm>
+#include <cctype>
 #include <utility>
 
 namespace vsr::scivis_studio::client {
@@ -22,6 +23,24 @@ std::string quoted(const std::string &text)
 std::string quoted(const std::filesystem::path &path)
 {
   return quoted(path.generic_string());
+}
+
+// `word` occurs in `text` bounded by non-identifier characters, so that
+// "LoadDataset" is not found inside "LoadDatasetArchive".
+bool containsWord(const std::string &text, const std::string &word)
+{
+  const auto isIdent = [](char c) {
+    return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+  };
+  for (auto pos = text.find(word); pos != std::string::npos;
+      pos = text.find(word, pos + 1)) {
+    const bool startsWord = pos == 0 || !isIdent(text[pos - 1]);
+    const auto end = pos + word.size();
+    const bool endsWord = end == text.size() || !isIdent(text[end]);
+    if (startsWord && endsWord)
+      return true;
+  }
+  return false;
 }
 
 } // namespace
@@ -48,6 +67,7 @@ ProjectOps::ProjectOps(Sender sender) : m_sender(std::move(sender)) {}
 // Generic sends //////////////////////////////////////////////////////////////
 
 RequestHandle ProjectOps::submit(uint64_t requestId,
+    StudioMessageType type,
     vsr::network::Message &&msg,
     ReplyCallback callback,
     std::string taskLabel)
@@ -58,13 +78,23 @@ RequestHandle ProjectOps::submit(uint64_t requestId,
   if (!sent) {
     if (callback) {
       m_undeliverable.push_back(makeErrorReply(requestId, "not connected"));
-      m_pending.push_back(Pending{requestId, std::move(callback), {}});
+      m_pending.push_back(Pending{requestId, type, std::move(callback), {}});
     }
     return handle;
   }
   m_pending.push_back(
-      Pending{requestId, std::move(callback), std::move(taskLabel)});
+      Pending{requestId, type, std::move(callback), std::move(taskLabel)});
   return handle;
+}
+
+std::optional<ProjectOps::Pending> ProjectOps::takePending(uint64_t requestId)
+{
+  auto *found = findPending(requestId);
+  if (!found)
+    return {};
+  Pending entry = std::move(*found);
+  m_pending.erase(m_pending.begin() + (found - m_pending.data()));
+  return entry;
 }
 
 ProjectOps::Pending *ProjectOps::findPending(uint64_t requestId)
@@ -526,9 +556,8 @@ void ProjectOps::handleReply(const ProjectOpReply &reply)
 {
   // Take the entry out before running anything: the callback may send again.
   Pending entry;
-  if (auto *found = findPending(reply.requestId)) {
-    entry = std::move(*found);
-    m_pending.erase(m_pending.begin() + (found - m_pending.data()));
+  if (auto taken = takePending(reply.requestId)) {
+    entry = std::move(*taken);
   } else {
     vsr::core::logWarning("[ProjectOps] reply to unknown request %llu (%s)",
         static_cast<unsigned long long>(reply.requestId),
@@ -571,6 +600,24 @@ void ProjectOps::handleTaskFailed(const TaskFailed &failed)
   TaskRecord &record = recordFor(failed.taskId);
   record.state = TaskState::Failed;
   record.error = failed.error;
+}
+
+bool ProjectOps::failOldestNamed(const std::string &message)
+{
+  auto it = std::find_if(m_pending.begin(), m_pending.end(), [&](const auto &p) {
+    return containsWord(message, toString(p.type));
+  });
+  if (it == m_pending.end())
+    return false;
+  const auto requestId = it->requestId;
+  vsr::core::logWarning("[ProjectOps] request %llu (%s) refused: %s",
+      static_cast<unsigned long long>(requestId),
+      toString(it->type),
+      message.c_str());
+  auto entry = takePending(requestId);
+  if (entry && entry->callback)
+    entry->callback(makeErrorReply(requestId, message));
+  return true;
 }
 
 void ProjectOps::failAllPending(const std::string &error)

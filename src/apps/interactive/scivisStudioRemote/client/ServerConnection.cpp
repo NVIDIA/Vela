@@ -555,6 +555,10 @@ void ServerConnection::handleMessage(const vsr::network::Message &msg)
       vsr::core::logError("[ServerConnection] undecodable Error payload");
       return;
     }
+    // A refusal that names a request type is that request's answer (the
+    // server could not read its id); anything else is for the banner.
+    if (m_projectOps->failOldestNamed(error->message))
+      return;
     vsr::core::logError(
         "[ServerConnection] server error: %s", error->message.c_str());
     if (onServerError)
