@@ -267,6 +267,12 @@ struct ProjectOps
 
   // Matches the reply to its callback and registers a started task.
   void handleReply(const protocol::ProjectOpReply &reply);
+  // A bare Error from the server that names a request type ("malformed
+  // CreateShot payload", "Pick is not implemented ...") retires the oldest
+  // pending request of that type with `message` as its error; true when one
+  // was. Servers answer such requests with a ProjectOpReply when the payload
+  // carried an id; this covers the ones that cannot.
+  bool failOldestNamed(const std::string &message);
   // Task events create a record when the task is unknown (a task-status
   // replay during bootstrap, or one another client launched).
   void handleTaskProgress(const protocol::TaskProgress &progress);
@@ -283,14 +289,18 @@ struct ProjectOps
   struct Pending
   {
     uint64_t requestId{0};
+    protocol::StudioMessageType type{};
     ReplyCallback callback;
     std::string taskLabel;
   };
 
   RequestHandle submit(uint64_t requestId,
+      protocol::StudioMessageType type,
       vsr::network::Message &&msg,
       ReplyCallback callback,
       std::string taskLabel);
+  // Takes the entry out of the pending list, if it is there.
+  std::optional<Pending> takePending(uint64_t requestId);
   TaskRecord &recordFor(uint64_t taskId);
   Pending *findPending(uint64_t requestId);
   const Pending *findPending(uint64_t requestId) const;
@@ -323,6 +333,7 @@ inline RequestHandle ProjectOps::send(
 {
   req.requestId = m_nextRequestId++;
   return submit(req.requestId,
+      Req::MESSAGE_TYPE,
       protocol::encode(req),
       std::move(callback),
       std::move(taskLabel));

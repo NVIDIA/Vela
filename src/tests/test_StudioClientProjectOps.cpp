@@ -15,6 +15,7 @@
 #include "ProjectOpReply.h"
 #include "ProjectRequests.h"
 #include "ProjectSnapshot.h"
+#include "SessionMessages.h"
 #include "ShotRigRequests.h"
 #include "StudioCodec.h"
 #include "StudioProtocol.h"
@@ -238,6 +239,93 @@ SCENARIO("ProjectOps matches replies to requests by id", "[StudioClient]")
       {
         REQUIRE(pollUntil(f.connection, [&] { return !f.ops().pending(h1); }));
         REQUIRE(first.count() == 0);
+      }
+    }
+  }
+}
+
+SCENARIO("ProjectOps retires a request a bare Error names", "[StudioClient]")
+{
+  GIVEN("a connected client with a shot and a dataset request in flight")
+  {
+    Fixture f;
+    std::vector<std::string> bannerErrors;
+    f.connection.onServerError = [&](const std::string &m) {
+      bannerErrors.push_back(m);
+    };
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+
+    Recorded shot, rename;
+    const auto hShot = f.ops().send(CreateShot{}, shot.recorder());
+    RenameDataset renameReq;
+    renameReq.datasetId = "dataset_0001";
+    renameReq.newName = "pressure";
+    const auto hRename = f.ops().send(renameReq, rename.recorder());
+    REQUIRE(f.waitForRequests(2));
+
+    WHEN("the server refuses one by type with a bare Error")
+    {
+      Error error;
+      error.message = "malformed RenameDataset payload";
+      f.server.send(encode(error));
+
+      THEN("only that request fails, once, with the server's text")
+      {
+        REQUIRE(pollUntil(f.connection, [&] { return rename.count() == 1; }));
+        REQUIRE_FALSE(rename.replies[0].ok);
+        REQUIRE(rename.replies[0].requestId == hRename.requestId);
+        REQUIRE(rename.replies[0].error == "malformed RenameDataset payload");
+        REQUIRE(shot.count() == 0);
+        REQUIRE(f.ops().pending(hShot));
+        REQUIRE_FALSE(f.ops().pending(hRename));
+        REQUIRE(bannerErrors.empty());
+
+        AND_THEN("a late reply to it is noise")
+        {
+          f.server.send(encode(makeOkReply(hRename.requestId)));
+          pollFor(f.connection, 50ms);
+          REQUIRE(rename.count() == 1);
+        }
+      }
+    }
+
+    WHEN("the Error names a type nothing pending has, or a longer name")
+    {
+      Error unrelated;
+      unrelated.message = "Pick is not implemented in this server";
+      f.server.send(encode(unrelated));
+      Error longer;
+      longer.message = "malformed CreateShotArchive payload";
+      f.server.send(encode(longer));
+
+      THEN("both requests stay pending and the banner hears the errors")
+      {
+        REQUIRE(pollUntil(f.connection, [&] { return bannerErrors.size() == 2; }));
+        REQUIRE(bannerErrors[0] == unrelated.message);
+        REQUIRE(bannerErrors[1] == longer.message);
+        REQUIRE(shot.count() == 0);
+        REQUIRE(rename.count() == 0);
+        REQUIRE(f.ops().pendingCount() == 2);
+      }
+    }
+
+    WHEN("two requests of one type are pending and an Error names it")
+    {
+      Recorded secondShot;
+      const auto hShot2 = f.ops().send(CreateShot{}, secondShot.recorder());
+      REQUIRE(f.waitForRequests(3));
+      Error error;
+      error.message = "malformed CreateShot payload";
+      f.server.send(encode(error));
+
+      THEN("the oldest one is the one retired")
+      {
+        REQUIRE(pollUntil(f.connection, [&] { return shot.count() == 1; }));
+        REQUIRE(shot.replies[0].requestId == hShot.requestId);
+        REQUIRE(secondShot.count() == 0);
+        REQUIRE(f.ops().pending(hShot2));
+        REQUIRE(f.ops().pending(hRename));
       }
     }
   }
