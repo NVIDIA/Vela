@@ -36,6 +36,7 @@ add_executable(scivisStudioClient
   windows/CameraRigEditor.cpp
   windows/DatasetEditor.cpp
   windows/EditorWindow.cpp
+  windows/HistogramPanel.cpp
   windows/LightRigEditor.cpp
   windows/ProjectWindow.cpp
   windows/ShotEditor.cpp
