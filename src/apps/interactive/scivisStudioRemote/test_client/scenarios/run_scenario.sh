@@ -10,7 +10,9 @@
 # <tmp>` (plus any extra server args) in a temporary directory, waits for it
 # to listen, runs the client with `--script <scenario>` from that directory
 # (so relative save-frame paths land there), and exits with the client's exit
-# code. The server is always stopped; on failure both logs are printed.
+# code. The server is always stopped. On success the temporary directory is
+# removed; on failure both logs are printed and the directory is kept for a
+# post-mortem, its path in the output.
 #
 # Exit 77 (ctest's SKIP_RETURN_CODE for these tests) when the server cannot
 # load any ANARI device, so a tree without helide skips instead of failing.
@@ -153,7 +155,12 @@ log "scenario $name on port $port (work dir $work)"
 start_server
 status=$?
 if [ $status -ne 0 ]; then
-  [ $status -eq 77 ] || dump_logs
+  if [ $status -eq 77 ]; then
+    rm -rf "$work"
+  else
+    dump_logs
+    log "work dir kept: $work"
+  fi
   exit $status
 fi
 
@@ -188,6 +195,7 @@ if [ -n "$kill_after" ]; then
       wait "$client_pid" 2>/dev/null
       client_pid=""
       dump_logs
+      log "work dir kept: $work"
       exit 1
     fi
   fi
@@ -201,11 +209,13 @@ client_pid=""
 # and session logs on its stderr only matter when something went wrong.
 cat "$client_log"
 
+stop_server
 if [ $client_status -ne 0 ]; then
   log "client exited with $client_status"
   dump_logs
+  log "work dir kept: $work"
 else
   log "client exited with 0"
+  rm -rf "$work"
 fi
-stop_server
 exit $client_status

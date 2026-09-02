@@ -165,13 +165,16 @@ scivisStudioTestClient --port 12345 --script test_client/scenarios/session.studi
 scivisStudioTestClient --port 12345 -e "connect; start-rendering; await-frame 3; dump-frame; shutdown"
 ```
 
-Or let `scenarios/run_scenario.sh` do it: it picks a free port, starts the
-server with `--library helide --data-root <mktemp -d>` in a temporary
-directory (where `save-frame` files land), waits for its `Listening on port`
-line, runs the client with `--script`, propagates the client's exit code,
-always stops the server, and prints both logs on failure. Extra arguments go
-to the server after `--library helide --data-root <tmp>` (a `--project`, say);
-do not pass `--port`, the runner owns it.
+Or let `scenarios/run_scenario.sh` do it: it picks a free port (picking again
+when another process grabs it before the server binds), starts the server
+with `--library helide --data-root <mktemp -d>` in a temporary directory
+(where `save-frame` files land), waits for its `Listening on port` line, runs
+the client with `--script`, propagates the client's exit code, and always
+stops the server. On success the temporary directory is removed; on failure
+both logs are printed and the directory is kept, its path in the output, for
+a post-mortem. Extra arguments go to the server after `--library helide
+--data-root <tmp>` (a `--project`, say); do not pass `--port`, the runner owns
+it.
 
 ```bash
 test_client/scenarios/run_scenario.sh build/scivisStudioServer \
