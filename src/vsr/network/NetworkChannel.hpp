@@ -58,6 +58,11 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
   //// Send messages ////
 
   MessageFuture send(Message &&msg);
+  // IO thread only. Writes `msg` on the socket right now, without blocking:
+  // a farewell before a close the caller is about to make. Best effort --
+  // false when the socket is closed, when a queued write is under way
+  // (interleaving would corrupt the stream) or when the kernel would block.
+  bool sendImmediately(const Message &msg);
   MessageFuture send(uint8_t type, StructuredMessage &&msg);
 
   /* No payload */
@@ -113,6 +118,8 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
     std::shared_ptr<std::atomic<bool>> completed;
   };
 
+  // Header and payload as they go on the wire.
+  static std::vector<std::byte> frame(const Message &msg);
   void enqueue_write(std::shared_ptr<PendingWrite> pending);
   void start_next_write();
   void complete_write(const std::shared_ptr<PendingWrite> &pending,
@@ -148,11 +155,18 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
  */
 struct NetworkServer : public NetworkChannel
 {
+  using ReplaceHandler = std::function<void()>;
+
   NetworkServer(short port);
   ~NetworkServer() override = default;
 
   // The port actually bound; differs from the constructor argument for 0.
   unsigned short port() const;
+
+  // Runs on the IO thread when a new connection is about to replace a live
+  // one, before the old socket closes; a last sendImmediately() to the
+  // client being replaced belongs here. Set before start().
+  void setReplaceHandler(ReplaceHandler handler);
 
   void start();
   void restart(); // must be running already
@@ -166,6 +180,7 @@ struct NetworkServer : public NetworkChannel
 
   tcp::acceptor m_acceptor;
   std::atomic<bool> m_acceptPending{false};
+  ReplaceHandler m_replaceHandler;
 };
 
 /*

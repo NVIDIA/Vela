@@ -314,6 +314,13 @@ no control stays greyed until the connection is lost. `PROTOCOL_VERSION` is
   render left. Endings delivered live during a session are replayed once
   more at the next bootstrap (the history is "since the last bootstrap"),
   which the clients treat as idempotent.
+- **Second client.** One client per server: a connection accepted over a
+  live session replaces it. The replaced client is sent `Error{"replaced by
+  another client"}` right before its socket closes
+  (`NetworkServer::setReplaceHandler` + `sendImmediately`, a non-blocking
+  write on the IO thread) so its banner can name the reason; best effort --
+  when a Frame is mid-write on a slow link the farewell is skipped and the
+  client sees the plain close.
 - **UI state round trip.** The server keeps the `{windows, layout,
   settings}` tree of the project it opened: from `--project` at startup
   (`setupProject` reads it with the same out-params the dispatcher uses),
