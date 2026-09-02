@@ -731,11 +731,13 @@ void Application::watchTasks()
     const auto *announced = m_announcedTasks.at(task.taskId);
     if (announced && *announced == task.state)
       continue;
-    m_announcedTasks[task.taskId] = task.state;
     // The client failed a stale record itself at BootstrapBegin; the banner
-    // already said the connection was lost, and the replay may yet revive it.
+    // already said the connection was lost, and the replay may yet revive
+    // it. Its Failed is not recorded as announced, so the ending the replay
+    // brings (Failed again, with the server's reason) still toasts.
     if (task.stale)
       continue;
+    m_announcedTasks[task.taskId] = task.state;
     const std::string label = task.label.empty() ? "<task>" : task.label;
     if (task.state == TaskState::Completed) {
       std::string text = label + " completed";
@@ -786,7 +788,11 @@ void Application::onStateChanged(ConnectionState from, ConnectionState to)
   vsr::core::logStatus("[Client] %s -> %s", toString(from), toString(to));
   switch (to) {
   case ConnectionState::Connected:
-    m_panelsReadOnly = false;
+    // Hello answered, bootstrap still to come -- as long as the render a
+    // busy server finishes first. What is on screen until BootstrapBegin is
+    // the previous session's mirror, so the panels stay locked (like the
+    // editors, EditorContext::canSend) until onBootstrapComplete.
+    m_panelsReadOnly = true;
     break;
   case ConnectionState::Lost:
     // Freeze in place: mirror, replica and last frame stay; edits stop.
