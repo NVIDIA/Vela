@@ -493,8 +493,7 @@ vsr::scene::LayerNodeRef ProjectContext::addLightToRig(
   if (!rigRoot)
     return {};
 
-  const auto lightSubtype =
-      subtype.empty() ? std::string("directional") : subtype;
+  const auto lightSubtype = light_rig::resolveLightSubtype(subtype);
   auto light = m_ctx->vsr.scene.createObject<vsr::scene::Light>(lightSubtype);
   const auto lightName =
       lightSubtype + "Light_" + std::to_string(light->index());
@@ -813,7 +812,7 @@ LightRig *ProjectContext::ensureDefaultLightRig()
   if (!rig)
     return nullptr;
 
-  addLightToRig(*rig, "directional");
+  addLightToRig(*rig, light_rig::LIGHT_SUBTYPES.front().subtype);
   if (auto root = resolveLightRigRoot(*rig)) {
     auto *layer = (*root)->layer();
     layer->traverse(root, [&](auto &node, int) {

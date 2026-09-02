@@ -12,7 +12,6 @@
 #include "vsr/core/Logging.hpp"
 // std
 #include <algorithm>
-#include <array>
 #include <filesystem>
 #include <optional>
 #include <utility>
@@ -23,10 +22,6 @@ using namespace protocol;
 using vsr::network::Message;
 
 namespace {
-
-// The ANARI light subtypes the monolith's Light Rig editor offers.
-constexpr std::array<const char *, 5> LIGHT_SUBTYPES = {
-    "directional", "point", "quad", "spot", "ring"};
 
 template <typename T>
 std::optional<ProjectRequest> decodeAs(const Message &msg)
@@ -786,15 +781,11 @@ void ProjectOpDispatcher::handle(const AddLightToRig &req)
     fail(req.requestId, "light rig not found");
     return;
   }
-  const auto subtype =
-      req.subtype.empty() ? std::string("directional") : req.subtype;
-  if (std::none_of(LIGHT_SUBTYPES.begin(),
-          LIGHT_SUBTYPES.end(),
-          [&](const char *known) { return subtype == known; })) {
-    fail(req.requestId, "unknown light subtype '" + subtype + "'");
+  if (!light_rig::isKnownLightSubtype(req.subtype)) {
+    fail(req.requestId, "unknown light subtype '" + req.subtype + "'");
     return;
   }
-  auto node = context().addLightToRig(*rig, subtype);
+  auto node = context().addLightToRig(*rig, req.subtype);
   if (!node) {
     fail(req.requestId, "light rig has no scene node");
     return;

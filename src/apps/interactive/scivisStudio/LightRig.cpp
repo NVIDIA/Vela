@@ -6,8 +6,23 @@
 #include "Project.h"
 
 #include <algorithm>
+#include <string>
 
 namespace vsr::scivis_studio::light_rig {
+
+std::string resolveLightSubtype(std::string_view requested)
+{
+  return std::string(
+      requested.empty() ? LIGHT_SUBTYPES.front().subtype : requested);
+}
+
+bool isKnownLightSubtype(std::string_view requested)
+{
+  const auto subtype = resolveLightSubtype(requested);
+  return std::any_of(LIGHT_SUBTYPES.begin(),
+      LIGHT_SUBTYPES.end(),
+      [&](const LightSubtype &known) { return subtype == known.subtype; });
+}
 
 LightRigID nextLightRigId(const Project &project)
 {
