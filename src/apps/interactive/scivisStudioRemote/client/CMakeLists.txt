@@ -7,6 +7,7 @@
 add_library(vsr_scivis_studio_client_core OBJECT
   MirrorUpdateDelegate.cpp
   ProjectOps.cpp
+  ReplicaView.cpp
   ServerConnection.cpp
 )
 
