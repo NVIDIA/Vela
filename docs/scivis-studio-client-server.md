@@ -437,7 +437,8 @@ src/apps/interactive/scivisStudioRemote/
 ├── CONTEXT.md            ← wire vocabulary (SciVis Studio Remote context)
 ├── protocol/             → vsr_scivis_studio_protocol   (OBJECT library)
 ├── server/               → scivisStudioServer           (executable)
-└── client/               → scivisStudioClient           (executable)
+├── client/               → scivisStudioClient           (executable)
+└── test_client/          → scivisStudioTestClient       (executable, headless)
 ```
 
 - **Nothing moves.** `ProjectContext` and the whole project model are already
@@ -470,6 +471,51 @@ src/apps/interactive/scivisStudioRemote/
   on UI + protocol + model, so it does not). The v1 lightweight-client story
   is `-DVSR_USE_CUDA=OFF`, which already works.
 
+## Headless test client
+
+`scivisStudioTestClient` is a second, complete client with no UI: a
+command-line program that speaks the full Studio Message Set from a script so
+the server can be exercised end to end on a machine with no display, in CI,
+or by an agent working unattended. It exists so that every server-side
+milestone can be verified without launching the interactive client, and so
+the protocol has two independent client implementations.
+
+- **Its own application, not a test harness for `client/`.** It lives in
+  `test_client/`, links only `vsr_scivis_studio_protocol` (and through it the
+  transport and model types), and implements its own connection, handshake,
+  bootstrap, liveness and loss logic. It shares no code with `client/` beyond
+  the protocol library, so a bug in the GUI client's session code cannot hide
+  a server bug, and vice versa.
+- **Same client-held state.** It maintains a Structural Mirror and a Project
+  Replica exactly as the GUI client does, so scripts can assert on what the
+  server pushed (object counts, layer counts, active shot, replica fields,
+  frame headers), not just on which message types arrived.
+- **Scripted, deterministic, machine-checkable.** Commands come from a script
+  file (`--script`), inline (`-e "cmd; cmd"`), or stdin, one command per
+  line. Every wait has a deadline (`--timeout` default) and every command
+  either prints `OK <command>` or `FAIL <command>: <reason>`; server events
+  print as `EVT <name> key=value ...` lines. The process exits non-zero on
+  the first failure unless `--keep-going` is given. Output is plain text with
+  one record per line so a shell script or a reader can grep it.
+- **Command vocabulary tracks the message set.** Session (`connect`,
+  `disconnect`, `shutdown`, `ping`, `expect-pong`, `await-lost`,
+  `reconnect`), rendering (`set-frame-config`, `set-encodings`,
+  `start-rendering`, `stop-rendering`, `await-frame`, `save-frame`), scene
+  edits (`set-param`, `remove-param`, `set-node-transform`), inspection
+  (`dump-scene`, `dump-project`, `dump-layers`), assertions (`assert
+  <expr>` over a small set of named values), raw probes (`send-raw <type>
+  [payload]`, `expect-error`), and — added by the milestones that introduce
+  them — every Project Op, Server Task wait (`await-task`), Remote Browse,
+  playback, pick and shot-render command. A command that the server answers
+  with `Error` fails the script unless it was written as an expectation.
+- **Scenario scripts ship with it.** `test_client/scenarios/*.studio` cover
+  each milestone's server surface and are wired into `ctest` (a scenario
+  test launches a server on a free port with the CPU ANARI device, runs the
+  script, and checks the exit code), skipping cleanly when no device loads.
+  Each later milestone adds its scenarios here as its acceptance test.
+- **Not a load or fuzz tool.** One connection, sequential commands; no timing
+  measurement beyond deadlines. Those stay out of scope.
+
 ## Staged implementation plan
 
 Each milestone is independently landable and leaves every existing target
@@ -490,15 +536,20 @@ green; everything new sits behind `VSR_USE_NETWORKING`.
    camera/parameter edits with origin-based echo suppression, and the
    render-loop Control-State Latch from day one (it is also the thread-hazard
    fix). Ping/Pong, loss detection, freeze-and-retry client states.
-4. **Project layer.** Project Ops one-to-one with `ProjectContext`, request
+4. **Headless test client.** `scivisStudioTestClient` (see
+   [Headless test client](#headless-test-client)) with the full milestone 3
+   command surface, scenario scripts for the viewer-parity server, and their
+   `ctest` wiring. From here on every server milestone lands with the test
+   client commands and scenarios that exercise it.
+5. **Project layer.** Project Ops one-to-one with `ProjectContext`, request
    ids, `ProjectSnapshot` as commit marker, the Project Replica, Remote
    Browse + the ImGui dialog, the single-lane Server Task worker with
    progress/cancel, and the adapted editor windows against the mirrors.
-5. **Time, picking, passes.** Server free-run playback (`SetPlaying`,
+6. **Time, picking, passes.** Server free-run playback (`SetPlaying`,
    `SetTime`, `TimeAdvanceWarning`, auto-stop snapshot, frame-header time),
    `Pick` via the latch with one-frame ID channels, `SetOutline`,
    `ViewportSettings` with the relocated pass suite.
-6. **Shot rendering + hardening.** `RenderShot` as a Server Task
+7. **Shot rendering + hardening.** `RenderShot` as a Server Task
    (pause-and-refuse semantics), task-status replay in bootstrap, `Shutdown`,
    UI-state round-trip through save/open, and an end-to-end pass over the
    loss/reconnect story.
