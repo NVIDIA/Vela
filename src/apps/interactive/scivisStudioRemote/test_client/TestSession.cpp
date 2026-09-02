@@ -937,8 +937,10 @@ void TestSession::handleMessage(const Message &msg)
       m_lastReplyError = reply->error;
     } else if (const auto started = results<TaskStartedResult>(*reply)) {
       // Queued from the launch, so a loss before its first progress still
-      // leaves a record to fail.
-      taskRecord(started->taskId);
+      // leaves a record to fail. A record already under the id belongs to a
+      // task of a server process since restarted (ids count from 1 again):
+      // the new task takes it over.
+      m_tasks[started->taskId] = TaskRecord{};
     }
     m_replies[reply->requestId] = {std::move(*reply), m_snapshotsReceived};
     break;
@@ -993,14 +995,17 @@ void TestSession::handleMessage(const Message &msg)
     event.fields.emplace_back("current", std::to_string(progress->current));
     event.fields.emplace_back("total", std::to_string(progress->total));
     event.fields.emplace_back("message", quotedText(progress->message));
-    // Progress after the end would be the server's mistake; the end stands.
+    // A task ends once and the replay repeats endings, not progress, so
+    // progress for a finished record is a new task: a restarted server
+    // reusing the id, or the replay reviving one this client failed at
+    // BootstrapBegin. Either way the record starts over.
     auto &record = taskRecord(progress->taskId);
-    if (!record.finished()) {
-      record.status = TaskRecord::Status::Running;
-      ++record.progressReports;
-      record.current = progress->current;
-      record.total = progress->total;
-    }
+    if (record.finished())
+      record = TaskRecord{};
+    record.status = TaskRecord::Status::Running;
+    ++record.progressReports;
+    record.current = progress->current;
+    record.total = progress->total;
     if (m_bootstrapping)
       ++m_tasksReplayed;
     break;
@@ -1078,8 +1083,10 @@ void TestSession::handleTaskEnd(uint64_t taskId,
   record.snapshotsAtEnd = m_snapshotsReceived;
   // A replayed end may repeat one heard live before the link dropped; both
   // are messages, and both count (README: assert values).
-  ++(status == TaskRecord::Status::Completed ? m_tasksCompleted
-                                             : m_tasksFailed);
+  if (status == TaskRecord::Status::Completed)
+    ++m_tasksCompleted;
+  else
+    ++m_tasksFailed;
   if (m_bootstrapping)
     ++m_tasksReplayed;
 }

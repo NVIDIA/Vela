@@ -1942,6 +1942,43 @@ SCENARIO("the test client drives project ops against a fake server",
       }
     }
 
+    WHEN("a restarted server reuses the id of a task that finished")
+    {
+      const auto first = runScript(session,
+          "connect " + endpoint + "\n"
+          "save-project /data/p1\n"
+          "await-task\n"
+          "assert task.1.state == Completed\n"
+          "update-shot active frameCount=400\n"
+          "await-snapshot\n");
+      REQUIRE(first.ok);
+      // A kill and restart: the socket drops and the new process counts task
+      // ids from 1 again.
+      server.channel->restart();
+      server.nextTaskId = 1;
+      server.renderRunning.reset();
+      const auto reused = runScript(session,
+          "await-lost\n"
+          "reconnect\n"
+          "render-shot active\n"
+          "assert var.lastTaskId == 1\n"
+          "await-task-progress\n"
+          "assert task.1.state == Running\n"
+          "assert task.1.message == \"\"\n"
+          "cancel-task 1\n"
+          "await-task 1 expect-fail\n"
+          "assert task.1.state == Failed\n"
+          "assert task.1.message == \"cancelled\"\n"
+          "disconnect\n");
+      for (const auto &f : failLines(reused.records))
+        WARN(f);
+
+      THEN("the old record starts over with the new task")
+      {
+        REQUIRE(reused.ok);
+      }
+    }
+
     WHEN("a script misuses the prefixes, variables and waits")
     {
       const auto result = runScript(session,
