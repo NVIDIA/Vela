@@ -599,15 +599,14 @@ SCENARIO(
           "shutdown\n"
           "assert state == Disconnected\n";
       const auto result = runScript(session, script);
+      // Every branch below assumes the whole script ran; name the FAIL lines
+      // when it did not.
+      for (const auto &f : failLines(result.records))
+        WARN(f);
+      REQUIRE(result.ok);
 
       THEN("every command records OK and the events tell the story")
       {
-        const auto fails = failLines(result.records);
-        CHECK(fails.empty());
-        for (const auto &f : fails)
-          WARN(f);
-        REQUIRE(result.ok);
-
         const auto &r = result.records;
         REQUIRE(hasLineStarting(r,
             "EVT Hello version=" + std::to_string(PROTOCOL_VERSION)
