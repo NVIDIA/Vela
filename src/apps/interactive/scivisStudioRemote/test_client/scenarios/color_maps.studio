@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Color maps: a ColorMapRecord and its scene-side Array are created together,
+# so the reply names both the record id and the object (an ObjectAdded push
+# precedes it), renamed and removed as a pair.
+
+connect
+assert project.colorMaps == 0
+
+create-color-map Warm
+await-snapshot
+assert project.colorMaps == 1
+assert colorMap.$lastColorMapId.name == Warm
+# The scene-side half is an Array in the Structural Mirror, named after the
+# id in dump-scene.
+assert var.lastObjectType == array1d
+assert scene.objects >= 6
+dump-scene
+
+# A second one; names are unique per collection.
+create-color-map Cool
+await-snapshot
+assert project.colorMaps == 2
+expect-fail rename-color-map $lastColorMapId Warm
+
+rename-color-map $lastColorMapId "Cool Blue"
+await-snapshot
+assert colorMap.$lastColorMapId.name == "Cool Blue"
+
+remove-color-map $lastColorMapId
+await-snapshot
+assert project.colorMaps == 1
+expect-fail remove-color-map $lastColorMapId
+expect-fail rename-color-map $lastColorMapId Gone
+
+dump-project
+disconnect

@@ -19,6 +19,11 @@
 # A port another process grabs between the pick and the server's bind is
 # picked again, a few times.
 #
+# A scenario whose opening comment block holds `# runner: fixture <path>`
+# (relative to the scenario file; repeatable) gets that file copied into the
+# data root before the server starts, so a script can import it as
+# `$dataRoot/<basename>` without writing anything itself.
+#
 # A scenario whose opening comment block holds `# runner: kill-restart-after
 # <n>` is run in kill-restart mode: after the client has printed <n> `OK`
 # records the server is killed (SIGKILL, the "process went away" case), and a
@@ -57,14 +62,25 @@ client_err=$work/client-stderr.log
 server_pid=""
 client_pid=""
 
-# The runner hint, if any, anywhere in the comment block that opens the file
+# The runner hints, if any, anywhere in the comment block that opens the file
 # (so the SPDX header can come first).
+opening=$(sed -n '/^#/!q;p' "$scenario")
 kill_after=""
-hint=$(sed -n '/^#/!q;p' "$scenario" \
+hint=$(echo "$opening" \
   | grep -E -m1 '^#[[:space:]]*runner:[[:space:]]*kill-restart-after[[:space:]]+[0-9]+' || true)
 if [ -n "$hint" ]; then
   kill_after=$(echo "$hint" | sed -E 's/.*kill-restart-after[[:space:]]+([0-9]+).*/\1/')
 fi
+scenario_dir=$(dirname "$scenario")
+while read -r fixture; do
+  [ -n "$fixture" ] || continue
+  if [ ! -r "$scenario_dir/$fixture" ]; then
+    echo "fixture not readable: $scenario_dir/$fixture" >&2
+    exit 2
+  fi
+  cp "$scenario_dir/$fixture" "$data_root/"
+done < <(echo "$opening" \
+  | sed -n -E 's/^#[[:space:]]*runner:[[:space:]]*fixture[[:space:]]+([^[:space:]]+).*/\1/p')
 
 log() { echo "[run_scenario] $*" >&2; }
 
