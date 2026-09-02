@@ -5,8 +5,10 @@
 
 // vsr_scivis_studio_protocol
 #include "FrameMessages.h"
+#include "PlaybackMessages.h"
 #include "ProjectOpReply.h"
 #include "StudioCodec.h"
+#include "ViewportMessages.h"
 // vsr_scivis_studio_model
 #include "Dataset.h"
 // vsr_network
@@ -130,7 +132,11 @@ size_t totalObjects(const vsr::scene::Scene &scene);
  * session keeps every ProjectOpReply by request id, applies every Project
  * Snapshot to the replica, and tracks each Server Task's progress and end, so
  * a caller can wait on state rather than on the order messages happen to
- * arrive in.
+ * arrive in. Picks share the id space: every PickReply is kept by request id
+ * too. Time in motion is read off the Frame headers: the session counts the
+ * frames whose `frame` differed from the previous one (and the largest
+ * forward step between two consecutive headers), and keeps the newest
+ * TimeAdvanceWarning.
  *
  * Threading: every public member runs on the caller's thread. The network
  * handlers run on the channel's IO thread and only queue messages (Frames
@@ -178,6 +184,12 @@ struct TestSession
   const vsr::network::Message &lastFrame() const;
   // Frames poll() consumed (frames the slot dropped are not counted).
   size_t framesReceived() const;
+  // Consumed frames whose header `frame` differed from the previous one's
+  // (the first frame counts as none), and the largest forward step between
+  // two consecutive headers. A step backwards (a loop wrap to 0, a scrub) is
+  // time moving on purpose, not a skip, so it does not count as a step.
+  size_t framesAdvanced() const;
+  int frameMaxStep() const;
   size_t errorsReceived() const;
   const std::string &lastError() const;
   // Why the last connect attempt failed or the link was Lost.
@@ -203,6 +215,14 @@ struct TestSession
   size_t tasksFailed() const;
   // Project Snapshots applied so far, the Bootstrap's included.
   size_t snapshotsReceived() const;
+  // The error text of the newest reply with ok == false; empty until one.
+  const std::string &lastReplyError() const;
+  // The PickReply to that request id; null until it arrives, and once the
+  // session is Disconnected.
+  const protocol::PickReply *pickReply(uint64_t requestId) const;
+  // TimeAdvanceWarnings received, and the newest one (empty until the first).
+  size_t warningsReceived() const;
+  const std::optional<protocol::TimeAdvanceWarning> &lastWarning() const;
 
   // Session //
 
@@ -328,6 +348,8 @@ struct TestSession
   std::optional<protocol::FrameHeader> m_lastFrameHeader;
   vsr::network::Message m_lastFrame;
   size_t m_framesReceived{0};
+  size_t m_framesAdvanced{0};
+  int m_frameMaxStep{0};
   size_t m_errorsReceived{0};
   std::string m_lastError;
   uint64_t m_nextRequestId{1};
@@ -338,6 +360,10 @@ struct TestSession
   };
   vsr::core::FlatMap<uint64_t, ReceivedReply> m_replies;
   size_t m_repliesFailed{0};
+  std::string m_lastReplyError;
+  vsr::core::FlatMap<uint64_t, protocol::PickReply> m_pickReplies;
+  size_t m_warningsReceived{0};
+  std::optional<protocol::TimeAdvanceWarning> m_lastWarning;
   vsr::core::FlatMap<uint64_t, TaskRecord> m_tasks;
   size_t m_tasksCompleted{0};
   size_t m_tasksFailed{0};
