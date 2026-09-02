@@ -173,6 +173,10 @@ struct StudioServer
   void requestClose(
       const std::string &reason, vsr::network::MessageFuture farewell = {});
   void replyError(const std::string &text);
+  // Refuses a request the server cannot serve: a ProjectOpReply{ok=false}
+  // when the payload carries a non-zero requestId (so the sender can retire
+  // it), a bare Error otherwise.
+  void refuseRequest(const vsr::network::Message &msg, const std::string &text);
 
   // Loop thread
   void applyControlState();
