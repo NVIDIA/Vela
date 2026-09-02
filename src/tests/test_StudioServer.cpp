@@ -139,24 +139,24 @@ void TestClient::clear()
 // failed REQUIRE never leaves a joinable thread behind.
 struct ServerLoop
 {
-  explicit ServerLoop(StudioServer &server);
+  explicit ServerLoop(StudioServer *server);
   ~ServerLoop();
 
-  StudioServer &server;
+  StudioServer *server{nullptr};
   std::atomic<bool> finished{false};
   std::thread thread;
 };
 
-ServerLoop::ServerLoop(StudioServer &server)
-    : server(server), thread([this, &server] {
-        server.run();
+ServerLoop::ServerLoop(StudioServer *server)
+    : server(server), thread([this] {
+        this->server->run();
         finished.store(true);
       })
 {}
 
 ServerLoop::~ServerLoop()
 {
-  server.requestShutdown();
+  server->requestShutdown();
   thread.join();
 }
 
@@ -308,7 +308,7 @@ SCENARIO("StudioServer runs a viewer-parity session", "[StudioServer]")
     REQUIRE(cameraIndex != VSR_INVALID_INDEX);
     const SceneObjectRef cameraRef{ANARI_CAMERA, cameraIndex};
 
-    ServerLoop loop(server);
+    ServerLoop loop(&server);
 
     WHEN("a client connects and answers the Hello")
     {
