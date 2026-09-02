@@ -16,18 +16,28 @@
 #include "FrameMessages.h"
 #include "ProjectOpReply.h"
 #include "TaskMessages.h"
+#include "ViewportMessages.h"
 // vsr_scivis_studio_model
 #include "Project.h"
+#include "Shot.h"
 // vsr_scene
 #include "vsr/scene/Scene.hpp"
 #include "vsr/scene/UpdateDelegate.hpp"
+#include "vsr/scene/objects/Array.hpp"
+// vsr_core
+#include "vsr/core/VSRMath.hpp"
 // std
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <string>
 #include <system_error>
@@ -242,6 +252,143 @@ std::vector<TaskState> waitForTaskEnd(Client &client, const uint64_t &taskId)
       },
       E2E_TIMEOUT);
   return states;
+}
+
+// Polls until `n` more Frames were taken; false on timeout.
+bool waitForFrames(Client &client, size_t n)
+{
+  size_t taken = 0;
+  return pollUntil(
+      client.connection,
+      [&] {
+        vsr::network::Message msg;
+        if (client.connection.takeLatestFrame(msg))
+          taken++;
+        return taken >= n;
+      },
+      E2E_TIMEOUT);
+}
+
+// The header frames of the Frames taken while polling, one entry per change
+// of frame, until `advances` changes were seen or the wait timed out. The
+// client slot is latest-wins, so a client slower than the stream could see
+// steps the server never took; the polls here run far faster than the
+// shots' fps ceilings.
+std::vector<int> collectFrameAdvances(Client &client, size_t advances)
+{
+  std::vector<int> frames;
+  pollUntil(
+      client.connection,
+      [&] {
+        vsr::network::Message msg;
+        if (!client.connection.takeLatestFrame(msg))
+          return false;
+        const auto &header = client.connection.lastFrameHeader();
+        if (!header)
+          return false;
+        if (frames.empty() || frames.back() != header->frame)
+          frames.push_back(header->frame);
+        return frames.size() > advances;
+      },
+      E2E_TIMEOUT);
+  return frames;
+}
+
+// Polls until `replaced` (the caller's onProjectReplaced count) reaches
+// `target`; false on timeout.
+bool waitForSnapshots(Client &client, const int &replaced, int target)
+{
+  return pollUntil(
+      client.connection, [&] { return replaced >= target; }, E2E_TIMEOUT);
+}
+
+// The active shot as the replica holds it.
+const Shot &activeReplicaShot(Client &client)
+{
+  const auto *project = client.connection.project();
+  REQUIRE(project);
+  const auto *shot = project::activeShot(*project);
+  REQUIRE(shot);
+  return *shot;
+}
+
+// Sends UpdateShot with `edit` applied to the replica's active shot and waits
+// for its reply and snapshot.
+void updateActiveShot(
+    Client &client, int &replaced, const std::function<void(Shot &)> &edit)
+{
+  Shot shot = activeReplicaShot(client);
+  edit(shot);
+  std::vector<ProjectOpReply> replies;
+  const int snapshots = replaced;
+  client.connection.projectOps().updateShot(
+      shot, [&](const ProjectOpReply &r) { replies.push_back(r); });
+  REQUIRE(pollUntil(
+      client.connection, [&] { return replies.size() == 1; }, E2E_TIMEOUT));
+  REQUIRE(replies[0].ok);
+  REQUIRE(waitForSnapshots(client, replaced, snapshots + 1));
+}
+
+// Sends SetPlaying for the active shot; the reply must be ok.
+void setPlaying(Client &client, bool playing)
+{
+  std::vector<ProjectOpReply> replies;
+  client.connection.projectOps().setPlaying(activeReplicaShot(client).id,
+      playing,
+      [&](const ProjectOpReply &r) { replies.push_back(r); });
+  REQUIRE(pollUntil(
+      client.connection, [&] { return replies.size() == 1; }, E2E_TIMEOUT));
+  REQUIRE(replies[0].ok);
+}
+
+// Sends a Pick and waits for its reply.
+PickReply pick(Client &client, int x, int y)
+{
+  std::optional<PickReply> reply;
+  bool answered = false;
+  client.connection.projectOps().pick(
+      x, y, [&](const std::optional<PickReply> &r) {
+        reply = r;
+        answered = true;
+      });
+  REQUIRE(pollUntil(client.connection, [&] { return answered; }, E2E_TIMEOUT));
+  REQUIRE(reply);
+  return *reply;
+}
+
+// Imports `mesh` as a static dataset and waits for the task to complete.
+void importMesh(Client &client, const std::filesystem::path &mesh)
+{
+  uint64_t taskId = 0;
+  client.connection.projectOps().importStaticDataset("Triangle",
+      mesh,
+      vsr::io::ImporterType::OBJ,
+      false,
+      [&](const ProjectOpReply &r,
+          const std::optional<TaskStartedResult> &started) {
+        REQUIRE(r.ok);
+        REQUIRE(started);
+        taskId = started->taskId;
+      });
+  const auto states = waitForTaskEnd(client, taskId);
+  REQUIRE(taskId != 0);
+  REQUIRE_FALSE(states.empty());
+  REQUIRE(states.back() == TaskState::Completed);
+}
+
+// The mirror's first array of `elementType`, if any.
+std::optional<SceneObjectRef> findArray(
+    const vsr::scene::Scene &scene, anari::DataType elementType)
+{
+  for (size_t i = 0; i < scene.numberOfObjects(ANARI_ARRAY); ++i) {
+    const auto *obj = scene.getObject(ANARI_ARRAY, i);
+    if (!obj)
+      continue;
+    if (static_cast<const vsr::scene::Array *>(obj)->elementType()
+        == elementType)
+      return SceneObjectRef{ANARI_ARRAY, i};
+  }
+  return {};
 }
 
 } // namespace
@@ -623,6 +770,328 @@ SCENARIO("scivisStudioServer and the client core run a session end to end",
                 REQUIRE(server->finished.load());
                 REQUIRE(
                     server->server->sessionState() == SessionState::Shutdown);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+SCENARIO("scivisStudioServer and the client core play the active shot",
+    "[StudioRemote]")
+{
+  if (!helideAvailable()) {
+    WARN("helide ANARI library unavailable, skipping the playback test");
+    return;
+  }
+
+  GIVEN("a client core streaming frames of a 12-frame looping shot at 30 fps")
+  {
+    auto server = std::make_unique<RunningServer>(0);
+    REQUIRE(server->started);
+    Client client;
+    int replaced = 0;
+    client.connection.onProjectReplaced = [&] { replaced++; };
+    client.connection.connect("127.0.0.1", short(server->port()));
+    REQUIRE(client.waitConnectedAndBootstrapped(1));
+    REQUIRE(replaced == 1);
+    const ShotID shotId = activeReplicaShot(client).id;
+
+    // An fps ceiling well below the loop rate: a skipped header could only
+    // come from the tick catching up, never from wire pacing.
+    updateActiveShot(client, replaced, [](Shot &shot) {
+      shot.frameCount = 12;
+      shot.fps = 30.f;
+      shot.loop = true;
+    });
+    REQUIRE(activeReplicaShot(client).frameCount == 12);
+    REQUIRE_FALSE(activeReplicaShot(client).playing);
+
+    client.connection.setEncodings({FrameEncoding::Raw});
+    client.connection.setFrameConfig(32, 24);
+    client.connection.startRendering();
+    REQUIRE(waitForFrames(client, 1));
+    REQUIRE(client.connection.lastFrameHeader());
+    REQUIRE(client.connection.lastFrameHeader()->frame == 0);
+
+    WHEN("the client sets the shot playing")
+    {
+      const int before = replaced;
+      setPlaying(client, true);
+      REQUIRE(waitForSnapshots(client, replaced, before + 1));
+
+      THEN("the replica plays and the headers advance one frame at a time")
+      {
+        REQUIRE(activeReplicaShot(client).playing);
+        const auto frames = collectFrameAdvances(client, 10);
+        REQUIRE(frames.size() > 10);
+        for (size_t i = 1; i < frames.size(); ++i) {
+          const int step = frames[i] - frames[i - 1];
+          const bool wrapped = frames[i - 1] == 11 && frames[i] == 0;
+          CAPTURE(i, frames[i - 1], frames[i]);
+          REQUIRE((step == 1 || wrapped));
+        }
+        // Time in Motion travels in the headers, not in snapshots.
+        REQUIRE(replaced == before + 1);
+
+        AND_THEN("pausing commits the frame time rests on")
+        {
+          setPlaying(client, false);
+          REQUIRE(waitForSnapshots(client, replaced, before + 2));
+          const Shot &rested = activeReplicaShot(client);
+          REQUIRE_FALSE(rested.playing);
+          // Frames after the pause render Time at Rest.
+          REQUIRE(waitForFrames(client, 3));
+          REQUIRE(client.connection.lastFrameHeader()->frame
+              == rested.currentFrame);
+          REQUIRE(client.connection.lastFrameHeader()->shotId == shotId);
+
+          AND_THEN("a paused scrub shows at once and commits once, debounced")
+          {
+            const int scrubbed = replaced;
+            client.connection.setTime(shotId, 7);
+            REQUIRE(pollUntil(
+                client.connection,
+                [&] {
+                  vsr::network::Message msg;
+                  client.connection.takeLatestFrame(msg);
+                  const auto &header = client.connection.lastFrameHeader();
+                  return header && header->frame == 7;
+                },
+                E2E_TIMEOUT));
+            REQUIRE(waitForSnapshots(client, replaced, scrubbed + 1));
+            REQUIRE(activeReplicaShot(client).currentFrame == 7);
+            REQUIRE_FALSE(activeReplicaShot(client).playing);
+            pollFor(client.connection, 400ms);
+            REQUIRE(replaced == scrubbed + 1);
+
+            AND_THEN("a camera edit through the mirror survives a scrub")
+            {
+              const vsr::math::float3 position{1.f, 2.f, 3.f};
+              const vsr::math::float3 direction{0.f, 0.f, -1.f};
+              const auto cameraIndex =
+                  activeReplicaShot(client).camera.objectIndex;
+              auto *mirrorCamera =
+                  client.mirror.getObject(ANARI_CAMERA, cameraIndex);
+              REQUIRE(mirrorCamera);
+              mirrorCamera->setParameter("position", position);
+              mirrorCamera->setParameter("direction", direction);
+              mirrorCamera->setParameter(
+                  "up", vsr::math::float3(0.f, 1.f, 0.f));
+              pollFor(client.connection, 100ms);
+
+              client.connection.setTime(shotId, 3);
+              REQUIRE(pollUntil(
+                  client.connection,
+                  [&] {
+                    vsr::network::Message msg;
+                    client.connection.takeLatestFrame(msg);
+                    const auto &header = client.connection.lastFrameHeader();
+                    return header && header->frame == 3;
+                  },
+                  E2E_TIMEOUT));
+              REQUIRE(waitForSnapshots(client, replaced, scrubbed + 2));
+              REQUIRE(activeReplicaShot(client).currentFrame == 3);
+
+              pauseServer(client, *server);
+              auto *camera =
+                  server->scene().getObject(ANARI_CAMERA, cameraIndex);
+              REQUIRE(camera);
+              const auto p =
+                  camera->parameterValueAs<vsr::math::float3>("position");
+              const auto d =
+                  camera->parameterValueAs<vsr::math::float3>("direction");
+              REQUIRE(p);
+              REQUIRE(d);
+              REQUIRE(p->x == Approx(position.x));
+              REQUIRE(p->y == Approx(position.y));
+              REQUIRE(p->z == Approx(position.z));
+              REQUIRE(d->z == Approx(direction.z));
+              REQUIRE(client.errors.empty());
+
+              AND_THEN("a non-looping shot auto-stops with one snapshot")
+              {
+                client.connection.startRendering();
+                REQUIRE(waitForFrames(client, 1));
+                updateActiveShot(client, replaced, [](Shot &shot) {
+                  shot.frameCount = 5;
+                  shot.fps = 30.f;
+                  shot.loop = false;
+                });
+                REQUIRE(activeReplicaShot(client).currentFrame == 3);
+                const int started = replaced;
+                setPlaying(client, true);
+                REQUIRE(waitForSnapshots(client, replaced, started + 1));
+                REQUIRE(activeReplicaShot(client).playing);
+
+                REQUIRE(waitForSnapshots(client, replaced, started + 2));
+                const Shot &stopped = activeReplicaShot(client);
+                REQUIRE_FALSE(stopped.playing);
+                REQUIRE(stopped.currentFrame == 4);
+                REQUIRE(waitForFrames(client, 3));
+                REQUIRE(client.connection.lastFrameHeader()->frame == 4);
+                pollFor(client.connection, 400ms);
+                REQUIRE(replaced == started + 2);
+                REQUIRE(client.errors.empty());
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+SCENARIO("scivisStudioServer and the client core pick, outline and bin",
+    "[StudioRemote]")
+{
+  if (!helideAvailable()) {
+    WARN("helide ANARI library unavailable, skipping the viewport test");
+    return;
+  }
+
+  GIVEN("a client core streaming frames of an imported triangle")
+  {
+    constexpr uint32_t WIDTH = 64;
+    constexpr uint32_t HEIGHT = 48;
+    constexpr size_t SCALAR_COUNT = 1000;
+
+    // One triangle in the z = 0 plane with corners at the origin, (1, 0, 0)
+    // and (0, 1, 0), under the server's Data Root.
+    ProjectScratch scratch;
+    const auto mesh = scratch.base / "triangle.obj";
+    std::ofstream(mesh) << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+
+    // A scalar array the histogram can be asked about: 1000 float32 values
+    // evenly spread over [0, 1]; the bootstrap mirrors its descriptor.
+    SceneObjectRef scalarArray;
+    auto server =
+        std::make_unique<RunningServer>(0, [&](vsr::scene::Scene &scene) {
+          auto scalars = scene.createArray(ANARI_FLOAT32, SCALAR_COUNT);
+          auto *values = scalars->mapAs<float>();
+          for (size_t i = 0; i < SCALAR_COUNT; ++i)
+            values[i] = float(i) / float(SCALAR_COUNT - 1);
+          scalars->unmap();
+          scalarArray = {ANARI_ARRAY, scalars.index()};
+        });
+    REQUIRE(server->started);
+    Client client;
+    client.connection.connect("127.0.0.1", short(server->port()));
+    REQUIRE(client.waitConnectedAndBootstrapped(1));
+    importMesh(client, mesh);
+    REQUIRE(pollUntil(
+        client.connection,
+        [&] {
+          const auto *p = client.connection.project();
+          return p && p->datasets.size() == 1;
+        },
+        E2E_TIMEOUT));
+    REQUIRE(client.mirror.numberOfObjects(ANARI_SURFACE) == 1);
+
+    // Frame the triangle through the mirror: its centroid sits on the view
+    // axis two units away, so the centre pixel hits it and the corners see
+    // past it.
+    const auto cameraIndex = activeReplicaShot(client).camera.objectIndex;
+    auto *mirrorCamera = client.mirror.getObject(ANARI_CAMERA, cameraIndex);
+    REQUIRE(mirrorCamera);
+    mirrorCamera->setParameter(
+        "position", vsr::math::float3(1.f / 3, 1.f / 3, 2.f));
+    mirrorCamera->setParameter("direction", vsr::math::float3(0.f, 0.f, -1.f));
+    mirrorCamera->setParameter("up", vsr::math::float3(0.f, 1.f, 0.f));
+    mirrorCamera->setParameter("fovy", vsr::math::radians(40.f));
+
+    client.connection.setEncodings({FrameEncoding::Raw});
+    client.connection.setFrameConfig(WIDTH, HEIGHT);
+    client.connection.startRendering();
+    REQUIRE(waitForFrames(client, 3));
+    REQUIRE(client.connection.lastFrameHeader()->width == WIDTH);
+
+    THEN("a pick at the centre hits a surface the mirror can resolve")
+    {
+      const auto reply = pick(client, int(WIDTH / 2), int(HEIGHT / 2));
+      REQUIRE(reply.hit);
+      REQUIRE(reply.objectIdentity);
+      REQUIRE(reply.objectIdentity->type == ANARI_SURFACE);
+      REQUIRE(client.mirror.getObject(
+          ANARI_SURFACE, reply.objectIdentity->objectIndex));
+      REQUIRE(reply.worldPosition.x == Approx(1.f / 3).margin(0.05));
+      REQUIRE(reply.worldPosition.y == Approx(1.f / 3).margin(0.05));
+      REQUIRE(reply.worldPosition.z == Approx(0.f).margin(0.05));
+
+      AND_THEN("a pick at the top-left corner misses")
+      {
+        const auto miss = pick(client, 0, 0);
+        REQUIRE_FALSE(miss.hit);
+        REQUIRE_FALSE(miss.objectIdentity);
+        REQUIRE(waitForFrames(client, 2));
+
+        AND_THEN("outlining the hit keeps frames coming")
+        {
+          client.connection.setOutline(reply.objectIdentity);
+          REQUIRE(waitForFrames(client, 3));
+          client.connection.setOutline(std::nullopt);
+          REQUIRE(waitForFrames(client, 3));
+          REQUIRE(client.errors.empty());
+
+          AND_THEN("visualizing the DEPTH AOV keeps frames coming")
+          {
+            ViewportSettings settings;
+            settings.visualizeAOV = vsr::rendering::AOVType::DEPTH;
+            settings.depthVisualMinimum = 1.f;
+            settings.depthVisualMaximum = 3.f;
+            client.connection.setViewportSettings(settings);
+            REQUIRE(waitForFrames(client, 3));
+            client.connection.setViewportSettings(ViewportSettings{});
+            REQUIRE(waitForFrames(client, 3));
+            REQUIRE(client.errors.empty());
+
+            AND_THEN("the scalar array bins to its element count")
+            {
+              std::optional<ArrayHistogramResult> result;
+              std::vector<ProjectOpReply> replies;
+              client.connection.projectOps().requestArrayHistogram(scalarArray,
+                  10,
+                  [&](const ProjectOpReply &r,
+                      const std::optional<ArrayHistogramResult> &h) {
+                    replies.push_back(r);
+                    result = h;
+                  });
+              REQUIRE(pollUntil(
+                  client.connection,
+                  [&] { return replies.size() == 1; },
+                  E2E_TIMEOUT));
+              REQUIRE(replies[0].ok);
+              REQUIRE(result);
+              REQUIRE(result->bins.size() == 10);
+              REQUIRE(std::accumulate(
+                          result->bins.begin(), result->bins.end(), uint64_t(0))
+                  == SCALAR_COUNT);
+              REQUIRE(result->minValue == 0.f);
+              REQUIRE(result->maxValue == 1.f);
+
+              AND_THEN("the mesh's vector position array is refused")
+              {
+                const auto positions =
+                    findArray(client.mirror, ANARI_FLOAT32_VEC3);
+                REQUIRE(positions);
+                std::vector<ProjectOpReply> refused;
+                client.connection.projectOps().requestArrayHistogram(*positions,
+                    8,
+                    [&](const ProjectOpReply &r,
+                        const std::optional<ArrayHistogramResult> &) {
+                      refused.push_back(r);
+                    });
+                REQUIRE(pollUntil(
+                    client.connection,
+                    [&] { return refused.size() == 1; },
+                    E2E_TIMEOUT));
+                REQUIRE_FALSE(refused[0].ok);
+                REQUIRE(
+                    refused[0].error.find("not scalar") != std::string::npos);
+                REQUIRE(waitForFrames(client, 2));
+                REQUIRE(client.errors.empty());
               }
             }
           }
