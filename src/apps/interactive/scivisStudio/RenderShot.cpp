@@ -18,7 +18,6 @@
 
 namespace vsr::scivis_studio {
 
-
 namespace {
 
 anari::Device loadFirstAvailableDevice(
@@ -174,8 +173,7 @@ bool renderActiveShotToFrames(ProjectContext &projectContext,
   std::filesystem::create_directories(outputDirectory, ec);
   if (ec) {
     return failRender(out,
-        "Failed to create render directory '" + outputDirectory.string()
-            + "'");
+        "Failed to create render directory '" + outputDirectory.string() + "'");
   }
 
   auto libName = shot->renderSettings.rendererLibrary;

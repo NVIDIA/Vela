@@ -229,8 +229,7 @@ void ServerTaskRunner::dropQueued()
   const auto dropped = size_t(std::distance(kept, m_queue.end()));
   if (dropped > 0) {
     vsr::core::logWarning(
-        "[StudioServer] %zu queued task(s) dropped with the session",
-        dropped);
+        "[StudioServer] %zu queued task(s) dropped with the session", dropped);
   }
   m_queue.erase(kept, m_queue.end());
   for (const auto &task : m_queue) {

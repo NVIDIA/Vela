@@ -343,13 +343,12 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
       result.projectChanged = true;
       return result;
     });
-    const auto second =
-        runner.enqueue("second", [&](const TaskControl &) {
-          TaskResult result;
-          result.ok = false;
-          result.error = "boom";
-          return result;
-        });
+    const auto second = runner.enqueue("second", [&](const TaskControl &) {
+      TaskResult result;
+      result.ok = false;
+      result.error = "boom";
+      return result;
+    });
     const auto third = runner.enqueue(
         "third", [&](const TaskControl &) { return TaskResult{}; });
 
@@ -479,7 +478,8 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
     const auto after = runner.enqueue(
         "after", [&](const TaskControl &) { return TaskResult{}; });
 
-    THEN("it is pending, and the flag is refused for a task that is not running")
+    THEN(
+        "it is pending, and the flag is refused for a task that is not running")
     {
       REQUIRE(runner.exclusivePending());
       REQUIRE_FALSE(runner.requestCancelRunning(render));
@@ -593,13 +593,12 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
 
   GIVEN("a task whose body throws")
   {
-    const auto thrower =
-        runner.enqueue("thrower", [&](const TaskControl &) {
-          throw std::filesystem::filesystem_error("stat failed",
-              std::filesystem::path("/locked/dir"),
-              std::make_error_code(std::errc::permission_denied));
-          return TaskResult{};
-        });
+    const auto thrower = runner.enqueue("thrower", [&](const TaskControl &) {
+      throw std::filesystem::filesystem_error("stat failed",
+          std::filesystem::path("/locked/dir"),
+          std::make_error_code(std::errc::permission_denied));
+      return TaskResult{};
+    });
     const auto after = runner.enqueue(
         "after", [&](const TaskControl &) { return TaskResult{}; });
 

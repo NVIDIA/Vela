@@ -85,7 +85,7 @@ Milestone 3, remote-viewer parity (item 3 of the spec's
 [staged implementation plan](../../../../docs/scivis-studio-client-server.md#staged-implementation-plan)):
 Hello handshake with exact-match `PROTOCOL_VERSION`, the bracketed Bootstrap
 (structural scene with descriptor-only arrays, layers, frame config, UI
-state, Project Snapshot), raw and turbojpeg frames with header and encoding
+state, task-status replay, Project Snapshot), raw and turbojpeg frames with header and encoding
 negotiation, optimistic camera and parameter edits with origin-based echo
 suppression, the render-loop Control-State Latch, Ping/Pong liveness, and
 the `NeverConnected`/`Connected`/`Lost`/`Disconnected` client states.
@@ -110,17 +110,29 @@ after a task waits until that task has run; task requests do not wait, and
 
 Server Tasks (`server/ServerTaskRunner`) run on the render loop, one per
 iteration, to completion; frames pause while one runs (the client keeps its
-last frame). `TaskProgress` is indeterminate with phase text; `CancelTask`
-removes a task still queued (`TaskFailed{"cancelled"}`) and is refused for
-the running one ("task already running"). A body that throws (a filesystem
+last frame). `TaskProgress` is indeterminate with phase text for every task
+but the shot render, whose progress is determinate (`current`/`total` =
+frame/frames). `CancelTask` removes a task still queued
+(`TaskFailed{"cancelled"}`); for the running task it is honoured only by a
+body that polls its cancel flag (today the shot render, see milestone 7) --
+the flag is raised on the IO thread the moment the `CancelTask` is decoded,
+the body stops at its next frame, and the `CancelTask` itself, dispatched
+once the body has returned, is answered "ok". A `CancelTask` for a task that
+already ended without a cancel is refused with "task already finished", one
+for an id never issued with "unknown task N". A body that throws (a filesystem
 error on a path the roots admitted) fails its task rather than the server.
-Queued tasks die with the session they were sent on, and the client drops its
-task records at every `BootstrapBegin` for the same reason (milestone 7's
-task-status replay refills them). `OpenProject` goes through `stageProjectOpen` then
+Queued tasks die with the session they were sent on -- except a queued shot
+render, which like a running one outlives its session and runs with nobody
+listening -- and the client drops its task records at every `BootstrapBegin`
+for the same reason; the task-status replay refills them: the runner keeps
+every ending since the last bootstrap (at most 32) and the bootstrap sends
+each `TaskCompleted`/`TaskFailed` verbatim between `UIState` and the
+`ProjectSnapshot`, then a `TaskProgress{message = description}` for a task
+running at that moment. `OpenProject` goes through `stageProjectOpen` then
 `ProjectContext::openStagedProject`, both on the loop thread, so a later
 worker-thread staging phase is a mechanical move. Task ids increase for the
 life of the server; `TaskCompleted::message` of an import carries the new
-dataset's id.
+dataset's id, that of a render its output directory.
 
 Data Roots (`server/DataRoots`) gate every path-taking op: open and save
 project, imports, archive save and load, dataset candidates and Remote
@@ -242,16 +254,76 @@ latch slots (latest-wins); `RequestArrayHistogram` is a sync Project Op. See
   arrays, proxy arrays (the mirror's descriptors), CUDA arrays and non-scalar
   element types (vectors, matrices, object handles). No snapshot follows.
 
-Not there yet: `RenderShot` (60) and the rest of milestone 7 (its
-pause-and-refuse semantics, the task-status replay in the bootstrap, the
-UI-state round-trip through save and open). The server refuses `RenderShot`,
-and any request whose payload it cannot decode, loudly rather than dropping
-them: with a `ProjectOpReply{ok=false}` carrying the request's id when the
-payload has a readable non-zero `requestId` (so a client's pending request
-retires), and with a bare `Error{"... not implemented in this server"}` /
-`Error{"malformed ..."}` otherwise. The client core covers the second case too: a bare `Error` that
-names the type of a pending request fails the oldest pending request of that
-type, so no control stays greyed until the connection is lost.
+Milestone 7, shot rendering and hardening (item 7): `RenderShot` (60) is
+served; every type a client may send is now either handled or refused with a
+specific reason. A request whose payload cannot be decoded is refused loudly
+rather than dropped: with a `ProjectOpReply{ok=false}` carrying the request's
+id when the payload has a readable non-zero `requestId` (so a client's
+pending request retires), and with a bare `Error{"malformed ..."}` otherwise.
+The client core covers the second case too: a bare `Error` that names the
+type of a pending request fails the oldest pending request of that type, so
+no control stays greyed until the connection is lost. `PROTOCOL_VERSION` is
+2: `TaskFailed` gained `framesCompleted` (optional on the wire).
+
+### Shot rendering
+
+- **A Server Task with a sync prelude.** `RenderShot{shotId}` is refused at
+  once when the shot does not exist, when the project is not saved ("project
+  is not saved; save it before rendering") or when a render is already queued
+  or running ("render in progress"). Otherwise the shot becomes the active
+  one, the pipeline rebinds (which also pins the shot's renderer settings to
+  the server's library, as every bind does) and a `ProjectSnapshot` follows
+  the `TaskStartedResult` reply, so the client sees the switch before the
+  first frame renders. The body is `renderActiveShotToFrames` -- the same
+  engine path as `scivisStudioRenderShot` and the monolith -- with a per-frame
+  hook: `TaskProgress{current = frame, total = frames, message = "frame N of
+  M"}` before each frame. `TaskCompleted{message = output directory,
+  framesCompleted}` ends it; the directory is `<project>/renders/<shotId>/`,
+  inside the Data Roots by construction and listable with `ListDirectory`.
+  Preconditions the engine finds (a dataset that cannot be made resident, a
+  missing camera) fail the task with the engine's text. A snapshot follows
+  either way: the render restores residency, the dirty flag and the frame
+  time it found.
+- **Cancel and Shutdown.** `CancelTask` naming the running render raises the
+  runner's cancel flag on the IO thread; the body stops before its next frame
+  (granularity: one frame times `samples` renders), the task ends
+  `TaskFailed{"cancelled", framesCompleted}`, and the `CancelTask` reply is
+  "ok" once dispatched after the body returns. Frames already written stay
+  on disk. `Shutdown` stops a running render the same way. A `CancelTask`
+  that reaches the IO thread in the instant between the render leaving the
+  queue and its body starting misses the flag and is answered "task already
+  finished" after the render completes; the window is a few microseconds.
+- **Pause-and-refuse.** Interactive frames pause by construction (the body
+  holds the loop thread) and resume after the task. While a render is queued
+  or running, every request that mutates the Project or Scene or launches a
+  task -- including a second `RenderShot` -- is refused with "render in
+  progress" when dispatched, and is not held back behind the render to be
+  served later; `ListRoots`, `ListDirectory`, `RequestArrayHistogram` and
+  `CancelTask` are served. Requests that *arrive* while the body runs are
+  latched and dispatched after it, when the render is over, so they are
+  served normally. Scene edits, `SetTime` and `Pick` latched during the body
+  targeted a scene the render was mutating: the edits and the scrub are
+  dropped with a log line, the pick is answered `Error{"Pick N refused:
+  render in progress"}`.
+- **Sessions.** A render survives its session, queued or running: the body
+  runs with nobody listening and the next bootstrap's task-status replay
+  reports how it ended. A client that connects mid-render is bootstrapped
+  after the body returns; until then it may receive live `TaskProgress` for
+  an id it never launched (the GUI shows it as "Task N" until the replay
+  names it). The `ProjectSnapshot` of that bootstrap shows the Project the
+  render left. Endings delivered live during a session are replayed once
+  more at the next bootstrap (the history is "since the last bootstrap"),
+  which the clients treat as idempotent.
+- **UI state round trip.** The server keeps the `{windows, layout,
+  settings}` tree of the project it opened: from `--project` at startup
+  (`setupProject` reads it with the same out-params the dispatcher uses),
+  from `OpenProject` (whose body sends `UIState{tree}` before its
+  `TaskCompleted` and snapshot, so the client that asked can apply the
+  opened project's layout), and from a `SaveProject` that carried one.
+  `SaveProject` writes the client-supplied tree, or the retained one when
+  the request has none, so a headless save never drops a layout. Every
+  bootstrap sends `UIState` (null when no project with UI state was ever
+  opened) before the task-status replay.
 
 A fresh project (server start without `--project`, or `NewProject`) reports
 `dirty == false` in its snapshot: binding the server's renderer into a shot
