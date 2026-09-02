@@ -69,8 +69,8 @@ void ProjectWindow::buildUI_shots(const Project &project)
 
   ImGui::BeginDisabled(pending(m_pendingCreate));
   if (ImGui::Button("Add Shot")) {
-    const auto name = "Shot " + std::to_string(project.shots.size() + 1);
-    m_pendingCreate = ops().createShot(name,
+    // An empty name lets the server number the shot.
+    m_pendingCreate = ops().createShot({},
         [this](const protocol::ProjectOpReply &reply,
             const std::optional<protocol::ShotCreatedResult> &) {
           if (!reply.ok)

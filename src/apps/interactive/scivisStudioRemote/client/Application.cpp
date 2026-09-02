@@ -357,10 +357,8 @@ void Application::uiMenu_Studio()
       ImGui::EndMenu();
     }
     if (ImGui::MenuItem("Add Shot")) {
-      const Project *project = m_connection->project();
-      const auto name = "Shot "
-          + std::to_string(project ? project->shots.size() + 1 : 1);
-      m_connection->projectOps().createShot(name,
+      // An empty name lets the server number the shot.
+      m_connection->projectOps().createShot({},
           [this](const ProjectOpReply &reply,
               const std::optional<ShotCreatedResult> &) {
             if (!reply.ok)

@@ -188,6 +188,7 @@ struct ProjectOps
 
   // Shots (36..39) ///////////////////////////////////////////////////////////
 
+  // An empty name is numbered by the server ("Shot N").
   RequestHandle createShot(const std::string &name,
       ResultCallback<protocol::ShotCreatedResult> callback);
   RequestHandle removeShot(const ShotID &shotId, ReplyCallback callback);
