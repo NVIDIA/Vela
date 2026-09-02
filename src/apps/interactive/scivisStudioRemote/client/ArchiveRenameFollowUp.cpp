@@ -10,8 +10,7 @@
 
 namespace vsr::scivis_studio::client {
 
-std::vector<DatasetID> ArchiveRenameFollowUp::datasetIds(
-    const Project *project)
+std::vector<DatasetID> ArchiveRenameFollowUp::datasetIds(const Project *project)
 {
   std::vector<DatasetID> ids;
   if (!project)
@@ -60,7 +59,8 @@ RequestHandle ArchiveRenameFollowUp::apply(
 
   RequestHandle sent;
   if (added.size() == 1)
-    sent = ops.renameDataset(added.front(), m_pending->name, std::move(onReply));
+    sent =
+        ops.renameDataset(added.front(), m_pending->name, std::move(onReply));
   m_pending.reset();
   return sent;
 }
