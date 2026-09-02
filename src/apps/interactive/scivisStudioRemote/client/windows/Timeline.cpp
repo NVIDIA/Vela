@@ -79,8 +79,8 @@ int Timeline::shownFrame(const Shot &shot) const
 void Timeline::syncDraft(const Shot &shot)
 {
   const bool switched = !m_draft || m_draft->id != shot.id;
-  const bool refresh = m_draftStale && !pending(m_pendingUpdate)
-      && !ImGui::IsAnyItemActive();
+  const bool refresh =
+      m_draftStale && !pending(m_pendingUpdate) && !ImGui::IsAnyItemActive();
   if (switched || refresh) {
     m_draft = shot;
     m_draftStale = false;
@@ -226,11 +226,13 @@ void Timeline::buildUI_transport(const Shot &shot, int shownFrame)
     if (m_draft && ImGui::Checkbox("Loop", &m_draft->loop))
       sendDraft(shownFrame);
 
-    // Frame counter: typed values commit once, on leaving the field.
+    // Frame counter: typed values commit once, on leaving the field (or
+    // Enter), like the Frames and FPS fields; the +/- steps commit on release.
     ImGui::TableNextColumn();
     int frame = shownFrame;
     ImGui::SetNextItemWidth(110.f * uiScale);
-    if (ImGui::InputInt("##frame", &frame, 1, 10))
+    ImGui::InputInt("##frame", &frame, 1, 10);
+    if (ImGui::IsItemDeactivatedAfterEdit())
       requestTime(frame);
     ImGui::TableNextColumn();
     ImGui::Text("%d / %d", shownFrame, lastFrameOf(shot));
@@ -298,8 +300,7 @@ void Timeline::buildUI_ruler(const Shot &shot, int shownFrame)
   ImGui::InvisibleButton("##ruler", ImVec2(width, rulerHeight));
   if (ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
     const float mx = ImGui::GetMousePos().x - rulerPos.x;
-    const int frame =
-        clampFrame(shot, int(mx / pixelsPerFrame + 0.5f));
+    const int frame = clampFrame(shot, int(mx / pixelsPerFrame + 0.5f));
     if (!m_dragFrame || *m_dragFrame != frame)
       requestTime(frame);
     m_dragFrame = frame;
