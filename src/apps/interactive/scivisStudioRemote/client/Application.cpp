@@ -745,7 +745,10 @@ void Application::watchTasks()
         text += ": " + task.lastProgress.message;
       notify(text, false);
     } else if (task.state == TaskState::Failed) {
-      notify(label + " failed: " + task.error, true);
+      std::string text = label + " failed";
+      if (task.framesCompleted != 0)
+        text += " after " + std::to_string(task.framesCompleted) + " frames";
+      notify(text + ": " + task.error, true);
     }
   }
 }

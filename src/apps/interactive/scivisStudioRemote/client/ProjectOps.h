@@ -79,7 +79,9 @@ struct TaskRecord
   TaskState state{TaskState::Queued};
   TaskProgressInfo lastProgress;
   std::string error; // TaskFailed::error
-  uint64_t framesCompleted{0}; // TaskCompleted::framesCompleted (renders)
+  // Frames a render wrote, from TaskCompleted or TaskFailed (a cancelled or
+  // failed render leaves its partial frames on disk).
+  uint64_t framesCompleted{0};
   // Launched by this client's RenderShot: the editors show a note while it
   // is active, since the server refuses edits until the render ends.
   bool render{false};
