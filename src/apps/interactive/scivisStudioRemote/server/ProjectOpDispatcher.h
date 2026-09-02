@@ -81,9 +81,6 @@ std::optional<ProjectRequest> decodeProjectRequest(
 // requests (they only queue), CancelTask and Remote Browse are not.
 bool waitsForQueuedTasks(const ProjectRequest &request);
 
-// The request's message type, for logs.
-protocol::StudioMessageType requestType(const ProjectRequest &request);
-
 /*
  * Runs project requests on the loop thread against the server's
  * ProjectContext. Sync ops call the context, send the ProjectOpReply, then a
