@@ -4,9 +4,11 @@
 #pragma once
 
 // vsr_scivis_studio_client_core
+#include "ProjectOps.h"
 #include "ServerConnection.h"
 // vsr_scivis_studio_protocol
 #include "FrameMessages.h"
+#include "ViewportMessages.h"
 // vsr_ui_imgui
 #include "vsr/ui/imgui/windows/BaseViewport.h"
 // vsr_rendering
@@ -18,6 +20,7 @@
 #include <chrono>
 #include <cstdint>
 #include <deque>
+#include <optional>
 #include <vector>
 
 namespace vsr::scivis_studio::client {
@@ -34,6 +37,14 @@ namespace vsr::scivis_studio::client {
  * Structural Mirror's current camera exactly as the monolith viewport does;
  * the MirrorUpdateDelegate turns those writes into SetObjectParameter. A
  * viewport resize is reported once per settled size as SetFrameConfig.
+ *
+ * Picking follows the monolith's gestures: a double-click asks the server
+ * for the object under the mouse (Pick) and selects its mirror object; with
+ * Shift held it re-centres the arcball on the hit point instead. Selection
+ * stays client-local; only the first selected surface or volume is sent as
+ * SetOutline. The View menu edits the id-driven pass toggles and sends the
+ * whole ViewportSettings on every change (and again after each bootstrap);
+ * they persist with the window's UI state.
  *
  * Connection State decides what is shown: Connected presents frames and
  * takes input; Lost keeps the last frame frozen and ignores input;
@@ -79,6 +90,12 @@ struct StudioViewport : public vsr::ui::imgui::BaseViewport
   void dropMirrorReferences();
   // Back to the home state: dropMirrorReferences() and no frame.
   void reset();
+  // After a bootstrap: the server starts from default viewport settings and
+  // no outline, so both are sent afresh.
+  void onServerReady();
+
+  void saveSettings(vsr::core::DataNode &root) override;
+  void loadSettings(vsr::core::DataNode &root) override;
 
  private:
   void imagePipeline_populate(vsr::rendering::ImagePipeline &p) override;
@@ -95,8 +112,17 @@ struct StudioViewport : public vsr::ui::imgui::BaseViewport
   float receivedFps() const;
 
   void ui_menubar(bool connected);
+  void ui_menubar_View();
   void ui_notConnectedHint();
   void ui_overlay();
+  // Right after the image item: double-click gestures over it.
+  void ui_picking();
+  void pick(int x, int y, bool selectObject);
+  void onPickReply(const protocol::PickReply &reply, bool selectObject);
+  // The first selected surface/volume, as the server names it.
+  std::optional<SceneObjectRef> selectedIdentity() const;
+  void syncOutline();
+  void sendViewportSettings();
 
   // Data /////////////////////////////////////////////////////////////////////
 
@@ -120,6 +146,13 @@ struct StudioViewport : public vsr::ui::imgui::BaseViewport
   vsr::math::uint2 m_sentFrameConfig{0, 0};
   bool m_reportResizes{false}; // armed by sendFrameConfig()
   std::deque<Clock::time_point> m_frameArrivals; // last second, for fps
+
+  // Picking, outline, passes //
+
+  RequestHandle m_pendingPick;
+  bool m_serverReady{false}; // bootstrapped; settings and outline sent
+  std::optional<SceneObjectRef> m_sentOutline;
+  protocol::ViewportSettings m_settings;
 
   vsr::rendering::ClearBuffersPass *m_clearPass{nullptr};
   vsr::rendering::CopyToColorBufferPass *m_framePass{nullptr};

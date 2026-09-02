@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "StudioViewport.h"
+#include "ProjectOps.h"
 // vsr_scivis_studio_protocol
 #include "FrameCodec.h"
 // vsr_ui_imgui
@@ -16,6 +17,9 @@
 #include "vsr/core/Logging.hpp"
 // imgui
 #include <imgui.h>
+// std
+#include <algorithm>
+#include <cmath>
 
 namespace vsr::scivis_studio::client {
 
@@ -39,6 +43,16 @@ const char *hintFor(ConnectionState state)
   }
   return "Not connected -- Client > Connect";
 }
+
+bool sameIdentity(const std::optional<SceneObjectRef> &a,
+    const std::optional<SceneObjectRef> &b)
+{
+  if (a.has_value() != b.has_value())
+    return false;
+  return !a || (a->type == b->type && a->objectIndex == b->objectIndex);
+}
+
+constexpr int AOV_TYPE_COUNT = int(vsr::rendering::AOVType::INSTANCE_ID) + 1;
 
 } // namespace
 
@@ -99,10 +113,15 @@ void StudioViewport::buildUI()
         ImGui::GetContentRegionAvail(),
         ImVec2(0, 1),
         ImVec2(1, 0));
+    if (connected && m_hasFrame)
+      ui_picking();
   }
 
   if (!m_hasFrame)
     ui_notConnectedHint();
+
+  if (connected)
+    syncOutline();
 
   // Only a connected viewport with a camera to drive takes input; while Lost
   // the frozen frame must not drift from the mirror camera.
@@ -127,6 +146,11 @@ void StudioViewport::ui_menubar(bool connected)
     ImGui::EndMenu();
   }
 
+  if (ImGui::BeginMenu("View")) {
+    ui_menubar_View();
+    ImGui::EndMenu();
+  }
+
   ImGui::BeginDisabled(!connected);
   if (!m_renderers.objects.empty())
     BaseViewport::ui_menubar_Renderer();
@@ -135,6 +159,71 @@ void StudioViewport::ui_menubar(bool connected)
   ImGui::EndDisabled();
 
   ImGui::EndMenuBar();
+}
+
+// The monolith Viewport's id-driven pass toggles; every change ships the
+// whole struct. PRIMITIVE_ID is offered without knowing the server device:
+// the server turns it off silently when unsupported.
+void StudioViewport::ui_menubar_View()
+{
+  using vsr::rendering::AOVType;
+  auto &s = m_settings;
+  bool changed = false;
+
+  ImGui::Text("AOV Visualization:");
+  ImGui::Indent(vsr::ui::imgui::INDENT_AMOUNT);
+  if (ImGui::BeginCombo("AOV", protocol::toString(s.visualizeAOV))) {
+    for (int i = 0; i < AOV_TYPE_COUNT; ++i) {
+      const auto type = AOVType(i);
+      const bool selected = type == s.visualizeAOV;
+      if (ImGui::Selectable(protocol::toString(type), selected) && !selected) {
+        s.visualizeAOV = type;
+        changed = true;
+      }
+      if (selected)
+        ImGui::SetItemDefaultFocus();
+    }
+    ImGui::EndCombo();
+  }
+  ImGui::BeginDisabled(s.visualizeAOV != AOVType::DEPTH);
+  changed |= ImGui::DragFloat("Depth Minimum",
+      &s.depthVisualMinimum,
+      0.1f,
+      0.f,
+      s.depthVisualMaximum);
+  changed |= ImGui::DragFloat("Depth Maximum",
+      &s.depthVisualMaximum,
+      0.1f,
+      s.depthVisualMinimum,
+      1e20f);
+  ImGui::EndDisabled();
+  ImGui::BeginDisabled(s.visualizeAOV != AOVType::EDGES);
+  changed |= ImGui::Checkbox("Invert Edges", &s.edgeInvert);
+  ImGui::EndDisabled();
+  ImGui::Unindent(vsr::ui::imgui::INDENT_AMOUNT);
+
+  ImGui::Separator();
+
+  ImGui::Text("Display:");
+  ImGui::Indent(vsr::ui::imgui::INDENT_AMOUNT);
+  changed |= ImGui::Checkbox("Highlight Selected", &s.highlightSelection);
+  changed |= ImGui::Checkbox("Outline Primitives", &s.outlinePrimitives);
+  vsr::ui::tooltipForPreviousItem(
+      "Needs a server device with primitive ids; silently off otherwise");
+  changed |= ImGui::Checkbox("World Bounds", &s.showWorldBounds);
+  ImGui::BeginDisabled(!s.showWorldBounds);
+  changed |= ImGui::ColorEdit4("Bounds Color",
+      &s.worldBoundsColor.x,
+      ImGuiColorEditFlags_NoInputs);
+  if (ImGui::InputInt("Bounds Width", &s.worldBoundsWidth)) {
+    s.worldBoundsWidth = std::max(1, s.worldBoundsWidth);
+    changed = true;
+  }
+  ImGui::EndDisabled();
+  ImGui::Unindent(vsr::ui::imgui::INDENT_AMOUNT);
+
+  if (changed)
+    sendViewportSettings();
 }
 
 void StudioViewport::ui_notConnectedHint()
@@ -190,6 +279,150 @@ void StudioViewport::ui_overlay()
   ImGui::PopStyleColor();
 }
 
+// Picking and outline ////////////////////////////////////////////////////////
+
+void StudioViewport::ui_picking()
+{
+  if (!ImGui::IsItemHovered()
+      || !ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)
+      || !m_camera.current || m_lastHeader.width == 0
+      || m_lastHeader.height == 0)
+    return;
+
+  // Frame-header pixels, y down from the top-left, however the image is
+  // scaled on screen.
+  const ImVec2 min = ImGui::GetItemRectMin();
+  const ImVec2 max = ImGui::GetItemRectMax();
+  const ImVec2 mouse = ImGui::GetMousePos();
+  const float w = std::max(max.x - min.x, 1.f);
+  const float h = std::max(max.y - min.y, 1.f);
+  const int x = std::clamp(int((mouse.x - min.x) / w * m_lastHeader.width),
+      0,
+      int(m_lastHeader.width) - 1);
+  const int y = std::clamp(int((mouse.y - min.y) / h * m_lastHeader.height),
+      0,
+      int(m_lastHeader.height) - 1);
+
+  // Shift: re-centre the view (perspective only, as the monolith); plain:
+  // select what is under the mouse.
+  const bool focus = ImGui::IsKeyDown(ImGuiKey_LeftShift)
+      || ImGui::IsKeyDown(ImGuiKey_RightShift);
+  if (focus
+      && m_camera.current->subtype()
+          != vsr::scene::tokens::camera::perspective)
+    return;
+  pick(x, y, !focus);
+}
+
+void StudioViewport::pick(int x, int y, bool selectObject)
+{
+  if (!m_connection || m_connection->state() != ConnectionState::Connected)
+    return;
+  auto &ops = m_connection->projectOps();
+  // One pick in flight: the server keeps only the latest anyway.
+  if (m_pendingPick.valid() && ops.pending(m_pendingPick))
+    ops.forget(m_pendingPick);
+  m_pendingPick = ops.pick(x, y, [this, selectObject](const auto &reply) {
+    if (reply)
+      onPickReply(*reply, selectObject);
+  });
+}
+
+void StudioViewport::onPickReply(
+    const protocol::PickReply &reply, bool selectObject)
+{
+  auto *ctx = appContext();
+  if (selectObject) {
+    // Identity -> mirror object -> its layer node; unknown clears, as the
+    // monolith does.
+    const vsr::scene::Object *object = nullptr;
+    if (reply.objectIdentity) {
+      object = ctx->vsr.scene.getObject(
+          reply.objectIdentity->type, reply.objectIdentity->objectIndex);
+    }
+    ctx->setSelected(object);
+    return;
+  }
+  if (!reply.hit || !m_camera.arcball)
+    return;
+  m_camera.arcball->setCenter(reply.worldPosition);
+}
+
+std::optional<SceneObjectRef> StudioViewport::selectedIdentity() const
+{
+  const auto node = appContext()->getFirstSelected();
+  if (!node.valid())
+    return {};
+  const auto *object = (*node)->getObject();
+  if (!object
+      || (object->type() != ANARI_SURFACE && object->type() != ANARI_VOLUME))
+    return {};
+  return SceneObjectRef{object->type(), object->index()};
+}
+
+void StudioViewport::syncOutline()
+{
+  if (!m_serverReady || !m_connection)
+    return;
+  const auto identity = selectedIdentity();
+  if (sameIdentity(identity, m_sentOutline))
+    return;
+  m_connection->setOutline(identity);
+  m_sentOutline = identity;
+}
+
+void StudioViewport::sendViewportSettings()
+{
+  if (!m_serverReady || !m_connection)
+    return;
+  m_connection->setViewportSettings(m_settings);
+}
+
+void StudioViewport::onServerReady()
+{
+  m_serverReady = true;
+  m_sentOutline.reset(); // the server starts with none; resend on change
+  sendViewportSettings();
+}
+
+// Window settings ////////////////////////////////////////////////////////////
+
+void StudioViewport::saveSettings(vsr::core::DataNode &root)
+{
+  root["showOverlay"] = m_showOverlay;
+  root["highlightSelection"] = m_settings.highlightSelection;
+  root["outlinePrimitives"] = m_settings.outlinePrimitives;
+  root["showWorldBounds"] = m_settings.showWorldBounds;
+  root["worldBoundsColor"] = m_settings.worldBoundsColor;
+  root["worldBoundsWidth"] = m_settings.worldBoundsWidth;
+  root["visualizeAOV"] = static_cast<int>(m_settings.visualizeAOV);
+  root["depthVisualMinimum"] = m_settings.depthVisualMinimum;
+  root["depthVisualMaximum"] = m_settings.depthVisualMaximum;
+  root["edgeInvert"] = m_settings.edgeInvert;
+  BaseViewport::saveSettings(root);
+}
+
+void StudioViewport::loadSettings(vsr::core::DataNode &root)
+{
+  BaseViewport::loadSettings(root);
+  auto &s = m_settings;
+  root["showOverlay"].getValue(ANARI_BOOL, &m_showOverlay);
+  root["highlightSelection"].getValue(ANARI_BOOL, &s.highlightSelection);
+  root["outlinePrimitives"].getValue(ANARI_BOOL, &s.outlinePrimitives);
+  root["showWorldBounds"].getValue(ANARI_BOOL, &s.showWorldBounds);
+  root["worldBoundsColor"].getValue(ANARI_FLOAT32_VEC4, &s.worldBoundsColor);
+  root["worldBoundsWidth"].getValue(ANARI_INT32, &s.worldBoundsWidth);
+  int aov = static_cast<int>(s.visualizeAOV);
+  root["visualizeAOV"].getValue(ANARI_INT32, &aov);
+  s.visualizeAOV = static_cast<vsr::rendering::AOVType>(
+      std::clamp(aov, 0, AOV_TYPE_COUNT - 1));
+  root["depthVisualMinimum"].getValue(ANARI_FLOAT32, &s.depthVisualMinimum);
+  root["depthVisualMaximum"].getValue(ANARI_FLOAT32, &s.depthVisualMaximum);
+  root["edgeInvert"].getValue(ANARI_BOOL, &s.edgeInvert);
+  s.worldBoundsWidth = std::max(1, s.worldBoundsWidth);
+  sendViewportSettings(); // no-op until the server is ready
+}
+
 // Connection-driven state ////////////////////////////////////////////////////
 
 void StudioViewport::sendFrameConfig()
@@ -235,6 +468,12 @@ void StudioViewport::dropMirrorReferences()
   m_renderers.current = {};
   m_reportResizes = false;
   m_sentFrameConfig = vsr::math::uint2(0, 0);
+  // The server this state was sent to is gone or being re-bootstrapped.
+  m_serverReady = false;
+  m_sentOutline.reset();
+  if (m_connection && m_pendingPick.valid())
+    m_connection->projectOps().forget(m_pendingPick);
+  m_pendingPick = {};
 }
 
 void StudioViewport::reset()
