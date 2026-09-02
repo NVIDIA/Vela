@@ -174,6 +174,10 @@ struct NetworkServer : public NetworkChannel
  * connect() may be called again after a failed or closed connection: it
  * restarts the IO thread and reopens the socket.
  *
+ * connect() never blocks on the network: name resolution and the connect
+ * both run on the IO thread, and their outcome arrives through the connect
+ * or disconnect handler.
+ *
  * Example:
  *   NetworkClient client("127.0.0.1", 9000);
  *   client.send(MSG_HELLO, payload.data(), payload.size());
@@ -187,6 +191,12 @@ struct NetworkClient : public NetworkChannel
 
   void connect(const std::string &host, short port);
   void disconnect();
+
+ private:
+  // Bumped by every connect() and disconnect(); a resolve or connect
+  // completion from an earlier attempt compares and stands down instead of
+  // acting on the socket a later attempt owns.
+  std::atomic<uint64_t> m_connectGeneration{0};
 };
 
 // Inline definitions /////////////////////////////////////////////////////////

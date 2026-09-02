@@ -144,6 +144,28 @@ SCENARIO(
     server->stop();
   }
 
+  GIVEN("a client and a host name that cannot resolve")
+  {
+    auto client = std::make_shared<NetworkClient>();
+    LifecycleCounters counters;
+    counters.attach(*client);
+
+    WHEN("connect is attempted")
+    {
+      client->connect("no-such-host.invalid", 1);
+
+      THEN("the failure is reported once through the disconnect handler")
+      {
+        REQUIRE(waitFor([&] { return counters.disconnected == 1; },
+            std::chrono::seconds(30)));
+        REQUIRE(counters.connected == 0);
+        REQUIRE_FALSE(client->isConnected());
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        REQUIRE(counters.disconnected == 1);
+      }
+    }
+  }
+
   GIVEN("a client and no server listening")
   {
     // Bind and drop an ephemeral port so nothing is listening on it.
@@ -166,6 +188,15 @@ SCENARIO(
         REQUIRE(counters.connected == 0);
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
         REQUIRE(counters.disconnected == 1);
+      }
+
+      THEN("a disconnect while the attempt is in flight is not confused by it")
+      {
+        client->disconnect();
+        REQUIRE(waitFor([&] { return counters.disconnected == 1; }));
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        REQUIRE(counters.disconnected == 1);
+        REQUIRE(counters.connected == 0);
       }
 
       THEN("a later connect to a live server succeeds")
