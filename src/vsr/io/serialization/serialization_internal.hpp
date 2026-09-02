@@ -40,7 +40,8 @@ namespace detail {
 void serialize_LayerSubtree(const scene::Layer &layer,
     scene::LayerNodeRef start,
     core::DataNode &node,
-    const std::vector<scene::LayerNodeRef> *excluded);
+    const std::vector<scene::LayerNodeRef> *excluded,
+    LayerNodeNumbering numbering = LayerNodeNumbering::Archive);
 
 enum class LegacyExcludedAnimationPolicy
 {

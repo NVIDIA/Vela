@@ -5,6 +5,7 @@
 
 // vsr_io
 #include "vsr/io/archives/ArchiveValidation.hpp"
+#include "vsr/io/serialization/Layer.hpp"
 
 namespace vsr::core {
 struct DataNode;
@@ -26,9 +27,13 @@ enum class ArrayDataPolicy
   ProxyOnly
 };
 
+/* Layer nodes are re-numbered densely on reload unless Preserved numbering is
+ * requested, which a Structural Mirror needs so a node index names the same
+ * node on both sides. */
 bool serialize_SceneArchive(const scene::Scene &scene,
     core::DataNode &archive,
-    ArrayDataPolicy arrayData = ArrayDataPolicy::IncludeData);
+    ArrayDataPolicy arrayData = ArrayDataPolicy::IncludeData,
+    LayerNodeNumbering numbering = LayerNodeNumbering::Archive);
 
 /* Serialize a Scene and its Animation Manager as a compatible Archive pair.
  * The manager must belong to the Scene; object and layer bindings in its
