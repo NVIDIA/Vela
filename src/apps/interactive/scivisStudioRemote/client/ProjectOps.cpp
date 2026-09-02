@@ -33,7 +33,7 @@ bool containsWord(const std::string &text, const std::string &word)
     return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
   };
   for (auto pos = text.find(word); pos != std::string::npos;
-      pos = text.find(word, pos + 1)) {
+       pos = text.find(word, pos + 1)) {
     const bool startsWord = pos == 0 || !isIdent(text[pos - 1]);
     const auto end = pos + word.size();
     const bool endsWord = end == text.size() || !isIdent(text[end]);
@@ -604,9 +604,9 @@ void ProjectOps::handleTaskFailed(const TaskFailed &failed)
 
 bool ProjectOps::failOldestNamed(const std::string &message)
 {
-  auto it = std::find_if(m_pending.begin(), m_pending.end(), [&](const auto &p) {
-    return containsWord(message, toString(p.type));
-  });
+  auto it = std::find_if(m_pending.begin(),
+      m_pending.end(),
+      [&](const auto &p) { return containsWord(message, toString(p.type)); });
   if (it == m_pending.end())
     return false;
   const auto requestId = it->requestId;

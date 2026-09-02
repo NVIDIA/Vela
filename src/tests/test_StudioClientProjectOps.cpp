@@ -301,7 +301,8 @@ SCENARIO("ProjectOps retires a request a bare Error names", "[StudioClient]")
 
       THEN("both requests stay pending and the banner hears the errors")
       {
-        REQUIRE(pollUntil(f.connection, [&] { return bannerErrors.size() == 2; }));
+        REQUIRE(
+            pollUntil(f.connection, [&] { return bannerErrors.size() == 2; }));
         REQUIRE(bannerErrors[0] == unrelated.message);
         REQUIRE(bannerErrors[1] == longer.message);
         REQUIRE(shot.count() == 0);
