@@ -84,18 +84,6 @@ const char *boolText(bool value)
   return value ? "true" : "false";
 }
 
-// A TaskFailed's `framesCompleted`, read off the wire tree: a cancelled or
-// failed RenderShot reports the frames it left on disk there, and the payload
-// struct does not carry the field yet (milestone 7 server work). Absent or
-// mistyped reads as 0, like every optional child.
-uint64_t failedFramesCompleted(const Message &msg)
-{
-  vsr::core::DataTree tree;
-  if (msg.payload.empty() || !tree.read(msg.payload))
-    return 0;
-  return readChildOr(tree.root(), "framesCompleted", uint64_t(0));
-}
-
 } // namespace
 
 const char *toString(TaskRecord::Status status)
@@ -1045,15 +1033,14 @@ void TestSession::handleMessage(const Message &msg)
     }
     event.fields.emplace_back("taskId", std::to_string(failed->taskId));
     event.fields.emplace_back("error", quotedText(failed->error));
-    const auto framesCompleted = failedFramesCompleted(msg);
-    if (framesCompleted) {
+    if (failed->framesCompleted) {
       event.fields.emplace_back(
-          "framesCompleted", std::to_string(framesCompleted));
+          "framesCompleted", std::to_string(failed->framesCompleted));
     }
     handleTaskEnd(failed->taskId,
         TaskRecord::Status::Failed,
         std::move(failed->error),
-        framesCompleted);
+        failed->framesCompleted);
     break;
   }
   case StudioMessageType::UIState: {

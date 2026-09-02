@@ -17,9 +17,9 @@ expect-error "unknown message type 255"
 send-raw 200
 expect-error "unknown message type 200"
 
-# A request of a later milestone (RenderShot = 60) is refused loudly.
+# A RenderShot (60) whose payload cannot be decoded is refused loudly.
 send-raw 60
-expect-error "not implemented"
+expect-error "malformed RenderShot payload"
 assert lastError contains RenderShot
 
 assert errors.received == 4
