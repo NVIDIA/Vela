@@ -24,8 +24,12 @@ PUBLIC
 # The thin client executable: ImGui UI over the client core.
 add_executable(scivisStudioClient
   Application.cpp
+  EditorContext.cpp
+  RemoteBrowseDialog.cpp
   StudioViewport.cpp
+  UICommon.cpp
   scivisStudioClient.cpp
+  windows/EditorWindow.cpp
 )
 
 # OBJECT libraries only contribute their objects to direct linkers, so the
