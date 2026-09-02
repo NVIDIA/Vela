@@ -8,7 +8,6 @@
 #include "vsr/ui/imgui/Application.h"
 
 #include <algorithm>
-#include <array>
 #include <cfloat>
 #include <cstring>
 #include <filesystem>
@@ -27,19 +26,6 @@ std::string withVsrExtension(const std::string &path)
     p.replace_extension(".vsr");
   return p.string();
 }
-
-struct LightTypeOption
-{
-  const char *label;
-  const char *subtype;
-};
-
-constexpr std::array<LightTypeOption, 5> LIGHT_TYPES = {
-    {{"Directional", "directional"},
-        {"Point", "point"},
-        {"Quad", "quad"},
-        {"Spot", "spot"},
-        {"Ring", "ring"}}};
 
 std::vector<vsr::scene::LayerNodeRef> lightNodes(vsr::scene::LayerNodeRef root)
 {
@@ -180,7 +166,7 @@ void LightRigEditor::buildUI_addLight(LightRig &rig)
     ImGui::OpenPopup("Add Light");
 
   if (ImGui::BeginPopup("Add Light")) {
-    for (const auto &type : LIGHT_TYPES) {
+    for (const auto &type : light_rig::LIGHT_SUBTYPES) {
       if (ImGui::MenuItem(type.label)) {
         auto node = m_projectContext->addLightToRig(rig, type.subtype);
         if (node)

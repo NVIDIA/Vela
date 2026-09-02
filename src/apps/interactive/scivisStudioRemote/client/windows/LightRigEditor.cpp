@@ -14,7 +14,6 @@
 #include <imgui.h>
 // std
 #include <algorithm>
-#include <array>
 
 namespace vsr::scivis_studio::client {
 
@@ -25,19 +24,6 @@ namespace {
 constexpr const char *REMOVE_POPUP = "Delete Light Rig?";
 constexpr const char *ADD_LIGHT_POPUP = "Add Light";
 const std::vector<std::string> ARCHIVE_EXTENSIONS = {".vsr", ".tsd"};
-
-struct LightTypeOption
-{
-  const char *label;
-  const char *subtype;
-};
-
-constexpr std::array<LightTypeOption, 5> LIGHT_TYPES = {
-    {{"Directional", "directional"},
-        {"Point", "point"},
-        {"Quad", "quad"},
-        {"Spot", "spot"},
-        {"Ring", "ring"}}};
 
 std::string lightName(vsr::scene::LayerNodeRef node)
 {
@@ -307,7 +293,7 @@ void LightRigEditor::buildUI_lightList(const LightRig &rig)
   if (ImGui::Button("Add Light"))
     ImGui::OpenPopup(ADD_LIGHT_POPUP);
   if (ImGui::BeginPopup(ADD_LIGHT_POPUP)) {
-    for (const auto &type : LIGHT_TYPES) {
+    for (const auto &type : light_rig::LIGHT_SUBTYPES) {
       if (ImGui::MenuItem(type.label)) {
         m_pendingLightOp = ops().addLightToRig(rig.id,
             type.subtype,
