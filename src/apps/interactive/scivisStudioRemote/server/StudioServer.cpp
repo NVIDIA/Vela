@@ -238,16 +238,15 @@ bool StudioServer::loadDevice(std::string *error)
 bool StudioServer::setupProject(std::string *error)
 {
   if (!m_options.projectDirectory.empty()) {
-    // The same {windows, layout, settings} tree the dispatcher keeps after
-    // an OpenProject: the bootstrap hands it to the client and a save
-    // without one writes it back.
-    auto ui = makeSubtree();
-    std::string layout;
+    // The same tree the dispatcher keeps after an OpenProject: the
+    // bootstrap hands it to the client and a save without one writes it
+    // back.
+    UIStateCapture ui;
     std::string openError;
     if (!m_projectContext.openProject(m_options.projectDirectory,
-            &ui->root()["windows"],
-            &layout,
-            &ui->root()["settings"],
+            ui.windows(),
+            &ui.layout,
+            ui.settings(),
             &openError)) {
       if (error) {
         *error = "failed to open project '"
@@ -255,8 +254,7 @@ bool StudioServer::setupProject(std::string *error)
       }
       return false;
     }
-    ui->root()["layout"] = layout;
-    m_uiState = ui;
+    m_uiState = ui.tree();
     vsr::core::logStatus("[StudioServer] opened project '%s' (%s)",
         m_projectContext.project().name.c_str(),
         m_options.projectDirectory.c_str());

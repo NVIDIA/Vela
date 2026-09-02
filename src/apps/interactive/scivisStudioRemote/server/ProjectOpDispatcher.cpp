@@ -191,6 +191,26 @@ bool refusedWhileRendering(const ProjectRequest &request)
       && !isOneOf<RequestArrayHistogram>(request);
 }
 
+// UIStateCapture /////////////////////////////////////////////////////////////
+
+UIStateCapture::UIStateCapture() : m_tree(makeSubtree()) {}
+
+vsr::core::DataNode *UIStateCapture::windows()
+{
+  return &m_tree->root()["windows"];
+}
+
+vsr::core::DataNode *UIStateCapture::settings()
+{
+  return &m_tree->root()["settings"];
+}
+
+SubtreePtr UIStateCapture::tree()
+{
+  m_tree->root()["layout"] = layout;
+  return m_tree;
+}
+
 // Dispatcher /////////////////////////////////////////////////////////////////
 
 ProjectOpDispatcher::ProjectOpDispatcher(Host host) : m_host(std::move(host)) {}
@@ -321,24 +341,20 @@ void ProjectOpDispatcher::handle(const OpenProject &req)
                 return result;
               }
               progress("applying");
-              // The same {windows, layout, settings} shape the manifest holds,
-              // handed back to the client at bootstrap.
-              auto ui = makeSubtree();
-              std::string layout;
+              UIStateCapture ui;
               if (!context().openStagedProject(stage,
-                      &ui->root()["windows"],
-                      &layout,
-                      &ui->root()["settings"],
+                      ui.windows(),
+                      &ui.layout,
+                      ui.settings(),
                       &result.error)) {
                 result.ok = false;
                 return result;
               }
-              ui->root()["layout"] = layout;
-              *m_host.uiState = ui;
+              *m_host.uiState = ui.tree();
               // The opened project's layout reaches the client that asked
               // before the snapshot that follows the task; a bootstrap
               // carries it too.
-              m_host.send(encode(UIState{ui}));
+              m_host.send(encode(UIState{*m_host.uiState}));
               result.projectChanged = true;
               return result;
             },
