@@ -67,32 +67,6 @@ anari::Device loadFirstAvailableDevice(
   return nullptr;
 }
 
-// Types the server emits; a client sending one is confused, not ahead of us.
-constexpr bool isServerToClient(StudioMessageType type)
-{
-  switch (type) {
-  case StudioMessageType::BootstrapBegin:
-  case StudioMessageType::BootstrapEnd:
-  case StudioMessageType::ProjectOpReply:
-  case StudioMessageType::ProjectSnapshot:
-  case StudioMessageType::TaskProgress:
-  case StudioMessageType::TaskCompleted:
-  case StudioMessageType::TaskFailed:
-  case StudioMessageType::TimeAdvanceWarning:
-  case StudioMessageType::PickReply:
-  case StudioMessageType::UIState:
-  case StudioMessageType::TransferScene:
-  case StudioMessageType::TransferLayer:
-  case StudioMessageType::ObjectAdded:
-  case StudioMessageType::ObjectRemoved:
-  case StudioMessageType::FrameConfig:
-  case StudioMessageType::Frame:
-    return true;
-  default:
-    return false;
-  }
-}
-
 } // namespace
 
 const char *toString(SessionState state)
