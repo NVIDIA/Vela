@@ -253,6 +253,9 @@ struct TestSession
   std::string m_lastError;
   std::deque<Event> m_events;
   std::vector<vsr::network::MessageFuture> m_sendFutures;
+  // The mirror's object for an edit, or null with the reason.
+  vsr::scene::Object *mirrorObject(
+      const SceneObjectRef &object, std::string *error);
 
   // Shared with the IO thread
   std::mutex m_inboundMutex;
