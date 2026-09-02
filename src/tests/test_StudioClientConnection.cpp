@@ -2,32 +2,25 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // catch
+#include "StudioFakeServer.h"
 #include "StudioRemoteTestHelpers.h"
 #include "catch.hpp"
 // vsr_scivis_studio_client_core
 #include "ServerConnection.h"
 // vsr_scivis_studio_protocol
 #include "FrameMessages.h"
-#include "ProjectSnapshot.h"
 #include "SceneEditMessages.h"
 #include "SceneMessages.h"
 #include "SessionMessages.h"
 #include "StudioCodec.h"
 #include "StudioProtocol.h"
 // vsr_network
-#include "vsr/network/NetworkChannel.hpp"
-#include "vsr/network/messages/TransferLayer.hpp"
 #include "vsr/network/messages/TransferScene.hpp"
 // vsr_scene
 #include "vsr/scene/Scene.hpp"
 // std
-#include <atomic>
 #include <chrono>
-#include <functional>
-#include <memory>
-#include <mutex>
 #include <string>
-#include <thread>
 #include <vector>
 
 using namespace vsr::scivis_studio;
@@ -38,155 +31,6 @@ namespace messages = vsr::network::messages;
 using namespace std::chrono_literals;
 
 namespace {
-
-constexpr const char *LAYER_NAME = "extra";
-constexpr const char *GEOMETRY_NAME = "bootstrapped geometry";
-
-void populate(vsr::scene::Scene &scene)
-{
-  auto *layer = scene.addLayer(LAYER_NAME);
-  auto geometry = scene.createObject<vsr::scene::Geometry>("sphere");
-  geometry->setName(GEOMETRY_NAME);
-  geometry->setParameter("radius", 0.25f);
-  scene.insertChildObjectNode(layer->root(), geometry);
-}
-
-/*
- * A Studio server reduced to its session behaviour: Hello on accept, the
- * prebuilt bootstrap on the client's Hello, Pong on Ping unless silenced.
- * Everything runs on the server's IO thread; the test reads the counters.
- */
-struct FakeServer
-{
-  FakeServer(int helloVersion = PROTOCOL_VERSION);
-  ~FakeServer();
-
-  unsigned short port() const;
-  size_t count(StudioMessageType type);
-  std::vector<Message> messagesOf(StudioMessageType type);
-
-  void send(Message msg);
-  void sendBootstrapEnd();
-  // The prebuilt bracket, then End unless it is being held back.
-  void sendBootstrap();
-  void onMessage(const Message &msg);
-
-  int helloVersion{PROTOCOL_VERSION};
-  std::shared_ptr<vsr::network::NetworkServer> channel;
-  std::vector<Message> bootstrap; // sent on the client's Hello, in order
-  std::atomic<bool> holdBootstrap{false}; // answer Hello with nothing at all
-  std::atomic<bool> holdBootstrapEnd{false};
-  std::atomic<bool> silent{false};
-  std::atomic<int> accepts{0};
-  std::mutex mutex;
-  std::vector<Message> received;
-};
-
-FakeServer::FakeServer(int helloVersion) : helloVersion(helloVersion)
-{
-  channel = std::make_shared<vsr::network::NetworkServer>(0);
-  channel->setConnectHandler([this]() {
-    accepts++;
-    Hello hello;
-    hello.version = this->helloVersion;
-    hello.buildInfo = "fake server";
-    channel->send(encode(hello));
-  });
-  for (int value = 1; value < vsr::network::MESSAGE_TYPE_INVALID; ++value) {
-    if (!isStudioMessageType(uint8_t(value)))
-      continue;
-    channel->registerHandler(
-        uint8_t(value), [this](const Message &msg) { onMessage(msg); });
-  }
-  channel->start();
-}
-
-FakeServer::~FakeServer()
-{
-  channel->stop();
-}
-
-unsigned short FakeServer::port() const
-{
-  return channel->port();
-}
-
-size_t FakeServer::count(StudioMessageType type)
-{
-  std::lock_guard lock(mutex);
-  size_t n = 0;
-  for (const auto &msg : received)
-    n += msg.header.type == uint8_t(type);
-  return n;
-}
-
-std::vector<Message> FakeServer::messagesOf(StudioMessageType type)
-{
-  std::lock_guard lock(mutex);
-  std::vector<Message> out;
-  for (const auto &msg : received)
-    if (msg.header.type == uint8_t(type))
-      out.push_back(msg);
-  return out;
-}
-
-void FakeServer::send(Message msg)
-{
-  channel->send(std::move(msg));
-}
-
-void FakeServer::sendBootstrapEnd()
-{
-  send(encode(BootstrapEnd{}));
-}
-
-void FakeServer::sendBootstrap()
-{
-  for (const auto &m : bootstrap)
-    channel->send(Message(m));
-  if (!holdBootstrapEnd)
-    sendBootstrapEnd();
-}
-
-void FakeServer::onMessage(const Message &msg)
-{
-  {
-    std::lock_guard lock(mutex);
-    received.push_back(msg);
-  }
-  switch (StudioMessageType(msg.header.type)) {
-  case StudioMessageType::Hello:
-    if (!holdBootstrap)
-      sendBootstrap();
-    break;
-  case StudioMessageType::Ping:
-    if (!silent)
-      channel->send(encode(Pong{}));
-    break;
-  default:
-    break;
-  }
-}
-
-// BootstrapBegin, scene, layer, frame config, snapshot; End is sent
-// separately so a test can hold it back.
-std::vector<Message> makeBootstrap(vsr::scene::Scene &source)
-{
-  std::vector<Message> out;
-  out.push_back(encode(BootstrapBegin{}));
-  messages::TransferScene scene(&source, false);
-  out.push_back(encodeSceneMessage(scene, StudioMessageType::TransferScene));
-  messages::TransferLayer layer(&source, source.layer(LAYER_NAME));
-  out.push_back(encodeSceneMessage(layer, StudioMessageType::TransferLayer));
-  FrameConfig config;
-  config.width = 640;
-  config.height = 480;
-  out.push_back(encode(config));
-  ProjectSnapshot snapshot;
-  snapshot.project.name = "fake project";
-  out.push_back(encode(snapshot));
-  return out;
-}
 
 Message makeFrame(int frame)
 {
@@ -210,7 +54,7 @@ struct Fixture
 
   vsr::scene::Scene source;
   vsr::scene::Scene mirror;
-  FakeServer server;
+  FakeStudioServer server;
   ServerConnection connection;
   std::vector<ConnectionState> transitions;
   int mirrorReplaces{0};
@@ -222,8 +66,8 @@ struct Fixture
 Fixture::Fixture(int helloVersion, ConnectionTimings timings)
     : server(helloVersion), connection(&mirror, timings)
 {
-  populate(source);
-  server.bootstrap = makeBootstrap(source);
+  populateFakeScene(source);
+  server.bootstrap = makeFakeBootstrap(source);
   connection.onStateChanged = [this](ConnectionState, ConnectionState to) {
     transitions.push_back(to);
   };
@@ -254,7 +98,7 @@ bool Fixture::mirrorHasGeometry() const
   if (mirror.numberOfObjects(ANARI_GEOMETRY) != 1)
     return false;
   auto geometry = mirror.getObject<vsr::scene::Geometry>(0);
-  return geometry && geometry->name() == GEOMETRY_NAME;
+  return geometry && geometry->name() == FAKE_GEOMETRY_NAME;
 }
 
 } // namespace
@@ -285,7 +129,7 @@ SCENARIO("ServerConnection handshakes and bootstraps", "[StudioClient]")
         const auto hello = decode<Hello>(hellos.front());
         REQUIRE(hello);
         REQUIRE(hello->version == PROTOCOL_VERSION);
-        REQUIRE(f.mirror.layer(LAYER_NAME) != nullptr);
+        REQUIRE(f.mirror.layer(FAKE_LAYER_NAME) != nullptr);
         REQUIRE(f.connection.frameConfig().width == 640);
         REQUIRE(f.connection.frameConfig().height == 480);
         REQUIRE(f.connection.project() != nullptr);
