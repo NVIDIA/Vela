@@ -3,6 +3,11 @@
 
 #include "Application.h"
 #include "StudioViewport.h"
+#include "modals/ProjectLocationDialog.h"
+#include "windows/ProjectWindow.h"
+#include "windows/TaskPanel.h"
+// vsr_scivis_studio_client_core
+#include "ProjectOps.h"
 // vsr_scivis_studio_protocol
 #include "FrameCodec.h"
 // vsr_scivis_studio_model
@@ -23,7 +28,10 @@
 #include <SDL3/SDL.h>
 // std
 #include <algorithm>
+#include <iterator>
+#include <optional>
 #include <string>
+#include <utility>
 
 namespace vsr::scivis_studio::client {
 
@@ -57,6 +65,11 @@ void LockableWindow<WindowT>::buildUI()
 
 // ImGui docking needs a couple of frames before window sizes are final.
 constexpr int AUTO_CONNECT_DELAY_FRAMES = 3;
+
+constexpr double ERROR_TOAST_SECONDS = 8.0;
+constexpr double STATUS_TOAST_SECONDS = 4.0;
+constexpr size_t MAX_TOASTS = 5;
+constexpr const char *CONFIRMATION_POPUP = "Discard Unsaved Changes?";
 
 const char *usage()
 {
@@ -159,6 +172,18 @@ Application::Application(int argc, const char **argv)
     vsr::core::logError("[Client] server reported: %s", message.c_str());
   };
 
+  m_editorContext.connection = m_connection.get();
+  m_editorContext.reportError = [this](const std::string &message) {
+    notify(message, true);
+  };
+  m_editorContext.reportStatus = [this](const std::string &message) {
+    notify(message, false);
+  };
+  m_editorContext.actions.newProject = [this] { newProject(); };
+  m_editorContext.actions.openProject = [this] { openProjectDialog(); };
+  m_editorContext.actions.saveProject = [this] { saveProject(); };
+  m_editorContext.actions.saveProjectAs = [this] { saveProjectAsDialog(); };
+
   const auto &supported = supportedFrameEncodings();
   if (std::find(supported.begin(), supported.end(), FrameEncoding::TurboJpeg)
       != supported.end())
@@ -195,13 +220,23 @@ vsr_ui::WindowArray Application::setupWindows()
   auto *databaseEditor =
       new LockableWindow<vsr_ui::DatabaseEditor>(this, &m_panelsReadOnly);
 
+  auto *projectWindow = new ProjectWindow(this, &m_editorContext);
+  m_taskPanel = new TaskPanel(this, &m_editorContext);
+
+  m_editors = {projectWindow};
+
   windows.emplace_back(m_viewport);
+  windows.emplace_back(projectWindow);
   windows.emplace_back(log);
+  windows.emplace_back(m_taskPanel);
   windows.emplace_back(layers);
   windows.emplace_back(databaseEditor);
   windows.emplace_back(objectEditor);
 
   setWindowArray(windows);
+
+  m_projectLocationDialog = std::make_unique<ProjectLocationDialog>(
+      this, &m_editorContext, [this] { return buildUIState(); });
 
   if (m_options.connectAtStartup)
     m_autoConnectInFrames = AUTO_CONNECT_DELAY_FRAMES;
@@ -217,6 +252,7 @@ void Application::uiFrameStart()
   // Everything the network delivered since the last frame lands in the
   // mirror, replica and callbacks here, before any panel reads them.
   m_connection->poll();
+  watchTasks();
 
   if (ImGui::BeginMainMenuBar()) {
     uiMainMenuBar();
@@ -229,15 +265,26 @@ void Application::uiFrameStart()
   if (m_taskModal && m_taskModal->visible())
     m_taskModal->renderUI();
 
-  if (!ImGui::GetIO().WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Escape))
+  uiModals();
+  uiConfirmation();
+  uiToasts();
+
+  const bool typing = ImGui::GetIO().WantTextInput;
+  if (!typing && ImGui::IsKeyPressed(ImGuiKey_Escape))
     appContext()->clearSelected();
+  if (!typing && ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_S)
+      && !m_confirmation.open && !m_projectLocationDialog->visible())
+    saveProject();
 }
 
 void Application::uiMainMenuBar()
 {
+  uiMenu_File();
+  uiMenu_Studio();
   uiMenu_Client();
   uiMenu_Server();
   uiMainMenuBar_View();
+  uiTaskIndicator();
 }
 
 void Application::teardown()
@@ -249,6 +296,50 @@ void Application::teardown()
 }
 
 // Menus and banner ///////////////////////////////////////////////////////////
+
+void Application::uiMenu_File()
+{
+  const bool canSend = m_editorContext.canSend();
+  if (!ImGui::BeginMenu("File"))
+    return;
+
+  ImGui::BeginDisabled(!canSend);
+  if (ImGui::MenuItem("New Project"))
+    newProject();
+  if (ImGui::MenuItem("Open Project..."))
+    openProjectDialog();
+
+  ImGui::Separator();
+
+  if (ImGui::MenuItem("Save Project", "Ctrl+S"))
+    saveProject();
+  if (ImGui::MenuItem("Save Project As..."))
+    saveProjectAsDialog();
+  ImGui::EndDisabled();
+
+  ImGui::EndMenu();
+}
+
+void Application::uiMenu_Studio()
+{
+  const bool canSend = m_editorContext.canSend();
+  ImGui::BeginDisabled(!canSend);
+  if (ImGui::BeginMenu("Studio")) {
+    if (ImGui::MenuItem("Add Shot")) {
+      const Project *project = m_connection->project();
+      const auto name = "Shot "
+          + std::to_string(project ? project->shots.size() + 1 : 1);
+      m_connection->projectOps().createShot(name,
+          [this](const ProjectOpReply &reply,
+              const std::optional<ShotCreatedResult> &) {
+            if (!reply.ok)
+              notify(reply.error, true);
+          });
+    }
+    ImGui::EndMenu();
+  }
+  ImGui::EndDisabled();
+}
 
 void Application::uiMenu_Client()
 {
@@ -321,6 +412,35 @@ void Application::uiMenu_Server()
   ImGui::EndDisabled();
 }
 
+// Right-aligned in the menu bar while any Server Task is queued or running.
+void Application::uiTaskIndicator()
+{
+  const auto &ops = m_connection->projectOps();
+  if (!ops.tasksActive())
+    return;
+
+  const TaskRecord *shown = nullptr;
+  for (const TaskRecord &task : ops.tasks()) {
+    if (task.state == TaskState::Running) {
+      shown = &task;
+      break;
+    }
+    if (!shown && task.state == TaskState::Queued)
+      shown = &task;
+  }
+  if (!shown)
+    return;
+
+  const std::string text = std::string(toString(shown->state)) + ": "
+      + (shown->label.empty() ? "<task>" : shown->label);
+  const float width = ImGui::CalcTextSize(text.c_str()).x;
+  ImGui::SameLine(ImGui::GetWindowWidth() - width
+      - ImGui::GetStyle().FramePadding.x * 4.f);
+  ImGui::TextColored(ImVec4(1.f, 0.85f, 0.4f, 1.f), "%s", text.c_str());
+  if (ImGui::IsItemHovered() && !shown->lastProgress.message.empty())
+    ImGui::SetTooltip("%s", shown->lastProgress.message.c_str());
+}
+
 void Application::uiLostBanner()
 {
   const ImGuiViewport *mainViewport = ImGui::GetMainViewport();
@@ -353,6 +473,202 @@ void Application::uiLostBanner()
   ImGui::End();
 
   ImGui::PopStyleColor();
+}
+
+void Application::uiConfirmation()
+{
+  if (!m_confirmation.open)
+    return;
+
+  if (!ImGui::IsPopupOpen(CONFIRMATION_POPUP))
+    ImGui::OpenPopup(CONFIRMATION_POPUP);
+
+  const ImGuiViewport *mainViewport = ImGui::GetMainViewport();
+  ImGui::SetNextWindowPos(mainViewport->GetCenter(),
+      ImGuiCond_Appearing,
+      ImVec2(0.5f, 0.5f));
+  if (!ImGui::BeginPopupModal(
+          CONFIRMATION_POPUP, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    return;
+
+  ImGui::TextWrapped("%s", m_confirmation.message.c_str());
+  ImGui::Spacing();
+  if (ImGui::Button("Discard")) {
+    m_confirmation.open = false;
+    ImGui::CloseCurrentPopup();
+    auto action = std::move(m_confirmation.onConfirm);
+    m_confirmation.onConfirm = nullptr;
+    if (action)
+      action();
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    m_confirmation.open = false;
+    m_confirmation.onConfirm = nullptr;
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::EndPopup();
+}
+
+// Bottom-right, newest last; they expire on their own and take no input.
+void Application::uiToasts()
+{
+  const double now = ImGui::GetTime();
+  while (!m_toasts.empty() && m_toasts.front().expiresAt <= now)
+    m_toasts.pop_front();
+  if (m_toasts.empty())
+    return;
+
+  const ImGuiViewport *mainViewport = ImGui::GetMainViewport();
+  const ImVec2 corner(mainViewport->WorkPos.x + mainViewport->WorkSize.x - 12.f,
+      mainViewport->WorkPos.y + mainViewport->WorkSize.y - 12.f);
+  ImGui::SetNextWindowPos(corner, ImGuiCond_Always, ImVec2(1.f, 1.f));
+  ImGui::SetNextWindowBgAlpha(0.85f);
+  const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration
+      | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_AlwaysAutoResize
+      | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing
+      | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoDocking;
+  if (ImGui::Begin("##toasts", nullptr, flags)) {
+    ImGui::PushTextWrapPos(520.f);
+    for (const Toast &toast : m_toasts) {
+      if (toast.isError)
+        ImGui::TextColored(ImVec4(1.f, 0.4f, 0.4f, 1.f), "%s", toast.text.c_str());
+      else
+        ImGui::TextUnformatted(toast.text.c_str());
+    }
+    ImGui::PopTextWrapPos();
+  }
+  ImGui::End();
+}
+
+// Modals are not in the window array; their owner renders them.
+void Application::uiModals()
+{
+  if (m_projectLocationDialog->visible())
+    m_projectLocationDialog->renderUI();
+}
+
+// Project actions ////////////////////////////////////////////////////////////
+
+void Application::newProject()
+{
+  requestDirtyAction("Discard unsaved changes and start a new project?",
+      [this] {
+        m_connection->projectOps().newProject([this](
+                                                  const ProjectOpReply &reply) {
+          if (!reply.ok)
+            notify(reply.error, true);
+        });
+      });
+}
+
+void Application::openProjectDialog()
+{
+  requestDirtyAction("Discard unsaved changes and open another project?",
+      [this] {
+        m_projectLocationDialog->configure(ProjectLocationMode::OpenProject);
+        m_projectLocationDialog->show();
+      });
+}
+
+void Application::saveProject()
+{
+  if (!m_editorContext.canSend())
+    return;
+  const Project *project = m_connection->project();
+  if (project->projectDirectory.empty()) {
+    saveProjectAsDialog();
+    return;
+  }
+  m_connection->projectOps().saveProject(std::nullopt,
+      buildUIState(),
+      [this](const ProjectOpReply &reply,
+          const std::optional<TaskStartedResult> &) {
+        if (!reply.ok)
+          notify(reply.error, true);
+      });
+}
+
+void Application::saveProjectAsDialog()
+{
+  if (!m_editorContext.canSend())
+    return;
+  m_projectLocationDialog->configure(ProjectLocationMode::SaveProjectAs);
+  m_projectLocationDialog->show();
+}
+
+void Application::requestDirtyAction(
+    std::string message, std::function<void()> action)
+{
+  if (!m_editorContext.canSend())
+    return;
+  const Project *project = m_connection->project();
+  if (!project->dirty) {
+    action();
+    return;
+  }
+  m_confirmation.open = true;
+  m_confirmation.message = std::move(message);
+  m_confirmation.onConfirm = std::move(action);
+}
+
+SubtreePtr Application::buildUIState()
+{
+  SubtreePtr tree = makeSubtree();
+  auto &root = tree->root();
+  auto &windows = root["windows"];
+  for (auto *window : m_windows)
+    window->saveSettings(windows[window->name()]);
+  root["layout"] = std::string(ImGui::SaveIniSettingsToMemory());
+  auto &settings = root["settings"];
+  settings["fontScale"] = m_uiConfig.fontScale;
+  settings["uiRounding"] = m_uiConfig.rounding;
+  return tree;
+}
+
+// Notifications //////////////////////////////////////////////////////////////
+
+void Application::notify(const std::string &text, bool isError)
+{
+  if (isError)
+    vsr::core::logError("[Client] %s", text.c_str());
+  else
+    vsr::core::logStatus("[Client] %s", text.c_str());
+
+  Toast toast;
+  toast.text = text;
+  toast.isError = isError;
+  toast.expiresAt = ImGui::GetTime()
+      + (isError ? ERROR_TOAST_SECONDS : STATUS_TOAST_SECONDS);
+  m_toasts.push_back(std::move(toast));
+  while (m_toasts.size() > MAX_TOASTS)
+    m_toasts.pop_front();
+}
+
+// Announces each task's completion or failure once; the task panel shows
+// the rest.
+void Application::watchTasks()
+{
+  const auto &tasks = m_connection->projectOps().tasks();
+
+  for (auto it = m_announcedTasks.begin(); it != m_announcedTasks.end();) {
+    const bool present = std::any_of(tasks.begin(),
+        tasks.end(),
+        [&](const TaskRecord &t) { return t.taskId == it->first; });
+    it = present ? std::next(it) : m_announcedTasks.erase(it);
+  }
+
+  for (const TaskRecord &task : tasks) {
+    auto it = m_announcedTasks.find(task.taskId);
+    if (it != m_announcedTasks.end() && it->second == task.state)
+      continue;
+    m_announcedTasks[task.taskId] = task.state;
+    const std::string label = task.label.empty() ? "<task>" : task.label;
+    if (task.state == TaskState::Completed)
+      notify(label + " completed", false);
+    else if (task.state == TaskState::Failed)
+      notify(label + " failed: " + task.error, true);
+  }
 }
 
 // Connection lifecycle ///////////////////////////////////////////////////////
@@ -411,6 +727,8 @@ void Application::onMirrorReplaceBegin()
 // bootstrap's own snapshot is covered by onBootstrapComplete.
 void Application::onProjectReplaced()
 {
+  for (auto *editor : m_editors)
+    editor->onProjectReplaced();
   if (m_connection->bootstrapping())
     return;
   resolveActiveShotCamera();
@@ -510,11 +828,23 @@ Pos=60,60
 Size=400,400
 Collapsed=0
 
-[Window][Layers]
+[Window][Project]
 Pos=0,56
 Size=955,1341
 Collapsed=0
 DockId=0x00000005,0
+
+[Window][Layers]
+Pos=0,56
+Size=955,1341
+Collapsed=0
+DockId=0x00000005,1
+
+[Window][Tasks]
+Pos=957,1741
+Size=2883,521
+Collapsed=0
+DockId=0x0000000A,1
 
 [Window][Object Editor]
 Pos=0,1399
@@ -531,7 +861,7 @@ DockId=0x00000006,1
 [Docking][Data]
 DockSpace       ID=0x80F5B4C5 Window=0x079D3A04 Pos=0,56 Size=3840,2206 Split=X
   DockNode      ID=0x00000001 Parent=0x80F5B4C5 SizeRef=955,1054 Split=Y Selected=0xCD8384B1
-    DockNode    ID=0x00000005 Parent=0x00000001 SizeRef=547,640 Selected=0xCD8384B1
+    DockNode    ID=0x00000005 Parent=0x00000001 SizeRef=547,640 Selected=0x5B7FA1DE
     DockNode    ID=0x00000006 Parent=0x00000001 SizeRef=547,412 Selected=0x82B4C496
   DockNode      ID=0x00000002 Parent=0x80F5B4C5 SizeRef=2883,1054 Split=Y Selected=0xC450F867
     DockNode    ID=0x00000003 Parent=0x00000002 SizeRef=1371,1683 CentralNode=1 Selected=0xC450F867

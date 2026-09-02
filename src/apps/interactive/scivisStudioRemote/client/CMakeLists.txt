@@ -29,7 +29,10 @@ add_executable(scivisStudioClient
   StudioViewport.cpp
   UICommon.cpp
   scivisStudioClient.cpp
+  modals/ProjectLocationDialog.cpp
   windows/EditorWindow.cpp
+  windows/ProjectWindow.cpp
+  windows/TaskPanel.cpp
 )
 
 # OBJECT libraries only contribute their objects to direct linkers, so the
