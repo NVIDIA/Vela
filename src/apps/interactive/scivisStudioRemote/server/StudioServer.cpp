@@ -128,6 +128,7 @@ ProjectOpDispatcher::Host StudioServer::makeDispatcherHost()
     }
   };
   host.uiState = &m_uiState;
+  host.shutdownRequested = [this] { return m_shutdownRequested.load(); };
   return host;
 }
 
@@ -233,11 +234,16 @@ bool StudioServer::loadDevice(std::string *error)
 bool StudioServer::setupProject(std::string *error)
 {
   if (!m_options.projectDirectory.empty()) {
+    // The same {windows, layout, settings} tree the dispatcher keeps after
+    // an OpenProject: the bootstrap hands it to the client and a save
+    // without one writes it back.
+    auto ui = makeSubtree();
+    std::string layout;
     std::string openError;
     if (!m_projectContext.openProject(m_options.projectDirectory,
-            nullptr,
-            nullptr,
-            nullptr,
+            &ui->root()["windows"],
+            &layout,
+            &ui->root()["settings"],
             &openError)) {
       if (error) {
         *error = "failed to open project '"
@@ -245,6 +251,8 @@ bool StudioServer::setupProject(std::string *error)
       }
       return false;
     }
+    ui->root()["layout"] = layout;
+    m_uiState = ui;
     vsr::core::logStatus("[StudioServer] opened project '%s' (%s)",
         m_projectContext.project().name.c_str(),
         m_options.projectDirectory.c_str());
@@ -476,9 +484,14 @@ void StudioServer::run()
       bootstrap();
     if (m_sceneResendPending)
       sendSceneSnapshot();
-    // One Server Task per iteration; frames wait while it runs.
-    if (sessionEstablished())
-      m_dispatcher.runOneTask();
+    // One Server Task per iteration; frames wait while it runs. A shot
+    // render outlives its session (it runs with nobody listening and the
+    // next bootstrap replays its ending); inputs latched while it held the
+    // loop targeted a scene it was mutating.
+    if (sessionEstablished() || m_dispatcher.renderActive()) {
+      if (auto ran = m_dispatcher.runOneTask(); ran && ran->exclusive)
+        m_discardLatchedInputs = true;
+    }
     // A Frame still on the wire gets a moment to finish before time moves
     // on, so a fast link never sees a header skip a frame; on a slow link
     // the tick goes ahead regardless and time keeps its pace.
@@ -560,6 +573,11 @@ void StudioServer::applyControlState()
     }
   }
 
+  if (m_discardLatchedInputs) {
+    m_discardLatchedInputs = false;
+    discardStaleInputs(control);
+  }
+
   const bool established = m_bootstrapPending
       || m_state == SessionState::Connected
       || m_state == SessionState::Rendering;
@@ -622,6 +640,25 @@ void StudioServer::applyControlState()
   }
 }
 
+void StudioServer::discardStaleInputs(ControlState &control)
+{
+  if (!control.edits.empty() || control.time) {
+    vsr::core::logWarning(
+        "[StudioServer] %zu scene edit(s)%s latched during the shot render"
+        " dropped: they targeted the scene the render was mutating",
+        control.edits.size(),
+        control.time ? " and a SetTime" : "");
+    control.edits.clear();
+    control.time.reset();
+  }
+  if (control.pick) {
+    // Pick has no reply-with-error of its own; the bare Error names it.
+    replyError("Pick " + std::to_string(control.pick->requestId)
+        + " refused: render in progress");
+    control.pick.reset();
+  }
+}
+
 void StudioServer::dispatchPendingRequests()
 {
   while (!m_pendingRequests.empty()) {
@@ -632,7 +669,10 @@ void StudioServer::dispatchPendingRequests()
     // the task or the sync op could, and a cancel that waited for the task
     // it names would always come too late.
     auto next = m_pendingRequests.begin();
-    if (m_tasks.queued() > 0 && waitsForQueuedTasks(*next)) {
+    // A request the dispatcher will refuse anyway need not wait its turn.
+    const bool refusedNow =
+        m_dispatcher.renderActive() && refusedWhileRendering(*next);
+    if (!refusedNow && m_tasks.queued() > 0 && waitsForQueuedTasks(*next)) {
       next = std::find_if(
           std::next(next), m_pendingRequests.end(), independentOfQueuedTasks);
       if (next == m_pendingRequests.end())
@@ -721,6 +761,8 @@ void StudioServer::bootstrap()
   config.height = m_frameHeight;
   send(encode(config));
   send(encode(UIState{m_uiState}));
+  // Task-status replay: how the tasks this client never heard about ended.
+  m_tasks.replayTo([this](Message &&msg) { send(std::move(msg)); });
   send(encode(ProjectSnapshot{m_projectContext.project()}));
   send(encode(BootstrapEnd{}));
 
@@ -1258,6 +1300,11 @@ void StudioServer::onMessage(const Message &msg)
           msg, "malformed " + std::string(toString(*type)) + " payload");
       return;
     }
+    // A cancel of the running task cannot wait for the loop (it is inside
+    // the body): the flag is raised here, the request still goes through
+    // the queue for its reply.
+    if (const auto *cancel = std::get_if<CancelTask>(&*request))
+      m_tasks.requestCancelRunning(cancel->taskId);
     std::lock_guard lock(m_controlMutex);
     m_control.requests.push_back(std::move(*request));
     return;
@@ -1266,9 +1313,10 @@ void StudioServer::onMessage(const Message &msg)
   if (isServerToClient(*type)) {
     replyError(std::string(toString(*type)) + " is a server-to-client message");
   } else {
-    // RenderShot: milestone 7. Refused loudly, never dropped.
+    // Every client-to-server type is handled above; a new one added to the
+    // protocol without a handler is refused loudly, never dropped.
     refuseRequest(msg,
-        std::string(toString(*type)) + " is not implemented in this server");
+        std::string(toString(*type)) + " is not served by this server");
   }
 }
 

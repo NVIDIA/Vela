@@ -28,9 +28,9 @@
 namespace vsr::scivis_studio::server {
 
 // Every client->server project request the dispatcher serves: Project Ops
-// (SetPlaying and RequestArrayHistogram among them), Remote Browse and
-// CancelTask (types 20..59 and 61), decoded on the IO thread and queued for
-// the loop thread in arrival order.
+// (SetPlaying and RequestArrayHistogram among them), Remote Browse,
+// RenderShot and CancelTask (types 20..61), decoded on the IO thread and
+// queued for the loop thread in arrival order.
 using ProjectRequest = std::variant<protocol::NewProject,
     protocol::OpenProject,
     protocol::SaveProject,
@@ -71,6 +71,7 @@ using ProjectRequest = std::variant<protocol::NewProject,
     protocol::ListRoots,
     protocol::ListDirectory,
     protocol::RequestArrayHistogram,
+    protocol::RenderShot,
     protocol::CancelTask>;
 
 // True for the message types ProjectRequest covers. Derived from the
@@ -95,9 +96,20 @@ bool waitsForQueuedTasks(const ProjectRequest &request);
 // followed it.
 bool independentOfQueuedTasks(const ProjectRequest &request);
 
+// A request that mutates the Project or Scene, or launches a task that
+// would: refused with "render in progress" while a shot render is queued or
+// running (pause-and-refuse). Remote Browse, RequestArrayHistogram and
+// CancelTask are not.
+bool refusedWhileRendering(const ProjectRequest &request);
+
 /*
  * Runs project requests on the loop thread against the server's
- * ProjectContext. Sync ops call the context, send the ProjectOpReply, then a
+ * ProjectContext. RenderShot is a Server Task with a sync prelude: the shot
+ * becomes the active one, the pipeline rebinds and a snapshot goes out
+ * before the task is queued, so the client sees the switch at once; while
+ * the render is queued or running every mutating request is refused with
+ * "render in progress" (renderActive()) and the body polls its cancel flag
+ * once per frame. Sync ops call the context, send the ProjectOpReply, then a
  * ProjectSnapshot whenever the Project changed (including "failed" calls that
  * still mutate: an import that leaves an ImportFailed record, a load that
  * marks a dataset Unavailable). Task ops reply with a TaskStartedResult and
@@ -134,14 +146,22 @@ struct ProjectOpDispatcher
     std::function<void()> rebindActiveShot;
     // The UI-state tree stored with the project (ui-state round trip).
     protocol::SubtreePtr *uiState{nullptr};
+    // The server is going down: a running render stops at its next frame.
+    std::function<bool()> shutdownRequested;
   };
 
   explicit ProjectOpDispatcher(Host host);
 
+  // Serves `request`, or refuses it when a render is pending and the
+  // request would mutate (refusedWhileRendering).
   void dispatch(const ProjectRequest &request);
 
-  // Runs one queued task (if any) and sends the snapshot it earned.
-  void runOneTask();
+  // Runs one queued task (if any) and sends the snapshot it earned; what ran,
+  // for the host's follow-up.
+  std::optional<RanTask> runOneTask();
+
+  // A shot render is queued or running.
+  bool renderActive() const;
 
  private:
   // Project
@@ -190,6 +210,7 @@ struct ProjectOpDispatcher
   // Remote Browse and tasks
   void handle(const protocol::ListRoots &);
   void handle(const protocol::ListDirectory &);
+  void handle(const protocol::RenderShot &);
   void handle(const protocol::CancelTask &);
   // Viewport
   void handle(const protocol::RequestArrayHistogram &);
@@ -202,8 +223,14 @@ struct ProjectOpDispatcher
   void fail(uint64_t requestId,
       const std::string &error,
       bool projectChanged = false);
-  // Queues `body` and answers with its task id.
-  void startTask(uint64_t requestId, std::string description, TaskBody body);
+  // Queues `body` and answers with its task id; `projectChanged` and
+  // `rebind` describe what a sync prelude did before the task was queued.
+  void startTask(uint64_t requestId,
+      std::string description,
+      TaskBody body,
+      bool exclusive = false,
+      bool projectChanged = false,
+      bool rebind = false);
   // Runs `body`, then -- however it ended -- rebinds (if asked) and flushes
   // scene pushes so the completion report follows them.
   TaskResult runTaskBody(const std::function<TaskResult()> &body, bool rebind);
