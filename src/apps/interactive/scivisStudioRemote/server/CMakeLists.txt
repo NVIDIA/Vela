@@ -11,6 +11,7 @@ add_library(vsr_scivis_studio_server_core OBJECT
   ServerPushDelegate.cpp
   ServerTaskRunner.cpp
   StudioServer.cpp
+  ViewportPasses.cpp
 )
 
 target_include_directories(vsr_scivis_studio_server_core

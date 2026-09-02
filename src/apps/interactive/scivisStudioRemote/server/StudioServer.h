@@ -8,11 +8,13 @@
 #include "ServerOptions.h"
 #include "ServerPushDelegate.h"
 #include "ServerTaskRunner.h"
+#include "ViewportPasses.h"
 // vsr_scivis_studio_protocol
 #include "FrameMessages.h"
 #include "PayloadCommon.h"
 #include "PlaybackMessages.h"
 #include "SceneEditMessages.h"
+#include "ViewportMessages.h"
 // vsr_scivis_studio_model
 #include "ProjectContext.h"
 // vsr_network
@@ -83,8 +85,15 @@ const char *toString(SessionState state);
  * snapshot), auto-stop at the end of a non-looping shot sends one, and a
  * SetTime scrub while paused commits one after 250 ms of quiet. Frames a
  * file binding cannot load go out as TimeAdvanceWarning; playback goes on.
- * Picking and RenderShot are still answered with Error{"... not implemented
- * in this server"}.
+ *
+ * The Viewport Pass suite (ViewportPasses) composites the outline, AOV and
+ * world-bounds passes over each frame before it is copied out; SetOutline
+ * and ViewportSettings are latch slots feeding it. Pick is a latch slot too,
+ * one in flight, latest-wins: the loop services it by rendering one frame
+ * with the id channel on, even while paused, and answers with a PickReply
+ * before the next Frame. RequestArrayHistogram is a sync Project Op.
+ * RenderShot is still answered with a "... not implemented in this server"
+ * refusal.
  *
  * Example:
  *   StudioServer server(options);
@@ -121,6 +130,9 @@ struct StudioServer
   SessionState sessionState() const;
   // The ANARI library actually rendering, after any fallback.
   const std::string &libraryName() const;
+  // Whether the scene pass renders the objectId channel right now (mirrored
+  // from the loop thread for tests).
+  bool idChannelEnabled() const;
 
   // The loop thread's state; other threads may only read it while the server
   // is not rendering (tests).
@@ -163,6 +175,10 @@ struct StudioServer
     std::vector<ProjectRequest> requests;
     // Playback
     std::optional<protocol::SetTime> time; // the scrub, latest-wins
+    // Viewport: latest-wins slots feeding the pass suite and the pick
+    std::optional<protocol::Pick> pick;
+    std::optional<protocol::SetOutline> outline;
+    std::optional<protocol::ViewportSettings> viewportSettings;
   };
 
   // Startup and teardown (caller's thread)
@@ -209,6 +225,8 @@ struct StudioServer
   void applyEdit(const protocol::RemoveObjectParameter &edit);
   void applyEdit(const protocol::SetNodeTransform &edit);
   void renderAndSendFrame();
+  // Encodes m_colorBytes as this iteration's Frame and sends it.
+  void sendRenderedFrame();
   void send(vsr::network::Message &&msg);
   bool sessionEstablished() const;
 
@@ -232,6 +250,17 @@ struct StudioServer
   void setState(SessionState state);
   void setPushEnabled(bool enabled);
 
+  // Viewport (loop thread)
+  // Applies the latched ViewportSettings and SetOutline, and takes over a
+  // latched Pick as the one pending.
+  void applyViewportControl(const ControlState &control);
+  // Refreshes the world-bounds pass from the world and the shot camera.
+  void prepareViewportPasses();
+  // Renders one frame with the id channel on for m_pendingPick, replies, and
+  // when rendering sends that frame as well; true when a Frame went out.
+  bool servicePendingPick();
+  const vsr::scene::Object *shotCameraObject() const;
+
   ServerOptions m_options;
   vsr::app::Context m_ctx; // outlives m_projectContext: declared first
   ProjectContext m_projectContext;
@@ -247,6 +276,11 @@ struct StudioServer
   std::vector<uint8_t> m_colorBytes; // RGBA8, filled by the pipeline
   std::vector<std::byte> m_encodedPixels;
   ServerPushDelegate *m_push{nullptr};
+
+  // Viewport (loop thread; the flag is mirrored for queries)
+  ViewportPasses m_viewport;
+  std::optional<protocol::Pick> m_pendingPick;
+  std::atomic<bool> m_idChannelEnabled{false};
 
   // Project Ops (loop thread)
   DataRoots m_dataRoots;

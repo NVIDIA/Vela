@@ -28,6 +28,7 @@
 // std
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <iterator>
 #include <thread>
 
@@ -76,6 +77,56 @@ anari::Device loadFirstAvailableDevice(
 
   libName.clear();
   return nullptr;
+}
+
+constexpr uint32_t VOLUME_ID_BIT = 0x80000000u;
+
+// Where the ray through frame pixel (x, y) -- x right, y down from the
+// top-left -- ends after `depth` units, for the shot camera object's pose. The
+// ray construction mirrors the monolith Viewport's focus pick; an
+// orthographic camera offsets the origin across its image plane instead.
+vsr::math::float3 pickWorldPosition(const vsr::scene::Object &camera,
+    uint32_t width,
+    uint32_t height,
+    int x,
+    int y,
+    float depth)
+{
+  using vsr::math::float3;
+  const auto position =
+      camera.parameterValueAs<float3>("position").value_or(float3(0.f));
+  const auto direction =
+      vsr::math::normalize(camera.parameterValueAs<float3>("direction")
+                               .value_or(float3(0.f, 0.f, -1.f)));
+  const auto up =
+      camera.parameterValueAs<float3>("up").value_or(float3(0.f, 1.f, 0.f));
+  const auto du = vsr::math::normalize(vsr::math::cross(direction, up));
+  const auto dv = vsr::math::normalize(vsr::math::cross(du, direction));
+
+  const float px = float(std::clamp(x, 0, int(width) - 1)) + 0.5f;
+  const float py = float(std::clamp(y, 0, int(height) - 1)) + 0.5f;
+  const float sx = px / float(width);
+  const float sy = 1.f - py / float(height); // ANARI's image plane is bottom-up
+  const float aspect = float(width) / float(height);
+
+  if (camera.subtype() == vsr::scene::tokens::camera::orthographic) {
+    const float planeHeight =
+        camera.parameterValueAs<float>("height").value_or(1.f);
+    const float planeWidth = planeHeight * aspect;
+    const auto origin = position + (sx - 0.5f) * planeWidth * du
+        + (sy - 0.5f) * planeHeight * dv;
+    return origin + depth * direction;
+  }
+
+  const float fovy =
+      camera.parameterValueAs<float>("fovy").value_or(vsr::math::radians(40.f));
+  const float planeHeight = 2.f * std::tan(0.5f * fovy);
+  const float planeWidth = planeHeight * aspect;
+  const auto dirDu = du * planeWidth;
+  const auto dirDv = dv * planeHeight;
+  const auto dir00 = direction - 0.5f * dirDu - 0.5f * dirDv;
+  const auto ray = vsr::math::normalize(dir00 + sx * dirDu + sy * dirDv);
+  return position + depth * ray;
 }
 
 } // namespace
@@ -151,6 +202,11 @@ SessionState StudioServer::sessionState() const
 const std::string &StudioServer::libraryName() const
 {
   return m_libraryName;
+}
+
+bool StudioServer::idChannelEnabled() const
+{
+  return m_idChannelEnabled.load();
 }
 
 vsr::app::Context &StudioServer::appContext()
@@ -371,6 +427,10 @@ bool StudioServer::setupRendering(std::string *error)
   m_scenePass->setRenderer(m_renderIndex->renderer(m_renderer->index()));
   m_scenePass->setCamera(m_renderIndex->camera(m_cameraIndex));
   m_scenePass->setEnableIDs(false);
+  // The id-driven passes composite over the LDR color before it is copied
+  // out; the server has no tonemap stage in between.
+  m_viewport.setup(m_pipeline, m_scenePass, m_device);
+  m_idChannelEnabled = m_viewport.idChannelEnabled();
 
   auto *copy =
       m_pipeline.emplace_back<vsr::rendering::CopyFromColorBufferPass>();
@@ -431,6 +491,8 @@ void StudioServer::teardown()
     m_push = nullptr;
   }
   // Passes hold ANARI handles: release them before the device goes.
+  m_viewport.teardown();
+  m_pendingPick.reset();
   m_pipeline.clear();
   m_scenePass = nullptr;
   m_renderer = {};
@@ -478,9 +540,18 @@ void StudioServer::run()
     tickPlayback();
     commitScrubIfQuiet();
 
+    // A pick renders its own frame, with ids, paused or not.
+    bool frameSent = false;
+    if (m_pendingPick
+        && (m_state == SessionState::Connected
+            || m_state == SessionState::Rendering)) {
+      frameSent = servicePendingPick();
+    }
+
     switch (m_state.load()) {
     case SessionState::Rendering:
-      renderAndSendFrame();
+      if (!frameSent)
+        renderAndSendFrame();
       break;
     case SessionState::Listening:
       std::this_thread::sleep_for(LISTENING_SLEEP);
@@ -549,7 +620,8 @@ void StudioServer::applyControlState()
   if (!established) {
     const bool dropped = control.frameConfig || control.encoding
         || control.rendering || !control.edits.empty()
-        || !control.requests.empty();
+        || !control.requests.empty() || control.pick || control.outline
+        || control.viewportSettings;
     if (dropped) {
       vsr::core::logWarning(
           "[StudioServer] control messages dropped: no session (%s)",
@@ -588,6 +660,7 @@ void StudioServer::applyControlState()
 
   if (control.time)
     applyTime(*control.time);
+  applyViewportControl(control);
 
   for (auto &request : control.requests)
     m_pendingRequests.push_back(std::move(request));
@@ -644,6 +717,11 @@ void StudioServer::beginSession(uint64_t serial)
   m_pendingRequests.clear();
   m_tasks.dropQueued();
   m_scrubPending = false;
+  // Viewport state belongs to the client that sent it.
+  m_pendingPick.reset();
+  m_viewport.apply(ViewportSettings{});
+  m_viewport.setOutline({}, m_ctx.vsr.scene);
+  m_idChannelEnabled = m_viewport.idChannelEnabled();
   setState(SessionState::AwaitingHello);
   vsr::core::logStatus("[StudioServer] client connected, awaiting Hello");
 }
@@ -666,6 +744,7 @@ void StudioServer::endSession(const std::string &reason, bool closeSocket)
   }
   m_tasks.dropQueued();
   m_scrubPending = false;
+  m_pendingPick.reset();
   if (closeSocket) {
     // Closes the socket and re-arms the accept; the disconnect this reports
     // lands in the latch and is dropped as stale. A peer-closed socket needs
@@ -786,8 +865,13 @@ void StudioServer::renderAndSendFrame()
   if (!vsr::network::is_ready(m_frameInFlight))
     return;
 
+  prepareViewportPasses();
   m_pipeline.render();
+  sendRenderedFrame();
+}
 
+void StudioServer::sendRenderedFrame()
+{
   const size_t expectedBytes = size_t(m_frameWidth) * m_frameHeight * 4;
   if (m_colorBytes.size() != expectedBytes) {
     vsr::core::logError(
@@ -957,6 +1041,86 @@ void StudioServer::setPushEnabled(bool enabled)
     m_push->setEnabled(enabled);
 }
 
+// Viewport ///////////////////////////////////////////////////////////////////
+
+void StudioServer::applyViewportControl(const ControlState &control)
+{
+  if (control.viewportSettings)
+    m_viewport.apply(*control.viewportSettings);
+  if (control.outline)
+    m_viewport.setOutline(control.outline->objectIdentity, m_ctx.vsr.scene);
+  if (control.pick) {
+    if (m_pendingPick) {
+      vsr::core::logStatus(
+          "[StudioServer] Pick %llu superseded before it was serviced",
+          static_cast<unsigned long long>(m_pendingPick->requestId));
+    }
+    m_pendingPick = *control.pick;
+  }
+  m_idChannelEnabled = m_viewport.idChannelEnabled();
+}
+
+const vsr::scene::Object *StudioServer::shotCameraObject() const
+{
+  return m_ctx.vsr.scene.getObject(ANARI_CAMERA, m_cameraIndex);
+}
+
+void StudioServer::prepareViewportPasses()
+{
+  m_viewport.updateWorldBounds(
+      m_renderIndex ? m_renderIndex->world() : nullptr, shotCameraObject());
+}
+
+bool StudioServer::servicePendingPick()
+{
+  const Pick pick = *m_pendingPick;
+  m_pendingPick.reset();
+
+  m_viewport.armPick(pick.x, pick.y);
+  prepareViewportPasses();
+  m_pipeline.render();
+  const auto sample = m_viewport.takePick();
+  m_idChannelEnabled = m_viewport.idChannelEnabled();
+
+  PickReply reply;
+  reply.requestId = pick.requestId;
+  reply.hit = sample && sample->objectId != ~0u;
+  if (reply.hit) {
+    SceneObjectRef identity;
+    identity.type =
+        (sample->objectId & VOLUME_ID_BIT) ? ANARI_VOLUME : ANARI_SURFACE;
+    identity.objectIndex = sample->objectId & ~VOLUME_ID_BIT;
+    reply.objectIdentity = identity;
+    if (const auto *camera = shotCameraObject()) {
+      reply.worldPosition = pickWorldPosition(
+          *camera, m_frameWidth, m_frameHeight, pick.x, pick.y, sample->depth);
+    }
+    vsr::core::logStatus(
+        "[StudioServer] Pick %llu at (%d, %d): %s %zu, depth %f",
+        static_cast<unsigned long long>(pick.requestId),
+        pick.x,
+        pick.y,
+        anari::toString(identity.type),
+        identity.objectIndex,
+        sample->depth);
+  } else {
+    vsr::core::logStatus("[StudioServer] Pick %llu at (%d, %d): background",
+        static_cast<unsigned long long>(pick.requestId),
+        pick.x,
+        pick.y);
+  }
+  send(encode(reply));
+
+  // The frame that carried the ids is as good as any: send it when the
+  // client is streaming and the previous one is off the wire.
+  if (m_state == SessionState::Rendering
+      && vsr::network::is_ready(m_frameInFlight)) {
+    sendRenderedFrame();
+    return true;
+  }
+  return false;
+}
+
 // IO thread //////////////////////////////////////////////////////////////////
 
 void StudioServer::onConnected()
@@ -1094,6 +1258,37 @@ void StudioServer::onMessage(const Message &msg)
     m_control.time = *time;
     return;
   }
+  // Viewport: latest-wins slots
+  case StudioMessageType::Pick: {
+    const auto pick = decode<Pick>(msg);
+    if (!pick) {
+      replyError("malformed Pick payload");
+      return;
+    }
+    std::lock_guard lock(m_controlMutex);
+    m_control.pick = *pick;
+    return;
+  }
+  case StudioMessageType::SetOutline: {
+    const auto outline = decode<SetOutline>(msg);
+    if (!outline) {
+      replyError("malformed SetOutline payload");
+      return;
+    }
+    std::lock_guard lock(m_controlMutex);
+    m_control.outline = *outline;
+    return;
+  }
+  case StudioMessageType::ViewportSettings: {
+    const auto settings = decode<ViewportSettings>(msg);
+    if (!settings) {
+      replyError("malformed ViewportSettings payload");
+      return;
+    }
+    std::lock_guard lock(m_controlMutex);
+    m_control.viewportSettings = *settings;
+    return;
+  }
   default:
     break;
   }
@@ -1113,7 +1308,7 @@ void StudioServer::onMessage(const Message &msg)
   if (isServerToClient(*type)) {
     replyError(std::string(toString(*type)) + " is a server-to-client message");
   } else {
-    // Picking, RenderShot: later milestones. Refused loudly, never dropped.
+    // RenderShot: milestone 7. Refused loudly, never dropped.
     refuseRequest(msg,
         std::string(toString(*type)) + " is not implemented in this server");
   }
