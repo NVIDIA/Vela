@@ -90,11 +90,14 @@ void ProjectLocationDialog::buildUI()
     ImGui::TextDisabled("waiting for the server...");
   ui::errorText(m_error);
 
+  // Read before the browse draws: its own Escape hides it in the same
+  // frame, which must not count as this dialog's Escape too.
+  const bool browseWasVisible = m_browse.visible();
   m_browse.renderUI();
 
   ImGui::Spacing();
   if (ImGui::Button("Cancel")
-      || (ImGui::IsKeyPressed(ImGuiKey_Escape) && !m_browse.visible())) {
+      || (ImGui::IsKeyPressed(ImGuiKey_Escape) && !browseWasVisible)) {
     hide();
     return;
   }
