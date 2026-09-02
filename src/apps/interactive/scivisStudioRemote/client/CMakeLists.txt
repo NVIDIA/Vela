@@ -2,10 +2,11 @@
 ## SPDX-License-Identifier: Apache-2.0
 
 # UI-agnostic client core: connection state machine, Structural Mirror
-# delegate and Project Replica. No vsr_ui_imgui dependency so it stays unit
+# delegate, Project Replica, Project Ops and Server Task tracking. No vsr_ui_imgui dependency so it stays unit
 # testable; the scivisStudioClient executable builds on it below.
 add_library(vsr_scivis_studio_client_core OBJECT
   MirrorUpdateDelegate.cpp
+  ProjectOps.cpp
   ServerConnection.cpp
 )
 
