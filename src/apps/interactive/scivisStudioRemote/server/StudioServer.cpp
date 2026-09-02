@@ -468,6 +468,12 @@ void StudioServer::run()
     // One Server Task per iteration; frames wait while it runs.
     if (sessionEstablished())
       m_dispatcher.runOneTask();
+    // A Frame still on the wire gets a moment to finish before time moves
+    // on, so a fast link never sees a header skip a frame; on a slow link
+    // the tick goes ahead regardless and time keeps its pace.
+    if (m_state == SessionState::Rendering
+        && !vsr::network::is_ready(m_frameInFlight))
+      m_frameInFlight.wait_for(PAUSED_SLEEP);
     // Time advances before the render so the Frame carries the frame drawn.
     tickPlayback();
     commitScrubIfQuiet();
@@ -774,12 +780,11 @@ void StudioServer::renderAndSendFrame()
     std::this_thread::sleep_for(PAUSED_SLEEP);
     return;
   }
-  // Latest-frame-wins: the previous Frame is still on the wire, so this
-  // iteration's picture would be dropped anyway; do not render it.
-  if (!vsr::network::is_ready(m_frameInFlight)) {
-    std::this_thread::sleep_for(PAUSED_SLEEP);
+  // Latest-frame-wins: the previous Frame is still on the wire (the loop
+  // already waited a moment for it), so this iteration's picture would be
+  // dropped anyway; do not render it.
+  if (!vsr::network::is_ready(m_frameInFlight))
     return;
-  }
 
   m_pipeline.render();
 
