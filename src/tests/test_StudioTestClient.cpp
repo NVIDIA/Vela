@@ -747,10 +747,10 @@ SCENARIO(
           "send-raw 0\n"
           "expect-error \"unknown message type 0\"\n"
           "ping\n"
-          "send-raw 20 0a0b 0c\n"
+          "send-raw 62 0a0b 0c\n"
           "expect-error \"not implemented\"\n"
           "assert errors.received == 3\n"
-          "assert lastError contains NewProject\n"
+          "assert lastError contains Pick\n"
           "sleep 20\n"
           "disconnect\n"
           "assert state == Disconnected\n"
@@ -800,7 +800,7 @@ SCENARIO(
         REQUIRE(hasLine(r, "EVT Error message=\"unknown message type 255\""));
         REQUIRE(hasLine(r, "EVT Error message=\"unknown message type 0\""));
         REQUIRE(hasLineStarting(
-            r, "EVT Error message=\"NewProject is not implemented"));
+            r, "EVT Error message=\"Pick is not implemented"));
         REQUIRE(hasLine(r, "OK expect-error \"not implemented\""));
         REQUIRE(hasLine(r, "OK assert state == Disconnected"));
         REQUIRE(r.back() == "OK assert state == Disconnected");
