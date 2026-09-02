@@ -149,6 +149,46 @@ implemented in this server"}`.
   (the split `stageProjectOpen`/`openStagedProject` prepares) is deferred;
   see the notes on which `ProjectContext` calls are staging-safe.
 
+## The client's editors (milestone 5)
+
+The client carries its own copies of the Studio editors under
+`client/windows/` (Project, Dataset Editor, Shot Editor, Light Rig, Camera
+Rig, plus a Tasks panel) and modals under `client/modals/`. They read the
+Project Replica and send Project Ops through `ProjectOps`; nothing is applied
+optimistically -- a control with a request in flight is greyed until the
+reply, and the snapshot behind an accepted reply is what the panels show.
+Reply errors and Server Task outcomes go to the Log window and a transient
+toast. Every path is a server path chosen in the Remote Browse dialog
+(`client/RemoteBrowseDialog.*`), which lists the server's Data Roots and
+marks project directories; the free-text path field is the escape hatch and
+the op that consumes the path is the authority.
+
+*File* holds New/Open/Save/Save As (Ctrl+S saves; Save As and Open go
+through the Project Location dialog), *Studio* holds Add Dataset (Static,
+File Animation) and Add Shot. Save attaches the `{windows, layout, settings}`
+UI-state tree in the monolith's shape; restoring it on open is a later
+milestone.
+
+## Open design questions
+
+- **Light rename, camera-rig clone, camera-rig keyframe editing.** The v1
+  message set has no op for renaming a light node, cloning a camera rig, or
+  editing a camera rig's keyframes and current pose (the monolith's Set
+  View, Capture, Update, Delete, pose editor and inline frame/name/
+  interpolation edits). The client shows these read-only with a tooltip
+  saying so. Candidates: `RenameLightNode{lightRigId, lightNode, name}`,
+  `CloneCameraRig{cameraRigId}`, and an `UpdateCameraRig{rig}` whole-value
+  replace mirroring `UpdateShot`; the viewport's manipulator pose is what
+  Set View/Capture would send.
+- **Naming a loaded Dataset Archive.** `LoadDatasetArchive` carries no name,
+  so the Add Static Dataset dialog applies a typed name with a follow-up
+  `RenameDataset` once the snapshot after the load shows exactly one new
+  dataset id. A `name` field on the request would remove the heuristic.
+- **Renderer libraries in the Shot Editor.** The client offers only the
+  device names of the Renderer objects in the Structural Mirror (plus the
+  shot's current value); the server's loadable-library list is not in the
+  protocol.
+
 ## Tests
 
 `vsrTests "[StudioProtocol]"` (codecs), `"[StudioClient]"` (client core
