@@ -11,6 +11,7 @@
 // vsr_scivis_studio_protocol
 #include "FrameMessages.h"
 #include "PayloadCommon.h"
+#include "PlaybackMessages.h"
 #include "SceneEditMessages.h"
 // vsr_scivis_studio_model
 #include "ProjectContext.h"
@@ -25,6 +26,7 @@
 #include "vsr/core/TypeMacros.hpp"
 // std
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -72,8 +74,17 @@ const char *toString(SessionState state);
  * ops queue a Server Task that the loop runs to completion, one per
  * iteration, between applying the latch and rendering, so frames pause while
  * a task runs. Every path a request names must lie inside the Data Roots.
- * Playback, picking and RenderShot are still answered with Error{"... not
- * implemented in this server"}.
+ *
+ * Playback free-runs on the loop thread: each iteration applies the latch,
+ * ticks the AnimationManager by a steady-clock delta (at most one frame, even
+ * while a Frame is still in flight), then renders, so the Frame header names
+ * the frame actually rendered (Time in Motion). Time at Rest reaches the
+ * replica through snapshots only: SetPlaying is a Project Op (reply plus
+ * snapshot), auto-stop at the end of a non-looping shot sends one, and a
+ * SetTime scrub while paused commits one after 250 ms of quiet. Frames a
+ * file binding cannot load go out as TimeAdvanceWarning; playback goes on.
+ * Picking and RenderShot are still answered with Error{"... not implemented
+ * in this server"}.
  *
  * Example:
  *   StudioServer server(options);
@@ -150,6 +161,8 @@ struct StudioServer
     std::optional<bool> rendering;
     std::vector<SceneEdit> edits;
     std::vector<ProjectRequest> requests;
+    // Playback
+    std::optional<protocol::SetTime> time; // the scrub, latest-wins
   };
 
   // Startup and teardown (caller's thread)
@@ -197,6 +210,25 @@ struct StudioServer
   void applyEdit(const protocol::SetNodeTransform &edit);
   void renderAndSendFrame();
   void send(vsr::network::Message &&msg);
+  bool sessionEstablished() const;
+
+  // Playback (loop thread)
+  // Seeks the active shot to the latched SetTime; other shots are logged and
+  // ignored. While paused it opens (or extends) the rest-commit window.
+  void applyTime(const protocol::SetTime &time);
+  // One tick per iteration; a play->stop flip of the active shot (auto-stop)
+  // sends the snapshot that commits it.
+  void tickPlayback();
+  // Sends the debounced Time at Rest snapshot once no SetTime has arrived for
+  // SCRUB_COMMIT_QUIET and the frame differs from the one the window opened
+  // on (a scrub that returns to its start commits nothing).
+  void commitScrubIfQuiet();
+  // One TimeAdvanceWarning per load failure the manager collected.
+  void pushLoadFailures();
+  // A client edit on the active shot camera: the manipulator adopts the
+  // camera's pose and a keyframe-less camera rig's current view follows, so
+  // the next applyActiveShot() writes the client's pose back, not a stale one.
+  void followCameraEdit(const vsr::scene::Object *object);
   void setState(SessionState state);
   void setPushEnabled(bool enabled);
 
@@ -236,6 +268,13 @@ struct StudioServer
   bool m_renderingRequested{false};
   bool m_bootstrapPending{false};
   bool m_sceneResendPending{false};
+
+  // Playback (loop thread only)
+  using Clock = std::chrono::steady_clock;
+  std::optional<Clock::time_point> m_lastTick;
+  bool m_scrubPending{false};
+  Clock::time_point m_scrubDeadline{};
+  int m_scrubFrameBefore{0}; // the frame time rested on when the window opened
 
   // Shared with the IO thread
   std::mutex m_controlMutex;

@@ -668,6 +668,19 @@ void ProjectOpDispatcher::handle(const SetActiveShot &req)
   finish(makeOkReply(req.requestId), true, true);
 }
 
+// Play/pause is a confirmed mutation: the reply says it took, the snapshot
+// carries playing plus the frame time rests on (currentFrame). The ticking
+// itself belongs to the server loop.
+void ProjectOpDispatcher::handle(const SetPlaying &req)
+{
+  std::string error;
+  if (!context().setPlaying(req.shotId, req.playing, &error)) {
+    fail(req.requestId, error);
+    return;
+  }
+  finish(makeOkReply(req.requestId), true, false);
+}
+
 // Light rigs /////////////////////////////////////////////////////////////////
 
 void ProjectOpDispatcher::handle(const CreateLightRig &req)

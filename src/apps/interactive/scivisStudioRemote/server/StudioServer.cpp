@@ -11,12 +11,17 @@
 #include "SessionMessages.h"
 #include "StudioCodec.h"
 #include "StudioProtocol.h"
+// vsr_scivis_studio_model
+#include "CameraRig.h"
 // vsr_network
 #include "vsr/network/messages/TransferLayer.hpp"
 #include "vsr/network/messages/TransferScene.hpp"
+// vsr_rendering
+#include "vsr/rendering/view/ManipulatorToVSR.hpp"
 // vsr_scene
 #include "vsr/scene/Layer.hpp"
 #include "vsr/scene/Scene.hpp"
+#include "vsr/scene/objects/Camera.hpp"
 #include "vsr/scene/objects/Renderer.hpp"
 // vsr_core
 #include "vsr/core/Logging.hpp"
@@ -42,6 +47,8 @@ constexpr std::chrono::milliseconds LISTENING_SLEEP{20};
 constexpr std::chrono::milliseconds PAUSED_SLEEP{1};
 // Guards the pipeline against a hostile or confused SetFrameConfig.
 constexpr uint32_t MAX_FRAME_DIMENSION = 16384;
+// A paused scrub commits Time at Rest once SetTime has been quiet this long.
+constexpr std::chrono::milliseconds SCRUB_COMMIT_QUIET{250};
 
 // Same fallback RenderShot uses: the requested library first, then the rest
 // of the device manager's list. `libName` ends up naming what was loaded.
@@ -459,9 +466,11 @@ void StudioServer::run()
     if (m_sceneResendPending)
       sendSceneSnapshot();
     // One Server Task per iteration; frames wait while it runs.
-    if (m_state == SessionState::Connected
-        || m_state == SessionState::Rendering)
+    if (sessionEstablished())
       m_dispatcher.runOneTask();
+    // Time advances before the render so the Frame carries the frame drawn.
+    tickPlayback();
+    commitScrubIfQuiet();
 
     switch (m_state.load()) {
     case SessionState::Rendering:
@@ -571,6 +580,9 @@ void StudioServer::applyControlState()
     setPushEnabled(pushWasEnabled);
   }
 
+  if (control.time)
+    applyTime(*control.time);
+
   for (auto &request : control.requests)
     m_pendingRequests.push_back(std::move(request));
   // Replies must not run ahead of the bootstrap bracket.
@@ -625,6 +637,7 @@ void StudioServer::beginSession(uint64_t serial)
   m_frameInFlight = {};
   m_pendingRequests.clear();
   m_tasks.dropQueued();
+  m_scrubPending = false;
   setState(SessionState::AwaitingHello);
   vsr::core::logStatus("[StudioServer] client connected, awaiting Hello");
 }
@@ -646,6 +659,7 @@ void StudioServer::endSession(const std::string &reason, bool closeSocket)
     m_pendingRequests.clear();
   }
   m_tasks.dropQueued();
+  m_scrubPending = false;
   if (closeSocket) {
     // Closes the socket and re-arms the accept; the disconnect this reports
     // lands in the latch and is dropped as stale. A peer-closed socket needs
@@ -717,6 +731,7 @@ void StudioServer::applyEdit(const SetObjectParameter &edit)
     return;
   }
   obj->addParameter(edit.name).setValue(edit.value);
+  followCameraEdit(obj);
 }
 
 void StudioServer::applyEdit(const RemoveObjectParameter &edit)
@@ -797,7 +812,9 @@ void StudioServer::renderAndSendFrame()
   header.pixelFormat = PixelFormat::RGBA8_sRGB;
   header.encoding = m_encoding;
   header.shotId = project.activeShotId;
-  header.frame = shot ? shot->currentFrame : 0; // Time at Rest: no playback yet
+  // Time in Motion: tickPlayback() ran before this render, so this is the
+  // frame the pixels show.
+  header.frame = shot ? shot->currentFrame : 0;
   m_frameInFlight = m_server->send(
       encodeFrame(header, m_encodedPixels.data(), m_encodedPixels.size()));
 }
@@ -806,6 +823,114 @@ void StudioServer::send(Message &&msg)
 {
   if (m_server)
     m_server->send(std::move(msg));
+}
+
+bool StudioServer::sessionEstablished() const
+{
+  const auto state = m_state.load();
+  return state == SessionState::Connected || state == SessionState::Rendering;
+}
+
+// Playback ///////////////////////////////////////////////////////////////////
+
+void StudioServer::applyTime(const SetTime &time)
+{
+  const auto &project = m_projectContext.project();
+  const auto *shot = project::activeShot(project);
+  if (!shot)
+    return;
+  if (time.shotId != project.activeShotId) {
+    vsr::core::logWarning(
+        "[StudioServer] SetTime for shot '%s' ignored: the active shot is '%s'",
+        time.shotId.c_str(),
+        project.activeShotId.c_str());
+    return;
+  }
+
+  if (!shot->playing) {
+    if (!m_scrubPending)
+      m_scrubFrameBefore = shot->currentFrame;
+    m_scrubPending = true;
+    m_scrubDeadline = Clock::now() + SCRUB_COMMIT_QUIET;
+  }
+
+  m_projectContext.setActiveShotFrame(time.frame);
+  pushLoadFailures();
+}
+
+void StudioServer::tickPlayback()
+{
+  const auto now = Clock::now();
+  float elapsed = 0.f;
+  if (m_lastTick)
+    elapsed = std::chrono::duration<float>(now - *m_lastTick).count();
+  m_lastTick = now;
+
+  if (!sessionEstablished())
+    return;
+  auto *shot = project::activeShot(m_projectContext.project());
+  if (!shot)
+    return;
+
+  const bool wasPlaying = shot->playing;
+  m_ctx.vsr.animationMgr.tick(elapsed);
+  pushLoadFailures();
+
+  // The manager stopped on its own and ProjectContext wrote the Shot: that
+  // is a confirmed mutation, and the snapshot is its commit.
+  if (wasPlaying && !shot->playing) {
+    m_scrubPending = false;
+    send(encode(ProjectSnapshot{m_projectContext.project()}));
+  }
+}
+
+void StudioServer::commitScrubIfQuiet()
+{
+  if (!m_scrubPending || Clock::now() < m_scrubDeadline)
+    return;
+  m_scrubPending = false;
+  if (!sessionEstablished())
+    return;
+
+  const auto *shot = project::activeShot(m_projectContext.project());
+  // A play that started meanwhile committed the frame with its own snapshot.
+  if (!shot || shot->playing || shot->currentFrame == m_scrubFrameBefore)
+    return;
+  send(encode(ProjectSnapshot{m_projectContext.project()}));
+}
+
+void StudioServer::pushLoadFailures()
+{
+  auto failures = m_ctx.vsr.animationMgr.takeLoadFailures();
+  if (failures.empty() || !sessionEstablished())
+    return;
+  const auto &project = m_projectContext.project();
+  for (auto &failure : failures) {
+    TimeAdvanceWarning warning;
+    warning.shotId = project.activeShotId;
+    warning.frame = failure.frame;
+    warning.message = std::move(failure.message);
+    send(encode(warning));
+  }
+}
+
+void StudioServer::followCameraEdit(const vsr::scene::Object *object)
+{
+  auto *shot = project::activeShot(m_projectContext.project());
+  if (!shot || !object || object->type() != ANARI_CAMERA
+      || m_projectContext.resolveShotCamera(*shot) != object)
+    return;
+
+  auto &manipulator = m_ctx.view.manipulator;
+  vsr::rendering::updateManipulatorFromCameraPose(
+      manipulator, *static_cast<const vsr::scene::Camera *>(object));
+  // Without keyframes the rig's current view is what applyActiveShot() writes
+  // back into the camera on every time change; it follows the client's view
+  // here (no snapshot: the view is in motion, like time under playback).
+  if (auto *rig = m_projectContext.activeShotCameraRig();
+      rig && rig->keyframes.empty()) {
+    rig->current = camera_rig::manipulatorStateFromManipulator(manipulator);
+  }
 }
 
 void StudioServer::setState(SessionState state)
@@ -949,6 +1074,17 @@ void StudioServer::onMessage(const Message &msg)
     m_control.edits.emplace_back(std::move(*edit));
     return;
   }
+  case StudioMessageType::SetTime: {
+    // The scrub: optimistic and latest-wins, so a latch slot.
+    const auto time = decode<SetTime>(msg);
+    if (!time) {
+      replyError("malformed SetTime payload");
+      return;
+    }
+    std::lock_guard lock(m_controlMutex);
+    m_control.time = *time;
+    return;
+  }
   default:
     break;
   }
@@ -968,8 +1104,7 @@ void StudioServer::onMessage(const Message &msg)
   if (isServerToClient(*type)) {
     replyError(std::string(toString(*type)) + " is a server-to-client message");
   } else {
-    // Playback, picking, RenderShot: later milestones. Refused loudly, never
-    // dropped.
+    // Picking, RenderShot: later milestones. Refused loudly, never dropped.
     refuseRequest(msg,
         std::string(toString(*type)) + " is not implemented in this server");
   }

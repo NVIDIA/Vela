@@ -8,6 +8,7 @@
 // vsr_scivis_studio_protocol
 #include "BrowseMessages.h"
 #include "PayloadCommon.h"
+#include "PlaybackMessages.h"
 #include "ProjectOpReply.h"
 #include "ProjectRequests.h"
 #include "ShotRigRequests.h"
@@ -25,9 +26,10 @@
 
 namespace vsr::scivis_studio::server {
 
-// Every client->server project request the dispatcher serves: Project Ops,
-// Remote Browse and CancelTask (types 20..57 and 61), decoded on the IO
-// thread and queued for the loop thread in arrival order.
+// Every client->server project request the dispatcher serves: Project Ops
+// (SetPlaying among them), Remote Browse and CancelTask (types 20..58 and
+// 61), decoded on the IO thread and queued for the loop thread in arrival
+// order.
 using ProjectRequest = std::variant<protocol::NewProject,
     protocol::OpenProject,
     protocol::SaveProject,
@@ -48,6 +50,7 @@ using ProjectRequest = std::variant<protocol::NewProject,
     protocol::RemoveShot,
     protocol::UpdateShot,
     protocol::SetActiveShot,
+    protocol::SetPlaying,
     protocol::CreateLightRig,
     protocol::CloneLightRig,
     protocol::RemoveLightRig,
@@ -162,6 +165,7 @@ struct ProjectOpDispatcher
   void handle(const protocol::RemoveShot &);
   void handle(const protocol::UpdateShot &);
   void handle(const protocol::SetActiveShot &);
+  void handle(const protocol::SetPlaying &);
   // Light rigs
   void handle(const protocol::CreateLightRig &);
   void handle(const protocol::CloneLightRig &);
