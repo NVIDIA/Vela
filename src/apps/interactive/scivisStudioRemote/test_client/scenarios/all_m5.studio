@@ -1,0 +1,152 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# runner: fixture fixtures/triangle.obj
+#
+# The milestone-5 surface in one session, in orders the per-area scenarios
+# never take: a project holding a dataset, rigs, a color map and a bound
+# second shot is saved, replaced by a fresh project, reopened and checked
+# collection by collection; a sync op sent behind a queued import waits for
+# it (the shot it creates already binds the imported dataset); a cancelled
+# task ahead of a sync op does not hold it up; and frames follow the active
+# shot across all of it.
+
+connect
+list-roots
+assert project.dirty == false
+assert project.shots == 1
+assert project.activeShot == shot_0001
+
+# Build the project: a dataset, a lit and dollied second shot, a color map.
+import-static-dataset $dataRoot/triangle.obj Tri OBJ
+await-task
+await-snapshot
+assert project.datasets == 1
+assert dataset.dataset_0001.status == Available
+create-light-rig Key
+await-snapshot
+add-light $lastLightRigId point
+await-snapshot
+create-camera-rig Dolly
+await-snapshot
+create-color-map Warm
+await-snapshot
+create-shot Second
+await-snapshot
+assert project.shots == 2
+assert project.activeShot == $lastShotId
+assert shot.$lastShotId.binding.dataset_0001 == true
+update-shot $lastShotId lightRigId=$lastLightRigId cameraRigId=$lastCameraRigId frameCount=12
+await-snapshot
+assert shot.$lastShotId.lightRigId == $lastLightRigId
+assert shot.$lastShotId.cameraRigId == $lastCameraRigId
+assert project.dirty == true
+
+# Frames name the active shot while the project is being edited.
+set-encodings raw
+set-frame-config 32 24
+start-rendering
+await-frame 2
+assert frame.shotId == $lastShotId
+set-active-shot shot_0001
+await-snapshot
+await-frame 3
+assert frame.shotId == shot_0001
+stop-rendering
+
+save-project $dataRoot/all
+await-task
+await-snapshot
+assert tasks.completed == 2
+assert project.dirty == false
+assert project.directory == $dataRoot/all
+
+# A fresh project forgets all of it and starts clean...
+new-project
+await-snapshot
+assert project.shots == 1
+assert project.datasets == 0
+assert project.lightRigs == 1
+assert project.cameraRigs == 1
+assert project.colorMaps == 0
+assert project.directory == ""
+assert project.dirty == false
+
+# ...and reopening brings every collection back, bindings included.
+open-project $dataRoot/all
+await-task
+await-snapshot
+assert tasks.completed == 3
+assert project.datasets == 1
+assert dataset.dataset_0001.status == Available
+assert dataset.dataset_0001.residency == Loaded
+assert project.lightRigs == 2
+assert project.cameraRigs == 2
+assert project.colorMaps == 1
+assert colorMap.colorMap_0001.name == Warm
+assert project.shots == 2
+assert project.activeShot == shot_0001
+assert shot.shot_0002.name == Second
+assert shot.shot_0002.lightRigId == lightRig_0002
+assert shot.shot_0002.cameraRigId == cameraRig_0002
+assert shot.shot_0002.frameCount == 12
+assert shot.shot_0002.binding.dataset_0001 == true
+assert project.dirty == false
+dump-project
+
+# A sync op sent behind a queued import waits for the import: the shot it
+# creates binds the dataset the import produced.
+no-wait import-static-dataset $dataRoot/triangle.obj Late OBJ
+no-wait create-shot Third
+assert replies.pending == 2
+await-reply
+await-reply
+await-task
+await-snapshot
+assert tasks.completed == 4
+assert project.datasets == 2
+assert project.shots == 3
+assert shot.$lastShotId.name == Third
+assert shot.$lastShotId.binding.$lastDatasetId == true
+
+# A queued task cancelled ahead of a sync op does not hold it up. The first
+# import shields the second: a lone queued task may run in the very loop
+# iteration that queued it, before the cancel is latched. Task ids count from
+# 1 for the life of the server, so the sixth is the second import here.
+no-wait import-static-dataset $dataRoot/triangle.obj Fifth OBJ
+no-wait import-static-dataset $dataRoot/triangle.obj Never OBJ
+no-wait cancel-task 6
+no-wait create-shot Fourth
+assert replies.pending == 4
+await-reply
+await-reply
+await-reply
+await-reply
+await-task 5
+await-task 6 expect-fail
+await-snapshot
+assert tasks.completed == 5
+assert tasks.failed == 1
+assert project.datasets == 3
+assert project.shots == 4
+assert shot.$lastShotId.name == Fourth
+assert shot.$lastShotId.binding.dataset_0003 == true
+assert project.activeShot == $lastShotId
+
+# Saving in place keeps the directory; the new shots render.
+save-project
+await-task
+await-snapshot
+assert project.dirty == false
+assert project.directory == $dataRoot/all
+list-directory $dataRoot
+# The project directory and the fixture the runner copied in.
+assert browse.entries == 2
+start-rendering
+await-frame 2
+assert frame.shotId == $lastShotId
+stop-rendering
+
+assert errors.received == 0
+assert replies.failed == 0
+disconnect

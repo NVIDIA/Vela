@@ -89,3 +89,6 @@ add_studio_scenario(datasets)
 add_studio_scenario(tasks)
 add_studio_scenario(browse)
 add_studio_scenario(errors_project)
+# The whole milestone-5 surface in one session, in orders the per-area
+# scenarios do not take (save, new, reopen; sync ops queued behind tasks).
+add_studio_scenario(all_m5)
