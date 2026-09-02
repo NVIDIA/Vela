@@ -115,6 +115,15 @@ struct ProjectContext
       vsr::core::DataNode *settingsOut = nullptr,
       std::string *error = nullptr,
       const ProjectOpenOptions &options = {});
+  // The second half of openProject(): installs a stage that stageProjectOpen()
+  // filled, replacing the live Scene and Project. Staging reads the directory
+  // without touching shared state, so a caller may run it elsewhere and
+  // finish here; on failure the live project is unchanged.
+  bool openStagedProject(ProjectOpenStage &stage,
+      vsr::core::DataNode *windowsOut = nullptr,
+      std::string *layoutOut = nullptr,
+      vsr::core::DataNode *settingsOut = nullptr,
+      std::string *error = nullptr);
 
   vsr::scene::LayerNodeRef resolve(const SceneNodeRef &ref) const;
   vsr::scene::Object *resolve(const SceneObjectRef &ref) const;

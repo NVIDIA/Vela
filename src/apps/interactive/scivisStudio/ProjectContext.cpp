@@ -1906,6 +1906,22 @@ bool ProjectContext::openProject(const std::filesystem::path &directory,
   ProjectOpenStage stage;
   if (!stageProjectOpen(directory, stage, options, error))
     return false;
+  if (!openStagedProject(stage, windowsOut, layoutOut, settingsOut, error))
+    return false;
+
+  vsr::core::logStatus(
+      "[SciVisStudio] Opened project '%s'", directory.string().c_str());
+  return true;
+}
+
+bool ProjectContext::openStagedProject(ProjectOpenStage &stage,
+    vsr::core::DataNode *windowsOut,
+    std::string *layoutOut,
+    vsr::core::DataNode *settingsOut,
+    std::string *error)
+{
+  if (!m_ctx)
+    return fail("missing VSR application context", error);
 
   m_ctx->clearSelected();
   m_syncingAnimationManager = true;
@@ -1951,8 +1967,6 @@ bool ProjectContext::openProject(const std::filesystem::path &directory,
   }
 
   applyActiveShot();
-  vsr::core::logStatus(
-      "[SciVisStudio] Opened project '%s'", directory.string().c_str());
   return true;
 }
 
