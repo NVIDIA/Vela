@@ -971,13 +971,16 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
       const auto geometries = scene.numberOfObjects(ANARI_GEOMETRY);
       const auto shots = session.latestSnapshot().project.shots.size();
 
-      auto reply = session.request(SaveProject{});
-      REQUIRE_FALSE(reply.ok);
-      REQUIRE(reply.error.find("never been saved") != std::string::npos);
+      // Whether the project has a directory is read when the task runs.
+      const auto unsavedId = startedTaskId(session.request(SaveProject{}));
+      const auto unsavedEnd = waitForTaskEnd(client, unsavedId);
+      REQUIRE(unsavedEnd);
+      REQUIRE_FALSE(unsavedEnd->completed);
+      REQUIRE(unsavedEnd->text.find("never been saved") != std::string::npos);
 
       SaveProject save;
       save.directory = std::filesystem::temp_directory_path() / "elsewhere";
-      reply = session.request(save);
+      auto reply = session.request(save);
       REQUIRE_FALSE(reply.ok);
       REQUIRE(reply.error.find("Data Roots") != std::string::npos);
 
@@ -1039,6 +1042,52 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
           REQUIRE_FALSE(badEnd->completed);
           REQUIRE(client.count(StudioMessageType::ProjectSnapshot) == before);
         }
+      }
+    }
+
+    WHEN("a save naming no directory follows an open back to back")
+    {
+      REQUIRE(session.waitForSnapshots(++snapshots));
+      const auto saved = data.root / "saved_then_reopened";
+      SaveProject save;
+      save.directory = saved;
+      const auto saveEnd =
+          waitForTaskEnd(client, startedTaskId(session.request(save)));
+      REQUIRE(saveEnd);
+      REQUIRE(saveEnd->completed);
+      REQUIRE(session.request(NewProject{}).ok);
+      REQUIRE(session.waitForSnapshots(snapshots += 2));
+      REQUIRE(session.latestSnapshot().project.projectDirectory.empty());
+
+      // "Open that project, then save it" without waiting in between: the
+      // save must resolve the directory against the project the open puts in
+      // place, not the unsaved one it was dispatched against.
+      OpenProject open;
+      open.requestId = session.nextRequestId++;
+      open.directory = saved;
+      SaveProject saveOwn;
+      saveOwn.requestId = session.nextRequestId++;
+      client.send(open);
+      client.send(saveOwn);
+
+      THEN("the save runs after the open and writes the reopened project")
+      {
+        const auto openReply = client.waitForReply(open.requestId);
+        const auto saveReply = client.waitForReply(saveOwn.requestId);
+        REQUIRE(openReply);
+        REQUIRE(saveReply);
+        const auto openId = startedTaskId(*openReply);
+        const auto saveId = startedTaskId(*saveReply);
+        const auto openEnd = waitForTaskEnd(client, openId);
+        const auto saveOwnEnd = waitForTaskEnd(client, saveId);
+        REQUIRE(openEnd);
+        REQUIRE(openEnd->completed);
+        REQUIRE(saveOwnEnd);
+        REQUIRE(saveOwnEnd->completed);
+        REQUIRE(session.waitForSnapshots(snapshots += 2));
+        const auto project = session.latestSnapshot().project;
+        REQUIRE(project.projectDirectory == canonicalizePath(saved));
+        REQUIRE_FALSE(project.dirty);
       }
     }
 

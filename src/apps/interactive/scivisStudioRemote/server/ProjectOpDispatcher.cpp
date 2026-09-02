@@ -13,6 +13,8 @@
 // std
 #include <algorithm>
 #include <array>
+#include <filesystem>
+#include <optional>
 #include <utility>
 
 namespace vsr::scivis_studio::server {
@@ -39,6 +41,15 @@ template <typename T>
 constexpr bool isOneOf(const ProjectRequest &request)
 {
   return std::holds_alternative<T>(request);
+}
+
+// The failure of a task body whose dataset is gone by the time it runs.
+TaskResult datasetNotFound()
+{
+  TaskResult result;
+  result.ok = false;
+  result.error = "dataset not found";
+  return result;
 }
 
 // The UI-state pieces saveProject() takes, read from an opaque tree.
@@ -302,31 +313,47 @@ void ProjectOpDispatcher::handle(const OpenProject &req)
 
 void ProjectOpDispatcher::handle(const SaveProject &req)
 {
-  const auto requested = req.directory.value_or(project().projectDirectory);
-  if (requested.empty()) {
-    fail(req.requestId, "project has never been saved; choose a directory");
-    return;
-  }
-  std::string error;
-  const auto directory = m_host.dataRoots->resolve(requested, &error);
-  if (!directory) {
-    fail(req.requestId, error);
-    return;
+  // Only a named directory can be checked now; "the project's own" is read
+  // when the task runs, since an OpenProject queued ahead may change it.
+  std::optional<std::filesystem::path> named;
+  if (req.directory) {
+    std::string error;
+    named = m_host.dataRoots->resolve(*req.directory, &error);
+    if (!named) {
+      fail(req.requestId, error);
+      return;
+    }
   }
 
   startTask(req.requestId,
-      "save project to '" + directory->string() + "'",
-      [this, directory = *directory, uiState = req.uiState](
+      named ? "save project to '" + named->string() + "'"
+            : std::string("save project"),
+      [this, named, uiState = req.uiState](
           const TaskProgressFunction &progress) {
         return runTaskBody(
             [&] {
               TaskResult result;
+              auto directory = named;
+              if (!directory) {
+                const auto &own = project().projectDirectory;
+                if (own.empty()) {
+                  result.ok = false;
+                  result.error =
+                      "project has never been saved; choose a directory";
+                  return result;
+                }
+                directory = m_host.dataRoots->resolve(own, &result.error);
+                if (!directory) {
+                  result.ok = false;
+                  return result;
+                }
+              }
               progress("writing");
               // A save without UI state keeps what the project opened with,
               // so a headless save never drops the user's layout.
               const auto &tree = uiState ? uiState : *m_host.uiState;
               const auto parts = uiStateParts(tree);
-              if (!context().saveProject(directory,
+              if (!context().saveProject(*directory,
                       parts.windows,
                       parts.layout,
                       parts.settings,
@@ -455,16 +482,14 @@ void ProjectOpDispatcher::handle(const DeclareFileAnimationDataset &req)
 
 void ProjectOpDispatcher::handle(const ReimportDataset &req)
 {
-  if (!project::findDataset(project(), req.datasetId)) {
-    fail(req.requestId, "dataset not found");
-    return;
-  }
   startTask(req.requestId,
       "reimport dataset '" + req.datasetId + "'",
       [this, id = req.datasetId](const TaskProgressFunction &progress) {
         return runTaskBody(
             [&] {
               TaskResult result;
+              if (!project::findDataset(project(), id))
+                return datasetNotFound();
               progress("reimporting");
               result.ok = context().reimportStaticDataset(id, &result.error);
               result.projectChanged = result.ok;
@@ -496,20 +521,17 @@ void ProjectOpDispatcher::handle(const RemoveDataset &req)
 
 void ProjectOpDispatcher::handle(const LoadDataset &req)
 {
-  if (!project::findDataset(project(), req.datasetId)) {
-    fail(req.requestId, "dataset not found");
-    return;
-  }
   startTask(req.requestId,
       "load dataset '" + req.datasetId + "'",
       [this, id = req.datasetId](const TaskProgressFunction &progress) {
         return runTaskBody(
             [&] {
               TaskResult result;
-              progress("loading");
               const auto *before = project::findDataset(project(), id);
-              const auto statusBefore =
-                  before ? before->status : DatasetStatus::Unavailable;
+              if (!before)
+                return datasetNotFound();
+              progress("loading");
+              const auto statusBefore = before->status;
               result.ok = context().loadDataset(id, &result.error);
               // A failed load marks the dataset Unavailable: still a change.
               const auto *after = project::findDataset(project(), id);
@@ -554,10 +576,6 @@ void ProjectOpDispatcher::handle(const RefreshDatasetAvailability &req)
 
 void ProjectOpDispatcher::handle(const SaveDatasetArchive &req)
 {
-  if (!project::findDataset(project(), req.datasetId)) {
-    fail(req.requestId, "dataset not found");
-    return;
-  }
   std::string error;
   const auto file = m_host.dataRoots->resolve(req.file, &error);
   if (!file) {
@@ -571,6 +589,8 @@ void ProjectOpDispatcher::handle(const SaveDatasetArchive &req)
         return runTaskBody(
             [&] {
               TaskResult result;
+              if (!project::findDataset(project(), id))
+                return datasetNotFound();
               progress("writing");
               result.ok = context().saveDatasetArchive(id, file, &result.error);
               return result; // the project itself is untouched
