@@ -40,11 +40,24 @@ void AnimationManager::setPlaybackStoppedCallback(PlaybackStoppedCallback cb)
 
 void AnimationManager::reportLoadFailure(int frame, std::string message)
 {
-  m_loadFailures.push_back({frame, std::move(message)});
+  // Bindings know their own file index; the clock frame is the manager's.
+  const int clockFrame = m_applyingAnimations ? getAnimationFrame() : frame;
+  if (m_loadFailures.size() >= MAX_LOAD_FAILURES) {
+    if (!m_loadFailuresOverflowed) {
+      vsr::core::logWarning(
+          "[animation] more than %zu load failures collected by nobody;"
+          " dropping the oldest",
+          MAX_LOAD_FAILURES);
+      m_loadFailuresOverflowed = true;
+    }
+    m_loadFailures.erase(m_loadFailures.begin());
+  }
+  m_loadFailures.push_back({clockFrame, std::move(message)});
 }
 
 std::vector<AnimationManager::LoadFailure> AnimationManager::takeLoadFailures()
 {
+  m_loadFailuresOverflowed = false;
   return std::exchange(m_loadFailures, {});
 }
 

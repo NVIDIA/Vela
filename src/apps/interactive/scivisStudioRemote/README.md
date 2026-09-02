@@ -177,10 +177,15 @@ latch slots (latest-wins); `RequestArrayHistogram` is a sync Project Op. See
   but nothing is committed, and a pending scrub commit is dropped once the
   shot plays.
 - **`TimeAdvanceWarning`.** A `FileBinding` that cannot load a frame reports
-  `{frame, message}` to its `AnimationManager`; after every tick or
+  `{frame, message}` to its `AnimationManager`, which records it against the
+  clock frame being applied (the shot frame the Timeline shows; a binding
+  with fewer files than the shot has frames reports its own file index, and
+  the manager boundary is the one place that converts); after every tick or
   `SetTime` the loop drains `takeLoadFailures()` and pushes one
   `TimeAdvanceWarning{shotId, frame, message}` per failure. Load failure
-  never stops playback.
+  never stops playback. The record holds at most
+  `AnimationManager::MAX_LOAD_FAILURES` (256) so a driver that never drains it
+  (the monolith) does not grow it forever.
 - **The manipulator follows client camera edits.** A `SetObjectParameter`
   landing on the active shot's camera object updates the server's
   `m_ctx.view.manipulator` from the camera pose (`followCameraEdit`), and a
