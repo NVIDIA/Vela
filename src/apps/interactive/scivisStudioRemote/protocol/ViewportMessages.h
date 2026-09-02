@@ -89,6 +89,11 @@ struct ViewportSettings
   bool edgeInvert{false};
 };
 
+// The server clamps binCount into this range before binning; both ends of
+// the wire agree on it.
+constexpr uint32_t MIN_HISTOGRAM_BINS = 1;
+constexpr uint32_t MAX_HISTOGRAM_BINS = 4096;
+
 struct RequestArrayHistogram
 {
   static constexpr StudioMessageType MESSAGE_TYPE =
@@ -98,12 +103,15 @@ struct RequestArrayHistogram
   uint32_t binCount{0};
 };
 
-// Result carried in a ProjectOpReply's `results` subtree.
+// Result carried in a ProjectOpReply's `results` subtree. Elements that are
+// NaN or infinite take no part in the range or the bins; nonFinite counts
+// them so the bins still account for every element.
 struct ArrayHistogramResult
 {
   std::vector<uint64_t> bins;
   float minValue{0.f};
   float maxValue{0.f};
+  uint64_t nonFinite{0};
 };
 
 // Enumerator names ("NONE", "DEPTH", ..., "INSTANCE_ID"), "Unknown" otherwise.
@@ -135,7 +143,7 @@ void toNode(const RequestArrayHistogram &, vsr::core::DataNode &);
 bool fromNode(const vsr::core::DataNode &, RequestArrayHistogram &);
 
 // bins travel as one UINT64 array leaf (absent when empty); minValue and
-// maxValue are required.
+// maxValue are required, nonFinite defaults to 0 when absent.
 void toNode(const ArrayHistogramResult &, vsr::core::DataNode &);
 bool fromNode(const vsr::core::DataNode &, ArrayHistogramResult &);
 

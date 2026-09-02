@@ -156,12 +156,15 @@ void toNode(const ArrayHistogramResult &r, vsr::core::DataNode &n)
     n["bins"].setValueAsArray(r.bins);
   writeChild(n, "minValue", r.minValue);
   writeChild(n, "maxValue", r.maxValue);
+  writeChild(n, "nonFinite", r.nonFinite);
 }
 
 bool fromNode(const vsr::core::DataNode &n, ArrayHistogramResult &r)
 {
+  r.nonFinite = 0;
   if (!readChild(n, "minValue", r.minValue)
-      || !readChild(n, "maxValue", r.maxValue))
+      || !readChild(n, "maxValue", r.maxValue)
+      || !readOptionalChild(n, "nonFinite", r.nonFinite))
     return false;
   r.bins.clear();
   const auto *bins = n.child("bins");

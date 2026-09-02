@@ -121,7 +121,7 @@ active shot.
 | `pick X Y` | send a `Pick` at that pixel (x right, y down from the top-left, in frame-header pixels; the server clamps what lies outside the frame) and await its `PickReply`, printed as `EVT PickReply requestId= hit= worldPosition="x y z" objectType= objectIndex=` (`none` when nothing was hit); sets `$lastPickType`, `$lastPickIndex` on a hit and unsets them on a miss |
 | `set-outline [TYPE INDEX\|TYPE:INDEX\|none]` | outline that object, or clear the outline (`none` or no argument) |
 | `viewport-settings KEY=VALUE...` | edit the remembered `ViewportSettings` and send the whole struct; keys `highlightSelection`, `outlinePrimitives`, `showWorldBounds`, `edgeInvert` (bools), `worldBoundsColor=r,g,b,a`, `worldBoundsWidth`, `visualizeAOV` (`NONE`, `DEPTH`, `ALBEDO`, `NORMAL`, `EDGES`, `OBJECT_ID`, `PRIMITIVE_ID`, `INSTANCE_ID`), `depthVisualMinimum`, `depthVisualMaximum`; an unknown key is a usage error. Unset keys keep the last value sent (the struct's defaults at first), so repeated commands compose; with no edits the current struct is sent again |
-| `request-array-histogram TYPE INDEX BINS` | Project Op: bin a scalar array on the server; the reply prints `bins=<count> min= max=` and fills the `histogram.*` values (cleared when the request goes out, so a refused one leaves none) |
+| `request-array-histogram TYPE INDEX BINS` | Project Op: bin a scalar array on the server; the reply prints `bins=<count> min= max= nonFinite=` and fills the `histogram.*` values (cleared when the request goes out, so a refused one leaves none) |
 
 `pick` is request/reply like a Project Op but its reply is a plain
 `PickReply`, not a `ProjectOpReply`: `expect-fail` and `no-wait` do not apply
@@ -229,7 +229,7 @@ bytes are exactly two hex digits each.
 | `frames.advanced`, `frames.maxStep` | consumed frames whose header `frame` differed from the previous one's, and the largest forward step between two consecutive headers. A step backwards (a loop wrap to 0, a scrub back) is time moving on purpose, not a skip, and does not count; a forward scrub does. Frames are latest-wins, so a client slower than the stream can see steps the server never took |
 | `warnings.received`, `lastWarning` | `TimeAdvanceWarning`s received and the message of the newest one |
 | `pick.hit`, `pick.worldPosition`, `pick.objectType`, `pick.objectIndex` | the last `PickReply` (FAIL before one): `true`/`false`, `"x y z"`, and the identity (`surface`/`volume` and the pool index, or `none`) |
-| `histogram.bins`, `histogram.min`, `histogram.max`, `histogram.total` | the last ok `request-array-histogram`: the bin count, value range and sum of all bins (FAIL when the last request was refused or none was made) |
+| `histogram.bins`, `histogram.min`, `histogram.max`, `histogram.total`, `histogram.nonFinite` | the last ok `request-array-histogram`: the bin count, value range, sum of all bins and the NaN/inf elements left out of them (FAIL when the last request was refused or none was made) |
 | `frameConfig.width`, `frameConfig.height` | the last FrameConfig the server acknowledged |
 | `param.<type>.<index>.<name>` | a mirror parameter's value: strings verbatim, bools `true`/`false`, numbers space-separated per component (`"1 2 3"`), object references `type:index`; a missing parameter is a FAIL |
 | `errors.received`, `lastError` | Error messages received and the text of the newest one |

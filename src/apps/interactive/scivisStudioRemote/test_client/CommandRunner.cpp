@@ -801,7 +801,8 @@ const std::vector<std::string> &CommandRunner::assertNames()
       "histogram.bins",
       "histogram.min",
       "histogram.max",
-      "histogram.total"};
+      "histogram.total",
+      "histogram.nonFinite"};
   return names;
 }
 
@@ -1959,6 +1960,8 @@ std::optional<std::string> CommandRunner::namedValue(
         total += count;
       return std::to_string(total);
     }
+    if (field == "nonFinite")
+      return std::to_string(m_histogram->nonFinite);
   }
 
   if (name.rfind("param.", 0) == 0) {
@@ -2479,6 +2482,8 @@ CommandRunner::Failure CommandRunner::requestArrayHistogram(
         event.fields.emplace_back("bins", std::to_string(result->bins.size()));
         event.fields.emplace_back("min", numberText(result->minValue));
         event.fields.emplace_back("max", numberText(result->maxValue));
+        event.fields.emplace_back(
+            "nonFinite", std::to_string(result->nonFinite));
         m_histogram = *result;
         return {};
       });

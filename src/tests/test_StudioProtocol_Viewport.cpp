@@ -533,11 +533,24 @@ SCENARIO("Viewport payloads", "[StudioProtocol]")
       result.bins = {0, 5, 17, 1000000000000ull, 3, 0};
       result.minValue = -1.5f;
       result.maxValue = 42.f;
+      result.nonFinite = 9;
       ArrayHistogramResult out;
       REQUIRE(roundTripNode(result, out));
       REQUIRE(out.bins == result.bins);
       REQUIRE(out.minValue == -1.5f);
       REQUIRE(out.maxValue == 42.f);
+      REQUIRE(out.nonFinite == 9);
+    }
+
+    THEN("an absent nonFinite count reads as zero")
+    {
+      vsr::core::DataTree tree;
+      writeChild(tree.root(), "minValue", 0.f);
+      writeChild(tree.root(), "maxValue", 1.f);
+      ArrayHistogramResult out;
+      out.nonFinite = 5;
+      REQUIRE(fromNode(tree.root(), out));
+      REQUIRE(out.nonFinite == 0);
     }
 
     THEN("an empty bins vector reads back empty")
