@@ -114,40 +114,34 @@ worker-thread staging phase is a mechanical move. Task ids increase for the
 life of the server; `TaskCompleted::message` of an import carries the new
 dataset's id.
 
-Not there yet (milestones 6-7): playback and time, picking, viewport passes
-and `RenderShot`. The server answers those messages with `Error{"... not
-implemented in this server"}`.
+Data Roots (`server/DataRoots`) gate every path-taking op: open and save
+project, imports, archive save and load, dataset candidates and Remote
+Browse. The requested path is made canonical (`weakly_canonical`, so the
+existing prefix has its symlinks resolved) and must lie inside one root by
+path components; a path outside is refused with an error reply naming it
+before anything is touched. The `--project` directory is implicitly a root.
+Remote Browse (`server/RemoteBrowse`) lists a directory inside the roots as
+`File`, `Directory` or `ProjectDirectory` (a directory holding the project
+manifest) with sizes and mtimes; a file, a missing directory or a path
+outside the roots is refused.
 
-## Open design questions
+Not there yet (milestones 6-7): playback and time (`SetPlaying` 58,
+`SetTime` 143), `RequestArrayHistogram` (59), `RenderShot` (60), picking
+(`Pick` 62) and the viewport passes (`SetOutline` 144, `ViewportSettings`
+145). The server refuses those, and any request whose payload it cannot
+decode, loudly rather than dropping them: with a `ProjectOpReply{ok=false}`
+carrying the request's id when the payload has a readable non-zero
+`requestId` (so a client's pending request retires), and with a bare
+`Error{"... not implemented in this server"}` / `Error{"malformed ..."}`
+otherwise. The client core covers the second case too: a bare `Error` that
+names the type of a pending request fails the oldest pending request of that
+type, so no control stays greyed until the connection is lost.
 
-- **Color map objects.** No scene object type today carries a color map as
-  *parameters*: vsr_ui_imgui's TransferFunctionEditor edits a
-  `vsr::scene::Array` of RGBA samples (`colormap_<name>`). The server
-  therefore pairs each `ColorMapRecord` with a `vsr::scene::Array` of
-  `ANARI_FLOAT32_VEC4` (256 samples, default color map) named
-  `<colorMapId>_colormap`; the name is the only link, as with
-  `<shotId>_camera`. Consequences the transfer-function work must resolve:
-  the samples are array data, not parameters, so `SetObjectParameter` cannot
-  edit them and the bootstrap's descriptor-only `TransferScene` does not
-  carry them; project saves persist the record but not the Array, so an
-  opened project recreates each record's Array with default samples. Rename
-  touches the record only.
-- **Not in the v1 message set, hence read-only in the client:** light node
-  rename (node and object names are not parameters), camera rig clone, and
-  camera rig keyframe editing (Set View, Capture, Update, Delete); an
-  `UpdateCameraRig{CameraRig}` analogous to `UpdateShot` would cover the
-  last. `UpdateShot` covers every Shot field except `playing`, which stays
-  with playback (`SetPlaying`, milestone 6).
-- **Renderer library switches.** `UpdateShot` accepts a
-  `renderSettings.rendererObjectIndex` only when it names a Renderer of
-  `renderSettings.rendererLibrary` (or is unset). The server renders with
-  its own library regardless and rewrites the active shot's renderer
-  settings to match when they disagree, as `setupRendering` always did, so
-  a client choosing another library sees its choice overridden in the next
-  snapshot rather than a device switch.
-- **Task threading.** Moving the disk phases of tasks to a worker thread
-  (the split `stageProjectOpen`/`openStagedProject` prepares) is deferred;
-  see the notes on which `ProjectContext` calls are staging-safe.
+A fresh project (server start without `--project`, or `NewProject`) reports
+`dirty == false` in its snapshot: binding the server's renderer into a shot
+that never picked one completes the shot's defaults and is not counted as
+an edit; overriding a real pick (an opened project saved for another
+library) is.
 
 ## The client's editors (milestone 5)
 
@@ -171,15 +165,40 @@ milestone.
 
 ## Open design questions
 
+- **Color map objects.** No scene object type today carries a color map as
+  *parameters*: vsr_ui_imgui's TransferFunctionEditor edits a
+  `vsr::scene::Array` of RGBA samples (`colormap_<name>`). The server
+  therefore pairs each `ColorMapRecord` with a `vsr::scene::Array` of
+  `ANARI_FLOAT32_VEC4` (256 samples, default color map) named
+  `<colorMapId>_colormap`; the name is the only link, as with
+  `<shotId>_camera`. Consequences the transfer-function work must resolve:
+  the samples are array data, not parameters, so `SetObjectParameter` cannot
+  edit them and the bootstrap's descriptor-only `TransferScene` does not
+  carry them; project saves persist the record but not the Array, so an
+  opened project recreates each record's Array with default samples. Rename
+  touches the record only.
+- **Renderer library switches.** `UpdateShot` accepts a
+  `renderSettings.rendererObjectIndex` only when it names a Renderer of
+  `renderSettings.rendererLibrary` (or is unset). The server renders with
+  its own library regardless and rewrites the active shot's renderer
+  settings to match when they disagree, as `setupRendering` always did, so
+  a client choosing another library sees its choice overridden in the next
+  snapshot rather than a device switch.
+- **Task threading.** Moving the disk phases of tasks to a worker thread
+  (the split `stageProjectOpen`/`openStagedProject` prepares) is deferred;
+  see the notes on which `ProjectContext` calls are staging-safe.
+
 - **Light rename, camera-rig clone, camera-rig keyframe editing.** The v1
-  message set has no op for renaming a light node, cloning a camera rig, or
-  editing a camera rig's keyframes and current pose (the monolith's Set
-  View, Capture, Update, Delete, pose editor and inline frame/name/
-  interpolation edits). The client shows these read-only with a tooltip
-  saying so. Candidates: `RenameLightNode{lightRigId, lightNode, name}`,
-  `CloneCameraRig{cameraRigId}`, and an `UpdateCameraRig{rig}` whole-value
-  replace mirroring `UpdateShot`; the viewport's manipulator pose is what
-  Set View/Capture would send.
+  message set has no op for renaming a light node (node and object names are
+  not parameters), cloning a camera rig, or editing a camera rig's keyframes
+  and current pose (the monolith's Set View, Capture, Update, Delete, pose
+  editor and inline frame/name/interpolation edits). The client shows these
+  read-only with a tooltip saying so. Candidates: `RenameLightNode{lightRigId,
+  lightNode, name}`, `CloneCameraRig{cameraRigId}`, and an
+  `UpdateCameraRig{rig}` whole-value replace mirroring `UpdateShot`; the
+  viewport's manipulator pose is what Set View/Capture would send.
+  `UpdateShot` covers every Shot field except `playing`, which stays with
+  playback (`SetPlaying`, milestone 6).
 - **Naming a loaded Dataset Archive.** `LoadDatasetArchive` carries no name,
   so the Add Static Dataset dialog applies a typed name with a follow-up
   `RenameDataset` once the snapshot after the load shows exactly one new
@@ -201,8 +220,44 @@ an in-process server). Those that render use `helide` and skip when it
 cannot be loaded. The new `ProjectContext` operations are covered by
 `"[SciVisStudio]"`.
 
+`"[StudioRemote]"` (`src/tests/test_StudioRemoteE2E.cpp`) also drives the
+project layer through the client core against the in-process server:
+`NewProject`, an unnamed `CreateShot` landing in the replica, `SetActiveShot`
+seen in the frame headers, a `SaveProject` task tracked in `tasks()` to
+completion with the replica clean afterwards, `ListDirectory` of the Data
+Root marking the saved `ProjectDirectory`, `OpenProject` of it rebuilding
+mirror and replica, and a request pending across a server stop failing once
+with "connection lost".
+
 End to end, `ctest -R StudioScenario` runs each scenario script under
 [`test_client/scenarios/`](test_client/scenarios) against a freshly launched
 `scivisStudioServer`; see [`test_client/README.md`](test_client/README.md)
 for the headless test client, its command vocabulary and how to run a
 scenario by hand.
+
+### Driving project ops from the test client
+
+Every server op has a `scivisStudioTestClient` command of the same shape
+(`create-shot [NAME]`, `import-static-dataset PATH [NAME] [IMPORTER]`,
+`save-project [DIR]`, `list-directory PATH`, `cancel-task ID`, ...): the
+command mints a request id, sends the request and waits for its reply;
+`await-task` waits for a launched task to end, `await-snapshot` for the
+Project Snapshot that confirms a mutation, and `assert project.shots == 2`
+or `assert shot.$lastShotId.name == Intro` reads the replica. Paths come
+from `$dataRoot` (the first root `list-roots` reports) and ids from the
+`$last*Id` variables the replies fill. `no-wait` sends without waiting so
+several requests can be in flight; `expect-fail` asserts a refused reply.
+A session against a running server:
+
+```bash
+scivisStudioTestClient --port 12345 \
+  -e 'connect; list-roots' \
+  -e 'import-static-dataset $dataRoot/mesh.obj Mesh OBJ; await-task; await-snapshot' \
+  -e 'assert project.datasets == 1; save-project $dataRoot/demo; await-task' \
+  -e 'disconnect'
+```
+
+The scenarios under `test_client/scenarios/` (`project_lifecycle`, `rigs`,
+`color_maps`, `datasets`, `tasks`, `browse`, `errors_project`, and `all_m5`
+for the whole surface in one session) are the worked examples; the test
+client README lists every command, variable and assert value.
