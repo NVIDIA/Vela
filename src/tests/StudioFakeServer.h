@@ -96,7 +96,8 @@ struct FakeStudioServer
   void sendBootstrap();
   void onMessage(const Message &msg);
 
-  int helloVersion{vsr::scivis_studio::protocol::PROTOCOL_VERSION};
+  // Read on the IO thread at each accept; a test may change it between two.
+  std::atomic<int> helloVersion{vsr::scivis_studio::protocol::PROTOCOL_VERSION};
   std::shared_ptr<vsr::network::NetworkServer> channel;
   std::vector<Message> bootstrap; // sent on the client's Hello, in order
   std::atomic<bool> holdBootstrap{false}; // answer Hello with nothing at all
