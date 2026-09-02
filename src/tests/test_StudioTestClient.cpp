@@ -216,6 +216,18 @@ unsigned short ScriptedServer::port() const
  * surface 4 elsewhere, after a stray PickReply nobody asked for;
  * RequestArrayHistogram bins array 0 and refuses every other array as not
  * scalar. SetOutline and ViewportSettings are only recorded.
+ *
+ * Milestone 7: RenderShot needs a saved project and is a task with
+ * determinate progress (1..frameCount of frameCount) and a TaskCompleted
+ * whose message is the output directory and framesCompleted the frame count;
+ * a shot of more than 8 frames is a "long" render that reports one frame and
+ * then holds, refusing CreateShot with "render in progress" until a
+ * CancelTask naming it ends it as TaskFailed "cancelled" with framesCompleted
+ * 1. Every finished task's end message is replayed by the next bootstrap
+ * (between UIState and the snapshot) until then, as the real server does
+ * since the last bootstrap. SaveProject retains the request's UIState tree,
+ * the bootstrap carries it, and OpenProject of the saved directory succeeds,
+ * sending UIState before its TaskCompleted.
  */
 struct ProjectOpsServer
 {
@@ -245,6 +257,12 @@ struct ProjectOpsServer
   uint64_t nextTaskId{1};
   int nextShot{2};
   int nextDataset{1};
+  // The UI state the last SaveProject carried (null until one).
+  SubtreePtr uiState;
+  // The end messages of the tasks finished since the last bootstrap.
+  std::vector<Message> finishedSinceBootstrap;
+  // The long render, while it runs.
+  std::optional<uint64_t> renderRunning;
   // Network lag, staged: the next `deferSnapshots` snapshots are held back
   // until the request after them arrives (and go out ahead of its reply,
   // as the order on the wire demands); every snapshot sent normally waits
@@ -260,6 +278,9 @@ struct ProjectOpsServer
   std::thread streamer;
 
   void sendFrame(const std::string &shotId, int frame);
+  void endTask(Message end);
+  // A TaskFailed with the framesCompleted child a cancelled render reports.
+  Message failedRender(uint64_t taskId, uint64_t framesCompleted);
 };
 
 ProjectOpsServer::ProjectOpsServer()
@@ -379,6 +400,28 @@ void ProjectOpsServer::sendFrame(const std::string &shotId, int frame)
   send(encodeFrame(header, pixels.data(), pixels.size()));
 }
 
+void ProjectOpsServer::endTask(Message end)
+{
+  finishedSinceBootstrap.push_back(end);
+  send(std::move(end));
+}
+
+vsr::network::Message ProjectOpsServer::failedRender(
+    uint64_t taskId, uint64_t framesCompleted)
+{
+  TaskFailed failed;
+  failed.taskId = taskId;
+  failed.error = "cancelled";
+  vsr::core::DataTree tree;
+  toNode(failed, tree.root());
+  writeChild(tree.root(), "framesCompleted", framesCompleted);
+  Message msg;
+  msg.header.type = uint8_t(TaskFailed::MESSAGE_TYPE);
+  tree.write(msg.payload);
+  msg.header.payload_length = uint32_t(msg.payload.size());
+  return msg;
+}
+
 void ProjectOpsServer::onMessage(const Message &msg)
 {
   std::lock_guard lock(mutex);
@@ -394,6 +437,12 @@ void ProjectOpsServer::onMessage(const Message &msg)
     config.width = 640;
     config.height = 480;
     send(encode(config));
+    send(encode(UIState{uiState}));
+    // The task-status replay: what ended while nobody was listening, or
+    // since the last bootstrap.
+    for (auto &end : finishedSinceBootstrap)
+      send(std::move(end));
+    finishedSinceBootstrap.clear();
     send(encode(ProjectSnapshot{project})); // never staged: the bootstrap's
     send(encode(BootstrapEnd{}));
     return;
@@ -413,6 +462,10 @@ void ProjectOpsServer::onMessage(const Message &msg)
   switch (*type) {
   case StudioMessageType::CreateShot: {
     const auto req = *decode<CreateShot>(msg);
+    if (renderRunning) {
+      replyError(req.requestId, "render in progress");
+      return;
+    }
     // A reply to a request nobody sent: the runner must look past it.
     replyOk(999999);
     Shot shot;
@@ -474,18 +527,76 @@ void ProjectOpsServer::onMessage(const Message &msg)
     project.projectDirectory = req.directory.value_or("/data/unnamed");
     project.name = project.projectDirectory.filename().string();
     project.dirty = false;
+    if (req.uiState)
+      uiState = req.uiState;
     TaskCompleted completed;
     completed.taskId = taskId;
-    send(encode(completed));
+    endTask(encode(completed));
     sendSnapshot();
     return;
   }
   case StudioMessageType::OpenProject: {
     const auto req = *decode<OpenProject>(msg);
-    TaskFailed failed;
-    failed.taskId = startTask(req.requestId);
-    failed.error = "project directory does not exist";
-    send(encode(failed));
+    const auto taskId = startTask(req.requestId);
+    if (req.directory != project.projectDirectory
+        || project.projectDirectory.empty()) {
+      TaskFailed failed;
+      failed.taskId = taskId;
+      failed.error = "project directory does not exist";
+      endTask(encode(failed));
+      return;
+    }
+    // The saved project again: its UI state goes out before the end.
+    project.dirty = false;
+    send(encode(UIState{uiState}));
+    TaskCompleted completed;
+    completed.taskId = taskId;
+    endTask(encode(completed));
+    sendSnapshot();
+    return;
+  }
+  case StudioMessageType::RenderShot: {
+    const auto req = *decode<RenderShot>(msg);
+    const auto *shot = project::findShot(project, req.shotId);
+    if (!shot) {
+      replyError(req.requestId, "shot not found");
+      return;
+    }
+    if (project.projectDirectory.empty()) {
+      replyError(req.requestId, "project must be saved before rendering");
+      return;
+    }
+    if (renderRunning) {
+      replyError(req.requestId, "render in progress");
+      return;
+    }
+    project.activeShotId = shot->id;
+    const auto taskId = startTask(req.requestId);
+    sendSnapshot(); // the active-shot change, before the task runs
+    const auto frames = uint64_t(shot->frameCount);
+    const auto sendProgress = [&](uint64_t frame) {
+      TaskProgress progress;
+      progress.taskId = taskId;
+      progress.current = frame;
+      progress.total = frames;
+      progress.message = "frame";
+      send(encode(progress));
+    };
+    if (frames > 8) {
+      // The long render: one frame, then it holds for a CancelTask.
+      sendProgress(1);
+      renderRunning = taskId;
+      return;
+    }
+    for (uint64_t frame = 1; frame <= frames; ++frame)
+      sendProgress(frame);
+    TaskCompleted completed;
+    completed.taskId = taskId;
+    completed.message =
+        (project.projectDirectory / "renders" / shot->id).generic_string();
+    completed.framesCompleted = frames;
+    endTask(encode(completed));
+    sendSnapshot();
     return;
   }
   case StudioMessageType::ImportStaticDataset: {
@@ -525,6 +636,14 @@ void ProjectOpsServer::onMessage(const Message &msg)
   }
   case StudioMessageType::CancelTask: {
     const auto req = *decode<CancelTask>(msg);
+    if (renderRunning && *renderRunning == req.taskId) {
+      // Cooperative, at the next frame: ok once the body has returned.
+      replyOk(req.requestId);
+      endTask(failedRender(req.taskId, 1));
+      renderRunning.reset();
+      sendSnapshot();
+      return;
+    }
     replyError(req.requestId, "unknown task " + std::to_string(req.taskId));
     return;
   }
@@ -1623,6 +1742,196 @@ SCENARIO("the test client drives project ops against a fake server",
         REQUIRE(server.requests<SetOutline>().empty());
         REQUIRE(server.requests<ViewportSettings>().empty());
         REQUIRE(server.requests<RequestArrayHistogram>().size() == 1);
+      }
+    }
+
+    WHEN("a script renders a shot, cancels a long render and reads UI state")
+    {
+      const std::string script =
+          "connect " + endpoint + "\n"
+          "assert uiState.present == false\n"
+          // An unsaved project cannot render; the refusal is a reply.
+          "expect-fail render-shot active\n"
+          "assert lastReplyError contains saved\n"
+          "expect-fail render-shot shot_9999\n"
+          "set-ui-state layout=abc theme=dark\n"
+          "set-ui-state theme=light\n"
+          "save-project /data/p1\n"
+          "await-task\n"
+          "await-snapshot\n"
+          "assert task.last.state == Completed\n"
+          "update-shot active frameCount=3\n"
+          "await-snapshot\n"
+          // The render: the active-shot snapshot, three determinate steps,
+          // the end with the frame count and the output directory.
+          "render-shot active\n"
+          "assert var.lastTaskId == 2\n"
+          "await-task\n"
+          "await-snapshot\n"
+          "assert task.last.state == Completed\n"
+          "assert task.last.framesCompleted == 3\n"
+          "assert task.last.current == 3\n"
+          "assert task.last.total == 3\n"
+          "assert task.2.message == /data/p1/renders/shot_0001\n"
+          "assert tasks.completed == 2\n"
+          "assert tasks.replayed == 0\n"
+          // The long render: progress, a refused edit, the cancel.
+          "update-shot active frameCount=400\n"
+          "await-snapshot\n"
+          "no-wait render-shot active\n"
+          "await-reply\n"
+          "assert var.lastTaskId == 3\n"
+          "await-task-progress\n"
+          "assert task.last.state == Running\n"
+          "assert task.last.current == 1\n"
+          "assert task.last.total == 400\n"
+          "no-wait expect-fail create-shot Late\n"
+          "cancel-task $lastTaskId\n"
+          "expect-fail await-reply\n"
+          "assert lastReplyError contains progress\n"
+          "await-task $lastTaskId expect-fail\n"
+          "assert task.last.state == Failed\n"
+          "assert task.last.message == cancelled\n"
+          "assert task.last.framesCompleted >= 1\n"
+          "assert tasks.failed == 1\n"
+          // The UI state round trip: the saved tree comes back with the
+          // OpenProject, and with the bootstrap of a fresh connection.
+          "open-project /data/p1\n"
+          "await-task\n"
+          "await-task-progress timeout=100\n"
+          "assert uiState.present == true\n"
+          "assert uiState.layout == abc\n"
+          "assert uiState.theme == light\n"
+          "dump-ui-state\n"
+          "disconnect\n"
+          "assert uiState.present == false\n"
+          "reconnect\n"
+          "assert uiState.theme == light\n"
+          // The replay: every task that ended since the last bootstrap, the
+          // ends heard live before the disconnect counted again.
+          "assert tasks.replayed == 4\n"
+          "assert task.3.state == Failed\n"
+          "assert task.3.framesCompleted == 1\n"
+          "assert task.2.framesCompleted == 3\n"
+          "assert tasks.completed == 6\n"
+          "assert tasks.failed == 2\n"
+          // Nothing ended since: an empty replay, and a disconnect forgets.
+          "disconnect\n"
+          "reconnect\n"
+          "assert tasks.replayed == 0\n"
+          "assert task.2.state == Completed\n"
+          "disconnect\n";
+      const auto result = runScript(session, script, [] {
+        RunnerOptions o;
+        o.keepGoing = true;
+        return o;
+      }());
+      for (const auto &f : failLines(result.records))
+        WARN(f);
+
+      THEN("the records show the progress, the ends and the UI state")
+      {
+        const auto &r = result.records;
+        const auto fails = failLines(r);
+        // The two FAILs written as such: a task that ended without ever
+        // reporting progress, and a record a disconnect forgot.
+        REQUIRE(fails.size() == 2);
+        REQUIRE(fails[0]
+            == "FAIL await-task-progress timeout=100: task 4 ended (Completed)"
+               " before reporting progress");
+        REQUIRE(fails[1]
+            == "FAIL assert task.2.state == Completed: task.2.state: nothing"
+               " has been heard of task 2");
+        REQUIRE(hasLine(r,
+            "EVT ProjectOpReply requestId=1 ok=false error=\"project must be"
+            " saved before rendering\""));
+        REQUIRE(hasLine(r, "OK assert lastReplyError contains saved"));
+        REQUIRE(hasLine(r,
+            "EVT TaskProgress taskId=2 current=1 total=3 message=\"frame\""));
+        REQUIRE(hasLine(r,
+            "EVT TaskProgress taskId=2 current=3 total=3 message=\"frame\""));
+        REQUIRE(hasLine(r,
+            "EVT TaskCompleted taskId=2 message=\"/data/p1/renders/shot_0001\""
+            " framesCompleted=3"));
+        REQUIRE(hasLine(r,
+            "EVT TaskProgress taskId=3 current=1 total=400 message=\"frame\""));
+        REQUIRE(hasLine(r,
+            "EVT TaskFailed taskId=3 error=\"cancelled\" framesCompleted=1"));
+        REQUIRE(hasLine(r, "OK expect-fail await-reply"));
+        REQUIRE(hasLine(r, "OK assert lastReplyError contains progress"));
+        REQUIRE(hasLine(r, "EVT UIState present=false children=0"));
+        REQUIRE(hasLine(r, "EVT UIState present=true children=1"));
+        REQUIRE(hasLine(r,
+            "EVT UIStateEntry path=\"windows/layout\""
+            " value=\"abc\""));
+        REQUIRE(hasLine(r,
+            "EVT UIStateEntry path=\"windows/theme\""
+            " value=\"light\""));
+        REQUIRE(hasLine(r, "OK assert tasks.replayed == 4"));
+        REQUIRE(hasLine(r, "OK assert tasks.completed == 6"));
+        REQUIRE(hasLine(r, "OK assert tasks.replayed == 0"));
+        REQUIRE(hasLine(r, "OK assert uiState.present == false"));
+      }
+
+      THEN("the wire carries the resolved shot ids and the UI state tree")
+      {
+        const auto renders = server.requests<RenderShot>();
+        REQUIRE(renders.size() == 4);
+        REQUIRE(renders[0].shotId == "shot_0001");
+        REQUIRE(renders[1].shotId == "shot_9999");
+        REQUIRE(renders[3].shotId == "shot_0001");
+        const auto saves = server.requests<SaveProject>();
+        REQUIRE(saves.size() == 1);
+        REQUIRE(saves[0].uiState);
+        const auto *windows = saves[0].uiState->root().child("windows");
+        REQUIRE(windows);
+        REQUIRE(windows->numChildren() == 2);
+        REQUIRE(windows->child("layout")->getValueAs<std::string>() == "abc");
+        REQUIRE(windows->child("theme")->getValueAs<std::string>() == "light");
+        REQUIRE(saves[0].uiState->root().child("layout") == nullptr);
+        const auto cancels = server.requests<CancelTask>();
+        REQUIRE(cancels.size() == 1);
+        REQUIRE(cancels[0].taskId == 3);
+      }
+    }
+
+    WHEN("the link drops while a task of this client is still open")
+    {
+      const auto first = runScript(session,
+          "connect " + endpoint + "\n"
+          "save-project /data/p1\n"
+          "await-task\n"
+          "update-shot active frameCount=400\n"
+          "await-snapshot\n"
+          "render-shot active\n"
+          "await-task-progress\n"
+          "assert task.last.state == Running\n");
+      REQUIRE(first.ok);
+      // The server drops the socket without a word, as a crash would.
+      server.channel->restart();
+      // A fresh runner: the render is task 2, not $lastTaskId.
+      const auto lost = runScript(session,
+          "await-lost\n"
+          "assert task.2.state == Running\n"
+          "reconnect\n"
+          "assert task.2.state == Failed\n"
+          "assert task.2.message == \"connection lost\"\n"
+          "assert tasks.failed == 0\n"
+          // The save ended since the last bootstrap, so its end is replayed
+          // (and counted again); the render is still open on the server, so
+          // nothing of it is.
+          "assert tasks.replayed == 1\n"
+          "assert tasks.completed == 2\n"
+          "assert task.1.state == Completed\n"
+          "disconnect\n");
+      for (const auto &f : failLines(lost.records))
+        WARN(f);
+
+      THEN("the bootstrap fails the open record without counting a message")
+      {
+        REQUIRE(lost.ok);
+        REQUIRE(countStarting(lost.records, "EVT TaskCompleted taskId=1") == 1);
+        REQUIRE(countStarting(lost.records, "EVT TaskFailed") == 0);
       }
     }
 
