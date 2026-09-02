@@ -23,6 +23,7 @@
 // vsr_scene
 #include "vsr/scene/Scene.hpp"
 #include "vsr/scene/objects/Camera.hpp"
+#include "vsr/scene/objects/Renderer.hpp"
 // std
 #include <chrono>
 #include <cmath>
@@ -347,6 +348,85 @@ SCENARIO("The server free-runs playback of the active shot", "[StudioServer]")
         const auto frames = session.frameNumbers();
         for (size_t i = 1; i < frames.size(); ++i)
           REQUIRE(frames[i] - frames[i - 1] <= 1);
+      }
+    }
+  }
+}
+
+SCENARIO("Frame headers name the frame their pixels show", "[StudioServer]")
+{
+  GIVEN("A rendering session whose background is red on odd frames")
+  {
+    constexpr vsr::math::float4 RED{1.f, 0.f, 0.f, 1.f};
+    constexpr vsr::math::float4 BLUE{0.f, 0.f, 1.f, 1.f};
+    PlaybackSession session([&](StudioServer &server) {
+      auto &ctx = server.appContext();
+      const auto *shot = project::activeShot(server.projectContext().project());
+      REQUIRE(shot);
+      auto renderer = ctx.vsr.scene.getObject<vsr::scene::Renderer>(
+          shot->renderSettings.rendererObjectIndex);
+      REQUIRE(renderer);
+      auto &animMgr = ctx.vsr.animationMgr;
+      // Runs while the manager applies a time: getAnimationFrame() is the
+      // frame being applied.
+      animMgr.addAnimation("background")
+          .addCallbackBinding([renderer, &animMgr](float) mutable {
+            renderer->setParameter(
+                "background", animMgr.getAnimationFrame() % 2 ? RED : BLUE);
+          });
+    });
+    // Odd frames red, even frames blue, in the frame's first pixel.
+    const auto agrees = [](const Message &msg) {
+      const auto view = decodeFrame(msg);
+      REQUIRE(view);
+      REQUIRE(view->size >= 4);
+      const auto red = uint8_t(view->data[0]);
+      const auto blue = uint8_t(view->data[2]);
+      const bool odd = view->header.frame % 2 == 1;
+      CAPTURE(view->header.frame, int(red), int(blue));
+      return odd ? (red == 255 && blue == 0) : (red == 0 && blue == 255);
+    };
+    session.setClock(12, 200.f, true);
+    session.client.clear();
+
+    WHEN("the shot plays")
+    {
+      REQUIRE(session.request(SetPlaying{0, session.shotId, true}).ok);
+      REQUIRE(session.waitForMoreFrames(24));
+
+      THEN("every Frame's pixels match the parity of its header frame")
+      {
+        size_t frames = 0;
+        for (const auto &msg : session.client.messages()) {
+          if (msg.header.type != uint8_t(StudioMessageType::Frame))
+            continue;
+          ++frames;
+          REQUIRE(agrees(msg));
+        }
+        REQUIRE(frames >= 24);
+      }
+    }
+
+    WHEN("a paused scrub lands on an odd frame")
+    {
+      session.client.send(SetTime{session.shotId, 5});
+      REQUIRE(session.waitForFrame(5));
+
+      THEN("the first Frame labelled with it already shows it")
+      {
+        bool found = false;
+        for (const auto &msg : session.client.messages()) {
+          if (msg.header.type != uint8_t(StudioMessageType::Frame))
+            continue;
+          const auto view = decodeFrame(msg);
+          REQUIRE(view);
+          if (view->header.frame != 5)
+            continue;
+          REQUIRE(agrees(msg));
+          found = true;
+          break;
+        }
+        REQUIRE(found);
       }
     }
   }

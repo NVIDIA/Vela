@@ -311,10 +311,20 @@ void AnariSceneRenderPass::render(ImageBuffers &b, int stageId)
 {
   m_buffers.stream = b.stream;
 
-  startFirstFrame(false);
-
-  if (!m_runAsync)
+  if (!m_runAsync) {
+    // Synchronous: this call's render of the current scene state is what is
+    // composited, so the caller's picture and its state agree.
+    if (!m_firstFrame)
+      waitForCompletion();
+    anari::render(m_device, m_frame);
     waitForCompletion();
+    m_firstFrame = false;
+    copyFrameData();
+    composite(b, stageId);
+    return;
+  }
+
+  startFirstFrame(false);
 
   if (anari::isReady(m_device, m_frame)) {
     copyFrameData();
