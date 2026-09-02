@@ -1,0 +1,35 @@
+# Session lifecycle of the milestone-3 server: connect and Bootstrap, liveness,
+# a voluntary disconnect that clears the mirror, a reconnect that bootstraps it
+# again, and a Shutdown the server honours by closing the socket.
+#
+# Run against `scivisStudioServer --library helide --data-root <tmp>`; the
+# runner (run_scenario.sh) passes --port, so `connect` names no endpoint.
+
+connect
+assert state == Connected
+
+# The Bootstrap filled the Structural Mirror and the Project Replica.
+assert scene.objects >= 1
+assert scene.cameras >= 1
+assert project.shots >= 1
+assert project.activeShot != ""
+
+# Ping/Pong liveness answers within the deadline.
+ping
+
+# Disconnected is a completed intention: mirror and replica are gone.
+disconnect
+assert state == Disconnected
+assert scene.objects == 0
+
+# A reconnect is a fresh handshake and Bootstrap to the same endpoint.
+reconnect
+assert state == Connected
+assert scene.objects >= 1
+assert scene.cameras >= 1
+assert project.shots >= 1
+assert project.activeShot != ""
+
+# Shutdown: the server closes the socket, which lands us in Disconnected.
+shutdown
+assert state == Disconnected

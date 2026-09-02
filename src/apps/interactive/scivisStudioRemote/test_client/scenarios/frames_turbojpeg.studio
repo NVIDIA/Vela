@@ -1,0 +1,29 @@
+# TurboJpeg frame streaming: the same run as frames_raw.studio with the
+# compressed encoding preferred. Both ends must have been built with
+# VSR_USE_TURBOJPEG; the CMake wiring registers this scenario only then.
+#
+# `save-frame` decodes the JPEG on the client side, so it also proves the
+# client build can read what the server encodes.
+
+connect
+
+# Most preferred first; the server picks the first one it can encode.
+set-encodings turbojpeg,raw
+
+set-frame-config 64 48
+assert frameConfig.width == 64
+assert frameConfig.height == 48
+
+start-rendering
+await-frame 3
+assert frames.received >= 3
+
+assert frame.width == 64
+assert frame.height == 48
+assert frame.encoding == TurboJpeg
+assert frame.shotId != ""
+dump-frame
+save-frame frames_turbojpeg.ppm
+
+stop-rendering
+disconnect
