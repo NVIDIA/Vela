@@ -186,8 +186,11 @@ struct CommandRunner
   Failure renameRequest(
       const Command &, Deadline, std::string R::*id, const char *idName);
   template <typename R>
-  Failure saveArchiveRequest(
-      const Command &, Deadline, std::string R::*id, const char *idName);
+  Failure saveArchiveRequest(const Command &,
+      Deadline,
+      std::string R::*id,
+      const char *idName,
+      const Describe & = {});
   template <typename R>
   Failure loadArchiveRequest(const Command &, Deadline, const Describe &);
 
