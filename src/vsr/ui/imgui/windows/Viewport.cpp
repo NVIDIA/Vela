@@ -30,24 +30,7 @@ namespace vsr::ui::imgui {
 
 namespace {
 
-bool deviceSupportsExtension(anari::Device d, const char *extension)
-{
-  if (!d || !extension)
-    return false;
-
-  auto list = (const char *const *)anariGetObjectInfo(
-      d, ANARI_DEVICE, "default", "extension", ANARI_STRING_LIST);
-
-  if (!list)
-    return false;
-
-  for (const char *const *i = list; *i != nullptr; ++i) {
-    if (std::string(*i) == extension)
-      return true;
-  }
-
-  return false;
-}
+using vsr::rendering::deviceSupportsExtension;
 
 std::string defaultLibraryName(const vsr::app::ANARIDeviceManager &adm)
 {
