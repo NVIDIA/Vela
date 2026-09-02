@@ -17,7 +17,9 @@ list-roots
 import-static-dataset $dataRoot/triangle.obj Tri OBJ
 await-task
 await-snapshot
-update-shot active frameCount=400 renderSettings.width=32 renderSettings.height=24 renderSettings.samples=1
+# Large enough that helide takes seconds over 400 frames: the kill lands
+# while the render is under way.
+update-shot active frameCount=400 renderSettings.width=512 renderSettings.height=384 renderSettings.samples=1
 await-snapshot
 save-project $dataRoot/lostproj
 await-task

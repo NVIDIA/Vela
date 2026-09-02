@@ -16,7 +16,9 @@ import-static-dataset $dataRoot/triangle.obj Tri OBJ
 await-task
 await-snapshot
 
-update-shot active frameCount=60 renderSettings.width=16 renderSettings.height=12 renderSettings.samples=1
+# Large enough that helide takes a second or two over 60 frames: the
+# disconnect lands while the render is under way.
+update-shot active frameCount=60 renderSettings.width=512 renderSettings.height=384 renderSettings.samples=1
 await-snapshot
 save-project $dataRoot/replayproj
 await-task

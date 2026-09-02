@@ -6,10 +6,11 @@
 # Cancelling a running render, and pause-and-refuse while it runs. The cancel
 # is cooperative: the server honours a CancelTask naming the running render at
 # the next frame boundary, the task ends as TaskFailed "cancelled" carrying
-# the frames written so far, and the CancelTask's reply is ok. A mutating
-# request that reaches the server while the render runs is refused with
-# "render in progress"; it is sent no-wait ahead of the cancel so it is
-# answered while the render is still the running task.
+# the frames written so far, and the CancelTask's reply is ok. Requests that
+# arrive while the render body holds the loop are latched and dispatched
+# together once it returns: a second render-shot queues there, and the
+# create-shot sent right behind it meets the queued render and is refused
+# with "render in progress".
 
 connect
 list-roots
@@ -17,8 +18,9 @@ import-static-dataset $dataRoot/triangle.obj Tri OBJ
 await-task
 await-snapshot
 
-# Enough frames that the cancel lands well before the end.
-update-shot active frameCount=400 renderSettings.width=32 renderSettings.height=24 renderSettings.samples=1
+# Large enough that helide takes seconds over 400 frames: the cancel lands
+# well before the end.
+update-shot active frameCount=400 renderSettings.width=512 renderSettings.height=384 renderSettings.samples=1
 await-snapshot
 save-project $dataRoot/cancelproj
 await-task
@@ -26,25 +28,37 @@ await-snapshot
 
 no-wait render-shot active
 await-reply
+assert var.lastTaskId == 3
 await-task-progress
 assert task.last.state == Running
 assert task.last.total == 400
 
-# Refused while the render runs; collected after the cancel's own reply.
+# Both latched behind the running body; the cancel raises the flag at once
+# and is answered ok after the body returns, ahead of neither.
+no-wait render-shot active
 no-wait expect-fail create-shot Late
-cancel-task $lastTaskId
+cancel-task 3
+await-reply
+assert var.lastTaskId == 4
 expect-fail await-reply
 assert lastReplyError contains progress
 
-await-task $lastTaskId expect-fail
-assert task.last.state == Failed
-assert task.last.message == cancelled
-assert task.last.framesCompleted >= 1
-assert task.last.framesCompleted < 400
+await-task 3 expect-fail
+assert task.3.state == Failed
+assert task.3.message == cancelled
+assert task.3.framesCompleted >= 1
+assert task.3.framesCompleted < 400
 assert tasks.failed == 1
 assert project.shots == 1
 
-# Nothing is running any more: edits go through again.
+# The second render, queued or already running, is cancelled the same way.
+cancel-task 4
+await-task 4 expect-fail
+assert task.4.message == cancelled
+assert task.4.framesCompleted < 400
+assert tasks.failed == 2
+
+# Nothing is queued or running any more: edits go through again.
 create-shot After
 await-snapshot
 assert project.shots == 2
