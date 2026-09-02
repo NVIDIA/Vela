@@ -12,9 +12,12 @@
 #include "vsr/core/Logging.hpp"
 // std
 #include <algorithm>
+#include <cstddef>
 #include <filesystem>
 #include <optional>
+#include <type_traits>
 #include <utility>
+#include <variant>
 
 namespace vsr::scivis_studio::server {
 
@@ -101,12 +104,43 @@ UIStateParts uiStateParts(const SubtreePtr &tree)
 
 // Request plumbing ///////////////////////////////////////////////////////////
 
+namespace {
+
+template <size_t I>
+using RequestAlternative = std::variant_alternative_t<I, ProjectRequest>;
+
+// The alternatives are the one list of request types: each carries its
+// MESSAGE_TYPE, so both the type test and the decoder fold over them.
+template <size_t... I>
+bool isProjectRequestTypeOf(StudioMessageType type, std::index_sequence<I...>)
+{
+  return ((RequestAlternative<I>::MESSAGE_TYPE == type) || ...);
+}
+
+template <size_t... I>
+std::optional<ProjectRequest> decodeProjectRequestOf(
+    const Message &msg, StudioMessageType type, std::index_sequence<I...>)
+{
+  std::optional<ProjectRequest> decoded;
+  const auto tryOne = [&](auto tag) {
+    using T = RequestAlternative<decltype(tag)::value>;
+    if (T::MESSAGE_TYPE != type)
+      return false;
+    decoded = decodeAs<T>(msg);
+    return true;
+  };
+  (tryOne(std::integral_constant<size_t, I>{}) || ...);
+  return decoded;
+}
+
+constexpr auto REQUEST_ALTERNATIVES =
+    std::make_index_sequence<std::variant_size_v<ProjectRequest>>{};
+
+} // namespace
+
 bool isProjectRequestType(StudioMessageType type)
 {
-  const auto value = int(type);
-  return (value >= int(StudioMessageType::NewProject)
-             && value <= int(StudioMessageType::ListDirectory))
-      || type == StudioMessageType::CancelTask;
+  return isProjectRequestTypeOf(type, REQUEST_ALTERNATIVES);
 }
 
 std::optional<ProjectRequest> decodeProjectRequest(const Message &msg)
@@ -114,88 +148,7 @@ std::optional<ProjectRequest> decodeProjectRequest(const Message &msg)
   const auto type = messageType(msg);
   if (!type)
     return {};
-  switch (*type) {
-  case StudioMessageType::NewProject:
-    return decodeAs<NewProject>(msg);
-  case StudioMessageType::OpenProject:
-    return decodeAs<OpenProject>(msg);
-  case StudioMessageType::SaveProject:
-    return decodeAs<SaveProject>(msg);
-  case StudioMessageType::ImportStaticDataset:
-    return decodeAs<ImportStaticDataset>(msg);
-  case StudioMessageType::ImportFileAnimationDataset:
-    return decodeAs<ImportFileAnimationDataset>(msg);
-  case StudioMessageType::DeclareFileAnimationDataset:
-    return decodeAs<DeclareFileAnimationDataset>(msg);
-  case StudioMessageType::ReimportDataset:
-    return decodeAs<ReimportDataset>(msg);
-  case StudioMessageType::RenameDataset:
-    return decodeAs<RenameDataset>(msg);
-  case StudioMessageType::RemoveDataset:
-    return decodeAs<RemoveDataset>(msg);
-  case StudioMessageType::LoadDataset:
-    return decodeAs<LoadDataset>(msg);
-  case StudioMessageType::UnloadDataset:
-    return decodeAs<UnloadDataset>(msg);
-  case StudioMessageType::RefreshDatasetAvailability:
-    return decodeAs<RefreshDatasetAvailability>(msg);
-  case StudioMessageType::SaveDatasetArchive:
-    return decodeAs<SaveDatasetArchive>(msg);
-  case StudioMessageType::LoadDatasetArchive:
-    return decodeAs<LoadDatasetArchive>(msg);
-  case StudioMessageType::DiscoverDatasetCandidates:
-    return decodeAs<DiscoverDatasetCandidates>(msg);
-  case StudioMessageType::IncorporateDatasetCandidate:
-    return decodeAs<IncorporateDatasetCandidate>(msg);
-  case StudioMessageType::CreateShot:
-    return decodeAs<CreateShot>(msg);
-  case StudioMessageType::RemoveShot:
-    return decodeAs<RemoveShot>(msg);
-  case StudioMessageType::UpdateShot:
-    return decodeAs<UpdateShot>(msg);
-  case StudioMessageType::SetActiveShot:
-    return decodeAs<SetActiveShot>(msg);
-  case StudioMessageType::CreateLightRig:
-    return decodeAs<CreateLightRig>(msg);
-  case StudioMessageType::CloneLightRig:
-    return decodeAs<CloneLightRig>(msg);
-  case StudioMessageType::RemoveLightRig:
-    return decodeAs<RemoveLightRig>(msg);
-  case StudioMessageType::RenameLightRig:
-    return decodeAs<RenameLightRig>(msg);
-  case StudioMessageType::AddLightToRig:
-    return decodeAs<AddLightToRig>(msg);
-  case StudioMessageType::RemoveLightFromRig:
-    return decodeAs<RemoveLightFromRig>(msg);
-  case StudioMessageType::CreateCameraRig:
-    return decodeAs<CreateCameraRig>(msg);
-  case StudioMessageType::RemoveCameraRig:
-    return decodeAs<RemoveCameraRig>(msg);
-  case StudioMessageType::RenameCameraRig:
-    return decodeAs<RenameCameraRig>(msg);
-  case StudioMessageType::SaveCameraRigArchive:
-    return decodeAs<SaveCameraRigArchive>(msg);
-  case StudioMessageType::LoadCameraRigArchive:
-    return decodeAs<LoadCameraRigArchive>(msg);
-  case StudioMessageType::SaveLightRigArchive:
-    return decodeAs<SaveLightRigArchive>(msg);
-  case StudioMessageType::LoadLightRigArchive:
-    return decodeAs<LoadLightRigArchive>(msg);
-  case StudioMessageType::CreateColorMap:
-    return decodeAs<CreateColorMap>(msg);
-  case StudioMessageType::RenameColorMap:
-    return decodeAs<RenameColorMap>(msg);
-  case StudioMessageType::RemoveColorMap:
-    return decodeAs<RemoveColorMap>(msg);
-  case StudioMessageType::ListRoots:
-    return decodeAs<ListRoots>(msg);
-  case StudioMessageType::ListDirectory:
-    return decodeAs<ListDirectory>(msg);
-  case StudioMessageType::CancelTask:
-    return decodeAs<CancelTask>(msg);
-  default:
-    return {};
-  }
+  return decodeProjectRequestOf(msg, *type, REQUEST_ALTERNATIVES);
 }
 
 bool waitsForQueuedTasks(const ProjectRequest &request)
