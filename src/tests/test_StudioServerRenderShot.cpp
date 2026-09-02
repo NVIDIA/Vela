@@ -381,7 +381,8 @@ SCENARIO(
             client.waitForReply(render.requestId, RENDER_TIMEOUT);
         REQUIRE(saveReply);
         REQUIRE(renderReply);
-        const auto saved = waitForTaskEnd(client, session.startTask(*saveReply));
+        const auto saved =
+            waitForTaskEnd(client, session.startTask(*saveReply));
         REQUIRE(saved);
         REQUIRE(saved->completed);
         const auto rendered =
