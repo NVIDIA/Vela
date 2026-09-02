@@ -67,6 +67,13 @@ class Manipulator
   void setConfig(anari::math::float3 center,
       float dist,
       anari::math::float2 azel = anari::math::float2(0.f));
+  // Adopts a camera pose given as eye, viewing direction and up vector: the
+  // center moves to the current distance along the direction and the up axis
+  // becomes the one the up vector points along. For following a camera whose
+  // position/direction/up were edited without manipulator metadata.
+  void setPose(anari::math::float3 eye,
+      anari::math::float3 direction,
+      anari::math::float3 up);
   void setCenter(anari::math::float3 center);
   void setDistance(float dist);
   void setFixedDistance(float dist);

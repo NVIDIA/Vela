@@ -26,6 +26,40 @@ void Manipulator::setConfig(
   update();
 }
 
+void Manipulator::setPose(anari::math::float3 eye,
+    anari::math::float3 direction,
+    anari::math::float3 up)
+{
+  const float length = linalg::length(direction);
+  if (!(length > 0.f))
+    return;
+  const auto dir = direction / length;
+
+  if (linalg::length2(up) > 0.f) {
+    // The axis the up vector leans along most.
+    const anari::math::float3 candidates[] = {{1.f, 0.f, 0.f},
+        {0.f, 1.f, 0.f},
+        {0.f, 0.f, 1.f},
+        {-1.f, 0.f, 0.f},
+        {0.f, -1.f, 0.f},
+        {0.f, 0.f, -1.f}};
+    int best = 0;
+    for (int i = 1; i < 6; ++i) {
+      if (linalg::dot(up, candidates[i]) > linalg::dot(up, candidates[best]))
+        best = i;
+    }
+    m_axis = static_cast<UpAxis>(best);
+  }
+
+  const float distance = std::abs(m_distance) > 0.f ? std::abs(m_distance) : 1.f;
+  m_distance = distance;
+  m_speed = distance;
+  m_eye = eye;
+  m_at = eye + dir * distance;
+  m_azel = directionToAzel(-dir, m_axis);
+  update();
+}
+
 void Manipulator::setCenter(anari::math::float3 center)
 {
   if (m_mode == ManipulatorMode::Look) {
