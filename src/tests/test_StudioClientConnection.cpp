@@ -256,9 +256,12 @@ SCENARIO("ServerConnection handshakes and bootstraps", "[StudioClient]")
 
       THEN("Hello is answered and the bootstrap populates the mirror")
       {
+        // The snapshot is the last message before the held-back End; once it
+        // is in, everything before it has been applied.
         REQUIRE(pollUntil(f.connection, [&] {
           return f.connection.state() == ConnectionState::Connected
-              && f.connection.bootstrapping() && f.mirrorHasGeometry();
+              && f.connection.bootstrapping() && f.mirrorHasGeometry()
+              && f.connection.project() != nullptr;
         }));
         REQUIRE(f.server.count(StudioMessageType::Hello) == 1);
         const auto hellos = f.server.messagesOf(StudioMessageType::Hello);
