@@ -71,7 +71,11 @@ struct StudioViewport : public vsr::ui::imgui::BaseViewport
   // renderer). Parameter edits flow out as SetObjectParameter; which renderer
   // the server draws with is not a client choice in this milestone.
   void adoptRenderer(size_t rendererIndex);
-  // Back to the home state: no frame, no camera, no renderers.
+  // Lets go of the camera and renderers. Required BEFORE the mirror is
+  // cleared or wholesale-replaced: the refs count uses on mirror objects and
+  // must not outlive them. The last frame stays.
+  void dropMirrorReferences();
+  // Back to the home state: dropMirrorReferences() and no frame.
   void reset();
 
  private:

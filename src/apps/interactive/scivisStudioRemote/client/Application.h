@@ -71,6 +71,7 @@ class Application : public vsr::ui::imgui::Application
   void onStateChanged(ConnectionState from, ConnectionState to);
   void onBootstrapBegin();
   void onBootstrapComplete();
+  void releaseMirror();
   void enterHomeState();
   void resolveActiveShotCamera();
   std::vector<protocol::FrameEncoding> encodingPreference() const;
