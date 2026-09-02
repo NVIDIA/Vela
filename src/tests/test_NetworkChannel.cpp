@@ -96,6 +96,30 @@ SCENARIO(
       }
     }
 
+    WHEN("a second client connects over the live first one")
+    {
+      auto second = std::make_shared<NetworkClient>();
+      LifecycleCounters secondCounters;
+      secondCounters.attach(*second);
+      second->connect("127.0.0.1", port);
+
+      THEN("the first is reported lost, the second stays connected")
+      {
+        REQUIRE(waitFor([&] { return serverCounters.connected == 2; }));
+        REQUIRE(serverCounters.disconnected == 1);
+        REQUIRE(waitFor([&] { return clientCounters.disconnected == 1; }));
+        REQUIRE(waitFor([&] { return secondCounters.connected == 1; }));
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        REQUIRE(secondCounters.disconnected == 0);
+        REQUIRE(server->isConnected());
+        REQUIRE(second->isConnected());
+
+        second->disconnect();
+        REQUIRE(waitFor([&] { return serverCounters.disconnected == 2; }));
+        REQUIRE(secondCounters.disconnected == 1);
+      }
+    }
+
     WHEN("the client reconnects after a closed connection")
     {
       client->disconnect();
