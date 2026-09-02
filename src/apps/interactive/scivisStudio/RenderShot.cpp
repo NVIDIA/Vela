@@ -13,6 +13,8 @@
 #include <filesystem>
 #include <iomanip>
 #include <sstream>
+#include <string>
+#include <utility>
 
 namespace vsr::scivis_studio {
 
@@ -47,6 +49,14 @@ anari::Device loadFirstAvailableDevice(
 
   libName.clear();
   return nullptr;
+}
+
+// Logs `error` and returns it in `out`; every early exit of the render.
+bool failRender(RenderShotResult &out, std::string error)
+{
+  vsr::core::logError("[SciVisStudio] %s", error.c_str());
+  out.error = std::move(error);
+  return false;
 }
 
 } // namespace
@@ -116,24 +126,25 @@ void restoreShotDatasetResidency(
     projectContext.project().dirty = restore.projectWasDirty;
 }
 
-bool renderActiveShotToFrames(
-    ProjectContext &projectContext, RenderShotProgress *progress)
+bool renderActiveShotToFrames(ProjectContext &projectContext,
+    RenderShotProgress *progress,
+    RenderShotResult *result)
 {
+  RenderShotResult local;
+  RenderShotResult &out = result ? *result : local;
+  out = RenderShotResult{};
+
   auto *ctx = projectContext.appContext();
   auto *shot = project::activeShot(projectContext.project());
   if (!ctx || !shot)
-    return false;
+    return failRender(out, "No active shot to render");
 
-  if (!projectContext.project().isSaved()) {
-    vsr::core::logError("[SciVisStudio] Cannot render an unsaved project");
-    return false;
-  }
+  if (!projectContext.project().isSaved())
+    return failRender(out, "Cannot render an unsaved project");
 
   auto *cameraObject = projectContext.resolveShotCamera(*shot);
-  if (!cameraObject || cameraObject->type() != ANARI_CAMERA) {
-    vsr::core::logError("[SciVisStudio] Active shot camera is missing");
-    return false;
-  }
+  if (!cameraObject || cameraObject->type() != ANARI_CAMERA)
+    return failRender(out, "Active shot camera is missing");
 
   // Final renders materialize shot intent: every bound, enabled dataset is
   // made fully resident regardless of stored residency, and a dataset that
@@ -143,8 +154,7 @@ bool renderActiveShotToFrames(
     std::string residencyError;
     if (!makeShotDatasetsResident(
             projectContext, *shot, residencyRestore, &residencyError)) {
-      vsr::core::logError("[SciVisStudio] %s", residencyError.c_str());
-      return false;
+      return failRender(out, residencyError);
     }
   }
   struct ResidencyGuard
@@ -159,21 +169,19 @@ bool renderActiveShotToFrames(
 
   const auto outputDirectory =
       projectContext.project().projectDirectory / "renders" / shot->id;
+  out.outputDirectory = outputDirectory;
   std::error_code ec;
   std::filesystem::create_directories(outputDirectory, ec);
   if (ec) {
-    vsr::core::logError("[SciVisStudio] Failed to create render directory '%s'",
-        outputDirectory.string().c_str());
-    return false;
+    return failRender(out,
+        "Failed to create render directory '" + outputDirectory.string()
+            + "'");
   }
 
   auto libName = shot->renderSettings.rendererLibrary;
   auto device = loadFirstAvailableDevice(ctx->anari, libName);
-  if (!device) {
-    vsr::core::logError(
-        "[SciVisStudio] Failed to load an ANARI device for shot rendering");
-    return false;
-  }
+  if (!device)
+    return failRender(out, "Failed to load an ANARI device for shot rendering");
 
   projectContext.applyActiveShot();
 
@@ -185,24 +193,20 @@ bool renderActiveShotToFrames(
   const auto rendererIndex = shot->renderSettings.rendererObjectIndex;
   auto rendererObject = ctx->vsr.scene.getObject(ANARI_RENDERER, rendererIndex);
   if (!rendererObject || rendererObject->rendererDeviceName() != libName) {
-    vsr::core::logError(
-        "[SciVisStudio] Renderer object index %zu is unavailable for ANARI "
-        "device '%s'",
-        rendererIndex,
-        libName.c_str());
     ctx->vsr.scene.updateDelegate().erase(renderIndex);
     anari::release(device, device);
-    return false;
+    return failRender(out,
+        "Renderer object index " + std::to_string(rendererIndex)
+            + " is unavailable for ANARI device '" + libName + "'");
   }
 
   auto renderer = renderIndex->renderer(rendererIndex);
   if (!renderer) {
-    vsr::core::logError(
-        "[SciVisStudio] Failed to resolve renderer object index %zu",
-        rendererIndex);
     ctx->vsr.scene.updateDelegate().erase(renderIndex);
     anari::release(device, device);
-    return false;
+    return failRender(out,
+        "Failed to resolve renderer object index "
+            + std::to_string(rendererIndex));
   }
 
   vsr::rendering::ImagePipeline pipeline;
@@ -241,7 +245,7 @@ bool renderActiveShotToFrames(
       totalFrames,
       outputDirectory.string().c_str());
 
-  bool completed = true;
+  out.completed = true;
   for (int frame = 0; frame < totalFrames; ++frame) {
     if (progress && progress->onFrame
         && !progress->onFrame(frame, totalFrames)) {
@@ -249,7 +253,8 @@ bool renderActiveShotToFrames(
           "[SciVisStudio] Shot render canceled before frame %d/%d",
           frame,
           totalFrames);
-      completed = false;
+      out.completed = false;
+      out.cancelled = true;
       break;
     }
 
@@ -263,6 +268,7 @@ bool renderActiveShotToFrames(
       savePass->setEnabled(sample + 1 == shot->renderSettings.samples);
       pipeline.render();
     }
+    ++out.framesCompleted;
   }
 
   shot->currentFrame = savedFrame;
@@ -273,7 +279,7 @@ bool renderActiveShotToFrames(
   ctx->vsr.scene.updateDelegate().erase(renderIndex);
   anari::release(device, device);
 
-  return completed;
+  return out.completed;
 }
 
 } // namespace vsr::scivis_studio
