@@ -17,10 +17,10 @@ expect-error "unknown message type 255"
 send-raw 200
 expect-error "unknown message type 200"
 
-# A milestone 5+ request (NewProject = 20) is refused loudly.
-send-raw 20
+# A request of a later milestone (Pick = 62) is refused loudly.
+send-raw 62
 expect-error "not implemented"
-assert lastError contains NewProject
+assert lastError contains Pick
 
 assert errors.received == 4
 
