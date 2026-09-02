@@ -268,8 +268,9 @@ server has it, and a task the restarted server never heard of stays
 `Failed "connection lost"`. `disconnect` clears every record, so a task
 launched before it is known again only through the replay. Task ids count
 from 1 for the life of a server process: after a kill and restart, ids repeat,
-and a record of the old process with the same id is overwritten by the new
-task's messages.
+and a record of the old process with the same id starts over (Queued, no
+progress, no message) the moment the new task's launch reply or first
+`TaskProgress` names it, so `await-task` waits for the new task's end.
 
 ## The record stream
 
