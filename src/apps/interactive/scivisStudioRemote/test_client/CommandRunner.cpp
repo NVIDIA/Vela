@@ -1480,10 +1480,8 @@ std::optional<std::string> CommandRunner::namedValue(
       const auto *rig = camera_rig::findCameraRig(*project, id);
       return rig ? std::optional(rig->name) : missing("camera rig");
     }
-    for (const auto &map : project->colorMaps)
-      if (map.id == id)
-        return map.name;
-    return missing("color map");
+    const auto *map = project::findColorMap(*project, id);
+    return map ? std::optional(map->name) : missing("color map");
   }
   if (name == "frame.width")
     return frame ? std::optional(std::to_string(frame->width)) : needFrame();

@@ -582,11 +582,11 @@ bool ProjectContext::renameColorMap(
 
 bool ProjectContext::removeColorMap(const ColorMapID &id, std::string *error)
 {
-  auto itr = std::find_if(m_project.colorMaps.begin(),
-      m_project.colorMaps.end(),
-      [&](const ColorMapRecord &record) { return record.id == id; });
-  if (itr == m_project.colorMaps.end())
+  const auto *record = project::findColorMap(m_project, id);
+  if (!record)
     return fail("color map not found", error);
+  const auto itr =
+      m_project.colorMaps.begin() + (record - m_project.colorMaps.data());
 
   if (m_ctx) {
     if (auto array = resolveColorMapArray(id))
@@ -972,12 +972,7 @@ bool ProjectContext::updateShot(const Shot &incoming, std::string *error)
   Shot shot = incoming;
   shot.camera = existing->camera;
   shot.playing = existing->playing;
-  shot.frameCount = std::max(1, shot.frameCount);
-  shot.currentFrame = std::clamp(shot.currentFrame, 0, shot.frameCount - 1);
-  shot.fps = std::max(1.f, shot.fps);
-  shot.renderSettings.width = std::max(1u, shot.renderSettings.width);
-  shot.renderSettings.height = std::max(1u, shot.renderSettings.height);
-  shot.renderSettings.samples = std::max(1u, shot.renderSettings.samples);
+  shot::clampToValidRanges(shot);
   shot.datasetBindings.erase(std::remove_if(shot.datasetBindings.begin(),
                                  shot.datasetBindings.end(),
                                  [&](const DatasetBinding &binding) {

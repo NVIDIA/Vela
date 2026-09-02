@@ -33,4 +33,14 @@ void setDatasetBinding(Shot &shot, const DatasetID &id, bool enabled)
   shot.datasetBindings.push_back({id, enabled});
 }
 
+void clampToValidRanges(Shot &shot)
+{
+  shot.frameCount = std::max(1, shot.frameCount);
+  shot.currentFrame = std::clamp(shot.currentFrame, 0, shot.frameCount - 1);
+  shot.fps = std::max(1.f, shot.fps);
+  shot.renderSettings.width = std::max(1u, shot.renderSettings.width);
+  shot.renderSettings.height = std::max(1u, shot.renderSettings.height);
+  shot.renderSettings.samples = std::max(1u, shot.renderSettings.samples);
+}
+
 } // namespace vsr::scivis_studio::shot

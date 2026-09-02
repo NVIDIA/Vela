@@ -49,6 +49,10 @@ namespace shot {
 DatasetBinding *findDatasetBinding(Shot &shot, const DatasetID &id);
 const DatasetBinding *findDatasetBinding(const Shot &shot, const DatasetID &id);
 void setDatasetBinding(Shot &shot, const DatasetID &id, bool enabled);
+// Brings a shot the user edited back inside its limits: at least one frame,
+// the current frame within them, fps and the render size and sample count at
+// least 1. What updateShot applies; a client editing a draft uses the same.
+void clampToValidRanges(Shot &shot);
 
 } // namespace shot
 

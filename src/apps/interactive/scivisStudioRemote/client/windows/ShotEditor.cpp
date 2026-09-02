@@ -95,12 +95,7 @@ void ShotEditor::sendDraft()
     return;
 
   Shot shot = *m_draft;
-  shot.frameCount = std::max(1, shot.frameCount);
-  shot.currentFrame = std::clamp(shot.currentFrame, 0, shot.frameCount - 1);
-  shot.fps = std::max(1.f, shot.fps);
-  shot.renderSettings.width = std::max(1u, shot.renderSettings.width);
-  shot.renderSettings.height = std::max(1u, shot.renderSettings.height);
-  shot.renderSettings.samples = std::max(1u, shot.renderSettings.samples);
+  shot::clampToValidRanges(shot); // what the server will apply anyway
   *m_draft = shot;
 
   m_pendingUpdate =
