@@ -83,8 +83,9 @@ Studio reuses the `vsr::network` transport as-is — Boost.Asio TCP,
   the server's authoritative state *is* the session. No session ids, no
   client identity, no delta-resync. On disconnect the server pauses rendering
   and preserves everything, including a running Server Task; the bootstrap
-  replays live task status so a reconnecting client resumes progress display
-  seamlessly.
+  replays task status (how every task ended since the previous bootstrap, and
+  the running one's progress) so a reconnecting client resumes progress
+  display seamlessly.
 - **Manual launch, CLI-configured.** The user launches the server out-of-band
   (ssh, job script). Configuration is argv only: `--port` (default 12345),
   `--library <anari lib>`, `--data-root` (repeatable), optional
@@ -110,10 +111,12 @@ Studio reuses the `vsr::network` transport as-is — Boost.Asio TCP,
 
 A **bracketed sequence, not a composite blob**: `BootstrapBegin`; then
 ordinary messages — structural scene transfer (descriptor-only arrays), layer
-snapshots, frame config, the project's opaque UI-state tree, and a task-status
-replay for any Server Task still running; then one `ProjectSnapshot` as the
-commit marker; then `BootstrapEnd`. The bracket gives the client its
-"suppress local reactions, then refresh everything" window.
+snapshots, frame config, the project's opaque UI-state tree (`UIState`), and
+a task-status replay (the `TaskCompleted`/`TaskFailed` of every Server Task
+that ended since the previous bootstrap, then one `TaskProgress` for a task
+still running); then one `ProjectSnapshot` as the commit marker; then
+`BootstrapEnd`. The bracket gives the client its "suppress local reactions,
+then refresh everything" window.
 
 ## The Studio Message Set
 
@@ -148,7 +151,8 @@ outside Studio's set is **rejected with an error**, never silently ignored.
 - **Session**: `Hello`, `Ping`/`Pong`, `Disconnect`, `Shutdown`;
   `BootstrapBegin` / `BootstrapEnd`.
 - **Project**: `NewProject` (sync), `OpenProject(dir)` (task),
-  `SaveProject(dir?, uiState)` (task).
+  `SaveProject(dir?, uiState)` (task); `UIState{tree}` (server→client, in
+  every bootstrap and after an `OpenProject` completes).
 - **Dataset**: static import, file-animation import (tasks); declared-dataset
   creation (sync — stats nothing, ADR 0023); `ReimportDataset` (task);
   `RenameDataset`, `RemoveDataset(keepAssetFile)`, `UnloadDataset`,
@@ -318,9 +322,10 @@ header is the sole carrier of in-motion time; the replica carries time at rest
 
 ## Picking, selection, and viewport passes
 
-- **Picking is v1**: one unified `Pick{x, y}` request/reply. The server picks
-  against its **current** camera and scene — no frame-id correlation, no
-  client rays. Staleness is accepted and self-limiting: users pick at rest,
+- **Picking is v1**: one unified `Pick{x, y}` request/reply, `x` and `y` in
+  frame pixels with `y` down from the top-left corner of the last frame
+  config. The server picks against its **current** camera and scene — no
+  frame-id correlation, no client rays. Staleness is accepted and self-limiting: users pick at rest,
   and at rest the cameras agree.
 - **Reply: `{hit, worldPosition, objectIdentity?}`** — one flat struct.
   `objectIdentity` is the server-minted `(type, pool index)`, absent on
@@ -371,9 +376,13 @@ next frame boundary.
   render index, `applyActiveShot` toggles) and the global `AnimationManager`,
   with no mutex anywhere. Today's app copes identically by disabling the
   viewport.
-- **Mutating ops are refused** while the render runs ("render in progress");
-  read-only requests (browse, histogram) remain fine. Cancel-then-edit is the
-  escape hatch.
+- **Mutating ops are refused** while the render is queued or running
+  ("render in progress"): a mutating request that reaches dispatch then is
+  answered with the refusal, not held back to run afterwards, while read-only
+  requests (browse, histogram) and `CancelTask` remain fine. Since the render
+  body holds the render loop, a request that *arrives* during it is dispatched
+  once the body returns — and, the render being over, is then served.
+  Cancel-then-edit is the escape hatch.
 - **No frame preview in v1** — progress and cancel only. The hook is cheap
   (the frame buffer is in hand right before the PNG write), so a preview
   stream is a clean later addition once the frame header carries dimensions.
