@@ -175,7 +175,10 @@ latch slots (latest-wins); `RequestArrayHistogram` is a sync Project Op. See
   differs from the one the scrub started from; a `SetTime` for a shot that
   is not active is logged and ignored; while playing, `SetTime` moves time
   but nothing is committed, and a pending scrub commit is dropped once the
-  shot plays.
+  shot plays. An `UpdateShot` landing while the shot plays (a Loop, Frames or
+  FPS edit from the Timeline) keeps the frame in motion: the server ignores
+  the incoming `currentFrame` as it ignores `playing`, and the Timeline sends
+  the replica's resting frame rather than the last header's.
 - **`TimeAdvanceWarning`.** A `FileBinding` that cannot load a frame reports
   `{frame, message}` to its `AnimationManager`, which records it against the
   clock frame being applied (the shot frame the Timeline shows; a binding

@@ -53,6 +53,8 @@ struct ProjectContext
   // ignored (playback is driven through the AnimationManager, not this
   // call). setActiveShot switches shots and re-syncs the animation manager.
   bool removeShot(const ShotID &id, std::string *error = nullptr);
+  // Replaces the shot wholesale after validation, never honouring `playing`
+  // and, while the shot plays, keeping the frame it is on.
   bool updateShot(const Shot &shot, std::string *error = nullptr);
   bool setActiveShot(const ShotID &id, std::string *error = nullptr);
   // Playback as whole operations (the monolith's transport pokes the

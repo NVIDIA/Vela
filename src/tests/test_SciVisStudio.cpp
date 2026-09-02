@@ -264,8 +264,9 @@ SCENARIO("SciVis Studio static Dataset Archives are self-contained",
   std::filesystem::remove(file);
 }
 
-SCENARIO("SciVis Studio file-animation Dataset Archives externalize their "
-         "source list",
+SCENARIO(
+    "SciVis Studio file-animation Dataset Archives externalize their "
+    "source list",
     "[SciVisStudio]")
 {
   const auto file = std::filesystem::temp_directory_path()
@@ -460,8 +461,7 @@ SCENARIO("SciVis Studio Source List Files hold one trimmed path per line",
   std::filesystem::remove_all(directory);
 }
 
-SCENARIO(
-    "SciVis Studio legacy embedded sourceFiles load and mark migration",
+SCENARIO("SciVis Studio legacy embedded sourceFiles load and mark migration",
     "[SciVisStudio]")
 {
   const auto file = std::filesystem::temp_directory_path()
@@ -1450,8 +1450,9 @@ SCENARIO(
   std::filesystem::remove_all(root);
 }
 
-SCENARIO("SciVis Studio projects persist file-animation source lists in "
-         "sibling Source List Files",
+SCENARIO(
+    "SciVis Studio projects persist file-animation source lists in "
+    "sibling Source List Files",
     "[SciVisStudio]")
 {
   const auto root = std::filesystem::temp_directory_path()
@@ -1616,8 +1617,7 @@ SCENARIO("SciVis Studio projects persist file-animation source lists in "
   std::filesystem::remove_all(root);
 }
 
-SCENARIO(
-    "SciVis Studio migrates legacy embedded sourceFiles on explicit save",
+SCENARIO("SciVis Studio migrates legacy embedded sourceFiles on explicit save",
     "[SciVisStudio]")
 {
   const auto root = std::filesystem::temp_directory_path()
@@ -1696,12 +1696,13 @@ SCENARIO(
   std::filesystem::remove_all(root);
 }
 
-SCENARIO("SciVis Studio sources edits rewrite the Source List File as an "
-         "external tool",
+SCENARIO(
+    "SciVis Studio sources edits rewrite the Source List File as an "
+    "external tool",
     "[SciVisStudio]")
 {
-  const auto root = std::filesystem::temp_directory_path()
-      / "vsr_scivis_studio_sources_edit";
+  const auto root =
+      std::filesystem::temp_directory_path() / "vsr_scivis_studio_sources_edit";
   std::filesystem::remove_all(root);
 
   const auto datasetFile = root / "datasets" / "Frames.vsr";
@@ -1738,8 +1739,9 @@ SCENARIO("SciVis Studio sources edits rewrite the Source List File as an "
       std::filesystem::file_time_type::clock::now() - std::chrono::hours(1);
   std::filesystem::last_write_time(datasetFile, sentinel);
   std::string error;
-  REQUIRE(writeDatasetSourceListEdit(
-      datasetFile, {"remapped/a.raw", "remapped/b.raw", "  spaced entry  "}, &error));
+  REQUIRE(writeDatasetSourceListEdit(datasetFile,
+      {"remapped/a.raw", "remapped/b.raw", "  spaced entry  "},
+      &error));
   REQUIRE(fileContents(sourcesFile)
       == "remapped/a.raw\nremapped/b.raw\n  spaced entry  \n");
   REQUIRE(std::filesystem::last_write_time(datasetFile) == sentinel);
@@ -1763,8 +1765,9 @@ SCENARIO("SciVis Studio sources edits rewrite the Source List File as an "
   std::filesystem::remove_all(root);
 }
 
-SCENARIO("SciVis Studio sources edits migrate legacy embedded source lists "
-         "in place",
+SCENARIO(
+    "SciVis Studio sources edits migrate legacy embedded source lists "
+    "in place",
     "[SciVisStudio]")
 {
   const auto root = std::filesystem::temp_directory_path()
@@ -1844,8 +1847,9 @@ SCENARIO("SciVis Studio sources edits migrate legacy embedded source lists "
   std::filesystem::remove_all(root);
 }
 
-SCENARIO("SciVis Studio declared file-animation datasets materialize on "
-         "first load",
+SCENARIO(
+    "SciVis Studio declared file-animation datasets materialize on "
+    "first load",
     "[SciVisStudio]")
 {
   const auto root = std::filesystem::temp_directory_path()
@@ -1895,7 +1899,8 @@ SCENARIO("SciVis Studio declared file-animation datasets materialize on "
     REQUIRE(fileContents(root / "datasets" / "Frames.sources")
         == entries[0] + "\n" + entries[1] + "\n");
     vsr::core::DataTree assetTree;
-    REQUIRE(assetTree.load((root / "datasets" / "Frames.vsr").string().c_str()));
+    REQUIRE(
+        assetTree.load((root / "datasets" / "Frames.vsr").string().c_str()));
     REQUIRE(assetTree.root()["dataset"].child("sourceFiles") == nullptr);
     REQUIRE_FALSE(project::findDataset(project, id)->dirty);
 
@@ -1930,8 +1935,8 @@ SCENARIO("SciVis Studio declared file-animation datasets materialize on "
     // from the Source List and marks the dataset dirty. Load itself never
     // writes to disk.
     const auto sourcesFile = root / "datasets" / "Frames.sources";
-    const auto sentinel = std::filesystem::file_time_type::clock::now()
-        - std::chrono::hours(1);
+    const auto sentinel =
+        std::filesystem::file_time_type::clock::now() - std::chrono::hours(1);
     std::filesystem::last_write_time(sourcesFile, sentinel);
     std::string error;
     REQUIRE(projectContext.loadDataset(id, &error));
@@ -2342,8 +2347,8 @@ SCENARIO("SciVis Studio treats the file-animation pair as one dataset asset",
   }
   REQUIRE(projectContext.loadDataset(id, &error));
   REQUIRE(project::findDataset(project, id)->sourceFiles.size() == 1);
-  REQUIRE(project::findDataset(project, id)->sourceFiles[0].path
-      == "frames/z.raw");
+  REQUIRE(
+      project::findDataset(project, id)->sourceFiles[0].path == "frames/z.raw");
 
   // Discovery scans only dataset files, and a file-animation dataset file
   // without its sibling is not a valid Dataset Candidate.
@@ -2436,12 +2441,11 @@ SCENARIO("SciVis Studio unloads a clean dataset without touching its asset",
     REQUIRE(record.residency == DatasetResidency::Unloaded);
     REQUIRE(record.status == DatasetStatus::Available);
     REQUIRE_FALSE(projectContext.resolveDatasetRoot(record));
-    REQUIRE(appContext.vsr.scene.numberOfObjects(ANARI_GEOMETRY)
-        < geometryCount);
+    REQUIRE(
+        appContext.vsr.scene.numberOfObjects(ANARI_GEOMETRY) < geometryCount);
     REQUIRE(record.id == datasetId);
     REQUIRE_FALSE(record.dirty);
-    REQUIRE(
-        shot::findDatasetBinding(*project::activeShot(project), datasetId));
+    REQUIRE(shot::findDatasetBinding(*project::activeShot(project), datasetId));
   }
 
   THEN("Unload marks the project dirty and never writes to disk")
@@ -2457,8 +2461,8 @@ SCENARIO("SciVis Studio unloads a clean dataset without touching its asset",
 SCENARIO("SciVis Studio Dataset Load recreates the runtime from the asset",
     "[SciVisStudio]")
 {
-  const auto root = std::filesystem::temp_directory_path()
-      / "vsr_scivis_studio_dataset_load";
+  const auto root =
+      std::filesystem::temp_directory_path() / "vsr_scivis_studio_dataset_load";
   const auto source = std::filesystem::temp_directory_path()
       / "vsr_scivis_studio_dataset_load.obj";
   std::filesystem::remove_all(root);
@@ -2498,10 +2502,9 @@ SCENARIO("SciVis Studio Dataset Load recreates the runtime from the asset",
     auto datasetRoot = projectContext.resolveDatasetRoot(record);
     REQUIRE(datasetRoot);
     REQUIRE((*datasetRoot)->isEnabled());
-    REQUIRE(appContext.vsr.scene.numberOfObjects(ANARI_GEOMETRY)
-        == geometryCount);
     REQUIRE(
-        shot::findDatasetBinding(*project::activeShot(project), datasetId));
+        appContext.vsr.scene.numberOfObjects(ANARI_GEOMETRY) == geometryCount);
+    REQUIRE(shot::findDatasetBinding(*project::activeShot(project), datasetId));
     REQUIRE(project.dirty);
   }
 
@@ -2514,8 +2517,8 @@ SCENARIO("SciVis Studio Dataset Load recreates the runtime from the asset",
   THEN("Loading an already-loaded dataset is a no-op success")
   {
     REQUIRE(projectContext.loadDataset(datasetId, &error));
-    REQUIRE(appContext.vsr.scene.numberOfObjects(ANARI_GEOMETRY)
-        == geometryCount);
+    REQUIRE(
+        appContext.vsr.scene.numberOfObjects(ANARI_GEOMETRY) == geometryCount);
   }
 
   std::filesystem::remove_all(root);
@@ -2618,8 +2621,8 @@ SCENARIO("SciVis Studio residency guards keep unloaded datasets read-only",
       REQUIRE(record.residency == DatasetResidency::Unloaded);
       REQUIRE(record.status == DatasetStatus::Unavailable);
       REQUIRE_FALSE(projectContext.resolveDatasetRoot(record));
-      REQUIRE(appContext.vsr.scene.numberOfObjects(ANARI_GEOMETRY)
-          == objectCount);
+      REQUIRE(
+          appContext.vsr.scene.numberOfObjects(ANARI_GEOMETRY) == objectCount);
     }
   }
 
@@ -2641,8 +2644,8 @@ SCENARIO("SciVis Studio residency guards keep unloaded datasets read-only",
   std::filesystem::remove(source);
 }
 
-SCENARIO("SciVis Studio dataset residency survives save and open",
-    "[SciVisStudio]")
+SCENARIO(
+    "SciVis Studio dataset residency survives save and open", "[SciVisStudio]")
 {
   const auto root = std::filesystem::temp_directory_path()
       / "vsr_scivis_studio_residency_roundtrip";
@@ -2716,8 +2719,9 @@ SCENARIO("SciVis Studio dataset residency survives save and open",
   std::filesystem::remove(source);
 }
 
-SCENARIO("SciVis Studio bookkeeping open round-trips residency without "
-         "building runtimes",
+SCENARIO(
+    "SciVis Studio bookkeeping open round-trips residency without "
+    "building runtimes",
     "[SciVisStudio]")
 {
   const auto root = std::filesystem::temp_directory_path()
@@ -2741,10 +2745,12 @@ SCENARIO("SciVis Studio bookkeeping open round-trips residency without "
     auto &project = projectContext.project();
     auto &scene = appContext.vsr.scene;
     loadedId =
-        projectContext.addStaticDataset("Mesh A", source, vsr::io::ImporterType::OBJ)
+        projectContext
+            .addStaticDataset("Mesh A", source, vsr::io::ImporterType::OBJ)
             ->id;
     unloadedId =
-        projectContext.addStaticDataset("Mesh B", source, vsr::io::ImporterType::OBJ)
+        projectContext
+            .addStaticDataset("Mesh B", source, vsr::io::ImporterType::OBJ)
             ->id;
     auto datasetsRoot =
         findDirectChild(scene.layer("studio")->root(), "datasets");
@@ -2799,8 +2805,8 @@ SCENARIO("SciVis Studio bookkeeping open round-trips residency without "
     {
       const auto assetFile = root / "datasets" / "Mesh A.vsr";
       const auto sourcesFile = root / "datasets" / "Frames.sources";
-      const auto sentinel = std::filesystem::file_time_type::clock::now()
-          - std::chrono::hours(1);
+      const auto sentinel =
+          std::filesystem::file_time_type::clock::now() - std::chrono::hours(1);
       std::filesystem::last_write_time(assetFile, sentinel);
       std::filesystem::last_write_time(sourcesFile, sentinel);
       project.shots.front().name = "Edited Shot";
@@ -3059,8 +3065,7 @@ SCENARIO("SciVis Studio --openUnloaded overrides initial residency",
     THEN("An override that changes nothing leaves the project clean")
     {
       auto &project = projectContext.project();
-      REQUIRE(
-          project.datasets.front().residency == DatasetResidency::Unloaded);
+      REQUIRE(project.datasets.front().residency == DatasetResidency::Unloaded);
       REQUIRE_FALSE(project.dirty);
     }
   }
@@ -3148,13 +3153,16 @@ SCENARIO("SciVis Studio shot rendering materializes bound datasets",
   ProjectContext projectContext(&appContext);
   projectContext.createUnsavedProject();
   const auto firstId =
-      projectContext.addStaticDataset("First", source, vsr::io::ImporterType::OBJ)
+      projectContext
+          .addStaticDataset("First", source, vsr::io::ImporterType::OBJ)
           ->id;
   const auto secondId =
-      projectContext.addStaticDataset("Second", source, vsr::io::ImporterType::OBJ)
+      projectContext
+          .addStaticDataset("Second", source, vsr::io::ImporterType::OBJ)
           ->id;
   const auto thirdId =
-      projectContext.addStaticDataset("Third", source, vsr::io::ImporterType::OBJ)
+      projectContext
+          .addStaticDataset("Third", source, vsr::io::ImporterType::OBJ)
           ->id;
   REQUIRE(projectContext.saveProject(root));
   REQUIRE(projectContext.unloadDataset(secondId));
@@ -3843,8 +3851,8 @@ SCENARIO("SciVis Studio CLI addresses datasets by ID then unique name",
   std::string error;
   REQUIRE(resolveDatasetSelector(project, "dataset_0002", error)
       == &project.datasets[1]);
-  REQUIRE(resolveDatasetSelector(project, "other", error)
-      == &project.datasets[2]);
+  REQUIRE(
+      resolveDatasetSelector(project, "other", error) == &project.datasets[2]);
 
   // Exact ID wins before names are considered; a name matching several
   // datasets case-insensitively is ambiguous and lists the candidates.
@@ -3868,8 +3876,7 @@ SCENARIO("SciVis Studio CLI gathers source-list entries and remaps prefixes",
   // Positional entries win.
   commandLine.paths = {"a.raw", "b.raw"};
   std::istringstream unusedInput("ignored.raw\n");
-  REQUIRE(
-      gatherSourceListEntries(commandLine, unusedInput, entries, error));
+  REQUIRE(gatherSourceListEntries(commandLine, unusedInput, entries, error));
   REQUIRE(entries == std::vector<std::string>{"a.raw", "b.raw"});
 
   // stdin entries follow Source List File rules: trimmed, blanks skipped.
@@ -3913,8 +3920,8 @@ SCENARIO("SciVis Studio CLI drives a headless declared-dataset round trip",
   std::filesystem::remove_all(root);
   std::filesystem::remove_all(framesDir);
 
-  const auto run = [](std::vector<std::string> argv, const std::string &in =
-                                                         std::string()) {
+  const auto run = [](std::vector<std::string> argv,
+                       const std::string &in = std::string()) {
     argv.insert(argv.begin(), "scivisStudioCLI");
     StudioCommandLine commandLine;
     std::string error;
@@ -3947,7 +3954,8 @@ SCENARIO("SciVis Studio CLI drives a headless declared-dataset round trip",
   REQUIRE(declareOut.find("declared") != std::string::npos);
   REQUIRE(fileContents(root / "datasets" / "Frames.sources")
       == "/authoring/a_1x1x1_float32.raw\n/authoring/b_1x1x1_float32.raw\n");
-  REQUIRE(validateDatasetAsset(root / "datasets" / "Frames.vsr").dataset.declared);
+  REQUIRE(
+      validateDatasetAsset(root / "datasets" / "Frames.vsr").dataset.declared);
 
   auto [listCode, listOut] = run({"dataset", "list", root.string()});
   REQUIRE(listCode == 0);
@@ -3973,10 +3981,10 @@ SCENARIO("SciVis Studio CLI drives a headless declared-dataset round trip",
       != std::string::npos);
 
   // Loading before the files exist fails and leaves the project untouched.
-  auto [failCode, failOut] =
-      run({"dataset", "load", root.string(), "Frames"});
+  auto [failCode, failOut] = run({"dataset", "load", root.string(), "Frames"});
   REQUIRE(failCode != 0);
-  REQUIRE(validateDatasetAsset(root / "datasets" / "Frames.vsr").dataset.declared);
+  REQUIRE(
+      validateDatasetAsset(root / "datasets" / "Frames.vsr").dataset.declared);
 
   // Materialize: with the files in place, dataset load imports and the save
   // bakes the scene representation into the asset.
@@ -4022,8 +4030,8 @@ SCENARIO("SciVis Studio CLI drives a headless declared-dataset round trip",
 
   // Removal with --keep-asset persists the inventory change and leaves the
   // pair on disk.
-  auto [removeCode, removeOut] = run(
-      {"dataset", "remove", root.string(), "Sim Frames", "--keep-asset"});
+  auto [removeCode, removeOut] =
+      run({"dataset", "remove", root.string(), "Sim Frames", "--keep-asset"});
   REQUIRE(removeCode == 0);
   REQUIRE(std::filesystem::exists(root / "datasets" / "Sim Frames.vsr"));
   REQUIRE(std::filesystem::exists(root / "datasets" / "Sim Frames.sources"));
@@ -4507,6 +4515,29 @@ SCENARIO(
         REQUIRE(shot->camera.objectIndex != 12345);
         REQUIRE(shot->renderSettings.width == 1);
         REQUIRE(shot->datasetBindings.empty());
+      }
+    }
+
+    WHEN("the active shot is updated while it plays")
+    {
+      REQUIRE(projectContext.setActiveShot(secondId, &error));
+      REQUIRE(projectContext.setPlaying(secondId, true, &error));
+      projectContext.setActiveShotFrame(7);
+      REQUIRE(project::findShot(project, secondId)->currentFrame == 7);
+
+      Shot edit = *project::findShot(project, secondId);
+      edit.loop = false;
+      edit.currentFrame = 2; // the frame an editor last saw
+      REQUIRE(projectContext.updateShot(edit, &error));
+
+      THEN("the edit lands but the frame in motion is kept")
+      {
+        const auto *shot = project::findShot(project, secondId);
+        REQUIRE_FALSE(shot->loop);
+        REQUIRE(shot->playing);
+        REQUIRE(shot->currentFrame == 7);
+        REQUIRE(appContext.vsr.animationMgr.getAnimationFrame() == 7);
+        REQUIRE(appContext.vsr.animationMgr.isPlaying());
       }
     }
 
