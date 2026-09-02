@@ -7,6 +7,7 @@
 #include "ServerConnection.h"
 // vsr_scivis_studio_protocol
 #include "FrameMessages.h"
+#include "StudioEndpoint.h"
 // vsr_ui_imgui
 #include "vsr/ui/imgui/Application.h"
 // std
@@ -23,7 +24,7 @@ struct StudioViewport;
 struct ClientCommandLine
 {
   std::string host{"127.0.0.1"};
-  short port{12345};
+  int port{protocol::DEFAULT_PORT}; // 1..65535, as parsePort() accepts
   bool connectAtStartup{false};
 };
 

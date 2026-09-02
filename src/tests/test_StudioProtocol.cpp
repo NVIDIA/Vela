@@ -7,6 +7,7 @@
 #include "PayloadCommon.h"
 #include "SessionMessages.h"
 #include "StudioCodec.h"
+#include "StudioEndpoint.h"
 #include "StudioProtocol.h"
 // std
 #include <array>
@@ -136,6 +137,34 @@ SCENARIO("StudioMessageType enum", "[StudioProtocol]")
       static_assert(isServerToClient(StudioMessageType::Frame));
       REQUIRE_FALSE(isServerToClient(StudioMessageType(0)));
       REQUIRE_FALSE(isServerToClient(StudioMessageType(255)));
+    }
+  }
+}
+
+SCENARIO("StudioEndpoint parses --port values", "[StudioProtocol]")
+{
+  GIVEN("a port variable")
+  {
+    int port = DEFAULT_PORT;
+
+    THEN("decimal integers in 1..65535 are accepted")
+    {
+      REQUIRE(parsePort("1", port));
+      REQUIRE(port == 1);
+      REQUIRE(parsePort("65535", port));
+      REQUIRE(port == 65535);
+      REQUIRE(parsePort(std::to_string(DEFAULT_PORT), port));
+      REQUIRE(port == DEFAULT_PORT);
+    }
+
+    THEN("anything else is refused and leaves the port alone")
+    {
+      for (const char *bad :
+          {"0", "65536", "-1", "abc", "12a", "", " 12", "12 ", "+12", "0x10"}) {
+        port = DEFAULT_PORT;
+        REQUIRE_FALSE(parsePort(bad, port));
+        REQUIRE(port == DEFAULT_PORT);
+      }
     }
   }
 }

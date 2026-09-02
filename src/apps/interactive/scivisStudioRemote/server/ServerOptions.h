@@ -3,14 +3,14 @@
 
 #pragma once
 
+// vsr_scivis_studio_protocol
+#include "StudioEndpoint.h"
 // std
 #include <filesystem>
 #include <string>
 #include <vector>
 
 namespace vsr::scivis_studio::server {
-
-constexpr int DEFAULT_PORT = 12345;
 
 /*
  * Launch configuration of scivisStudioServer. The server is config-free by
@@ -33,7 +33,7 @@ constexpr int DEFAULT_PORT = 12345;
 struct ServerOptions
 {
   // 0 asks the OS for a free port (tests); the parser only accepts 1..65535.
-  int port{DEFAULT_PORT};
+  int port{protocol::DEFAULT_PORT};
   // ANARI library to render with; empty means the first entry of the
   // ANARIDeviceManager library list, exactly what the monolith's viewport
   // starts with.

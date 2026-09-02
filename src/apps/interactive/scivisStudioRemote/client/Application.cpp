@@ -23,7 +23,6 @@
 #include <SDL3/SDL.h>
 // std
 #include <algorithm>
-#include <cstdlib>
 #include <string>
 
 namespace vsr::scivis_studio::client {
@@ -100,8 +99,15 @@ ParsedArguments parseArguments(int argc, const char **argv)
       if (const char *v = valueOf("--host"))
         parsed.options.host = v;
     } else if (arg == "--port") {
-      if (const char *v = valueOf("--port"))
-        parsed.options.port = short(std::atoi(v));
+      if (const char *v = valueOf("--port")) {
+        if (!parsePort(v, parsed.options.port)) {
+          vsr::core::logError(
+              "[Client] --port requires an integer in 1..65535, got: %s\n"
+              "usage: %s",
+              v,
+              usage());
+        }
+      }
     } else if (arg == "--connect") {
       parsed.options.connectAtStartup = true;
     } else if (arg == "-h" || arg == "--help") {
@@ -130,7 +136,7 @@ Application::Application(int argc, const char **argv)
   auto parsed = parseArguments(argc, argv);
   m_options = parsed.options;
   m_host = m_options.host;
-  m_port = int(static_cast<unsigned short>(m_options.port));
+  m_port = m_options.port;
 
   // The base class was given no argv; feed it the arguments it owns.
   auto *ctx = appContext();
