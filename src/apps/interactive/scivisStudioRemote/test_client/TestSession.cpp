@@ -922,13 +922,13 @@ void TestSession::handleMessage(const Message &msg)
     event.fields.emplace_back("hit", boolText(reply->hit));
     const auto &p = reply->worldPosition;
     event.fields.emplace_back("worldPosition",
-        quotedText(numberText(p.x) + " " + numberText(p.y) + " "
-            + numberText(p.z)));
+        quotedText(
+            numberText(p.x) + " " + numberText(p.y) + " " + numberText(p.z)));
     if (reply->objectIdentity) {
       event.fields.emplace_back(
           "objectType", shortTypeName(reply->objectIdentity->type));
-      event.fields.emplace_back("objectIndex",
-          std::to_string(reply->objectIdentity->objectIndex));
+      event.fields.emplace_back(
+          "objectIndex", std::to_string(reply->objectIdentity->objectIndex));
     } else {
       event.fields.emplace_back("objectType", "none");
       event.fields.emplace_back("objectIndex", "none");
