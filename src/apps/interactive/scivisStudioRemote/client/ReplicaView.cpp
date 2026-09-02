@@ -87,7 +87,7 @@ const CameraRig *findCameraRig(const Project &project, const CameraRigID &id)
 
 const ColorMapRecord *findColorMap(const Project &project, const ColorMapID &id)
 {
-  return findById(project.colorMaps, id);
+  return project::findColorMap(project, id);
 }
 
 size_t lightRigUseCount(const Project &project, const LightRigID &id)
