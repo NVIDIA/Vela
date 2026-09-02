@@ -49,7 +49,9 @@ void appendArrayParameters(const vsr::scene::Object &object,
       continue;
     std::string label = prefix + param.name().str() + "  ("
         + anari::toString(value.type()) + " " + std::to_string(index) + ")";
-    out.emplace_back(std::move(label), SceneObjectRef{value.type(), index});
+    // Every array kind lives in the scene's one array pool, and that is how
+    // the server names them: ANARI_ARRAY plus the pool index.
+    out.emplace_back(std::move(label), SceneObjectRef{ANARI_ARRAY, index});
   }
 }
 
@@ -144,7 +146,7 @@ void HistogramPanel::buildEditorUI(const Project &)
         }
         ImGui::EndCombo();
       }
-      ImGui::SetNextItemWidth(120.f);
+      ImGui::SetNextItemWidth(180.f * ImGui::GetIO().FontGlobalScale);
       if (ImGui::InputInt("Bins", &m_binCount, 1, 16))
         m_binCount = std::clamp(m_binCount, 1, MAX_BINS);
       ImGui::SameLine();
