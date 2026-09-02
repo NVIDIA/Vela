@@ -99,7 +99,9 @@ const char *toString(SessionState state);
  * naming the running render raises the runner's cancel flag from the IO
  * thread so the body stops at its next frame, as does Shutdown. Scene edits,
  * SetTime and Pick latched while the body ran targeted a scene the render
- * was mutating: they are dropped (the pick with an Error) once it returns.
+ * was mutating: they are dropped (the pick with an Error) the moment it
+ * returns, before its ending goes out, so a client reacting to the ending
+ * loses nothing.
  * The bootstrap replays how tasks ended since the last one (task-status
  * replay) between UIState and the ProjectSnapshot. A second client connecting
  * over a live session replaces it; the replaced client is sent
@@ -316,10 +318,6 @@ struct StudioServer
   bool m_renderingRequested{false};
   bool m_bootstrapPending{false};
   bool m_sceneResendPending{false};
-  // An exclusive task ran this iteration: the latch batch that accumulated
-  // meanwhile is stale (see applyControlState).
-  bool m_discardLatchedInputs{false};
-
   // Playback (loop thread only)
   using Clock = std::chrono::steady_clock;
   std::optional<Clock::time_point> m_lastTick;
