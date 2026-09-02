@@ -1,0 +1,93 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# The project lifecycle over Project Ops: a new project, shots created,
+# switched, edited and removed, a save to a directory under the data root
+# (a Server Task), and the saved project opened again.
+#
+# Every mutation is confirmed by the ProjectSnapshot that follows its reply;
+# `await-snapshot` waits for it before the replica is asserted on. Ids come
+# from the replies ($lastShotId) and the data root from `list-roots`
+# ($dataRoot), so the script names no path of its own.
+
+connect
+list-roots
+assert project.shots == 1
+assert project.activeShot == shot_0001
+
+# A fresh unsaved project replaces the one the server started with.
+new-project
+await-snapshot
+assert project.shots == 1
+assert project.datasets == 0
+assert project.lightRigs == 1
+assert project.cameraRigs == 1
+assert project.directory == ""
+
+# A created shot becomes the active one and carries its name.
+create-shot Intro
+await-snapshot
+assert project.shots == 2
+assert project.activeShot == $lastShotId
+assert shot.$lastShotId.name == Intro
+
+set-active-shot shot_0001
+await-snapshot
+assert project.activeShot == shot_0001
+
+# update-shot sends the whole Shot with the named fields changed; the server
+# normalizes and the snapshot carries what it kept.
+update-shot $lastShotId name="Intro Cut" frameCount=48 fps=30 loop=off currentFrame=7 renderSettings.width=320 renderSettings.height=200
+await-snapshot
+assert shot.$lastShotId.name == "Intro Cut"
+assert shot.$lastShotId.frameCount == 48
+assert shot.$lastShotId.fps == 30
+assert shot.$lastShotId.loop == false
+assert shot.$lastShotId.currentFrame == 7
+assert shot.$lastShotId.renderSettings.width == 320
+assert shot.$lastShotId.renderSettings.height == 200
+
+# A frame past the end is clamped, not refused.
+update-shot $lastShotId currentFrame=500
+await-snapshot
+assert shot.$lastShotId.currentFrame == 47
+
+# Rig ids must exist; the failed op sends no snapshot and changes nothing.
+expect-fail update-shot $lastShotId lightRigId=lightRig_9999
+assert shot.$lastShotId.lightRigId == lightRig_0001
+
+remove-shot $lastShotId
+await-snapshot
+assert project.shots == 1
+# The last shot cannot go: the server always renders one.
+expect-fail remove-shot shot_0001
+assert project.shots == 1
+assert replies.failed == 2
+
+# Save As is a task; its completion is followed by the snapshot that clears
+# the dirty flag and names the directory.
+save-project $dataRoot/lifecycle
+await-task
+await-snapshot
+assert tasks.completed == 1
+assert project.dirty == false
+assert project.name == lifecycle
+assert project.directory == $dataRoot/lifecycle
+dump-project
+
+# Dirty the project, then open the saved one over it.
+create-shot Scratch
+await-snapshot
+assert project.shots == 2
+assert project.dirty == true
+
+open-project $dataRoot/lifecycle
+await-task
+await-snapshot
+assert tasks.completed == 2
+assert project.shots == 1
+assert project.activeShot == shot_0001
+assert project.dirty == false
+assert project.directory == $dataRoot/lifecycle
+
+disconnect

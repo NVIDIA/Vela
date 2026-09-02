@@ -1,0 +1,92 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Light and camera rigs: create, add and remove lights, rename, clone,
+# archive to a file under the data root and load the archive back, bind a
+# rig to the active shot, remove. Light rigs live in the scene (their lights
+# arrive as ObjectAdded pushes before the reply); camera rigs are pure
+# Project data.
+
+connect
+list-roots
+assert project.lightRigs == 1
+assert project.cameraRigs == 1
+
+# Light rigs #
+
+create-light-rig Studio
+await-snapshot
+assert project.lightRigs == 2
+assert lightRig.$lastLightRigId.name == Studio
+
+# add-light answers with the light's node; the default subtype is directional.
+add-light $lastLightRigId point
+await-snapshot
+add-light $lastLightRigId
+await-snapshot
+expect-fail add-light $lastLightRigId laser
+
+# The last light added is removed by its node reference; a second removal
+# names a node that is no longer a light of the rig.
+remove-light $lastLightRigId $lastLightLayer $lastLightNode
+await-snapshot
+expect-fail remove-light $lastLightRigId $lastLightLayer $lastLightNode
+
+rename-light-rig $lastLightRigId "Key Light"
+await-snapshot
+assert lightRig.$lastLightRigId.name == "Key Light"
+# Names are unique per collection, case-insensitively.
+expect-fail rename-light-rig $lastLightRigId default
+expect-fail rename-light-rig $lastLightRigId ""
+
+clone-light-rig $lastLightRigId
+await-snapshot
+assert project.lightRigs == 3
+assert lightRig.$lastLightRigId.name contains "Key Light"
+
+save-light-rig-archive $lastLightRigId $dataRoot/key.lightrig.vsr
+load-light-rig-archive $dataRoot/key.lightrig.vsr
+await-snapshot
+assert project.lightRigs == 4
+expect-fail load-light-rig-archive $dataRoot/missing.lightrig.vsr
+
+# The active shot uses the loaded rig; removing the rig clears the binding.
+update-shot shot_0001 lightRigId=$lastLightRigId
+await-snapshot
+assert shot.shot_0001.lightRigId == $lastLightRigId
+remove-light-rig $lastLightRigId
+await-snapshot
+assert project.lightRigs == 3
+assert shot.shot_0001.lightRigId == ""
+expect-fail remove-light-rig $lastLightRigId
+
+# Camera rigs #
+
+create-camera-rig Dolly
+await-snapshot
+assert project.cameraRigs == 2
+assert cameraRig.$lastCameraRigId.name == Dolly
+
+rename-camera-rig $lastCameraRigId "Dolly In"
+await-snapshot
+assert cameraRig.$lastCameraRigId.name == "Dolly In"
+expect-fail rename-camera-rig $lastCameraRigId Default
+
+save-camera-rig-archive $lastCameraRigId $dataRoot/dolly.camerarig.vsr
+load-camera-rig-archive $dataRoot/dolly.camerarig.vsr
+await-snapshot
+assert project.cameraRigs == 3
+assert cameraRig.$lastCameraRigId.name contains "Dolly In"
+expect-fail load-camera-rig-archive $dataRoot/missing.camerarig.vsr
+
+update-shot shot_0001 cameraRigId=$lastCameraRigId
+await-snapshot
+assert shot.shot_0001.cameraRigId == $lastCameraRigId
+remove-camera-rig $lastCameraRigId
+await-snapshot
+assert project.cameraRigs == 2
+assert shot.shot_0001.cameraRigId == ""
+expect-fail remove-camera-rig $lastCameraRigId
+
+dump-project
+disconnect

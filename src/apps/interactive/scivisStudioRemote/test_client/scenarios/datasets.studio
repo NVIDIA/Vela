@@ -1,0 +1,112 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# runner: fixture fixtures/triangle.obj
+#
+# Datasets: a static import (a Server Task whose completion message is the
+# new dataset's id), a declared file animation (sync), rename, shot
+# bindings, a Dataset Archive saved and loaded back, unload/load against a
+# saved project, candidates discovered and incorporated, and removal.
+#
+# The runner copies fixtures/triangle.obj into the data root, which
+# `list-roots` reveals as $dataRoot.
+
+connect
+list-roots
+assert project.datasets == 0
+
+# Import: the task's completion names the dataset; the snapshot follows.
+import-static-dataset $dataRoot/triangle.obj Tri OBJ
+await-task
+await-snapshot
+assert tasks.completed == 1
+assert project.datasets == 1
+assert dataset.$lastDatasetId.name == Tri
+assert dataset.$lastDatasetId.status == Available
+assert dataset.$lastDatasetId.residency == Loaded
+assert dataset.$lastDatasetId.importerType == OBJ
+# Bound to every shot, enabled in the active one.
+assert shot.shot_0001.binding.$lastDatasetId == true
+
+# A missing file: the task fails, and the ImportFailed record still lands in
+# the project (so a snapshot follows anyway). No reply names its id; on a
+# fresh server it is the second one minted.
+import-static-dataset $dataRoot/missing.obj Missing OBJ
+await-task expect-fail
+await-snapshot
+assert tasks.failed == 1
+assert project.datasets == 2
+assert dataset.dataset_0002.status == ImportFailed
+remove-dataset dataset_0002
+await-snapshot
+assert project.datasets == 1
+
+rename-dataset $lastDatasetId Triangle
+await-snapshot
+assert dataset.$lastDatasetId.name == Triangle
+expect-fail rename-dataset $lastDatasetId ""
+
+update-shot shot_0001 binding.$lastDatasetId=off
+await-snapshot
+assert shot.shot_0001.binding.$lastDatasetId == false
+update-shot shot_0001 binding.$lastDatasetId=on
+await-snapshot
+assert shot.shot_0001.binding.$lastDatasetId == true
+
+# A declared file animation reads nothing from disk, so it is a sync op whose
+# reply carries the id.
+declare-file-animation-dataset Series VOLUME_ANIMATION frame_000.raw frame_001.raw frame_002.raw set-frame-count=true
+await-snapshot
+assert project.datasets == 2
+assert dataset.$lastDatasetId.name == Series
+assert dataset.$lastDatasetId.sourceKind == FileAnimation
+assert dataset.$lastDatasetId.declared == true
+assert shot.shot_0001.frameCount == 3
+remove-dataset $lastDatasetId
+await-snapshot
+assert project.datasets == 1
+
+# Dataset Archives: save the triangle to a file, load it back as a new
+# dataset (a distinct id, a de-duplicated name).
+save-dataset-archive dataset_0001 $dataRoot/triangle.vsr
+await-task
+load-dataset-archive $dataRoot/triangle.vsr
+await-task
+await-snapshot
+assert project.datasets == 2
+assert dataset.$lastDatasetId.status == Available
+remove-dataset $lastDatasetId
+await-snapshot
+
+# Residency needs a saved project: unload, refresh, load.
+save-project $dataRoot/datasets
+await-task
+await-snapshot
+assert project.dirty == false
+unload-dataset dataset_0001
+await-snapshot
+assert dataset.dataset_0001.residency == Unloaded
+refresh-dataset-availability dataset_0001
+assert dataset.dataset_0001.status == Available
+load-dataset dataset_0001
+await-task
+await-snapshot
+assert dataset.dataset_0001.residency == Loaded
+
+# An archive dropped into the project's datasets directory is a candidate.
+save-dataset-archive dataset_0001 $dataRoot/datasets/datasets/Extra.vsr
+await-task
+discover-dataset-candidates
+incorporate-dataset-candidate $dataRoot/datasets/datasets/Extra.vsr Extra Extra
+await-task
+await-snapshot
+assert project.datasets == 2
+assert dataset.$lastDatasetId.name == Extra
+
+remove-dataset $lastDatasetId keep-asset-file
+await-snapshot
+assert project.datasets == 1
+expect-fail remove-dataset $lastDatasetId
+
+dump-project
+disconnect

@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# runner: fixture fixtures/triangle.obj
+#
+# Server Tasks: progress and completion, a queue of two with the second
+# cancelled before it runs, and the cancel errors. Tasks are single-lane and
+# ids are allocated in order, so two imports and a cancel of the second sent
+# back to back (`no-wait`) land on the loop thread before the first has
+# finished; `await-reply` then collects the three replies in send order.
+
+connect
+list-roots
+
+# A task on its own: TaskStarted in the reply, progress, completion.
+import-static-dataset $dataRoot/triangle.obj First OBJ
+assert var.lastTaskId == 1
+await-task
+await-snapshot
+assert tasks.completed == 1
+assert tasks.failed == 0
+assert project.datasets == 1
+
+# Two queued, the second cancelled while still queued: task 2 runs, task 3
+# ends as TaskFailed "cancelled" and leaves nothing behind.
+no-wait import-static-dataset $dataRoot/triangle.obj Second OBJ
+no-wait import-static-dataset $dataRoot/triangle.obj Third OBJ
+no-wait cancel-task 3
+assert replies.pending == 3
+await-reply
+await-reply
+await-reply
+assert replies.pending == 0
+await-task 2
+await-task 3 expect-fail
+await-snapshot
+assert tasks.completed == 2
+assert tasks.failed == 1
+assert project.datasets == 2
+
+# A finished task is unknown to cancel, and so is an id never allocated.
+expect-fail cancel-task 2
+expect-fail cancel-task 999
+assert lastError == ""
+assert replies.failed == 2
+
+disconnect

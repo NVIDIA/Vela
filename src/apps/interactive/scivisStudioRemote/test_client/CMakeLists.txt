@@ -80,3 +80,12 @@ add_studio_scenario(errors)
 # loss.studio carries the `# runner: kill-restart-after` hint, so the same
 # runner kills and restarts the server mid-script.
 add_studio_scenario(loss)
+# Milestone 5: Project Ops, Server Tasks and Remote Browse. datasets and tasks
+# carry a `# runner: fixture` hint that puts a tiny OBJ under the data root.
+add_studio_scenario(project_lifecycle)
+add_studio_scenario(rigs)
+add_studio_scenario(color_maps)
+add_studio_scenario(datasets)
+add_studio_scenario(tasks)
+add_studio_scenario(browse)
+add_studio_scenario(errors_project)

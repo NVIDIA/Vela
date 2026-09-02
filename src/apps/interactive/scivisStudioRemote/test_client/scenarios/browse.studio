@@ -1,0 +1,34 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Remote Browse: the Data Roots, a listing inside one (a saved project shows
+# as a ProjectDirectory), and the refusals for a path outside every root, a
+# file, and a directory that does not exist.
+
+connect
+list-roots
+assert var.dataRoot != ""
+
+# The data root starts empty; a saved project puts a marked directory there.
+list-directory $dataRoot
+assert browse.entries == 0
+save-project $dataRoot/browsed
+await-task
+await-snapshot
+list-directory $dataRoot
+assert browse.entries == 1
+
+# Inside the project: its manifest and asset directories.
+list-directory $dataRoot/browsed
+assert browse.entries >= 1
+
+# Outside every root, a file, a missing directory: each an error reply, none
+# a listing.
+expect-fail list-directory /
+expect-fail list-directory $dataRoot/..
+expect-fail list-directory $dataRoot/browsed/project.vsr
+expect-fail list-directory $dataRoot/nowhere
+assert browse.entries == 0
+assert replies.failed == 4
+
+disconnect
