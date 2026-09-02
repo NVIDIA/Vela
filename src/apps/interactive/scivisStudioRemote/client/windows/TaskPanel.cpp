@@ -102,6 +102,11 @@ void TaskPanel::buildUI()
 
     ImGui::TableNextColumn();
     if (task.state == TaskState::Failed) {
+      if (task.framesCompleted != 0) {
+        ImGui::Text("%llu frames",
+            static_cast<unsigned long long>(task.framesCompleted));
+        ImGui::SameLine();
+      }
       ImGui::TextColored(ui::ERROR_TEXT_COLOR, "%s", task.error.c_str());
     } else if (task.framesCompleted != 0) {
       ImGui::TextWrapped("%llu frames  %s",

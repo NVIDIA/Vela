@@ -1009,9 +1009,11 @@ SCENARIO("ProjectOps flags the render it launched", "[StudioClient]")
         TaskFailed failed;
         failed.taskId = 7;
         failed.error = "cancelled";
+        failed.framesCompleted = 12;
         f.server.send(encode(failed));
         REQUIRE(pollUntil(f.connection,
             [&] { return f.ops().task(7)->state == TaskState::Failed; }));
+        REQUIRE(f.ops().task(7)->framesCompleted == 12);
         REQUIRE_FALSE(f.ops().renderActive());
       }
     }

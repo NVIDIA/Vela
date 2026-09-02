@@ -721,6 +721,7 @@ void ProjectOps::handleTaskFailed(const TaskFailed &failed)
   TaskRecord &record = recordFor(failed.taskId);
   record.state = TaskState::Failed;
   record.error = failed.error;
+  record.framesCompleted = failed.framesCompleted; // a cancelled render's
 }
 
 bool ProjectOps::failOldestNamed(const std::string &message)
