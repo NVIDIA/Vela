@@ -92,8 +92,16 @@ const char *toString(SessionState state);
  * one in flight, latest-wins: the loop services it by rendering one frame
  * with the id channel on, even while paused, and answers with a PickReply
  * before the next Frame. RequestArrayHistogram is a sync Project Op.
- * RenderShot is still answered with a "... not implemented in this server"
- * refusal.
+ *
+ * RenderShot is an exclusive Server Task (ProjectOpDispatcher): while it is
+ * queued or running, mutating requests are refused with "render in
+ * progress"; frames pause because the body holds the loop; a CancelTask
+ * naming the running render raises the runner's cancel flag from the IO
+ * thread so the body stops at its next frame, as does Shutdown. Scene edits,
+ * SetTime and Pick latched while the body ran targeted a scene the render
+ * was mutating: they are dropped (the pick with an Error) once it returns.
+ * The bootstrap replays how tasks ended since the last one (task-status
+ * replay) between UIState and the ProjectSnapshot.
  *
  * Example:
  *   StudioServer server(options);
@@ -219,6 +227,10 @@ struct StudioServer
   void endSession(const std::string &reason, bool closeSocket);
   void bootstrap();
   void sendSceneSnapshot();
+  // Drops the edits and SetTime a shot render's body accumulated in the
+  // latch and answers a Pick with an Error: they targeted a scene the render
+  // was mutating.
+  void discardStaleInputs(ControlState &control);
   void dispatchPendingRequests();
   void applyFrameConfig(uint32_t width, uint32_t height);
   void applyEdit(const protocol::SetObjectParameter &edit);
@@ -302,6 +314,9 @@ struct StudioServer
   bool m_renderingRequested{false};
   bool m_bootstrapPending{false};
   bool m_sceneResendPending{false};
+  // An exclusive task ran this iteration: the latch batch that accumulated
+  // meanwhile is stale (see applyControlState).
+  bool m_discardLatchedInputs{false};
 
   // Playback (loop thread only)
   using Clock = std::chrono::steady_clock;

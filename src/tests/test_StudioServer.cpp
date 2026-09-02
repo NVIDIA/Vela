@@ -296,7 +296,7 @@ SCENARIO("StudioServer runs a viewer-parity session", "[StudioServer]")
           REQUIRE(ack->width == 64);
           REQUIRE(ack->height == 48);
 
-          AND_THEN("unknown and unimplemented messages are refused loudly")
+          AND_THEN("unknown and malformed messages are refused loudly")
           {
             // 0 and 255 are the type bytes the enum never assigns (255 is the
             // transport's MESSAGE_TYPE_INVALID); 200 is a gap in the middle.
@@ -327,17 +327,45 @@ SCENARIO("StudioServer runs a viewer-parity session", "[StudioServer]")
             REQUIRE(refused->message.find("malformed Pick payload")
                 != std::string::npos);
 
-            client.clear();
-            Message render;
-            render.header.type = uint8_t(StudioMessageType::RenderShot);
-            client.channel->send(std::move(render));
-            REQUIRE(client.waitForCount(StudioMessageType::Error, 1));
-            const auto unimplemented =
-                decode<Error>(client.last(StudioMessageType::Error));
-            REQUIRE(unimplemented);
-            REQUIRE(
-                unimplemented->message.find("not implemented in this server")
-                != std::string::npos);
+            // Every type a client may send has a handler: a payload-less
+            // one of each is refused as malformed (never as unimplemented or
+            // unserved), except the types that carry no payload at all and
+            // those whose fields all have defaults, so an empty payload is a
+            // valid message (SetOutline clears, SetEncodings means Raw only).
+            for (int value = 1; value < 0xff; ++value) {
+              if (!isStudioMessageType(uint8_t(value)))
+                continue;
+              const auto type = StudioMessageType(value);
+              if (isServerToClient(type))
+                continue;
+              switch (type) {
+              case StudioMessageType::Hello:
+              case StudioMessageType::Error:
+              case StudioMessageType::Ping:
+              case StudioMessageType::Pong:
+              case StudioMessageType::Disconnect:
+              case StudioMessageType::Shutdown:
+              case StudioMessageType::StartRendering:
+              case StudioMessageType::StopRendering:
+              case StudioMessageType::SetOutline:
+              case StudioMessageType::ViewportSettings:
+              case StudioMessageType::SetEncodings:
+                continue;
+              default:
+                break;
+              }
+              client.clear();
+              Message empty;
+              empty.header.type = uint8_t(value);
+              client.channel->send(std::move(empty));
+              INFO(toString(type));
+              REQUIRE(client.waitForCount(StudioMessageType::Error, 1));
+              const auto malformed =
+                  decode<Error>(client.last(StudioMessageType::Error));
+              REQUIRE(malformed);
+              REQUIRE(malformed->message
+                  == "malformed " + std::string(toString(type)) + " payload");
+            }
           }
 
           AND_THEN("StopRendering pauses and an edit reaches the server scene")

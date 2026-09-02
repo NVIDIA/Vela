@@ -9,6 +9,7 @@
 #include "StudioCodec.h"
 // vsr_scivis_studio_model
 #include "ProjectPersistence.h"
+#include "RenderShot.h"
 // vsr_scene
 #include "vsr/scene/Scene.hpp"
 // vsr_core
@@ -154,16 +155,25 @@ std::optional<ProjectRequest> decodeProjectRequest(const Message &msg)
   return decodeProjectRequestOf(msg, *type, REQUEST_ALTERNATIVES);
 }
 
-bool waitsForQueuedTasks(const ProjectRequest &request)
+namespace {
+
+bool launchesTask(const ProjectRequest &request)
 {
-  const bool launchesTask = isOneOf<OpenProject>(request)
-      || isOneOf<SaveProject>(request) || isOneOf<ImportStaticDataset>(request)
+  return isOneOf<OpenProject>(request) || isOneOf<SaveProject>(request)
+      || isOneOf<ImportStaticDataset>(request)
       || isOneOf<ImportFileAnimationDataset>(request)
       || isOneOf<ReimportDataset>(request) || isOneOf<LoadDataset>(request)
       || isOneOf<SaveDatasetArchive>(request)
       || isOneOf<LoadDatasetArchive>(request)
-      || isOneOf<IncorporateDatasetCandidate>(request);
-  return !launchesTask && !independentOfQueuedTasks(request);
+      || isOneOf<IncorporateDatasetCandidate>(request)
+      || isOneOf<RenderShot>(request);
+}
+
+} // namespace
+
+bool waitsForQueuedTasks(const ProjectRequest &request)
+{
+  return !launchesTask(request) && !independentOfQueuedTasks(request);
 }
 
 bool independentOfQueuedTasks(const ProjectRequest &request)
@@ -172,21 +182,40 @@ bool independentOfQueuedTasks(const ProjectRequest &request)
       || isOneOf<CancelTask>(request);
 }
 
+bool refusedWhileRendering(const ProjectRequest &request)
+{
+  return !independentOfQueuedTasks(request)
+      && !isOneOf<RequestArrayHistogram>(request);
+}
+
 // Dispatcher /////////////////////////////////////////////////////////////////
 
 ProjectOpDispatcher::ProjectOpDispatcher(Host host) : m_host(std::move(host)) {}
 
 void ProjectOpDispatcher::dispatch(const ProjectRequest &request)
 {
+  if (renderActive() && refusedWhileRendering(request)) {
+    // Pause-and-refuse: the render owns the Project and the Scene until it
+    // ends; whoever asked can try again afterwards.
+    const auto requestId =
+        std::visit([](const auto &r) { return r.requestId; }, request);
+    fail(requestId, "render in progress");
+    return;
+  }
   std::visit([this](const auto &r) { handle(r); }, request);
 }
 
-void ProjectOpDispatcher::runOneTask()
+std::optional<RanTask> ProjectOpDispatcher::runOneTask()
 {
-  if (auto ran = m_host.tasks->runOne()) {
-    if (ran->result.projectChanged)
-      sendSnapshot();
-  }
+  auto ran = m_host.tasks->runOne();
+  if (ran && ran->result.projectChanged)
+    sendSnapshot();
+  return ran;
+}
+
+bool ProjectOpDispatcher::renderActive() const
+{
+  return m_host.tasks->exclusivePending();
 }
 
 ProjectContext &ProjectOpDispatcher::context()
@@ -219,14 +248,18 @@ void ProjectOpDispatcher::fail(
   finish(makeErrorReply(requestId, error), projectChanged, false);
 }
 
-void ProjectOpDispatcher::startTask(
-    uint64_t requestId, std::string description, TaskBody body)
+void ProjectOpDispatcher::startTask(uint64_t requestId,
+    std::string description,
+    TaskBody body,
+    bool exclusive,
+    bool projectChanged,
+    bool rebind)
 {
-  const auto taskId =
-      m_host.tasks->enqueue(std::move(description), std::move(body));
+  const auto taskId = m_host.tasks->enqueue(
+      std::move(description), std::move(body), exclusive);
   auto reply = makeOkReply(requestId);
   setResults(reply, TaskStartedResult{taskId});
-  finish(reply, false, false);
+  finish(reply, projectChanged, rebind);
 }
 
 TaskResult ProjectOpDispatcher::runTaskBody(
@@ -301,6 +334,10 @@ void ProjectOpDispatcher::handle(const OpenProject &req)
               }
               ui->root()["layout"] = layout;
               *m_host.uiState = ui;
+              // The opened project's layout reaches the client that asked
+              // before the snapshot that follows the task; a bootstrap
+              // carries it too.
+              m_host.send(encode(UIState{ui}));
               result.projectChanged = true;
               return result;
             },
@@ -928,6 +965,71 @@ void ProjectOpDispatcher::handle(const ListDirectory &req)
   auto reply = makeOkReply(req.requestId);
   setResults(reply, listing);
   finish(reply, false, false);
+}
+
+// The offline render. Sync prelude first (the shot becomes active, the
+// pipeline rebinds, the snapshot shows it), then the exclusive task whose
+// body walks the frames, reporting each and stopping at the next boundary
+// once a cancel or the shutdown is asked for. Partial frames stay on disk;
+// the ending carries how many were written. dispatch() has already refused
+// this request when a render is pending.
+void ProjectOpDispatcher::handle(const RenderShot &req)
+{
+  if (!project::findShot(project(), req.shotId)) {
+    fail(req.requestId, "shot not found");
+    return;
+  }
+  if (!project().isSaved()) {
+    fail(req.requestId, "project is not saved; save it before rendering");
+    return;
+  }
+  if (project().activeShotId != req.shotId) {
+    std::string error;
+    if (!context().setActiveShot(req.shotId, &error)) {
+      fail(req.requestId, error);
+      return;
+    }
+  }
+
+  startTask(
+      req.requestId,
+      "render shot '" + req.shotId + "'",
+      [this](const TaskControl &task) {
+        return runTaskBody(
+            [&] {
+              RenderShotProgress progress;
+              progress.onFrame = [&](int frame, int totalFrames) {
+                if (task.cancelRequested())
+                  return false;
+                if (m_host.shutdownRequested && m_host.shutdownRequested()) {
+                  vsr::core::logStatus(
+                      "[StudioServer] shot render stopped: server shutting"
+                      " down");
+                  return false;
+                }
+                task(uint64_t(frame) + 1,
+                    uint64_t(totalFrames),
+                    "frame " + std::to_string(frame + 1) + " of "
+                        + std::to_string(totalFrames));
+                return true;
+              };
+              RenderShotResult rendered;
+              renderActiveShotToFrames(context(), &progress, &rendered);
+              TaskResult result;
+              result.ok = rendered.completed;
+              result.error = rendered.cancelled ? "cancelled" : rendered.error;
+              result.message = rendered.outputDirectory.string();
+              result.framesCompleted = uint64_t(rendered.framesCompleted);
+              // Residency and the dirty flag were restored, the frame time
+              // put back: the snapshot confirms the Project the render left.
+              result.projectChanged = true;
+              return result;
+            },
+            true);
+      },
+      /*exclusive*/ true,
+      /*projectChanged*/ true, // the shot switch, and the rebind's pick
+      /*rebind*/ true);
 }
 
 void ProjectOpDispatcher::handle(const CancelTask &req)

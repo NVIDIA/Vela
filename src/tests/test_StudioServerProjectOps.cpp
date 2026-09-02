@@ -431,6 +431,24 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
         REQUIRE_FALSE(runner.runOne());
       }
     }
+
+    WHEN("an exclusive task is queued behind them and the session ends")
+    {
+      const auto render = runner.enqueue(
+          "render", [&](const TaskControl &) { return TaskResult{}; }, true);
+      runner.dropQueued();
+
+      THEN("only the exclusive task survives")
+      {
+        REQUIRE(runner.queued() == 1);
+        REQUIRE(runner.exclusivePending());
+        REQUIRE(sent.empty());
+        const auto ran = runner.runOne();
+        REQUIRE(ran);
+        REQUIRE(ran->taskId == render);
+        REQUIRE(ran->exclusive);
+      }
+    }
   }
 
   GIVEN("an exclusive task that polls its cancel flag")
@@ -934,20 +952,19 @@ SCENARIO("StudioServer refuses unserviceable requests with a matching reply",
       }
     }
 
-    WHEN("a request of a later milestone carries an id")
+    WHEN("a RenderShot names the active shot of an unsaved project")
     {
       RenderShot render;
       render.requestId = 502;
       render.shotId = session.server->projectContext().project().activeShotId;
       client.send(render);
 
-      THEN("the not-implemented refusal is a ProjectOpReply too")
+      THEN("the refusal is a ProjectOpReply naming the precondition")
       {
         const auto reply = client.waitForReply(502);
         REQUIRE(reply);
         REQUIRE_FALSE(reply->ok);
-        REQUIRE(reply->error.find("RenderShot is not implemented")
-            != std::string::npos);
+        REQUIRE(reply->error.find("not saved") != std::string::npos);
         REQUIRE(client.count(StudioMessageType::Error) == 0);
       }
     }
