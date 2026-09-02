@@ -144,9 +144,10 @@ struct ServerConnection
   // Callbacks, invoked from poll() on the UI thread //
 
   std::function<void(ConnectionState from, ConnectionState to)> onStateChanged;
-  // BootstrapBegin received: the mirror is about to be wholesale-replaced, so
-  // anything pointing into it (selection, cached refs) must be dropped now.
-  std::function<void()> onBootstrapBegin;
+  // The mirror is about to be wholesale-replaced (BootstrapBegin, or a
+  // TransferScene pushed outside a bootstrap), so anything pointing into it
+  // (selection, cached refs) must be dropped now, before the objects go.
+  std::function<void()> onMirrorReplaceBegin;
   // BootstrapEnd received: mirror and replica are fresh.
   std::function<void()> onBootstrapComplete;
   std::function<void(const std::string &)> onServerError;
@@ -186,6 +187,7 @@ struct ServerConnection
   void handleHello(const vsr::network::Message &msg);
   void applySceneMessage(
       protocol::StudioMessageType type, const vsr::network::Message &msg);
+  void announceMirrorReplace();
   void clearMirror();
   Clock::time_point lastTraffic() const;
 

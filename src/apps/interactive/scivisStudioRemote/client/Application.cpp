@@ -147,7 +147,7 @@ Application::Application(int argc, const char **argv)
                                      ConnectionState from, ConnectionState to) {
     onStateChanged(from, to);
   };
-  m_connection->onBootstrapBegin = [this] { onBootstrapBegin(); };
+  m_connection->onMirrorReplaceBegin = [this] { onMirrorReplaceBegin(); };
   m_connection->onBootstrapComplete = [this] { onBootstrapComplete(); };
   m_connection->onServerError = [](const std::string &message) {
     vsr::core::logError("[Client] server reported: %s", message.c_str());
@@ -395,7 +395,7 @@ void Application::onStateChanged(ConnectionState from, ConnectionState to)
   }
 }
 
-void Application::onBootstrapBegin()
+void Application::onMirrorReplaceBegin()
 {
   releaseMirror();
 }

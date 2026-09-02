@@ -236,9 +236,9 @@ struct Fixture
     connection.onStateChanged = [this](ConnectionState, ConnectionState to) {
       transitions.push_back(to);
     };
-    connection.onBootstrapBegin = [this]() {
-      bootstrapBegins++;
-      mirrorPopulatedAtBegin = mirror.numberOfObjects(ANARI_GEOMETRY) != 0;
+    connection.onMirrorReplaceBegin = [this]() {
+      mirrorReplaces++;
+      mirrorPopulatedAtReplace = mirror.numberOfObjects(ANARI_GEOMETRY) != 0;
     };
     connection.onBootstrapComplete = [this]() { bootstraps++; };
     connection.onServerError = [this](const std::string &m) {
@@ -272,8 +272,8 @@ struct Fixture
   FakeServer server;
   ServerConnection connection;
   std::vector<ConnectionState> transitions;
-  int bootstrapBegins{0};
-  bool mirrorPopulatedAtBegin{false};
+  int mirrorReplaces{0};
+  bool mirrorPopulatedAtReplace{false};
   int bootstraps{0};
   std::vector<std::string> errors;
 };
@@ -309,7 +309,7 @@ SCENARIO("ServerConnection handshakes and bootstraps", "[StudioClient]")
         REQUIRE(f.connection.project() != nullptr);
         REQUIRE(f.connection.project()->name == "fake project");
         REQUIRE(f.bootstraps == 0);
-        REQUIRE(f.bootstrapBegins == 1);
+        REQUIRE(f.mirrorReplaces == 1);
         REQUIRE(f.transitions
             == std::vector<ConnectionState>{ConnectionState::Connected});
 
@@ -426,8 +426,8 @@ SCENARIO("ServerConnection watches liveness", "[StudioClient]")
         REQUIRE(f.mirrorHasGeometry());
         // The frozen mirror was still populated when the second bootstrap
         // announced itself: the hook fires before the mirror is cleared.
-        REQUIRE(f.bootstrapBegins == 2);
-        REQUIRE(f.mirrorPopulatedAtBegin);
+        REQUIRE(f.mirrorReplaces == 2);
+        REQUIRE(f.mirrorPopulatedAtReplace);
         REQUIRE(f.transitions
             == std::vector<ConnectionState>{ConnectionState::Connected,
                 ConnectionState::Lost,
@@ -507,6 +507,49 @@ SCENARIO("ServerConnection watches liveness", "[StudioClient]")
         REQUIRE(f.connection.project() == nullptr);
         pollFor(f.connection, 100ms);
         REQUIRE(f.connection.state() == ConnectionState::Disconnected);
+      }
+    }
+  }
+}
+
+SCENARIO("ServerConnection announces a mid-session scene replacement",
+    "[StudioClient]")
+{
+  GIVEN("a connected, bootstrapped client")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+    REQUIRE(f.mirrorReplaces == 1);
+
+    WHEN("the server pushes a whole TransferScene outside a bootstrap")
+    {
+      auto second = f.source.createObject<vsr::scene::Geometry>("sphere");
+      second->setName("second geometry");
+      messages::TransferScene resend(&f.source, false);
+      f.server.send(
+          encodeSceneMessage(resend, StudioMessageType::TransferScene));
+
+      THEN(
+          "the hook fires while the old mirror still stands, then it is"
+          " replaced")
+      {
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.mirror.numberOfObjects(ANARI_GEOMETRY) == 2; }));
+        REQUIRE(f.mirrorReplaces == 2);
+        REQUIRE(f.mirrorPopulatedAtReplace);
+        REQUIRE(f.bootstraps == 1);
+        REQUIRE_FALSE(f.connection.bootstrapping());
+
+        AND_THEN("edits still flow afterwards")
+        {
+          auto geometry = f.mirror.getObject<vsr::scene::Geometry>(1);
+          REQUIRE(geometry);
+          geometry->setParameter("radius", 0.3f);
+          REQUIRE(pollUntil(f.connection, [&] {
+            return f.server.count(StudioMessageType::SetObjectParameter) == 1;
+          }));
+        }
       }
     }
   }
