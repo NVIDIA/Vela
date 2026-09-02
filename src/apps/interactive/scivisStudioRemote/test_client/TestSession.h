@@ -155,8 +155,8 @@ struct TestSession
   // Pops the oldest unconsumed event; false when there is none.
   bool takeEvent(Event &out);
   // Polls until `done` holds or the deadline passes; false on timeout.
-  bool pollUntil(const std::function<bool()> &done,
-      std::chrono::milliseconds deadline);
+  bool pollUntil(
+      const std::function<bool()> &done, std::chrono::milliseconds deadline);
 
   // Outbound (false with the reason unless Connected) //
 
@@ -176,7 +176,8 @@ struct TestSession
   bool startRendering(std::string *error = nullptr);
   bool stopRendering(std::string *error = nullptr);
   // Optimistic scene edits: applied to the mirror and sent. False when the
-  // mirror has no such object, layer or transform node.
+  // mirror has no such object or layer. The node index of a transform is the
+  // server's; the mirror is updated only when it has a transform node there.
   bool setParameter(const SceneObjectRef &object,
       const std::string &name,
       const vsr::core::Any &value,

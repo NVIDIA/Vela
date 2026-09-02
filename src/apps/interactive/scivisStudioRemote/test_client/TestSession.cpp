@@ -222,7 +222,8 @@ bool TestSession::connect(const std::string &host,
   return false;
 }
 
-bool TestSession::reconnect(std::chrono::milliseconds deadline, std::string *error)
+bool TestSession::reconnect(
+    std::chrono::milliseconds deadline, std::string *error)
 {
   if (m_host.empty()) {
     if (error)
@@ -243,7 +244,8 @@ void TestSession::disconnect()
   finishDisconnect();
 }
 
-bool TestSession::shutdown(std::chrono::milliseconds deadline, std::string *error)
+bool TestSession::shutdown(
+    std::chrono::milliseconds deadline, std::string *error)
 {
   if (!requireConnected(error))
     return false;
@@ -460,16 +462,21 @@ bool TestSession::setNodeTransform(const SceneNodeRef &node,
       *error = "no layer '" + node.layerName + "' in the mirror";
     return false;
   }
+  // Node indices are the server's: TransferLayer rebuilds the mirror's
+  // forest in traversal order, so a sparse server layer numbers its nodes
+  // differently. The mirror is updated when it agrees; the server is the
+  // truth either way.
   auto ref = layer->at(node.nodeIndex);
-  if (!ref || !(*ref)->isTransform()) {
-    if (error) {
-      *error = "'" + node.layerName + "'[" + std::to_string(node.nodeIndex)
-          + "] is not a transform node of the mirror";
-    }
-    return false;
+  if (ref && (*ref)->isTransform()) {
+    (*ref)->setAsTransform(transform);
+    m_mirror.signalLayerTransformChanged(layer);
+  } else {
+    vsr::core::logWarning(
+        "[TestSession] mirror has no transform node '%s'[%zu]; edit sent"
+        " unmirrored",
+        node.layerName.c_str(),
+        node.nodeIndex);
   }
-  (*ref)->setAsTransform(transform);
-  m_mirror.signalLayerTransformChanged(layer);
   SetNodeTransform edit;
   edit.node = node;
   edit.transform = transform;
@@ -655,8 +662,7 @@ void TestSession::handleMessage(const Message &msg)
       attemptFailed("server refused: " + text);
     } else {
       pushEvent(std::move(event));
-      vsr::core::logError(
-          "[TestSession] %s received before the server's Hello",
+      vsr::core::logError("[TestSession] %s received before the server's Hello",
           toString(*type));
     }
     return;
