@@ -712,8 +712,7 @@ void ProjectOps::handleTaskProgress(const TaskProgress &progress)
   // is a new task of a restarted server under a reused id: it starts over,
   // named like one never heard of.
   const TaskRecord *existing = task(progress.taskId);
-  const bool fresh =
-      !existing || (existing->finished() && !existing->stale);
+  const bool fresh = !existing || (existing->finished() && !existing->stale);
   TaskRecord &record =
       fresh ? freshRecordFor(progress.taskId) : recordFor(progress.taskId);
   if (fresh && !progress.message.empty())

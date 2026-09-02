@@ -3138,8 +3138,8 @@ SCENARIO("SciVis Studio --openUnloaded overrides initial residency",
   std::filesystem::remove(source);
 }
 
-SCENARIO("SciVis Studio shot rendering reports why it did not run",
-    "[SciVisStudio]")
+SCENARIO(
+    "SciVis Studio shot rendering reports why it did not run", "[SciVisStudio]")
 {
   vsr::app::Context appContext;
   ProjectContext projectContext(&appContext);
@@ -3178,8 +3178,8 @@ SCENARIO("SciVis Studio shot rendering restores the scene when a frame throws",
   }
   anari::unloadLibrary(library);
 
-  const auto root = std::filesystem::temp_directory_path()
-      / "vsr_scivis_studio_render_throw";
+  const auto root =
+      std::filesystem::temp_directory_path() / "vsr_scivis_studio_render_throw";
   std::filesystem::remove_all(root);
 
   vsr::app::Context appContext;

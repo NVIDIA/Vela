@@ -1324,8 +1324,9 @@ SCENARIO("scivisStudioServer and the client core render shots and recover",
         REQUIRE(waitForFrameOf(client, shotA));
         REQUIRE(client.errors.empty());
 
-        AND_THEN("a request meeting a queued render is refused; cancel stops "
-                 "the running one at a frame boundary")
+        AND_THEN(
+            "a request meeting a queued render is refused; cancel stops "
+            "the running one at a frame boundary")
         {
           // Large enough that helide takes a second or more over 400 frames.
           updateShot(client, replaced, shotA, [](Shot &shot) {
@@ -1348,13 +1349,12 @@ SCENARIO("scivisStudioServer and the client core render shots and recover",
           uint64_t second = 0;
           renderShot(client, shotA, second);
           std::vector<ProjectOpReply> lateReplies;
-          ops.createShot(
-              "Late", [&](const ProjectOpReply &r, const auto &) {
-                lateReplies.push_back(r);
-              });
+          ops.createShot("Late", [&](const ProjectOpReply &r, const auto &) {
+            lateReplies.push_back(r);
+          });
           std::vector<ProjectOpReply> cancelReplies;
-          ops.cancelTask(
-              first, [&](const ProjectOpReply &r) { cancelReplies.push_back(r); });
+          ops.cancelTask(first,
+              [&](const ProjectOpReply &r) { cancelReplies.push_back(r); });
 
           const auto firstStates = waitForTaskEnd(client, first);
           REQUIRE_FALSE(firstStates.empty());
@@ -1390,10 +1390,9 @@ SCENARIO("scivisStudioServer and the client core render shots and recover",
           // Nothing is queued or running any more: edits go through again
           // and frames resume.
           std::vector<ProjectOpReply> afterReplies;
-          ops.createShot(
-              "After", [&](const ProjectOpReply &r, const auto &) {
-                afterReplies.push_back(r);
-              });
+          ops.createShot("After", [&](const ProjectOpReply &r, const auto &) {
+            afterReplies.push_back(r);
+          });
           REQUIRE(waitForReplies(client, afterReplies, 1));
           REQUIRE(afterReplies[0].ok);
           REQUIRE(pollUntil(
@@ -1403,8 +1402,9 @@ SCENARIO("scivisStudioServer and the client core render shots and recover",
           REQUIRE(waitForFrames(client, 2));
           REQUIRE(client.errors.empty());
 
-          AND_THEN("a client evicted mid-render is bootstrapped after it and "
-                   "hears how it ended from the replay")
+          AND_THEN(
+              "a client evicted mid-render is bootstrapped after it and "
+              "hears how it ended from the replay")
           {
             // Shot A still has its 400 frames: under way for a second or
             // more when the eviction lands, done well inside the wait.
@@ -1520,16 +1520,16 @@ SCENARIO("scivisStudioServer and the client core render shots and recover",
                   E2E_TIMEOUT));
               REQUIRE(client.errors.empty());
 
-              AND_THEN("a retry greeted by another protocol version ends "
-                       "Disconnected")
+              AND_THEN(
+                  "a retry greeted by another protocol version ends "
+                  "Disconnected")
               {
                 server->stop();
                 REQUIRE(server->finished.load());
                 REQUIRE(pollUntil(
                     client.connection,
                     [&] {
-                      return client.connection.state()
-                          == ConnectionState::Lost;
+                      return client.connection.state() == ConnectionState::Lost;
                     },
                     E2E_TIMEOUT));
                 REQUIRE(client.connection.autoRetrying());

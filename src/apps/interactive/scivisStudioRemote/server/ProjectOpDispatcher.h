@@ -150,8 +150,8 @@ struct TaskLaunch
  * request is refused with "render in progress" (renderActive()) and the
  * body polls its cancel flag once per frame; when the body returns, the
  * host drops the inputs latched meanwhile (Host::dropLatchedInputs) before
- * the ending goes out. Sync ops call the context, send the ProjectOpReply, then a
- * ProjectSnapshot whenever the Project changed (including "failed" calls that
+ * the ending goes out. Sync ops call the context, send the ProjectOpReply, then
+ * a ProjectSnapshot whenever the Project changed (including "failed" calls that
  * still mutate: an import that leaves an ImportFailed record, a load that
  * marks a dataset Unavailable). Task ops reply with a TaskStartedResult and
  * enqueue their body on the ServerTaskRunner; runOneTask() runs one and
