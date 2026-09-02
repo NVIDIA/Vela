@@ -8,7 +8,8 @@
 
 namespace vsr::scivis_studio::protocol {
 
-constexpr int PROTOCOL_VERSION = 1;
+// 1: milestones 1-6. 2: TaskFailed carries framesCompleted (milestone 7).
+constexpr int PROTOCOL_VERSION = 2;
 
 /*
  * Complete v1 message set of the SciVis Studio client-server protocol. Values

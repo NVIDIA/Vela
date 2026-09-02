@@ -46,6 +46,7 @@ void toNode(const TaskFailed &f, vsr::core::DataNode &n)
 {
   writeChild(n, "taskId", f.taskId);
   writeChild(n, "error", f.error);
+  writeChild(n, "framesCompleted", f.framesCompleted);
 }
 
 bool fromNode(const vsr::core::DataNode &n, TaskFailed &f)
@@ -53,6 +54,7 @@ bool fromNode(const vsr::core::DataNode &n, TaskFailed &f)
   if (!readChild(n, "taskId", f.taskId))
     return false;
   f.error = readChildOr(n, "error", std::string());
+  f.framesCompleted = readChildOr(n, "framesCompleted", uint64_t(0));
   return true;
 }
 
