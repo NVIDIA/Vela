@@ -883,6 +883,7 @@ void TestSession::handleMessage(const Message &msg)
     auto &record = m_tasks[completed->taskId];
     record.status = TaskRecord::Status::Completed;
     record.message = completed->message;
+    record.snapshotsAtEnd = m_snapshotsReceived;
     ++m_tasksCompleted;
     break;
   }
@@ -898,6 +899,7 @@ void TestSession::handleMessage(const Message &msg)
     auto &record = m_tasks[failed->taskId];
     record.status = TaskRecord::Status::Failed;
     record.message = failed->error;
+    record.snapshotsAtEnd = m_snapshotsReceived;
     ++m_tasksFailed;
     break;
   }

@@ -89,6 +89,9 @@ struct TaskRecord
   };
   Status status{Status::Running};
   std::string message; // the completion message, or the failure's error
+  // Snapshots applied when the end message arrived; the server sends a
+  // task's snapshot after its TaskCompleted, so one past this count is it.
+  size_t snapshotsAtEnd{0};
 };
 
 const char *toString(TaskRecord::Status status);
