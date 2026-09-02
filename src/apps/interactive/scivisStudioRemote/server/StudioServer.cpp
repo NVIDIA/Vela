@@ -113,8 +113,11 @@ ProjectOpDispatcher::Host StudioServer::makeDispatcherHost()
   host.rebindActiveShot = [this] {
     std::string error;
     if (!bindActiveShotRendering(&error)) {
+      // Unbound now: frames pause until an op that gives the project an
+      // active shot (CreateShot, another open) binds again.
       vsr::core::logError(
-          "[StudioServer] cannot render the active shot: %s", error.c_str());
+          "[StudioServer] cannot render the active shot: %s; frames paused",
+          error.c_str());
     }
   };
   host.uiState = &m_uiState;
@@ -256,6 +259,7 @@ bool StudioServer::bindActiveShotRendering(std::string *error)
   auto &project = m_projectContext.project();
   auto *shot = project::activeShot(project);
   if (!shot) {
+    unbindRendering();
     if (error)
       *error = "project has no active shot to render";
     return false;
@@ -269,7 +273,7 @@ bool StudioServer::bindActiveShotRendering(std::string *error)
   if (m_renderers.empty())
     m_renderers = scene.createStandardRenderers(m_libraryName, m_device);
   if (m_renderers.empty()) {
-    m_renderer = {};
+    unbindRendering();
     if (error)
       *error = "ANARI library '" + m_libraryName + "' offers no renderers";
     return false;
@@ -317,6 +321,16 @@ bool StudioServer::bindActiveShotRendering(std::string *error)
     m_scenePass->setCamera(m_renderIndex->camera(m_cameraIndex));
   }
   return true;
+}
+
+void StudioServer::unbindRendering()
+{
+  m_renderer = {};
+  m_cameraIndex = VSR_INVALID_INDEX;
+  if (m_scenePass) {
+    m_scenePass->setRenderer(nullptr);
+    m_scenePass->setCamera(nullptr);
+  }
 }
 
 bool StudioServer::setupRendering(std::string *error)
@@ -740,6 +754,12 @@ void StudioServer::applyEdit(const SetNodeTransform &edit)
 
 void StudioServer::renderAndSendFrame()
 {
+  // Nothing to render with (a project opened without an active shot); the
+  // rebind that follows the next shot-changing op resumes frames.
+  if (!m_renderer) {
+    std::this_thread::sleep_for(PAUSED_SLEEP);
+    return;
+  }
   // Latest-frame-wins: the previous Frame is still on the wire, so this
   // iteration's picture would be dropped anyway; do not render it.
   if (!vsr::network::is_ready(m_frameInFlight)) {

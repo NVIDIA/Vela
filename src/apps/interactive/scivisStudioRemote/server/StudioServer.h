@@ -164,6 +164,9 @@ struct StudioServer
   // reopened project) and recording the pick in the shot. Used at setup and
   // after every project op that changes which shot or camera renders.
   bool bindActiveShotRendering(std::string *error);
+  // Forgets the pipeline's renderer and camera: after a project reset the
+  // objects they named are gone, so until a bind succeeds no frame renders.
+  void unbindRendering();
 
   // IO thread
   void onConnected();

@@ -26,6 +26,8 @@
 #include "ProjectSerialization.h"
 // vsr_scene
 #include "vsr/scene/Scene.hpp"
+// vsr_core
+#include "vsr/core/DataTree.hpp"
 // std
 #include <algorithm>
 #include <chrono>
@@ -37,6 +39,7 @@
 #include <optional>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -1055,6 +1058,59 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
           REQUIRE(badEnd);
           REQUIRE_FALSE(badEnd->completed);
           REQUIRE(client.count(StudioMessageType::ProjectSnapshot) == before);
+        }
+      }
+    }
+
+    WHEN("a project whose manifest lists no shots is opened")
+    {
+      REQUIRE(session.waitForSnapshots(++snapshots));
+      const auto noShots = data.root / "noshots";
+      SaveProject save;
+      save.directory = noShots;
+      const auto saveEnd =
+          waitForTaskEnd(client, startedTaskId(session.request(save)));
+      REQUIRE(saveEnd);
+      REQUIRE(saveEnd->completed);
+      REQUIRE(session.waitForSnapshots(++snapshots));
+      {
+        // openStagedProject creates no shot when the manifest has none.
+        const auto manifest = (noShots / PROJECT_MANIFEST_FILENAME).string();
+        vsr::core::DataTree tree;
+        REQUIRE(tree.load(manifest.c_str()));
+        auto *project = tree.root().child("scivisStudio");
+        REQUIRE(project);
+        REQUIRE(project->child("shots"));
+        project->remove("shots");
+        project->remove("activeShot");
+        REQUIRE(tree.save(manifest.c_str()));
+      }
+
+      const auto openId =
+          startedTaskId(session.request(OpenProject{0, noShots}));
+      const auto openEnd = waitForTaskEnd(client, openId);
+      REQUIRE(openEnd);
+      REQUIRE(openEnd->completed);
+      REQUIRE(session.waitForSnapshots(++snapshots));
+      REQUIRE(session.latestSnapshot().project.shots.empty());
+
+      THEN("rendering pauses instead of using the old scene's handles")
+      {
+        client.send(StartRendering{});
+        REQUIRE(waitFor([&] {
+          return session.server->sessionState() == SessionState::Rendering;
+        }));
+        std::this_thread::sleep_for(200ms);
+        REQUIRE(client.count(StudioMessageType::Frame) == 0);
+        REQUIRE(session.server->sessionState() == SessionState::Rendering);
+
+        AND_THEN("creating a shot binds the pipeline and frames resume")
+        {
+          const auto reply = session.request(CreateShot{0, "First"});
+          REQUIRE(reply.ok);
+          const auto created = results<ShotCreatedResult>(reply);
+          REQUIRE(created);
+          REQUIRE(session.waitForFrameOf(created->shotId));
         }
       }
     }
