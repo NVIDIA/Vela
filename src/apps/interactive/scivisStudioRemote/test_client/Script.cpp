@@ -4,7 +4,8 @@
 #include "Script.h"
 // std
 #include <cctype>
-#include <cstdlib>
+#include <charconv>
+#include <system_error>
 
 namespace vsr::scivis_studio::test_client {
 
@@ -141,16 +142,50 @@ std::optional<std::chrono::milliseconds> takeTimeoutSuffix(
   const std::string &last = command.args.back();
   if (last.compare(0, TIMEOUT_PREFIX.size(), TIMEOUT_PREFIX) != 0)
     return {};
-  const std::string value = last.substr(TIMEOUT_PREFIX.size());
-  char *end = nullptr;
-  const long ms = value.empty() ? -1 : std::strtol(value.c_str(), &end, 10);
-  if (ms < 0 || (end && *end != '\0')) {
+  std::chrono::milliseconds ms;
+  if (!parseMilliseconds(
+          std::string_view(last).substr(TIMEOUT_PREFIX.size()), ms)) {
     if (error)
       *error = "malformed timeout: " + last;
     return {};
   }
   command.args.pop_back();
-  return std::chrono::milliseconds(ms);
+  return ms;
+}
+
+bool parseInteger(std::string_view text, long long &out)
+{
+  long long value = 0;
+  const auto result = std::from_chars(text.data(), text.end(), value);
+  if (result.ec != std::errc{} || result.ptr != text.end())
+    return false;
+  out = value;
+  return true;
+}
+
+bool parseNonNegative(std::string_view text, unsigned long long &out)
+{
+  unsigned long long value = 0;
+  const auto result = std::from_chars(text.data(), text.end(), value);
+  if (result.ec != std::errc{} || result.ptr != text.end())
+    return false;
+  out = value;
+  return true;
+}
+
+bool parseMilliseconds(std::string_view text, std::chrono::milliseconds &out)
+{
+  // Half of what a steady_clock duration holds, so `now() + out` cannot wrap.
+  constexpr auto MAX_MS = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              std::chrono::steady_clock::duration::max())
+                              .count()
+      / 2;
+  unsigned long long value = 0;
+  if (!parseNonNegative(text, value)
+      || value > static_cast<unsigned long long>(MAX_MS))
+    return false;
+  out = std::chrono::milliseconds(value);
+  return true;
 }
 
 } // namespace vsr::scivis_studio::test_client

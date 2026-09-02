@@ -59,4 +59,12 @@ bool tokenize(std::string_view text,
 std::optional<std::chrono::milliseconds> takeTimeoutSuffix(
     Command &command, std::string *error = nullptr);
 
+// Integer arguments, on the command line and in scripts: the whole text is
+// one decimal number that fits, no sign for parseNonNegative. False otherwise.
+bool parseInteger(std::string_view text, long long &out);
+bool parseNonNegative(std::string_view text, unsigned long long &out);
+// A non-negative millisecond count that still adds to a steady_clock time
+// point without overflowing; timeouts and sleeps go through here.
+bool parseMilliseconds(std::string_view text, std::chrono::milliseconds &out);
+
 } // namespace vsr::scivis_studio::test_client

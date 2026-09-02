@@ -17,9 +17,11 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <charconv>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <ostream>
 #include <sstream>
 
@@ -74,28 +76,6 @@ std::string join(const std::vector<std::string> &items, const char *sep)
   return out;
 }
 
-bool parseInteger(const std::string &text, long long &out)
-{
-  if (text.empty())
-    return false;
-  errno = 0;
-  char *end = nullptr;
-  const long long value = std::strtoll(text.c_str(), &end, 10);
-  if (errno != 0 || end == text.c_str() || *end != '\0')
-    return false;
-  out = value;
-  return true;
-}
-
-bool parseUnsigned(const std::string &text, unsigned long long &out)
-{
-  long long value = 0;
-  if (!parseInteger(text, value) || value < 0)
-    return false;
-  out = static_cast<unsigned long long>(value);
-  return true;
-}
-
 bool parseDouble(const std::string &text, double &out)
 {
   if (text.empty())
@@ -109,17 +89,15 @@ bool parseDouble(const std::string &text, double &out)
   return true;
 }
 
-// Scalars print the way std::ostream prints them (6 significant digits), so a
-// float32 0.9 reads back as "0.9".
+// The shortest text that reads back as the same number, so a float32 set from
+// "0.9" prints "0.9" and one set from "0.123456789" prints "0.12345679", which
+// `assert ... == 0.123456789` still equates at float32 precision.
 template <typename T>
 std::string numberText(T value)
 {
-  std::ostringstream out;
-  if constexpr (std::is_same_v<T, int8_t> || std::is_same_v<T, uint8_t>)
-    out << int(value);
-  else
-    out << value;
-  return out.str();
+  char buffer[32];
+  const auto result = std::to_chars(buffer, buffer + sizeof(buffer), value);
+  return std::string(buffer, result.ptr);
 }
 
 // ANARI type names ///////////////////////////////////////////////////////////
@@ -193,13 +171,24 @@ const ComponentInfo *componentOf(anari::DataType type)
   return nullptr;
 }
 
+// Rejects what T cannot hold rather than wrapping it: uint8 300 is a typo,
+// not 44.
 template <typename T>
 bool storeInteger(const std::string &text, std::byte *dst)
 {
-  long long value = 0;
-  if (!parseInteger(text, value))
-    return false;
-  const T typed = static_cast<T>(value);
+  T typed{};
+  if constexpr (std::is_signed_v<T>) {
+    long long value = 0;
+    if (!parseInteger(text, value) || value < std::numeric_limits<T>::min()
+        || value > std::numeric_limits<T>::max())
+      return false;
+    typed = static_cast<T>(value);
+  } else {
+    unsigned long long value = 0;
+    if (!parseNonNegative(text, value) || value > std::numeric_limits<T>::max())
+      return false;
+    typed = static_cast<T>(value);
+  }
   std::memcpy(dst, &typed, sizeof(typed));
   return true;
 }
@@ -428,7 +417,7 @@ bool parseObjectRef(const std::string &typeText,
     return false;
   }
   unsigned long long index = 0;
-  if (!parseUnsigned(indexText, index)) {
+  if (!parseNonNegative(indexText, index)) {
     error = "not an object index: " + indexText;
     return false;
   }
@@ -450,14 +439,15 @@ bool parseHexBytes(const std::vector<std::string> &tokens,
       return false;
     }
     for (size_t j = 0; j < token.size(); j += 2) {
-      char *end = nullptr;
+      // Two hex digits exactly: strtol's tolerance of "-1" or "+f" is not
+      // wanted on a byte.
       const std::string pair = token.substr(j, 2);
-      const long value = std::strtol(pair.c_str(), &end, 16);
-      if (*end != '\0') {
+      if (!std::isxdigit(static_cast<unsigned char>(pair[0]))
+          || !std::isxdigit(static_cast<unsigned char>(pair[1]))) {
         error = "not a hex byte: " + pair;
         return false;
       }
-      out.push_back(std::byte(value));
+      out.push_back(std::byte(std::stoul(pair, nullptr, 16)));
     }
   }
   return true;
@@ -769,15 +759,14 @@ CommandRunner::Failure CommandRunner::reconnect(
 
 CommandRunner::Failure CommandRunner::sleep(const Command &command)
 {
-  unsigned long long ms = 0;
-  if (command.args.size() != 1 || !parseUnsigned(command.args[0], ms))
+  std::chrono::milliseconds ms;
+  if (command.args.size() != 1 || !parseMilliseconds(command.args[0], ms))
     return usageError(command, "<ms>");
   // Passing time is the point, so a loss meanwhile is the next command's to
   // notice; an Error is still an answer nobody asked for.
-  const auto wait = pumpUntil(
-      [] { return false; }, std::chrono::milliseconds(ms), LossEnds::Nothing);
+  const auto wait = pumpUntil([] { return false; }, ms, LossEnds::Nothing);
   if (wait == Wait::Error)
-    return waitFailure(wait, "the sleep to end", std::chrono::milliseconds(ms));
+    return waitFailure(wait, "the sleep to end", ms);
   return {};
 }
 
@@ -809,7 +798,7 @@ CommandRunner::Failure CommandRunner::expectError(
 CommandRunner::Failure CommandRunner::sendRaw(const Command &command)
 {
   unsigned long long type = 0;
-  if (command.args.empty() || !parseUnsigned(command.args[0], type)
+  if (command.args.empty() || !parseNonNegative(command.args[0], type)
       || type > 0xff)
     return usageError(command, "<typeByte 0..255> [hex bytes...]");
   std::vector<std::byte> payload;
@@ -829,8 +818,8 @@ CommandRunner::Failure CommandRunner::setFrameConfig(
 {
   unsigned long long width = 0;
   unsigned long long height = 0;
-  if (command.args.size() != 2 || !parseUnsigned(command.args[0], width)
-      || !parseUnsigned(command.args[1], height))
+  if (command.args.size() != 2 || !parseNonNegative(command.args[0], width)
+      || !parseNonNegative(command.args[1], height))
     return usageError(command, "<width> <height>");
   std::string error;
   if (!m_session->setFrameConfig(uint32_t(width), uint32_t(height), &error))
@@ -891,7 +880,7 @@ CommandRunner::Failure CommandRunner::awaitFrame(
 {
   unsigned long long count = 1;
   if (command.args.size() > 1
-      || (!command.args.empty() && !parseUnsigned(command.args[0], count)))
+      || (!command.args.empty() && !parseNonNegative(command.args[0], count)))
     return usageError(command, "[count]");
   if (m_session->state() != SessionState::Connected)
     return std::string("not connected (") + toString(m_session->state()) + ")";
@@ -978,7 +967,7 @@ CommandRunner::Failure CommandRunner::setNodeTransform(const Command &command)
   SceneNodeRef node;
   node.layerName = command.args[0];
   unsigned long long index = 0;
-  if (!parseUnsigned(command.args[1], index))
+  if (!parseNonNegative(command.args[1], index))
     return "not a node index: " + command.args[1];
   node.nodeIndex = size_t(index);
   float values[16];
