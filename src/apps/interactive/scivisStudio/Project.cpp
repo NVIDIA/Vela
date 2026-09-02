@@ -47,12 +47,12 @@ DatasetID nextDatasetId(Project &project)
 
 ShotID nextShotId(const Project &project)
 {
-  return makeGeneratedId("shot", project.shots.size() + 1);
+  return nextUnusedId("shot", project.shots);
 }
 
 ColorMapID nextColorMapId(const Project &project)
 {
-  return makeGeneratedId("colorMap", project.colorMaps.size() + 1);
+  return nextUnusedId("colorMap", project.colorMaps);
 }
 
 Dataset *findDataset(Project &project, const DatasetID &id)
@@ -99,6 +99,22 @@ const Shot *activeShot(const Project &project)
   if (auto *shot = findShot(project, project.activeShotId))
     return shot;
   return project.shots.empty() ? nullptr : &project.shots.front();
+}
+
+ColorMapRecord *findColorMap(Project &project, const ColorMapID &id)
+{
+  auto itr = std::find_if(project.colorMaps.begin(),
+      project.colorMaps.end(),
+      [&](const ColorMapRecord &c) { return c.id == id; });
+  return itr == project.colorMaps.end() ? nullptr : &*itr;
+}
+
+const ColorMapRecord *findColorMap(const Project &project, const ColorMapID &id)
+{
+  auto itr = std::find_if(project.colorMaps.begin(),
+      project.colorMaps.end(),
+      [&](const ColorMapRecord &c) { return c.id == id; });
+  return itr == project.colorMaps.end() ? nullptr : &*itr;
 }
 
 } // namespace project

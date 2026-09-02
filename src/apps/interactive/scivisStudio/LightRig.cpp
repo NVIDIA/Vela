@@ -11,7 +11,7 @@ namespace vsr::scivis_studio::light_rig {
 
 LightRigID nextLightRigId(const Project &project)
 {
-  return project::makeGeneratedId("lightRig", project.lightRigs.size() + 1);
+  return project::nextUnusedId("lightRig", project.lightRigs);
 }
 
 LightRig *findLightRig(Project &project, const LightRigID &id)
