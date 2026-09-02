@@ -66,6 +66,7 @@ endif()
 if (TARGET vsr_scivis_studio_server_core)
   target_sources(${PROJECT_NAME} PRIVATE
     test_StudioServer.cpp
+    test_StudioServerPlayback.cpp
     test_StudioServerProjectOps.cpp
   )
 endif()
