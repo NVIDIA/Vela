@@ -351,9 +351,10 @@ bool StudioServer::setupNetwork(std::string *error)
   m_server->setConnectHandler([this]() { onConnected(); });
   m_server->setDisconnectHandler(
       [this](const boost::system::error_code &ec) { onDisconnected(ec); });
-  // Every type byte gets a handler so a message outside the Studio set is
-  // answered with an Error instead of vanishing in the transport.
-  for (int value = 1; value < vsr::network::MESSAGE_TYPE_INVALID; ++value) {
+  // Every one of the 256 type bytes gets a handler so a message outside the
+  // Studio set is answered with an Error instead of vanishing in the
+  // transport's "no handler" log.
+  for (int value = 0; value <= 0xff; ++value) {
     m_server->registerHandler(
         uint8_t(value), [this](const Message &msg) { onMessage(msg); });
   }

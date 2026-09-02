@@ -70,10 +70,10 @@ ServerConnection::ServerConnection(
   }
 
   // Handlers are registered before any connect() so the IO thread never
-  // observes the handler map changing.
-  for (int value = 1; value < vsr::network::MESSAGE_TYPE_INVALID; ++value) {
-    if (!isStudioMessageType(uint8_t(value)))
-      continue;
+  // observes the handler map changing. Every one of the 256 type bytes gets
+  // one: a message outside the Studio set must be answered with an Error,
+  // not dropped by the transport.
+  for (int value = 0; value <= 0xff; ++value) {
     m_channel->registerHandler(uint8_t(value),
         [this](const vsr::network::Message &msg) { onInbound(msg); });
   }
@@ -306,6 +306,16 @@ void ServerConnection::sendMessage(vsr::network::Message &&msg)
   m_sendFutures.push_back(m_channel->send(std::move(msg)));
 }
 
+void ServerConnection::replyError(const std::string &text)
+{
+  vsr::core::logError("[ServerConnection] %s", text.c_str());
+  Error error;
+  error.message = text;
+  // Straight to the channel: the rejection goes out in any phase the socket
+  // is open, not only once Established.
+  m_channel->send(encode(error));
+}
+
 void ServerConnection::checkSendFailures()
 {
   boost::system::error_code failure;
@@ -457,9 +467,7 @@ void ServerConnection::handleMessage(const vsr::network::Message &msg)
 {
   const auto type = messageType(msg);
   if (!type) {
-    vsr::core::logError(
-        "[ServerConnection] rejected message outside the Studio set (type %d)",
-        int(msg.header.type));
+    replyError("unknown message type " + std::to_string(int(msg.header.type)));
     return;
   }
 

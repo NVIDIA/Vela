@@ -176,6 +176,7 @@ struct ServerConnection
   void attemptFailed(const std::string &reason);
   void scheduleRetry();
   void sendMessage(vsr::network::Message &&msg);
+  void replyError(const std::string &text);
   void checkSendFailures();
   void handleMessage(const vsr::network::Message &msg);
   void handleHello(const vsr::network::Message &msg);
