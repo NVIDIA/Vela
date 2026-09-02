@@ -6,15 +6,25 @@
 #include "Script.h"
 #include "TestSession.h"
 // vsr_scivis_studio_protocol
+#include "BrowseMessages.h"
+#include "ProjectOpReply.h"
+#include "ProjectRequests.h"
 #include "StudioEndpoint.h"
 // std
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
+#include <deque>
 #include <functional>
 #include <iosfwd>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
+
+namespace vsr::scivis_studio {
+struct Shot;
+}
 
 namespace vsr::scivis_studio::test_client {
 
@@ -39,17 +49,28 @@ struct RunnerOptions
  * as the session consumes it. Every line is one record, so a shell script or
  * a reader can grep the output.
  *
- * The command vocabulary is the milestone-3 server surface: session
+ * The command vocabulary is the server surface through milestone 5: session
  * (connect, disconnect, shutdown, ping, expect-pong, await-lost, reconnect,
  * sleep, expect-error, send-raw), rendering (set-frame-config, set-encodings,
  * start-rendering, stop-rendering, await-frame, save-frame), scene edits
- * (set-param, remove-param, set-node-transform), inspection (dump-scene,
- * dump-layers, dump-project, dump-frame) and `assert <value> <op> <rhs>` over
- * the named values assertNames() lists. Waiting commands take a trailing
- * `timeout=<ms>` and FAIL as soon as the connection is Lost. An Error the
- * server sends while any command but expect-error runs FAILs that command:
- * the protocol carries no request ids, so the command in flight is the best
+ * (set-param, remove-param, set-node-transform), one request command per
+ * Project Op, Remote Browse and task message (new-project, create-shot,
+ * list-directory, cancel-task, ...), the waits that go with them (await-task,
+ * await-snapshot, await-reply), inspection (dump-scene, dump-layers,
+ * dump-project, dump-frame) and `assert <value> <op> <rhs>` over the named
+ * values assertNames() lists. Waiting commands take a trailing `timeout=<ms>`
+ * and FAIL as soon as the connection is Lost. An Error the server sends while
+ * any command but expect-error runs FAILs that command: only Project Ops
+ * carry request ids, so for everything else the command in flight is the best
  * attribution there is.
+ *
+ * A request command mints a request id, sends, awaits the ProjectOpReply with
+ * that id and prints it with the decoded result fields; `ok=false` is a FAIL
+ * unless the command is prefixed with `expect-fail`, when `ok=true` is. The
+ * ids replies mint land in variables ($lastShotId, $lastTaskId, ...) that
+ * `$name` expands anywhere in a later command's arguments. The `no-wait`
+ * prefix sends without awaiting, so several requests can be in flight (a
+ * task to cancel before it runs); `await-reply` collects them.
  *
  * Example:
  *   TestSession session;
@@ -77,6 +98,12 @@ struct CommandRunner
   // Why a command FAILed; empty when it is OK.
   using Failure = std::optional<std::string>;
   using Deadline = std::chrono::milliseconds;
+  // Decodes an ok reply's results for the record stream: appends the result
+  // fields to the reply's Event, adds the records that follow it (one per
+  // directory entry, say), remembers minted ids in variables, and FAILs a
+  // reply that lacks the results its request promised.
+  using Describe = std::function<Failure(
+      const protocol::ProjectOpReply &, Event &, std::vector<Event> &)>;
   // How a wait ended: with what it waited for, at the deadline, with the link
   // Lost meanwhile, or with an Error nobody expected.
   enum class Wait
@@ -122,6 +149,68 @@ struct CommandRunner
   Failure dumpFrame(const Command &);
   Failure assertValue(const Command &);
 
+  // Request commands, waits and prefixes (the milestone-5 surface)
+  Failure executeRequest(const Command &, Deadline, bool &handled);
+  Failure openProject(const Command &, Deadline);
+  Failure saveProject(const Command &, Deadline);
+  Failure importStaticDataset(const Command &, Deadline);
+  Failure importFileAnimationDataset(const Command &, Deadline);
+  Failure declareFileAnimationDataset(const Command &, Deadline);
+  Failure removeDataset(const Command &, Deadline);
+  Failure discoverDatasetCandidates(const Command &, Deadline);
+  Failure incorporateDatasetCandidate(const Command &, Deadline);
+  Failure updateShot(const Command &, Deadline);
+  Failure addLight(const Command &, Deadline);
+  Failure removeLight(const Command &, Deadline);
+  Failure listRoots(const Command &, Deadline);
+  Failure listDirectory(const Command &, Deadline);
+  Failure cancelTask(const Command &, Deadline);
+  Failure awaitTask(const Command &, Deadline);
+  Failure awaitSnapshot(const Command &, Deadline);
+  Failure awaitReply(const Command &, Deadline);
+
+  // The recurring request shapes: {}, {name}, {id}, {id, newName},
+  // {id, file} and {file}, each from the command's arguments.
+  template <typename R>
+  Failure bareRequest(const Command &, Deadline, const Describe & = {});
+  template <typename R>
+  Failure nameRequest(
+      const Command &, Deadline, std::string R::*name, const Describe & = {});
+  template <typename R>
+  Failure idRequest(const Command &,
+      Deadline,
+      std::string R::*id,
+      const char *idName,
+      const Describe & = {});
+  template <typename R>
+  Failure renameRequest(
+      const Command &, Deadline, std::string R::*id, const char *idName);
+  template <typename R>
+  Failure saveArchiveRequest(
+      const Command &, Deadline, std::string R::*id, const char *idName);
+  template <typename R>
+  Failure loadArchiveRequest(const Command &, Deadline, const Describe &);
+
+  // Mints the request id, sends, and either awaits the reply (see
+  // awaitReply(uint64_t)) or, under `no-wait`, parks the Describe for a
+  // later await-reply.
+  template <typename R>
+  Failure sendRequest(R request, Deadline, const Describe & = {});
+  // Waits for the ProjectOpReply with that id, prints it with `describe`'s
+  // fields, and turns `ok` into the OK/FAIL the expect-fail prefix asks for.
+  Failure awaitReply(uint64_t requestId, Deadline, const Describe &describe);
+  // A Describe that reads one string id out of a Result, prints it as
+  // `key=` and stores it in the named variable.
+  template <typename Result>
+  Describe createdResult(
+      std::string Result::*id, const char *key, const char *variable);
+  // The Describe of every task-launching request: `taskId=`, $lastTaskId.
+  Describe taskStarted();
+  // The value a `$name` expands to; empty when there is no such variable.
+  std::optional<std::string> variable(const std::string &name) const;
+  // The replica's Shot with that id, or null with the reason.
+  const Shot *replicaShot(const std::string &id, std::string &error) const;
+
   // The current text of a named value; empty with the reason when it is
   // unknown or not available yet (no frame, no replica, ...).
   std::optional<std::string> namedValue(
@@ -134,8 +223,9 @@ struct CommandRunner
       LossEnds lossEnds = LossEnds::Wait);
   // Polls until an event `accept`s (that event is returned in `matched`) or
   // `done` holds; an Error that `accept` does not take ends the wait as
-  // Wait::Error.
-  Wait pumpUntilEvent(const std::function<bool(const Event &)> &accept,
+  // Wait::Error. `accept` sees each event before it is printed and may add
+  // fields to it (a reply's decoded results).
+  Wait pumpUntilEvent(const std::function<bool(Event &)> &accept,
       Deadline deadline,
       Event *matched = nullptr,
       LossEnds lossEnds = LossEnds::Wait,
@@ -152,6 +242,20 @@ struct CommandRunner
   TestSession *m_session{nullptr};
   std::ostream *m_out{nullptr};
   RunnerOptions m_options;
+
+  // The prefixes of the command being executed.
+  bool m_expectFail{false};
+  bool m_noWait{false};
+  // Ids the replies minted, by variable name (lastShotId, lastTaskId, ...).
+  std::map<std::string, std::string> m_variables;
+  // Requests sent under no-wait whose replies are still to be collected, in
+  // send order, with the Describe each await-reply will use.
+  std::deque<std::pair<uint64_t, Describe>> m_pendingReplies;
+  // Snapshots received when the last request went out; await-snapshot waits
+  // for one past that.
+  size_t m_snapshotMark{0};
+  // What the last list-directory and discover-dataset-candidates returned.
+  std::vector<protocol::DirectoryEntry> m_browseEntries;
 };
 
 } // namespace vsr::scivis_studio::test_client

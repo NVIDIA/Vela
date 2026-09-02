@@ -5,8 +5,13 @@
 // vsr_scivis_studio_protocol
 #include "FrameCodec.h"
 #include "PayloadCommon.h"
+#include "ShotRigRequests.h"
+#include "TaskMessages.h"
 // vsr_scivis_studio_model
+#include "CameraRig.h"
+#include "LightRig.h"
 #include "Project.h"
+#include "Shot.h"
 // vsr_scene
 #include "vsr/scene/Layer.hpp"
 #include "vsr/scene/Object.hpp"
@@ -473,6 +478,136 @@ std::string usageError(const Command &command, const char *usage)
   return "usage: " + command.name + " " + usage;
 }
 
+const char *boolText(bool value)
+{
+  return value ? "true" : "false";
+}
+
+// true/false, on/off, 1/0; case-insensitive.
+bool parseBool(const std::string &text, bool &out)
+{
+  const auto word = lower(text);
+  if (word == "true" || word == "on" || word == "1")
+    out = true;
+  else if (word == "false" || word == "off" || word == "0")
+    out = false;
+  else
+    return false;
+  return true;
+}
+
+std::string nodeText(const SceneNodeRef &node)
+{
+  return node.layerName + ":" + std::to_string(node.nodeIndex);
+}
+
+std::string objectRefText(const SceneObjectRef &ref)
+{
+  return shortTypeName(ref.type) + ":" + std::to_string(ref.objectIndex);
+}
+
+// The wire names of vsr::io::ImporterType ("OBJ", "VOLUME_ANIMATION", ...),
+// case-insensitive.
+std::optional<vsr::io::ImporterType> parseImporter(const std::string &text)
+{
+  return importerTypeFromString(upper(text));
+}
+
+// A trailing `key=value` argument, split off when present.
+std::optional<std::string> takeOption(
+    std::vector<std::string> &args, const char *key)
+{
+  if (args.empty())
+    return {};
+  const std::string prefix = std::string(key) + "=";
+  if (args.back().compare(0, prefix.size(), prefix) != 0)
+    return {};
+  auto value = args.back().substr(prefix.size());
+  args.pop_back();
+  return value;
+}
+
+// Applies one `field=value` edit of update-shot to a Shot; false with the
+// reason on an unknown field or a value the field cannot hold.
+bool applyShotField(Shot &shot,
+    const std::string &field,
+    const std::string &value,
+    std::string &error)
+{
+  const auto badValue = [&] {
+    error = "not a valid " + field + ": " + value;
+    return false;
+  };
+  long long integer = 0;
+  unsigned long long natural = 0;
+  double number = 0;
+  bool flag = false;
+  auto &rs = shot.renderSettings;
+
+  if (field == "name")
+    shot.name = value;
+  else if (field == "frameCount") {
+    if (!parseInteger(value, integer) || integer < 1
+        || integer > std::numeric_limits<int>::max())
+      return badValue();
+    shot.frameCount = int(integer);
+  } else if (field == "fps") {
+    if (!parseDouble(value, number) || number <= 0)
+      return badValue();
+    shot.fps = float(number);
+  } else if (field == "currentFrame") {
+    if (!parseInteger(value, integer) || integer < 0
+        || integer > std::numeric_limits<int>::max())
+      return badValue();
+    shot.currentFrame = int(integer);
+  } else if (field == "loop") {
+    if (!parseBool(value, flag))
+      return badValue();
+    shot.loop = flag;
+  } else if (field == "playing") {
+    error = "playing is playback state (SetPlaying), not a Shot edit";
+    return false;
+  } else if (field == "lightRigId")
+    shot.lightRigId = value;
+  else if (field == "cameraRigId")
+    shot.cameraRigId = value;
+  else if (field == "renderSettings.width" || field == "renderSettings.height"
+      || field == "renderSettings.samples") {
+    if (!parseNonNegative(value, natural) || natural < 1
+        || natural > std::numeric_limits<uint32_t>::max())
+      return badValue();
+    (field == "renderSettings.width"           ? rs.width
+            : field == "renderSettings.height" ? rs.height
+                                               : rs.samples) =
+        uint32_t(natural);
+  } else if (field == "renderSettings.rendererLibrary")
+    rs.rendererLibrary = value;
+  else if (field == "renderSettings.rendererSubtype")
+    rs.rendererSubtype = value;
+  else if (field == "renderSettings.outputFilePrefix")
+    rs.outputFilePrefix = value;
+  else if (field == "renderSettings.rendererObjectIndex") {
+    if (value == "none")
+      rs.rendererObjectIndex = VSR_INVALID_INDEX;
+    else if (parseNonNegative(value, natural))
+      rs.rendererObjectIndex = size_t(natural);
+    else
+      return badValue();
+  } else if (field.rfind("binding.", 0) == 0 && field.size() > 8) {
+    if (!parseBool(value, flag))
+      return badValue();
+    shot::setDatasetBinding(shot, field.substr(8), flag);
+  } else {
+    error = "unknown Shot field '" + field
+        + "'; valid: name, frameCount, fps, currentFrame, loop, lightRigId,"
+          " cameraRigId, renderSettings.{width,height,samples,rendererLibrary,"
+          "rendererSubtype,rendererObjectIndex,outputFilePrefix},"
+          " binding.<datasetId>";
+    return false;
+  }
+  return true;
+}
+
 } // namespace
 
 // Construction ///////////////////////////////////////////////////////////////
@@ -516,9 +651,26 @@ const std::vector<std::string> &CommandRunner::assertNames()
       "scene.layers",
       "scene.cameras",
       "scene.renderers",
+      "project.name",
+      "project.directory",
       "project.activeShot",
+      "project.dirty",
       "project.shots",
       "project.datasets",
+      "project.lightRigs",
+      "project.cameraRigs",
+      "project.colorMaps",
+      "shot.<id>.<field>",
+      "dataset.<id>.<field>",
+      "lightRig.<id>.name",
+      "cameraRig.<id>.name",
+      "colorMap.<id>.name",
+      "tasks.completed",
+      "tasks.failed",
+      "replies.failed",
+      "replies.pending",
+      "snapshots.received",
+      "browse.entries",
       "frame.width",
       "frame.height",
       "frame.encoding",
@@ -562,6 +714,37 @@ const std::vector<std::string> &CommandRunner::commandHelp()
       "                             print the mirror, replica or last frame header",
       "assert VALUE OP RHS          OP in == != < <= > >= contains; VALUE one of the names below",
       "",
+      "Project Ops (each sends one request, awaits its ProjectOpReply and prints it):",
+      "new-project | open-project DIR | save-project [DIR]",
+      "import-static-dataset PATH [NAME] [IMPORTER|VSR_SUBTREE]",
+      "import-file-animation-dataset NAME IMPORTER PATH... [set-frame-count=BOOL]",
+      "declare-file-animation-dataset NAME IMPORTER SOURCE... [set-frame-count=BOOL]",
+      "reimport-dataset ID | rename-dataset ID NAME | remove-dataset ID [keep-asset-file]",
+      "load-dataset ID | unload-dataset ID | refresh-dataset-availability ID",
+      "save-dataset-archive ID PATH | load-dataset-archive PATH",
+      "discover-dataset-candidates | incorporate-dataset-candidate FILE [PROPOSED] [NAME]",
+      "create-shot [NAME] | remove-shot ID | set-active-shot ID",
+      "update-shot ID FIELD=VALUE...  (name, frameCount, fps, loop, currentFrame, lightRigId,",
+      "                             cameraRigId, renderSettings.*, binding.<datasetId>=on|off)",
+      "create-light-rig [NAME] | clone-light-rig ID | remove-light-rig ID | rename-light-rig ID NAME",
+      "add-light RIG [SUBTYPE] | remove-light RIG LAYER NODE",
+      "create-camera-rig [NAME] | remove-camera-rig ID | rename-camera-rig ID NAME",
+      "save-light-rig-archive ID PATH | load-light-rig-archive PATH",
+      "save-camera-rig-archive ID PATH | load-camera-rig-archive PATH",
+      "create-color-map [NAME] | rename-color-map ID NAME | remove-color-map ID",
+      "list-roots | list-directory PATH   (one EVT DataRoot / DirectoryEntry per item)",
+      "cancel-task TASKID",
+      "await-task [TASKID] [expect-fail]",
+      "                             wait for the task (default $lastTaskId) to end",
+      "await-snapshot               wait for a ProjectSnapshot newer than the last request",
+      "await-reply [REQUESTID]      collect the reply of a no-wait request (default the oldest)",
+      "",
+      "Prefixes: `expect-fail <request>` makes ok=false the OK outcome;",
+      "`no-wait <request>` sends without awaiting the reply. Replies fill",
+      "$lastShotId $lastLightRigId $lastCameraRigId $lastColorMapId $lastObjectRef",
+      "$lastObjectType $lastObjectIndex $lastLightLayer $lastLightNode $lastDatasetId",
+      "$lastTaskId $lastRequestId $dataRoot; `$name` expands in any argument.",
+      "",
       "Waiting commands take a trailing timeout=MS and FAIL as soon as the",
       "connection is Lost. An Error the server sends during any command but",
       "expect-error FAILs that command. assert values:"};
@@ -571,11 +754,35 @@ const std::vector<std::string> &CommandRunner::commandHelp()
 
 CommandRunner::Failure CommandRunner::execute(Command command)
 {
+  m_expectFail = false;
+  m_noWait = false;
+  while (command.name == "expect-fail" || command.name == "no-wait") {
+    if (command.args.empty())
+      return usageError(command, "<request command> [args...]");
+    (command.name == "expect-fail" ? m_expectFail : m_noWait) = true;
+    command.name = command.args.front();
+    command.args.erase(command.args.begin());
+  }
+
   std::string error;
+  if (!expandVariables(
+          command,
+          [this](const std::string &n) { return variable(n); },
+          &error))
+    return error;
   const auto suffix = takeTimeoutSuffix(command, &error);
   if (!error.empty())
     return error;
   const Deadline deadline = suffix ? *suffix : m_options.timeout;
+
+  bool handled = false;
+  const auto requestFailure = executeRequest(command, deadline, handled);
+  if (handled)
+    return requestFailure;
+  if (m_expectFail || m_noWait) {
+    return std::string(m_expectFail ? "expect-fail" : "no-wait")
+        + " applies to request commands, not to " + command.name;
+  }
 
   const auto &name = command.name;
   if (name == "connect")
@@ -651,6 +858,9 @@ CommandRunner::Failure CommandRunner::connect(
   const auto pending = drainEvents();
   if (!ok)
     return error;
+  // The Bootstrap's snapshot is not the one await-snapshot waits for.
+  m_snapshotMark = m_session->snapshotsReceived();
+  m_pendingReplies.clear();
   return pending;
 }
 
@@ -736,6 +946,8 @@ CommandRunner::Failure CommandRunner::reconnect(
   const auto pending = drainEvents();
   if (!ok)
     return error;
+  m_snapshotMark = m_session->snapshotsReceived();
+  m_pendingReplies.clear();
   return pending;
 }
 
@@ -1022,7 +1234,37 @@ CommandRunner::Failure CommandRunner::dumpProject(const Command &command)
       + " datasets=" + std::to_string(project->datasets.size())
       + " lightRigs=" + std::to_string(project->lightRigs.size())
       + " cameraRigs=" + std::to_string(project->cameraRigs.size())
-      + " dirty=" + (project->dirty ? "true" : "false"));
+      + " colorMaps=" + std::to_string(project->colorMaps.size())
+      + " dirty=" + boolText(project->dirty)
+      + " directory=" + quoted(project->projectDirectory.generic_string()));
+  for (const auto &shot : project->shots) {
+    printRecord("EVT Shot id=" + shot.id + " name=" + quoted(shot.name)
+        + " frameCount=" + std::to_string(shot.frameCount)
+        + " fps=" + numberText(shot.fps) + " currentFrame="
+        + std::to_string(shot.currentFrame) + " loop=" + boolText(shot.loop)
+        + " lightRigId=" + shot.lightRigId + " cameraRigId=" + shot.cameraRigId
+        + " bindings=" + std::to_string(shot.datasetBindings.size())
+        + " camera=" + objectRefText(shot.camera)
+        + " active=" + boolText(shot.id == project->activeShotId));
+  }
+  for (const auto &dataset : project->datasets) {
+    printRecord("EVT Dataset id=" + dataset.id + " name=" + quoted(dataset.name)
+        + " status=" + dataset::toString(dataset.status)
+        + " residency=" + dataset::toString(dataset.residency)
+        + " sourceKind=" + dataset::toString(dataset.sourceKind)
+        + " importerType=" + dataset.importerType + " rootNode="
+        + nodeText(dataset.rootNode) + " dirty=" + boolText(dataset.dirty));
+  }
+  for (const auto &rig : project->lightRigs) {
+    printRecord("EVT LightRig id=" + rig.id + " name=" + quoted(rig.name)
+        + " rootNode=" + nodeText(rig.rootNode));
+  }
+  for (const auto &rig : project->cameraRigs) {
+    printRecord("EVT CameraRig id=" + rig.id + " name=" + quoted(rig.name)
+        + " keyframes=" + std::to_string(rig.keyframes.size()));
+  }
+  for (const auto &map : project->colorMaps)
+    printRecord("EVT ColorMap id=" + map.id + " name=" + quoted(map.name));
   return {};
 }
 
@@ -1088,15 +1330,151 @@ std::optional<std::string> CommandRunner::namedValue(
     return std::to_string(scene.numberOfObjects(ANARI_CAMERA));
   if (name == "scene.renderers")
     return std::to_string(scene.numberOfObjects(ANARI_RENDERER));
-  if (name == "project.activeShot")
-    return project ? std::optional(project->activeShotId) : needProject();
-  if (name == "project.shots") {
-    return project ? std::optional(std::to_string(project->shots.size()))
-                   : needProject();
+  if (name.rfind("project.", 0) == 0) {
+    if (!project)
+      return needProject();
+    const auto field = name.substr(8);
+    if (field == "activeShot")
+      return project->activeShotId;
+    if (field == "name")
+      return project->name;
+    if (field == "directory")
+      return project->projectDirectory.generic_string();
+    if (field == "dirty")
+      return std::string(boolText(project->dirty));
+    if (field == "shots")
+      return std::to_string(project->shots.size());
+    if (field == "datasets")
+      return std::to_string(project->datasets.size());
+    if (field == "lightRigs")
+      return std::to_string(project->lightRigs.size());
+    if (field == "cameraRigs")
+      return std::to_string(project->cameraRigs.size());
+    if (field == "colorMaps")
+      return std::to_string(project->colorMaps.size());
   }
-  if (name == "project.datasets") {
-    return project ? std::optional(std::to_string(project->datasets.size()))
-                   : needProject();
+  if (name == "tasks.completed")
+    return std::to_string(m_session->tasksCompleted());
+  if (name == "tasks.failed")
+    return std::to_string(m_session->tasksFailed());
+  if (name == "replies.failed")
+    return std::to_string(m_session->repliesFailed());
+  if (name == "replies.pending")
+    return std::to_string(m_pendingReplies.size());
+  if (name == "snapshots.received")
+    return std::to_string(m_session->snapshotsReceived());
+  if (name == "browse.entries")
+    return std::to_string(m_browseEntries.size());
+
+  // <collection>.<id>.<field>: ids carry no dots, fields may.
+  for (const char *collection :
+      {"shot", "dataset", "lightRig", "cameraRig", "colorMap"}) {
+    const std::string prefix = std::string(collection) + ".";
+    if (name.rfind(prefix, 0) != 0)
+      continue;
+    const auto idEnd = name.find('.', prefix.size());
+    if (idEnd == std::string::npos || idEnd + 1 >= name.size()) {
+      error =
+          "malformed value '" + name + "'; use " + collection + ".<id>.<field>";
+      return {};
+    }
+    if (!project)
+      return needProject();
+    const auto id = name.substr(prefix.size(), idEnd - prefix.size());
+    const auto field = name.substr(idEnd + 1);
+    const auto missing = [&](const char *what) -> std::optional<std::string> {
+      error = name + ": the replica has no " + what + " '" + id + "'";
+      return {};
+    };
+    const auto noField = [&]() -> std::optional<std::string> {
+      error = name + ": unknown " + collection + " field '" + field + "'";
+      return {};
+    };
+    if (prefix == "shot.") {
+      const auto *shot = project::findShot(*project, id);
+      if (!shot)
+        return missing("shot");
+      if (field == "name")
+        return shot->name;
+      if (field == "frameCount")
+        return std::to_string(shot->frameCount);
+      if (field == "fps")
+        return numberText(shot->fps);
+      if (field == "currentFrame")
+        return std::to_string(shot->currentFrame);
+      if (field == "loop")
+        return std::string(boolText(shot->loop));
+      if (field == "playing")
+        return std::string(boolText(shot->playing));
+      if (field == "lightRigId")
+        return shot->lightRigId;
+      if (field == "cameraRigId")
+        return shot->cameraRigId;
+      if (field == "camera")
+        return objectRefText(shot->camera);
+      if (field == "bindings")
+        return std::to_string(shot->datasetBindings.size());
+      if (field == "renderSettings.width")
+        return std::to_string(shot->renderSettings.width);
+      if (field == "renderSettings.height")
+        return std::to_string(shot->renderSettings.height);
+      if (field == "renderSettings.samples")
+        return std::to_string(shot->renderSettings.samples);
+      if (field == "renderSettings.rendererLibrary")
+        return shot->renderSettings.rendererLibrary;
+      if (field == "renderSettings.rendererSubtype")
+        return shot->renderSettings.rendererSubtype;
+      if (field == "renderSettings.outputFilePrefix")
+        return shot->renderSettings.outputFilePrefix;
+      if (field.rfind("binding.", 0) == 0 && field.size() > 8) {
+        const auto *binding = shot::findDatasetBinding(*shot, field.substr(8));
+        if (!binding) {
+          error = name + ": shot '" + id + "' has no binding for '"
+              + field.substr(8) + "'";
+          return {};
+        }
+        return std::string(boolText(binding->enabled));
+      }
+      return noField();
+    }
+    if (prefix == "dataset.") {
+      const auto *dataset = project::findDataset(*project, id);
+      if (!dataset)
+        return missing("dataset");
+      if (field == "name")
+        return dataset->name;
+      if (field == "status")
+        return std::string(dataset::toString(dataset->status));
+      if (field == "residency")
+        return std::string(dataset::toString(dataset->residency));
+      if (field == "sourceKind")
+        return std::string(dataset::toString(dataset->sourceKind));
+      if (field == "importerType")
+        return dataset->importerType;
+      if (field == "sourcePath")
+        return dataset->source.sourcePath;
+      if (field == "dirty")
+        return std::string(boolText(dataset->dirty));
+      if (field == "declared")
+        return std::string(boolText(dataset->declared));
+      if (field == "rootNode")
+        return nodeText(dataset->rootNode);
+      return noField();
+    }
+    if (field != "name")
+      return noField();
+    if (prefix == "lightRig.") {
+      const auto *rig = light_rig::findLightRig(*project, id);
+      return rig ? std::optional(rig->name) : missing("light rig");
+    }
+    if (prefix == "cameraRig.") {
+      const auto *rig = camera_rig::findCameraRig(*project, id);
+      return rig ? std::optional(rig->name) : missing("camera rig");
+    }
+    for (const auto &map : project->colorMaps)
+      if (map.id == id)
+        return map.name;
+    return missing("color map");
   }
   if (name == "frame.width")
     return frame ? std::optional(std::to_string(frame->width)) : needFrame();
@@ -1158,6 +1536,763 @@ std::optional<std::string> CommandRunner::namedValue(
   return {};
 }
 
+// Project Ops, Remote Browse and tasks /////////////////////////////////////
+
+CommandRunner::Failure CommandRunner::executeRequest(
+    const Command &command, Deadline deadline, bool &handled)
+{
+  handled = true;
+  const auto &name = command.name;
+
+  // Project
+  if (name == "new-project")
+    return bareRequest<NewProject>(command, deadline);
+  if (name == "open-project")
+    return openProject(command, deadline);
+  if (name == "save-project")
+    return saveProject(command, deadline);
+
+  // Datasets
+  if (name == "import-static-dataset")
+    return importStaticDataset(command, deadline);
+  if (name == "import-file-animation-dataset")
+    return importFileAnimationDataset(command, deadline);
+  if (name == "declare-file-animation-dataset")
+    return declareFileAnimationDataset(command, deadline);
+  if (name == "reimport-dataset") {
+    return idRequest<ReimportDataset>(
+        command, deadline, &ReimportDataset::datasetId, "id", taskStarted());
+  }
+  if (name == "rename-dataset") {
+    return renameRequest<RenameDataset>(
+        command, deadline, &RenameDataset::datasetId, "id");
+  }
+  if (name == "remove-dataset")
+    return removeDataset(command, deadline);
+  if (name == "load-dataset") {
+    return idRequest<LoadDataset>(
+        command, deadline, &LoadDataset::datasetId, "id", taskStarted());
+  }
+  if (name == "unload-dataset") {
+    return idRequest<UnloadDataset>(
+        command, deadline, &UnloadDataset::datasetId, "id");
+  }
+  if (name == "refresh-dataset-availability") {
+    return idRequest<RefreshDatasetAvailability>(
+        command, deadline, &RefreshDatasetAvailability::datasetId, "id");
+  }
+  if (name == "save-dataset-archive") {
+    return saveArchiveRequest<SaveDatasetArchive>(
+        command, deadline, &SaveDatasetArchive::datasetId, "id");
+  }
+  if (name == "load-dataset-archive") {
+    return loadArchiveRequest<LoadDatasetArchive>(
+        command, deadline, taskStarted());
+  }
+  if (name == "discover-dataset-candidates")
+    return discoverDatasetCandidates(command, deadline);
+  if (name == "incorporate-dataset-candidate")
+    return incorporateDatasetCandidate(command, deadline);
+
+  // Shots
+  if (name == "create-shot") {
+    return nameRequest<CreateShot>(command,
+        deadline,
+        &CreateShot::name,
+        createdResult<ShotCreatedResult>(
+            &ShotCreatedResult::shotId, "shotId", "lastShotId"));
+  }
+  if (name == "remove-shot")
+    return idRequest<RemoveShot>(command, deadline, &RemoveShot::shotId, "id");
+  if (name == "set-active-shot") {
+    return idRequest<SetActiveShot>(
+        command, deadline, &SetActiveShot::shotId, "id");
+  }
+  if (name == "update-shot")
+    return updateShot(command, deadline);
+
+  // Light rigs
+  const auto lightRigCreated = [&] {
+    return createdResult<LightRigCreatedResult>(
+        &LightRigCreatedResult::lightRigId, "lightRigId", "lastLightRigId");
+  };
+  if (name == "create-light-rig") {
+    return nameRequest<CreateLightRig>(
+        command, deadline, &CreateLightRig::name, lightRigCreated());
+  }
+  if (name == "clone-light-rig") {
+    return idRequest<CloneLightRig>(
+        command, deadline, &CloneLightRig::lightRigId, "id", lightRigCreated());
+  }
+  if (name == "remove-light-rig") {
+    return idRequest<RemoveLightRig>(
+        command, deadline, &RemoveLightRig::lightRigId, "id");
+  }
+  if (name == "rename-light-rig") {
+    return renameRequest<RenameLightRig>(
+        command, deadline, &RenameLightRig::lightRigId, "id");
+  }
+  if (name == "add-light")
+    return addLight(command, deadline);
+  if (name == "remove-light")
+    return removeLight(command, deadline);
+  if (name == "save-light-rig-archive") {
+    return saveArchiveRequest<SaveLightRigArchive>(
+        command, deadline, &SaveLightRigArchive::lightRigId, "id");
+  }
+  if (name == "load-light-rig-archive") {
+    return loadArchiveRequest<LoadLightRigArchive>(
+        command, deadline, lightRigCreated());
+  }
+
+  // Camera rigs
+  const auto cameraRigCreated = [&] {
+    return createdResult<CameraRigCreatedResult>(
+        &CameraRigCreatedResult::cameraRigId, "cameraRigId", "lastCameraRigId");
+  };
+  if (name == "create-camera-rig") {
+    return nameRequest<CreateCameraRig>(
+        command, deadline, &CreateCameraRig::name, cameraRigCreated());
+  }
+  if (name == "remove-camera-rig") {
+    return idRequest<RemoveCameraRig>(
+        command, deadline, &RemoveCameraRig::cameraRigId, "id");
+  }
+  if (name == "rename-camera-rig") {
+    return renameRequest<RenameCameraRig>(
+        command, deadline, &RenameCameraRig::cameraRigId, "id");
+  }
+  if (name == "save-camera-rig-archive") {
+    return saveArchiveRequest<SaveCameraRigArchive>(
+        command, deadline, &SaveCameraRigArchive::cameraRigId, "id");
+  }
+  if (name == "load-camera-rig-archive") {
+    return loadArchiveRequest<LoadCameraRigArchive>(
+        command, deadline, cameraRigCreated());
+  }
+
+  // Color maps
+  if (name == "create-color-map") {
+    return nameRequest<CreateColorMap>(command,
+        deadline,
+        &CreateColorMap::name,
+        [this](const ProjectOpReply &reply,
+            Event &event,
+            std::vector<Event> &) -> Failure {
+          const auto result = results<ColorMapCreatedResult>(reply);
+          if (!result)
+            return "the reply carries no ColorMapCreatedResult";
+          event.fields.emplace_back("colorMapId", result->colorMapId);
+          event.fields.emplace_back("object", objectRefText(result->object));
+          m_variables["lastColorMapId"] = result->colorMapId;
+          m_variables["lastObjectRef"] = objectRefText(result->object);
+          m_variables["lastObjectType"] = shortTypeName(result->object.type);
+          m_variables["lastObjectIndex"] =
+              std::to_string(result->object.objectIndex);
+          return {};
+        });
+  }
+  if (name == "rename-color-map") {
+    return renameRequest<RenameColorMap>(
+        command, deadline, &RenameColorMap::colorMapId, "id");
+  }
+  if (name == "remove-color-map") {
+    return idRequest<RemoveColorMap>(
+        command, deadline, &RemoveColorMap::colorMapId, "id");
+  }
+
+  // Remote Browse and tasks
+  if (name == "list-roots")
+    return listRoots(command, deadline);
+  if (name == "list-directory")
+    return listDirectory(command, deadline);
+  if (name == "cancel-task")
+    return cancelTask(command, deadline);
+  if (name == "await-task")
+    return awaitTask(command, deadline);
+  if (name == "await-snapshot")
+    return awaitSnapshot(command, deadline);
+  if (name == "await-reply")
+    return awaitReply(command, deadline);
+
+  handled = false;
+  return {};
+}
+
+// Request shapes //
+
+template <typename R>
+CommandRunner::Failure CommandRunner::bareRequest(
+    const Command &command, Deadline deadline, const Describe &describe)
+{
+  if (!command.args.empty())
+    return usageError(command, "");
+  return sendRequest(R{}, deadline, describe);
+}
+
+template <typename R>
+CommandRunner::Failure CommandRunner::nameRequest(const Command &command,
+    Deadline deadline,
+    std::string R::*name,
+    const Describe &describe)
+{
+  if (command.args.size() > 1)
+    return usageError(command, "[name]");
+  R request;
+  if (!command.args.empty())
+    request.*name = command.args[0];
+  return sendRequest(std::move(request), deadline, describe);
+}
+
+template <typename R>
+CommandRunner::Failure CommandRunner::idRequest(const Command &command,
+    Deadline deadline,
+    std::string R::*id,
+    const char *idName,
+    const Describe &describe)
+{
+  if (command.args.size() != 1)
+    return usageError(command, ("<" + std::string(idName) + ">").c_str());
+  R request;
+  request.*id = command.args[0];
+  return sendRequest(std::move(request), deadline, describe);
+}
+
+template <typename R>
+CommandRunner::Failure CommandRunner::renameRequest(const Command &command,
+    Deadline deadline,
+    std::string R::*id,
+    const char *idName)
+{
+  if (command.args.size() != 2) {
+    return usageError(
+        command, ("<" + std::string(idName) + "> <newName>").c_str());
+  }
+  R request;
+  request.*id = command.args[0];
+  request.newName = command.args[1];
+  return sendRequest(std::move(request), deadline);
+}
+
+template <typename R>
+CommandRunner::Failure CommandRunner::saveArchiveRequest(const Command &command,
+    Deadline deadline,
+    std::string R::*id,
+    const char *idName)
+{
+  if (command.args.size() != 2)
+    return usageError(
+        command, ("<" + std::string(idName) + "> <file>").c_str());
+  R request;
+  request.*id = command.args[0];
+  request.file = command.args[1];
+  return sendRequest(std::move(request), deadline, taskStarted());
+}
+
+template <typename R>
+CommandRunner::Failure CommandRunner::loadArchiveRequest(
+    const Command &command, Deadline deadline, const Describe &describe)
+{
+  if (command.args.size() != 1)
+    return usageError(command, "<file>");
+  R request;
+  request.file = command.args[0];
+  return sendRequest(std::move(request), deadline, describe);
+}
+
+// Project //
+
+CommandRunner::Failure CommandRunner::openProject(
+    const Command &command, Deadline deadline)
+{
+  if (command.args.size() != 1)
+    return usageError(command, "<directory>");
+  OpenProject request;
+  request.directory = command.args[0];
+  return sendRequest(std::move(request), deadline, taskStarted());
+}
+
+CommandRunner::Failure CommandRunner::saveProject(
+    const Command &command, Deadline deadline)
+{
+  if (command.args.size() > 1)
+    return usageError(command, "[directory]");
+  SaveProject request;
+  if (!command.args.empty())
+    request.directory = std::filesystem::path(command.args[0]);
+  return sendRequest(std::move(request), deadline, taskStarted());
+}
+
+// Datasets //
+
+CommandRunner::Failure CommandRunner::importStaticDataset(
+    const Command &command, Deadline deadline)
+{
+  if (command.args.empty() || command.args.size() > 3)
+    return usageError(command, "<path> [name] [importer|VSR_SUBTREE]");
+  ImportStaticDataset request;
+  request.sourcePath = command.args[0];
+  if (command.args.size() > 1)
+    request.name = command.args[1];
+  if (command.args.size() > 2) {
+    if (upper(command.args[2]) == "VSR_SUBTREE") {
+      request.fromSubtreeArchive = true;
+    } else {
+      const auto importer = parseImporter(command.args[2]);
+      if (!importer)
+        return "unknown importer '" + command.args[2] + "'";
+      request.importerType = *importer;
+    }
+  }
+  return sendRequest(std::move(request), deadline, taskStarted());
+}
+
+CommandRunner::Failure CommandRunner::importFileAnimationDataset(
+    const Command &command, Deadline deadline)
+{
+  auto args = command.args;
+  const auto frameCount = takeOption(args, "set-frame-count");
+  if (args.size() < 3)
+    return usageError(
+        command, "<name> <importer> <path>... [set-frame-count=BOOL]");
+  ImportFileAnimationDataset request;
+  request.name = args[0];
+  const auto importer = parseImporter(args[1]);
+  if (!importer)
+    return "unknown importer '" + args[1] + "'";
+  request.importerType = *importer;
+  for (size_t i = 2; i < args.size(); ++i)
+    request.sourcePaths.emplace_back(args[i]);
+  if (frameCount && !parseBool(*frameCount, request.setActiveShotFrameCount))
+    return "set-frame-count must be true or false, got: " + *frameCount;
+  return sendRequest(std::move(request), deadline, taskStarted());
+}
+
+CommandRunner::Failure CommandRunner::declareFileAnimationDataset(
+    const Command &command, Deadline deadline)
+{
+  auto args = command.args;
+  const auto frameCount = takeOption(args, "set-frame-count");
+  if (args.size() < 3) {
+    return usageError(
+        command, "<name> <importer> <source>... [set-frame-count=BOOL]");
+  }
+  DeclareFileAnimationDataset request;
+  request.name = args[0];
+  const auto importer = parseImporter(args[1]);
+  if (!importer)
+    return "unknown importer '" + args[1] + "'";
+  request.importerType = *importer;
+  request.sourceList.assign(args.begin() + 2, args.end());
+  if (frameCount && !parseBool(*frameCount, request.setActiveShotFrameCount))
+    return "set-frame-count must be true or false, got: " + *frameCount;
+  return sendRequest(std::move(request),
+      deadline,
+      createdResult<DatasetCreatedResult>(
+          &DatasetCreatedResult::datasetId, "datasetId", "lastDatasetId"));
+}
+
+CommandRunner::Failure CommandRunner::removeDataset(
+    const Command &command, Deadline deadline)
+{
+  if (command.args.empty() || command.args.size() > 2
+      || (command.args.size() == 2 && command.args[1] != "keep-asset-file"))
+    return usageError(command, "<id> [keep-asset-file]");
+  RemoveDataset request;
+  request.datasetId = command.args[0];
+  request.keepAssetFile = command.args.size() == 2;
+  return sendRequest(std::move(request), deadline);
+}
+
+CommandRunner::Failure CommandRunner::discoverDatasetCandidates(
+    const Command &command, Deadline deadline)
+{
+  if (!command.args.empty())
+    return usageError(command, "");
+  return sendRequest(DiscoverDatasetCandidates{},
+      deadline,
+      [](const ProjectOpReply &reply,
+          Event &event,
+          std::vector<Event> &following) -> Failure {
+        const auto result = results<DiscoverDatasetCandidatesResult>(reply);
+        if (!result)
+          return "the reply carries no DiscoverDatasetCandidatesResult";
+        event.fields.emplace_back(
+            "candidates", std::to_string(result->candidates.size()));
+        for (const auto &candidate : result->candidates) {
+          Event entry{"DatasetCandidate", {}};
+          entry.fields.emplace_back(
+              "file", quoted(candidate.file.generic_string()));
+          entry.fields.emplace_back(
+              "proposedName", quoted(candidate.proposedName));
+          following.push_back(std::move(entry));
+        }
+        return {};
+      });
+}
+
+CommandRunner::Failure CommandRunner::incorporateDatasetCandidate(
+    const Command &command, Deadline deadline)
+{
+  if (command.args.empty() || command.args.size() > 3)
+    return usageError(command, "<file> [proposedName] [name]");
+  IncorporateDatasetCandidate request;
+  request.file = command.args[0];
+  if (command.args.size() > 1)
+    request.proposedName = command.args[1];
+  if (command.args.size() > 2)
+    request.name = command.args[2];
+  return sendRequest(std::move(request), deadline, taskStarted());
+}
+
+// Shots and rigs //
+
+CommandRunner::Failure CommandRunner::updateShot(
+    const Command &command, Deadline deadline)
+{
+  if (command.args.size() < 2)
+    return usageError(command, "<id> <field>=<value> [...]");
+  std::string error;
+  const auto *current = replicaShot(command.args[0], error);
+  if (!current)
+    return error;
+  UpdateShot request;
+  request.shot = *current;
+  for (size_t i = 1; i < command.args.size(); ++i) {
+    const auto &edit = command.args[i];
+    const auto eq = edit.find('=');
+    if (eq == std::string::npos || eq == 0)
+      return "not a <field>=<value> edit: " + edit;
+    if (!applyShotField(
+            request.shot, edit.substr(0, eq), edit.substr(eq + 1), error))
+      return error;
+  }
+  return sendRequest(std::move(request), deadline);
+}
+
+CommandRunner::Failure CommandRunner::addLight(
+    const Command &command, Deadline deadline)
+{
+  if (command.args.empty() || command.args.size() > 2)
+    return usageError(command, "<lightRigId> [subtype]");
+  AddLightToRig request;
+  request.lightRigId = command.args[0];
+  if (command.args.size() > 1)
+    request.subtype = command.args[1];
+  return sendRequest(std::move(request),
+      deadline,
+      [this](const ProjectOpReply &reply,
+          Event &event,
+          std::vector<Event> &) -> Failure {
+        const auto result = results<LightAddedResult>(reply);
+        if (!result)
+          return "the reply carries no LightAddedResult";
+        event.fields.emplace_back("lightNode", nodeText(result->lightNode));
+        m_variables["lastLightLayer"] = result->lightNode.layerName;
+        m_variables["lastLightNode"] =
+            std::to_string(result->lightNode.nodeIndex);
+        return {};
+      });
+}
+
+CommandRunner::Failure CommandRunner::removeLight(
+    const Command &command, Deadline deadline)
+{
+  unsigned long long index = 0;
+  if (command.args.size() != 3 || !parseNonNegative(command.args[2], index))
+    return usageError(command, "<lightRigId> <layer> <nodeIndex>");
+  RemoveLightFromRig request;
+  request.lightRigId = command.args[0];
+  request.lightNode.layerName = command.args[1];
+  request.lightNode.nodeIndex = size_t(index);
+  return sendRequest(std::move(request), deadline);
+}
+
+// Remote Browse //
+
+CommandRunner::Failure CommandRunner::listRoots(
+    const Command &command, Deadline deadline)
+{
+  if (!command.args.empty())
+    return usageError(command, "");
+  return sendRequest(ListRoots{},
+      deadline,
+      [this](const ProjectOpReply &reply,
+          Event &event,
+          std::vector<Event> &following) -> Failure {
+        const auto result = results<ListRootsResult>(reply);
+        if (!result)
+          return "the reply carries no ListRootsResult";
+        event.fields.emplace_back(
+            "roots", std::to_string(result->roots.size()));
+        for (const auto &root : result->roots) {
+          Event entry{"DataRoot", {}};
+          entry.fields.emplace_back("path", quoted(root.generic_string()));
+          following.push_back(std::move(entry));
+        }
+        if (!result->roots.empty())
+          m_variables["dataRoot"] = result->roots.front().generic_string();
+        return {};
+      });
+}
+
+CommandRunner::Failure CommandRunner::listDirectory(
+    const Command &command, Deadline deadline)
+{
+  if (command.args.size() != 1)
+    return usageError(command, "<directory>");
+  ListDirectory request;
+  request.directory = command.args[0];
+  m_browseEntries.clear();
+  return sendRequest(std::move(request),
+      deadline,
+      [this](const ProjectOpReply &reply,
+          Event &event,
+          std::vector<Event> &following) -> Failure {
+        const auto result = results<ListDirectoryResult>(reply);
+        if (!result)
+          return "the reply carries no ListDirectoryResult";
+        m_browseEntries = result->entries;
+        event.fields.emplace_back(
+            "entries", std::to_string(result->entries.size()));
+        for (const auto &e : result->entries) {
+          Event entry{"DirectoryEntry", {}};
+          entry.fields.emplace_back("name", quoted(e.name));
+          entry.fields.emplace_back("kind", toString(e.kind));
+          entry.fields.emplace_back("size", std::to_string(e.size));
+          entry.fields.emplace_back("mtime", std::to_string(e.mtimeSeconds));
+          following.push_back(std::move(entry));
+        }
+        return {};
+      });
+}
+
+// Tasks //
+
+CommandRunner::Failure CommandRunner::cancelTask(
+    const Command &command, Deadline deadline)
+{
+  unsigned long long taskId = 0;
+  if (command.args.size() != 1 || !parseNonNegative(command.args[0], taskId))
+    return usageError(command, "<taskId>");
+  CancelTask request;
+  request.taskId = taskId;
+  return sendRequest(std::move(request), deadline);
+}
+
+CommandRunner::Failure CommandRunner::awaitTask(
+    const Command &command, Deadline deadline)
+{
+  if (m_noWait)
+    return "no-wait applies to request commands, not to await-task";
+  auto args = command.args;
+  if (!args.empty() && args.back() == "expect-fail") {
+    m_expectFail = true;
+    args.pop_back();
+  }
+  unsigned long long taskId = 0;
+  if (args.size() > 1 || (!args.empty() && !parseNonNegative(args[0], taskId)))
+    return usageError(command, "[taskId] [expect-fail]");
+  if (args.empty()) {
+    const auto last = m_variables.find("lastTaskId");
+    if (last == m_variables.end())
+      return "no task has been started yet ($lastTaskId is unset)";
+    parseNonNegative(last->second, taskId);
+  }
+  if (m_session->state() != SessionState::Connected)
+    return std::string("not connected (") + toString(m_session->state()) + ")";
+
+  const auto ended = [&] {
+    const auto *task = m_session->task(taskId);
+    return task && task->status != TaskRecord::Status::Running;
+  };
+  const auto wait = pumpUntil(ended, deadline);
+  if (wait != Wait::Done) {
+    return waitFailure(
+        wait, "the end of task " + std::to_string(taskId), deadline);
+  }
+  const auto &task = *m_session->task(taskId);
+  const bool failed = task.status == TaskRecord::Status::Failed;
+  if (failed && !m_expectFail)
+    return "task " + std::to_string(taskId) + " failed: " + task.message;
+  if (!failed && m_expectFail) {
+    return "task " + std::to_string(taskId)
+        + " completed, but was expected to fail";
+  }
+  // Imports report the new dataset's id as their completion message.
+  if (!failed && !task.message.empty())
+    m_variables["lastDatasetId"] = task.message;
+  return {};
+}
+
+CommandRunner::Failure CommandRunner::awaitSnapshot(
+    const Command &command, Deadline deadline)
+{
+  if (!command.args.empty())
+    return usageError(command, "");
+  if (m_session->state() != SessionState::Connected)
+    return std::string("not connected (") + toString(m_session->state()) + ")";
+  const auto wait =
+      pumpUntil([&] { return m_session->snapshotsReceived() > m_snapshotMark; },
+          deadline);
+  if (wait != Wait::Done)
+    return waitFailure(wait, "ProjectSnapshot", deadline);
+  // The next await-snapshot waits for the one after this.
+  m_snapshotMark = m_session->snapshotsReceived();
+  return {};
+}
+
+CommandRunner::Failure CommandRunner::awaitReply(
+    const Command &command, Deadline deadline)
+{
+  if (m_noWait)
+    return "no-wait applies to request commands, not to await-reply";
+  unsigned long long requestId = 0;
+  if (command.args.size() > 1
+      || (!command.args.empty()
+          && !parseNonNegative(command.args[0], requestId)))
+    return usageError(command, "[requestId]");
+  if (m_pendingReplies.empty())
+    return "no no-wait request is awaiting its reply";
+  auto pending = m_pendingReplies.begin();
+  if (!command.args.empty()) {
+    pending = std::find_if(m_pendingReplies.begin(),
+        m_pendingReplies.end(),
+        [&](const auto &p) { return p.first == requestId; });
+    if (pending == m_pendingReplies.end()) {
+      return "request " + std::to_string(requestId)
+          + " was not sent with no-wait, or its reply was collected already";
+    }
+  }
+  const auto id = pending->first;
+  const auto describe = std::move(pending->second);
+  m_pendingReplies.erase(pending);
+  return awaitReply(id, deadline, describe);
+}
+
+// The plumbing every request shares //
+
+template <typename R>
+CommandRunner::Failure CommandRunner::sendRequest(
+    R request, Deadline deadline, const Describe &describe)
+{
+  request.requestId = m_session->nextRequestId();
+  m_variables["lastRequestId"] = std::to_string(request.requestId);
+  // A snapshot this request causes is one past the count as it goes out.
+  m_snapshotMark = m_session->snapshotsReceived();
+  std::string error;
+  if (!m_session->send(request, &error))
+    return error;
+  if (m_noWait) {
+    m_pendingReplies.emplace_back(request.requestId, describe);
+    return drainEvents();
+  }
+  return awaitReply(request.requestId, deadline, describe);
+}
+
+CommandRunner::Failure CommandRunner::awaitReply(
+    uint64_t requestId, Deadline deadline, const Describe &describe)
+{
+  const auto idText = std::to_string(requestId);
+  std::vector<Event> following;
+  Failure described;
+
+  // Runs `describe` on an ok reply, so the reply's record shows the results.
+  const auto decorate = [&](const ProjectOpReply &reply, Event &event) {
+    if (reply.ok && describe)
+      described = describe(reply, event, following);
+  };
+
+  const auto *reply = m_session->reply(requestId);
+  if (reply) {
+    // Already consumed and printed (a no-wait reply an earlier command
+    // drained): the results are decoded, the record is not repeated.
+    Event event{"ProjectOpReply", {}};
+    decorate(*reply, event);
+  } else {
+    const auto wait = pumpUntilEvent(
+        [&](Event &event) {
+          if (event.name != "ProjectOpReply")
+            return false;
+          for (const auto &[key, value] : event.fields) {
+            if (key == "requestId" && value == idText) {
+              reply = m_session->reply(requestId);
+              if (reply)
+                decorate(*reply, event);
+              return true;
+            }
+          }
+          return false;
+        },
+        deadline);
+    if (wait != Wait::Done)
+      return waitFailure(wait, "the reply to request " + idText, deadline);
+    if (!reply)
+      return "the reply to request " + idText + " did not decode";
+  }
+  for (const auto &event : following)
+    printEvent(event);
+
+  if (!reply->ok && !m_expectFail)
+    return "server refused: " + reply->error;
+  if (reply->ok && m_expectFail)
+    return "expected the request to fail, but the server accepted it";
+  return described;
+}
+
+template <typename Result>
+CommandRunner::Describe CommandRunner::createdResult(
+    std::string Result::*id, const char *key, const char *variable)
+{
+  return [this, id, key, variable](const ProjectOpReply &reply,
+             Event &event,
+             std::vector<Event> &) -> Failure {
+    const auto result = results<Result>(reply);
+    if (!result)
+      return std::string("the reply carries no ") + key + " result";
+    event.fields.emplace_back(key, (*result).*id);
+    m_variables[variable] = (*result).*id;
+    return {};
+  };
+}
+
+CommandRunner::Describe CommandRunner::taskStarted()
+{
+  return [this](const ProjectOpReply &reply,
+             Event &event,
+             std::vector<Event> &) -> Failure {
+    const auto started = results<TaskStartedResult>(reply);
+    if (!started)
+      return "the reply carries no TaskStartedResult";
+    event.fields.emplace_back("taskId", std::to_string(started->taskId));
+    m_variables["lastTaskId"] = std::to_string(started->taskId);
+    return {};
+  };
+}
+
+std::optional<std::string> CommandRunner::variable(
+    const std::string &name) const
+{
+  const auto it = m_variables.find(name);
+  if (it == m_variables.end())
+    return {};
+  return it->second;
+}
+
+const Shot *CommandRunner::replicaShot(
+    const std::string &id, std::string &error) const
+{
+  const auto *project = m_session->project();
+  if (!project) {
+    error = "no Project Replica";
+    return nullptr;
+  }
+  const auto *shot = project::findShot(*project, id);
+  if (!shot)
+    error = "the replica has no shot '" + id + "'";
+  return shot;
+}
+
 // Pumping and output /////////////////////////////////////////////////////////
 
 CommandRunner::Wait CommandRunner::pumpUntil(
@@ -1170,7 +2305,7 @@ CommandRunner::Wait CommandRunner::pumpUntil(
 }
 
 CommandRunner::Wait CommandRunner::pumpUntilEvent(
-    const std::function<bool(const Event &)> &accept,
+    const std::function<bool(Event &)> &accept,
     Deadline deadline,
     Event *matched,
     LossEnds lossEnds,
@@ -1184,8 +2319,10 @@ CommandRunner::Wait CommandRunner::pumpUntilEvent(
       [&] {
         Event event;
         while (m_session->takeEvent(event)) {
+          // accept() first: it may add the fields the record then shows.
+          const bool accepted = accept(event);
           printEvent(event);
-          if (accept(event)) {
+          if (accepted) {
             if (matched)
               *matched = std::move(event);
             wait = Wait::Done;
