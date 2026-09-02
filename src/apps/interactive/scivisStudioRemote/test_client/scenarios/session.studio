@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # Session lifecycle of the milestone-3 server: connect and Bootstrap, liveness,
 # a voluntary disconnect that clears the mirror, a reconnect that bootstraps it
 # again, and a Shutdown the server honours by closing the socket.

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # The server's rejection paths: every message it does not handle is answered
 # with an Error, never dropped. `send-raw` skips the codec and puts an
 # arbitrary type byte on the wire; `expect-error` waits for the reply.

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # Optimistic scene edits: parameters set on the active shot's camera land in
 # the Structural Mirror at once and on the wire; the server keeps rendering
 # with them applied.

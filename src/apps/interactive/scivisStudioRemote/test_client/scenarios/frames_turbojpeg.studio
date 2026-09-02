@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # TurboJpeg frame streaming: the same run as frames_raw.studio with the
 # compressed encoding preferred. Both ends must have been built with
 # VSR_USE_TURBOJPEG; the CMake wiring registers this scenario only then.
