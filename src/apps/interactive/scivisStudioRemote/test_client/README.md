@@ -67,7 +67,7 @@ its Error is to land on it.
 | `expect-pong` | the next non-Frame server message must be a Pong |
 | `await-lost` | wait until the connection is Lost (mirror and replica stay as a frozen view) |
 | `reconnect` | connect again to the last host and port; a fresh handshake and Bootstrap |
-| `sleep MS` | keep polling (events still print) for MS milliseconds; a loss meanwhile is the next command's to notice |
+| `sleep MS` | keep polling (events still print) for MS milliseconds; a loss meanwhile is the next command's to notice. MS, like every `timeout=MS`, must fit a deadline |
 | `expect-error [SUBSTRING]` | the next server message other than a Frame or a liveness Pong must be an Error, containing SUBSTRING if given |
 | `send-raw TYPE [HEX ...]` | send a message of type byte TYPE (0..255) with the given payload bytes, verbatim |
 | `set-frame-config W H` | request a frame size, await the FrameConfig ack |
@@ -94,6 +94,11 @@ component.
 
 Numbers compare numerically (at float32 precision for equality, so `== 0.9`
 holds for a parameter set from `0.9`); everything else compares as text.
+Numeric parameter values print as the shortest text that reads back as the
+same number (`0.9`, `0.12345679` for a float32 set from `0.123456789`), so
+`==` holds for whatever literal a parameter was set from. Integer components
+must fit their type (`uint8 300` is a FAIL, not 44) and `send-raw` payload
+bytes are exactly two hex digits each.
 
 | value | is |
 |-------|----|

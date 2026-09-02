@@ -352,6 +352,42 @@ SCENARIO("the test client parses its script language", "[StudioTestClient]")
       REQUIRE_FALSE(takeTimeoutSuffix(c, &error));
       REQUIRE(error.find("timeout=soon") != std::string::npos);
     }
+    THEN("a timeout no deadline can hold is an error too")
+    {
+      Command c;
+      c.name = "ping";
+      c.args = {"timeout=99999999999999999999"};
+      REQUIRE_FALSE(takeTimeoutSuffix(c, &error));
+      REQUIRE(error.find("malformed timeout") != std::string::npos);
+      c.args = {"timeout=9223372036854775807"};
+      REQUIRE_FALSE(takeTimeoutSuffix(c, &error));
+      c.args = {"timeout=-5"};
+      REQUIRE_FALSE(takeTimeoutSuffix(c, &error));
+    }
+  }
+
+  GIVEN("integer arguments")
+  {
+    long long signedValue = 0;
+    unsigned long long unsignedValue = 0;
+    std::chrono::milliseconds ms;
+    THEN("whole decimal numbers that fit parse, nothing else does")
+    {
+      REQUIRE(parseInteger("-42", signedValue));
+      REQUIRE(signedValue == -42);
+      REQUIRE(parseNonNegative("18446744073709551615", unsignedValue));
+      REQUIRE(unsignedValue == 18446744073709551615ull);
+      REQUIRE_FALSE(parseInteger("", signedValue));
+      REQUIRE_FALSE(parseInteger("12x", signedValue));
+      REQUIRE_FALSE(parseInteger(" 12", signedValue));
+      REQUIRE_FALSE(parseInteger("99999999999999999999", signedValue));
+      REQUIRE_FALSE(parseNonNegative("-1", unsignedValue));
+      REQUIRE_FALSE(parseNonNegative("+1", unsignedValue));
+      REQUIRE(parseMilliseconds("0", ms));
+      REQUIRE(parseMilliseconds("86400000", ms));
+      REQUIRE(ms == 24h);
+      REQUIRE_FALSE(parseMilliseconds("9223372036854775807", ms));
+    }
   }
 }
 
@@ -418,6 +454,14 @@ SCENARIO("the test client parses its command line", "[StudioTestClient]")
           parseTestClientOptions(argv({"--port", "70000"}), options, &error));
       REQUIRE(error.find("--port") != std::string::npos);
     }
+    THEN("a --timeout no deadline can hold is rejected by name")
+    {
+      REQUIRE_FALSE(parseTestClientOptions(
+          argv({"--timeout", "99999999999999999999"}), options, &error));
+      REQUIRE(error.find("--timeout") != std::string::npos);
+      REQUIRE_FALSE(parseTestClientOptions(
+          argv({"--timeout", "9223372036854775807"}), options, &error));
+    }
     THEN("the usage names every flag and every assert value")
     {
       const auto usage = testClientUsage("scivisStudioTestClient");
@@ -479,7 +523,14 @@ SCENARIO(
         "assert scene.objects >= 0\n"
         "assert frames.received == 0\n"
         "assert errors.received == 0\n"
-        "assert lastError == \"\"\n",
+        "assert lastError == \"\"\n"
+        "sleep 9223372036854775807\n"
+        "set-param camera 0 n uint8 300\n"
+        "set-param camera 0 n int8 -129\n"
+        "set-param camera 0 n uint32 -1\n"
+        "set-param camera 0 n int64 -9223372036854775808\n"
+        "send-raw 20 -1\n"
+        "send-raw 20 +f\n",
         [] {
           RunnerOptions o;
           o.keepGoing = true;
@@ -489,9 +540,9 @@ SCENARIO(
     THEN("--keep-going runs everything, records each FAIL and still fails")
     {
       REQUIRE_FALSE(result.ok);
-      REQUIRE(result.records.size() == 16);
+      REQUIRE(result.records.size() == 23);
       const auto fails = failLines(result.records);
-      REQUIRE(fails.size() == 11);
+      REQUIRE(fails.size() == 18);
       REQUIRE(fails[0].find("not connected") != std::string::npos);
       REQUIRE(fails[3].find("no frame") != std::string::npos);
       REQUIRE(fails[5].find("no Project Replica") != std::string::npos);
@@ -502,6 +553,23 @@ SCENARIO(
       REQUIRE(fails[10].find("unknown command") != std::string::npos);
       REQUIRE(hasLine(result.records, "OK assert state == NeverConnected"));
       REQUIRE(hasLine(result.records, "OK assert lastError == \"\""));
+    }
+
+    THEN("values a component cannot hold are rejected, not wrapped")
+    {
+      const auto fails = failLines(result.records);
+      REQUIRE(fails.size() == 18);
+      REQUIRE(fails[11].find("usage: sleep") != std::string::npos);
+      REQUIRE(
+          fails[12].find("not a uint8 component: 300") != std::string::npos);
+      REQUIRE(
+          fails[13].find("not a int8 component: -129") != std::string::npos);
+      REQUIRE(
+          fails[14].find("not a uint32 component: -1") != std::string::npos);
+      // int64's minimum fits; only the missing connection stops it.
+      REQUIRE(fails[15].find("not connected") != std::string::npos);
+      REQUIRE(fails[16].find("not a hex byte: -1") != std::string::npos);
+      REQUIRE(fails[17].find("not a hex byte: +f") != std::string::npos);
     }
   }
 
@@ -727,8 +795,18 @@ SCENARIO(
           "set-param " + camera + " ucount uint32 7\n"
           "assert " + cameraParam + "ucount >= 7\n"
           "set-param " + camera + " uv float32_vec2 0.5 0.25\n"
+          "assert " + cameraParam + "uv == \"0.5 0.25\"\n"
           "set-param " + camera + " tint float32_vec4 1 0 0 1\n"
           "assert " + cameraParam + "tint != \"0 0 0 0\"\n"
+          "assert " + cameraParam + "tint == \"1 0 0 1\"\n"
+          "set-param " + camera + " precise float32 0.123456789\n"
+          "assert " + cameraParam + "precise == 0.123456789\n"
+          "set-param " + camera + " big float32 1234567\n"
+          "assert " + cameraParam + "big == 1234567\n"
+          "set-param " + camera + " wide float64 0.1234567890123\n"
+          "assert " + cameraParam + "wide == 0.1234567890123\n"
+          "set-param " + camera + " tiny int8 -128\n"
+          "assert " + cameraParam + "tiny == -128\n"
           "remove-param " + camera + " note\n"
           "set-node-transform studio " + std::to_string(server->transformNode)
           + " 2 0 0 0 0 2 0 0 0 0 2 0 5 6 7 1\n"

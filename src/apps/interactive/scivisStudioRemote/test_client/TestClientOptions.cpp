@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "TestClientOptions.h"
+#include "Script.h"
 // vsr_scivis_studio_protocol
 #include "StudioEndpoint.h"
 // std
-#include <cstdlib>
 #include <sstream>
 
 namespace vsr::scivis_studio::test_client {
@@ -16,18 +16,6 @@ void setError(std::string *error, const std::string &text)
 {
   if (error)
     *error = text;
-}
-
-bool parseMilliseconds(const std::string &text, std::chrono::milliseconds &out)
-{
-  if (text.empty())
-    return false;
-  char *end = nullptr;
-  const long value = std::strtol(text.c_str(), &end, 10);
-  if (*end != '\0' || value < 0)
-    return false;
-  out = std::chrono::milliseconds(value);
-  return true;
 }
 
 } // namespace
@@ -89,7 +77,8 @@ bool parseTestClientOptions(const std::vector<std::string> &args,
     } else if (arg == "--timeout") {
       if (!parseMilliseconds(value, options.runner.timeout)) {
         setError(error,
-            "--timeout requires a non-negative integer of milliseconds, got: "
+            "--timeout requires a non-negative count of milliseconds that fits"
+            " a deadline, got: "
                 + value);
         return false;
       }
