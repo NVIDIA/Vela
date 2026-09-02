@@ -70,6 +70,31 @@ struct Event
   std::string text() const;
 };
 
+// The Frame record, as both the event stream and dump-frame print it.
+Event frameEvent(const protocol::FrameHeader &header, size_t bytes);
+
+// Visits every object pool of a Scene as (ANARI type, pool), in the order
+// dump-scene lists them. Arrays ride the Structural Mirror as descriptors, so
+// they count too.
+template <typename Visitor>
+void forEachObjectPool(const vsr::scene::ObjectDatabase &db, Visitor &&visit)
+{
+  visit(ANARI_ARRAY, db.array);
+  visit(ANARI_SURFACE, db.surface);
+  visit(ANARI_GEOMETRY, db.geometry);
+  visit(ANARI_MATERIAL, db.material);
+  visit(ANARI_SAMPLER, db.sampler);
+  visit(ANARI_VOLUME, db.volume);
+  visit(ANARI_SPATIAL_FIELD, db.field);
+  visit(ANARI_LIGHT, db.light);
+  visit(ANARI_CAMERA, db.camera);
+  visit(ANARI_RENDERER, db.renderer);
+}
+
+// Objects of every type in `scene`: what the `scene.objects` assert value and
+// the scene-transfer events report.
+size_t totalObjects(const vsr::scene::Scene &scene);
+
 /*
  * The test client's connection to a Studio server: TCP connect, Hello
  * exchange with an exact version check, the bracketed Bootstrap into an owned
@@ -228,6 +253,9 @@ struct TestSession
   void pushEvent(Event event);
   void replyError(const std::string &text);
   bool requireConnected(std::string *error) const;
+  // The mirror's object for an edit, or null with the reason.
+  vsr::scene::Object *mirrorObject(
+      const SceneObjectRef &object, std::string *error);
   Clock::time_point lastTraffic() const;
 
   SessionTimings m_timings;
@@ -253,9 +281,6 @@ struct TestSession
   std::string m_lastError;
   std::deque<Event> m_events;
   std::vector<vsr::network::MessageFuture> m_sendFutures;
-  // The mirror's object for an edit, or null with the reason.
-  vsr::scene::Object *mirrorObject(
-      const SceneObjectRef &object, std::string *error);
 
   // Shared with the IO thread
   std::mutex m_inboundMutex;

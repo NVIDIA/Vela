@@ -32,18 +32,6 @@ using vsr::core::Any;
 
 namespace {
 
-// Every object pool of a Scene, the order dump-scene lists them in.
-constexpr anari::DataType OBJECT_TYPES[] = {ANARI_ARRAY,
-    ANARI_SURFACE,
-    ANARI_GEOMETRY,
-    ANARI_MATERIAL,
-    ANARI_SAMPLER,
-    ANARI_VOLUME,
-    ANARI_SPATIAL_FIELD,
-    ANARI_LIGHT,
-    ANARI_CAMERA,
-    ANARI_RENDERER};
-
 // Text helpers ///////////////////////////////////////////////////////////////
 
 std::string lower(std::string text)
@@ -987,28 +975,17 @@ CommandRunner::Failure CommandRunner::dumpScene(const Command &command)
     return usageError(command, "");
   if (const auto pending = drainEvents())
     return pending;
-  const auto &scene = m_session->mirror();
-  const auto &db = scene.objectDB();
-  const auto dump = [&](anari::DataType type, const auto &pool) {
-    vsr::core::foreach_item_const(pool, [&](const vsr::scene::Object *obj) {
-      if (!obj)
-        return;
-      printRecord("EVT Object type=" + shortTypeName(type)
-          + " index=" + std::to_string(obj->index())
-          + " subtype=" + obj->subtype().str() + " name=" + quoted(obj->name())
-          + " params=" + std::to_string(obj->numParameters()));
-    });
-  };
-  dump(ANARI_ARRAY, db.array);
-  dump(ANARI_SURFACE, db.surface);
-  dump(ANARI_GEOMETRY, db.geometry);
-  dump(ANARI_MATERIAL, db.material);
-  dump(ANARI_SAMPLER, db.sampler);
-  dump(ANARI_VOLUME, db.volume);
-  dump(ANARI_SPATIAL_FIELD, db.field);
-  dump(ANARI_LIGHT, db.light);
-  dump(ANARI_CAMERA, db.camera);
-  dump(ANARI_RENDERER, db.renderer);
+  forEachObjectPool(m_session->mirror().objectDB(),
+      [&](anari::DataType type, const auto &pool) {
+        vsr::core::foreach_item_const(pool, [&](const vsr::scene::Object *obj) {
+          if (!obj)
+            return;
+          printRecord("EVT Object type=" + shortTypeName(type)
+              + " index=" + std::to_string(obj->index()) + " subtype="
+              + obj->subtype().str() + " name=" + quoted(obj->name())
+              + " params=" + std::to_string(obj->numParameters()));
+        });
+      });
   return {};
 }
 
@@ -1059,12 +1036,7 @@ CommandRunner::Failure CommandRunner::dumpFrame(const Command &command)
   if (!header)
     return "no frame received yet";
   const auto view = decodeFrame(m_session->lastFrame());
-  printRecord("EVT Frame width=" + std::to_string(header->width)
-      + " height=" + std::to_string(header->height)
-      + " encoding=" + toString(header->encoding)
-      + " pixelFormat=" + toString(header->pixelFormat)
-      + " shotId=" + header->shotId + " frame=" + std::to_string(header->frame)
-      + " bytes=" + std::to_string(view ? view->size : 0));
+  printRecord("EVT " + frameEvent(*header, view ? view->size : 0).text());
   return {};
 }
 
@@ -1108,12 +1080,8 @@ std::optional<std::string> CommandRunner::namedValue(
 
   if (name == "state")
     return std::string(toString(m_session->state()));
-  if (name == "scene.objects") {
-    size_t n = 0;
-    for (auto type : OBJECT_TYPES)
-      n += scene.numberOfObjects(type);
-    return std::to_string(n);
-  }
+  if (name == "scene.objects")
+    return std::to_string(totalObjects(scene));
   if (name == "scene.layers")
     return std::to_string(scene.numberOfLayers());
   if (name == "scene.cameras")
