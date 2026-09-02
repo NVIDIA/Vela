@@ -133,15 +133,56 @@ Remote Browse (`server/RemoteBrowse`) lists a directory inside the roots as
 manifest) with sizes and mtimes; a file, a missing directory or a path
 outside the roots is refused.
 
-Not there yet (milestones 6-7): playback and time (`SetPlaying` 58,
-`SetTime` 143), `RequestArrayHistogram` (59), `RenderShot` (60), picking
-(`Pick` 62) and the viewport passes (`SetOutline` 144, `ViewportSettings`
-145). The server refuses those, and any request whose payload it cannot
-decode, loudly rather than dropping them: with a `ProjectOpReply{ok=false}`
-carrying the request's id when the payload has a readable non-zero
-`requestId` (so a client's pending request retires), and with a bare
-`Error{"... not implemented in this server"}` / `Error{"malformed ..."}`
-otherwise. The client core covers the second case too: a bare `Error` that
+Milestone 6, playback (item 6): `SetPlaying` is a Project Op and `SetTime` a
+Control-State Latch slot; the server free-runs the AnimationManager on its
+loop thread, commits Time at Rest through snapshots (auto-stop, debounced
+scrub) and reports frames a file binding cannot load as
+`TimeAdvanceWarning`. Picking and the viewport passes (item 6): `Pick`,
+`SetOutline` and `ViewportSettings` are latch slots (latest-wins);
+`RequestArrayHistogram` is a sync Project Op. See "Viewport" below.
+
+### Viewport
+
+- **Pixel convention.** `Pick{x, y}` names a pixel of the last `FrameConfig`
+  in frame pixels, `x` to the right and `y` *down* from the top-left corner
+  (the client's image origin). The server converts to ANARI's bottom-up
+  buffer; coordinates outside the frame are clamped to its edge. One pick is
+  in flight at a time, latest-wins: a `Pick` that arrives before an earlier
+  one was serviced replaces it and only the survivor is answered. Servicing
+  renders one frame with the `objectId` channel on (also while paused, when no
+  `Frame` follows) and replies `PickReply{hit, worldPosition, objectIdentity}`
+  before the next `Frame`: `hit` when the pixel shows a surface or volume,
+  `objectIdentity` its `{ANARI_SURFACE|ANARI_VOLUME, pool index}`, and
+  `worldPosition` the camera position plus the depth along the pixel ray
+  built from the shot camera object's `position`/`direction`/`up`/`fovy` (or
+  `height` for an orthographic camera) and the frame aspect.
+- **Pass order.** `server/ViewportPasses` appends, between the
+  `AnariSceneRenderPass` and the copy-out pass and in the monolith
+  Viewport's order: `PickPass`, `VisualizeAOVPass`,
+  `PrimitiveOutlineRenderPass`, `OutlineRenderPass`, `BoxOutlineRenderPass`.
+  The `objectId` channel is on exactly while an outline shows, the AOV is
+  `EDGES` or `OBJECT_ID`, or the primitive outline is on (or a pick is being
+  serviced). `primitiveId` is queried once at startup
+  (`ANARI_KHR_FRAME_CHANNEL_PRIMITIVE_ID`); without it the primitive outline
+  and the `PRIMITIVE_ID` AOV stay silently off. `ViewportSettings` is applied
+  whole (absent fields mean defaults), `SetOutline` of anything but a surface
+  or volume clears the outline, and both reset to defaults when a new client
+  connects. World bounds come from the render index world's `bounds`
+  property every frame the box is shown.
+- **Histogram limits.** `RequestArrayHistogram` bins a scalar host array on
+  the loop thread (frames pause for the duration; linear in the element
+  count): `binCount` is clamped to `[1, 4096]`, the last bin is closed, and
+  equal min and max put everything in bin 0. Fixed-point element types count
+  in ANARI's normalized range. Refused with an error: references that are not
+  arrays, proxy arrays (the mirror's descriptors), CUDA arrays and non-scalar
+  element types (vectors, matrices, object handles). No snapshot follows.
+
+Not there yet (milestone 7): `RenderShot` (60). The server refuses it, and
+any request whose payload it cannot decode, loudly rather than dropping
+them: with a `ProjectOpReply{ok=false}` carrying the request's id when the
+payload has a readable non-zero `requestId` (so a client's pending request
+retires), and with a bare `Error{"... not implemented in this server"}` /
+`Error{"malformed ..."}` otherwise. The client core covers the second case too: a bare `Error` that
 names the type of a pending request fails the oldest pending request of that
 type, so no control stays greyed until the connection is lost.
 
@@ -222,7 +263,8 @@ milestone.
 against a fake server), `"[StudioServer]"` (server against a raw
 `NetworkClient`: session, scene edits, and in
 `test_StudioServerProjectOps.cpp` the project ops, Remote Browse, Server
-Tasks and Data Roots), `"[StudioRemote]"` (server and client core in one
+Tasks and Data Roots, in `test_StudioServerViewport.cpp` picking, the
+viewport passes and the array histogram), `"[StudioRemote]"` (server and client core in one
 process) and `"[StudioTestClient]"` (the test client's script runner against
 an in-process server). Those that render use `helide` and skip when it
 cannot be loaded. The new `ProjectContext` operations are covered by
