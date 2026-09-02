@@ -212,6 +212,36 @@ File Animation) and Add Shot. Save attaches the `{windows, layout, settings}`
 UI-state tree in the monolith's shape; restoring it on open is a later
 milestone.
 
+### Time, picking and passes (milestone 6)
+
+The client has no `AnimationManager`. The **Timeline** window
+(`client/windows/Timeline.*`) is the monolith's transport row and ruler
+without tracks: Play/Pause sends the `SetPlaying` project op and the button
+follows the replica alone; Stop is `SetPlaying(false)` then `SetTime 0`;
+dragging or clicking the ruler and the frame field send `SetTime`, at most
+one per UI frame with the latest value; Loop, Frames and FPS travel as
+`UpdateShot`. The frame shown is the drag while scrubbing, the last frame
+header's frame while the shot plays (Time in Motion), and the replica's
+`currentFrame` otherwise (Time at Rest). Space toggles playback while the
+Timeline is focused. A `TimeAdvanceWarning` becomes a toast and a Log line,
+never a modal.
+
+In the viewport, a double-click picks the object under the mouse (`Pick`,
+frame-header pixels with y down from the top-left) and selects it in the
+Layers window through the mirror; Shift+double-click re-centres the arcball
+on the hit point. Selection stays client-local: whenever the first selected
+node's object changes and is a surface or volume it is sent as `SetOutline`.
+The viewport's *View* menu holds the AOV combo (all names; the server decides
+whether PRIMITIVE_ID is available), the depth range and edge inversion,
+Highlight Selected, Outline Primitives and World Bounds with colour and
+width; every change sends the whole `ViewportSettings`, which persist in the
+window's UI state and are re-sent after every bootstrap.
+
+The **Histogram** window (`client/windows/HistogramPanel.*`) lists the array
+parameters of the first selected object (and of a volume's spatial field),
+takes a bin count and asks the server with `RequestArrayHistogram`; the
+reply is plotted, a refusal shows the server's error text.
+
 ## Open design questions
 
 - **Color map objects.** No scene object type today carries a color map as

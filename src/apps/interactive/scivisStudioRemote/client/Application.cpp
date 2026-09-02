@@ -10,12 +10,15 @@
 #include "modals/ProjectLocationDialog.h"
 #include "windows/CameraRigEditor.h"
 #include "windows/DatasetEditor.h"
+#include "windows/HistogramPanel.h"
 #include "windows/LightRigEditor.h"
 #include "windows/ProjectWindow.h"
 #include "windows/ShotEditor.h"
 #include "windows/TaskPanel.h"
+#include "windows/Timeline.h"
 // vsr_scivis_studio_client_core
 #include "ProjectOps.h"
+#include "ReplicaView.h"
 // vsr_scivis_studio_protocol
 #include "FrameCodec.h"
 // vsr_scivis_studio_model
@@ -179,6 +182,10 @@ Application::Application(int argc, const char **argv)
   m_connection->onServerError = [](const std::string &message) {
     vsr::core::logError("[Client] server reported: %s", message.c_str());
   };
+  m_connection->onTimeAdvanceWarning =
+      [this](const TimeAdvanceWarning &warning) {
+        onTimeAdvanceWarning(warning);
+      };
 
   m_editorContext.connection = m_connection.get();
   m_editorContext.reportError = [this](const std::string &message) {
@@ -233,13 +240,17 @@ vsr_ui::WindowArray Application::setupWindows()
   auto *shotEditor = new ShotEditor(this, &m_editorContext);
   auto *lightRigEditor = new LightRigEditor(this, &m_editorContext);
   auto *cameraRigEditor = new CameraRigEditor(this, &m_editorContext);
+  auto *timeline = new Timeline(this, &m_editorContext);
+  auto *histogram = new HistogramPanel(this, &m_editorContext);
   m_taskPanel = new TaskPanel(this, &m_editorContext);
 
   m_editors = {projectWindow,
       datasetEditor,
       shotEditor,
       lightRigEditor,
-      cameraRigEditor};
+      cameraRigEditor,
+      timeline,
+      histogram};
 
   windows.emplace_back(m_viewport);
   windows.emplace_back(projectWindow);
@@ -247,11 +258,13 @@ vsr_ui::WindowArray Application::setupWindows()
   windows.emplace_back(shotEditor);
   windows.emplace_back(lightRigEditor);
   windows.emplace_back(cameraRigEditor);
+  windows.emplace_back(timeline);
   windows.emplace_back(log);
   windows.emplace_back(m_taskPanel);
   windows.emplace_back(layers);
   windows.emplace_back(databaseEditor);
   windows.emplace_back(objectEditor);
+  windows.emplace_back(histogram);
 
   setWindowArray(windows);
 
@@ -668,7 +681,11 @@ void Application::notify(const std::string &text, bool isError)
     vsr::core::logError("[Client] %s", text.c_str());
   else
     vsr::core::logStatus("[Client] %s", text.c_str());
+  pushToast(text, isError);
+}
 
+void Application::pushToast(const std::string &text, bool isError)
+{
   Toast toast;
   toast.text = text;
   toast.isError = isError;
@@ -677,6 +694,20 @@ void Application::notify(const std::string &text, bool isError)
   m_toasts.push_back(std::move(toast));
   while (m_toasts.size() > MAX_TOASTS)
     m_toasts.pop_front();
+}
+
+// Never modal: the server kept playing. The connection already wrote the Log
+// line; the toast is the transient part.
+void Application::onTimeAdvanceWarning(const TimeAdvanceWarning &warning)
+{
+  const Project *project = m_connection->project();
+  const std::string shot = project
+      ? replica::shotLabel(*project, warning.shotId)
+      : warning.shotId;
+  pushToast("Frame " + std::to_string(warning.frame) + " of " + shot
+          + " failed to load: " + warning.message,
+      true);
+  m_connection->clearTimeAdvanceWarning();
 }
 
 // Announces each task's completion or failure once; the task panel shows
@@ -781,6 +812,7 @@ void Application::onBootstrapComplete()
   m_viewport->sendFrameConfig();
   m_connection->setEncodings(encodingPreference());
   m_connection->startRendering();
+  m_viewport->onServerReady(); // viewport settings, then the outline
 
   resolveActiveShotCamera();
 }
@@ -909,6 +941,12 @@ Size=2883,521
 Collapsed=0
 DockId=0x0000000A,1
 
+[Window][Timeline]
+Pos=957,1741
+Size=2883,521
+Collapsed=0
+DockId=0x0000000A,2
+
 [Window][Object Editor]
 Pos=0,1399
 Size=955,863
@@ -920,6 +958,12 @@ Pos=0,1399
 Size=955,863
 Collapsed=0
 DockId=0x00000006,1
+
+[Window][Histogram]
+Pos=0,1399
+Size=955,863
+Collapsed=0
+DockId=0x00000006,2
 
 [Docking][Data]
 DockSpace       ID=0x80F5B4C5 Window=0x079D3A04 Pos=0,56 Size=3840,2206 Split=X
