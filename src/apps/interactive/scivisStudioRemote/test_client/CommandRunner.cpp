@@ -419,6 +419,35 @@ bool parseObjectRef(const std::string &typeText,
   return true;
 }
 
+// An object reference written as `type index` (two arguments) or `type:index`
+// (one, the spelling $lastObjectRef expands to). `consumed` is how many
+// arguments it took.
+bool parseObjectRefArgs(const std::vector<std::string> &args,
+    size_t first,
+    SceneObjectRef &ref,
+    size_t &consumed,
+    std::string &error)
+{
+  if (first >= args.size()) {
+    error = "missing object reference (<type> <index> or <type:index>)";
+    return false;
+  }
+  const auto colon = args[first].find(':');
+  if (colon != std::string::npos) {
+    consumed = 1;
+    return parseObjectRef(args[first].substr(0, colon),
+        args[first].substr(colon + 1),
+        ref,
+        error);
+  }
+  if (first + 1 >= args.size()) {
+    error = "missing object index after " + args[first];
+    return false;
+  }
+  consumed = 2;
+  return parseObjectRef(args[first], args[first + 1], ref, error);
+}
+
 bool parseHexBytes(const std::vector<std::string> &tokens,
     size_t first,
     std::vector<std::byte> &out,
@@ -608,6 +637,82 @@ bool applyShotField(Shot &shot,
   return true;
 }
 
+constexpr const char *VIEWPORT_SETTINGS_KEYS =
+    "highlightSelection, outlinePrimitives, showWorldBounds,"
+    " worldBoundsColor=r,g,b,a, worldBoundsWidth, visualizeAOV (NONE, DEPTH,"
+    " ALBEDO, NORMAL, EDGES, OBJECT_ID, PRIMITIVE_ID, INSTANCE_ID),"
+    " depthVisualMinimum, depthVisualMaximum, edgeInvert";
+
+// Applies one `key=value` of viewport-settings; false with the reason on an
+// unknown key or a value the field cannot hold.
+bool applyViewportField(ViewportSettings &settings,
+    const std::string &key,
+    const std::string &value,
+    std::string &error)
+{
+  const auto badValue = [&] {
+    error = "not a valid " + key + ": " + value;
+    return false;
+  };
+  const auto flag = [&](bool &field) {
+    return parseBool(value, field) ? true : badValue();
+  };
+  const auto number = [&](float &field) {
+    double v = 0;
+    if (!parseDouble(value, v))
+      return badValue();
+    field = float(v);
+    return true;
+  };
+
+  if (key == "highlightSelection")
+    return flag(settings.highlightSelection);
+  if (key == "outlinePrimitives")
+    return flag(settings.outlinePrimitives);
+  if (key == "showWorldBounds")
+    return flag(settings.showWorldBounds);
+  if (key == "edgeInvert")
+    return flag(settings.edgeInvert);
+  if (key == "depthVisualMinimum")
+    return number(settings.depthVisualMinimum);
+  if (key == "depthVisualMaximum")
+    return number(settings.depthVisualMaximum);
+  if (key == "worldBoundsWidth") {
+    long long width = 0;
+    if (!parseInteger(value, width) || width < 0
+        || width > std::numeric_limits<int>::max())
+      return badValue();
+    settings.worldBoundsWidth = int(width);
+    return true;
+  }
+  if (key == "worldBoundsColor") {
+    std::stringstream list(value);
+    std::string item;
+    float rgba[4];
+    size_t n = 0;
+    while (std::getline(list, item, ',')) {
+      double v = 0;
+      if (n == 4 || !parseDouble(item, v))
+        return badValue();
+      rgba[n++] = float(v);
+    }
+    if (n != 4)
+      return badValue();
+    settings.worldBoundsColor = {rgba[0], rgba[1], rgba[2], rgba[3]};
+    return true;
+  }
+  if (key == "visualizeAOV") {
+    const auto aov = aovTypeFromString(upper(value));
+    if (!aov)
+      return badValue();
+    settings.visualizeAOV = *aov;
+    return true;
+  }
+  error = "unknown viewport setting '" + key
+      + "'; valid: " + VIEWPORT_SETTINGS_KEYS;
+  return false;
+}
+
 } // namespace
 
 // Construction ///////////////////////////////////////////////////////////////
@@ -661,6 +766,7 @@ const std::vector<std::string> &CommandRunner::assertNames()
       "project.cameraRigs",
       "project.colorMaps",
       "shot.<id>.<field>",
+      "shot.active.<field>",
       "dataset.<id>.<field>",
       "lightRig.<id>.name",
       "cameraRig.<id>.name",
@@ -678,11 +784,24 @@ const std::vector<std::string> &CommandRunner::assertNames()
       "frame.shotId",
       "frame.frame",
       "frames.received",
+      "frames.advanced",
+      "frames.maxStep",
       "frameConfig.width",
       "frameConfig.height",
       "param.<type>.<index>.<name>",
       "errors.received",
-      "lastError"};
+      "lastError",
+      "lastReplyError",
+      "warnings.received",
+      "lastWarning",
+      "pick.hit",
+      "pick.worldPosition",
+      "pick.objectType",
+      "pick.objectIndex",
+      "histogram.bins",
+      "histogram.min",
+      "histogram.max",
+      "histogram.total"};
   return names;
 }
 
@@ -705,7 +824,19 @@ const std::vector<std::string> &CommandRunner::commandHelp()
       "start-rendering              ask the server to stream frames",
       "stop-rendering               pause the stream",
       "await-frame [COUNT]          wait for COUNT (default 1) frames",
+      "await-frame-at FRAME         wait for a Frame whose header says frame FRAME",
+      "await-frame-advance [COUNT]  wait for COUNT (default 1) frames whose frame changed",
+      "await-warning                wait for the next TimeAdvanceWarning",
       "save-frame PATH.ppm          decode the last frame into a binary P6 PPM",
+      "set-time SHOT FRAME          scrub (one-way SetTime); SHOT is an id or `active`",
+      "pick X Y                     pick the pixel (x right, y down from the top-left) and",
+      "                             await the PickReply; sets $lastPickType $lastPickIndex",
+      "set-outline [TYPE INDEX|none]",
+      "                             outline that object (or clear the outline)",
+      "viewport-settings KEY=VALUE...",
+      "                             edit and send the whole ViewportSettings (keys below)",
+      "find-object TYPE [first|name=NAME]",
+      "                             set $lastObjectRef/$lastObjectType/$lastObjectIndex from the mirror",
       "set-param TYPE INDEX NAME ANARITYPE VALUE...",
       "                             edit a parameter (e.g. camera 0 fovy float32 0.9)",
       "remove-param TYPE INDEX NAME remove a parameter",
@@ -713,6 +844,9 @@ const std::vector<std::string> &CommandRunner::commandHelp()
       "                             set a transform node's matrix (column-major)",
       "dump-scene | dump-layers | dump-project | dump-frame",
       "                             print the mirror, replica or last frame header",
+      "viewport-settings keys: highlightSelection outlinePrimitives showWorldBounds",
+      "                             worldBoundsColor=r,g,b,a worldBoundsWidth visualizeAOV",
+      "                             depthVisualMinimum depthVisualMaximum edgeInvert",
       "assert VALUE OP RHS          OP in == != < <= > >= contains; VALUE one of the names below",
       "",
       "Project Ops (each sends one request, awaits its ProjectOpReply and prints it):",
@@ -727,6 +861,9 @@ const std::vector<std::string> &CommandRunner::commandHelp()
       "create-shot [NAME] | remove-shot ID | set-active-shot ID",
       "update-shot ID FIELD=VALUE...  (name, frameCount, fps, loop, currentFrame, lightRigId,",
       "                             cameraRigId, renderSettings.*, binding.<datasetId>=on|off)",
+      "set-playing SHOT on|off      start or stop playback; SHOT is an id or `active`",
+      "request-array-histogram TYPE INDEX BINS   (or TYPE:INDEX BINS)",
+      "                             bin a scalar array; prints bins= min= max=",
       "create-light-rig [NAME] | clone-light-rig ID | remove-light-rig ID | rename-light-rig ID NAME",
       "add-light RIG [SUBTYPE] | remove-light RIG LAYER NODE",
       "create-camera-rig [NAME] | remove-camera-rig ID | rename-camera-rig ID NAME",
@@ -816,8 +953,24 @@ CommandRunner::Failure CommandRunner::execute(Command command)
     return stopRendering(command);
   if (name == "await-frame")
     return awaitFrame(command, deadline);
+  if (name == "await-frame-at")
+    return awaitFrameAt(command, deadline);
+  if (name == "await-frame-advance")
+    return awaitFrameAdvance(command, deadline);
+  if (name == "await-warning")
+    return awaitWarning(command, deadline);
   if (name == "save-frame")
     return saveFrame(command);
+  if (name == "set-time")
+    return setTime(command);
+  if (name == "pick")
+    return pick(command, deadline);
+  if (name == "set-outline")
+    return setOutline(command);
+  if (name == "viewport-settings")
+    return viewportSettings(command);
+  if (name == "find-object")
+    return findObject(command);
   if (name == "set-param")
     return setParam(command);
   if (name == "remove-param")
@@ -1095,6 +1248,69 @@ CommandRunner::Failure CommandRunner::awaitFrame(
   return {};
 }
 
+CommandRunner::Failure CommandRunner::awaitFrameAt(
+    const Command &command, Deadline deadline)
+{
+  long long frame = 0;
+  if (command.args.size() != 1 || !parseInteger(command.args[0], frame))
+    return usageError(command, "<frame>");
+  if (m_session->state() != SessionState::Connected)
+    return std::string("not connected (") + toString(m_session->state()) + ")";
+  // Header fields are text in the record; the frame number compares as such.
+  const auto wanted = std::to_string(frame);
+  const auto wait = pumpUntilEvent(
+      [&](const Event &e) {
+        if (e.name != "Frame")
+          return false;
+        for (const auto &[key, value] : e.fields)
+          if (key == "frame")
+            return value == wanted;
+        return false;
+      },
+      deadline);
+  if (wait != Wait::Done)
+    return waitFailure(wait, "a Frame at frame " + wanted, deadline);
+  return {};
+}
+
+CommandRunner::Failure CommandRunner::awaitFrameAdvance(
+    const Command &command, Deadline deadline)
+{
+  unsigned long long count = 1;
+  if (command.args.size() > 1
+      || (!command.args.empty() && !parseNonNegative(command.args[0], count)))
+    return usageError(command, "[count]");
+  if (m_session->state() != SessionState::Connected)
+    return std::string("not connected (") + toString(m_session->state()) + ")";
+  // Counted by the session as frames are consumed: a header whose frame
+  // differs from the previous one's is one advance.
+  const size_t target = m_session->framesAdvanced() + count;
+  const auto wait = pumpUntil(
+      [&] { return m_session->framesAdvanced() >= target; }, deadline);
+  if (wait != Wait::Done) {
+    const auto seen = target - m_session->framesAdvanced();
+    return waitFailure(wait,
+        "frame advance " + std::to_string(count - seen + 1) + " of "
+            + std::to_string(count),
+        deadline);
+  }
+  return {};
+}
+
+CommandRunner::Failure CommandRunner::awaitWarning(
+    const Command &command, Deadline deadline)
+{
+  if (!command.args.empty())
+    return usageError(command, "");
+  if (m_session->state() != SessionState::Connected)
+    return std::string("not connected (") + toString(m_session->state()) + ")";
+  const auto wait = pumpUntilEvent(
+      [](const Event &e) { return e.name == "TimeAdvanceWarning"; }, deadline);
+  if (wait != Wait::Done)
+    return waitFailure(wait, "TimeAdvanceWarning", deadline);
+  return {};
+}
+
 CommandRunner::Failure CommandRunner::saveFrame(const Command &command)
 {
   if (command.args.size() != 1)
@@ -1178,6 +1394,178 @@ CommandRunner::Failure CommandRunner::setNodeTransform(const Command &command)
   if (!m_session->setNodeTransform(node, transform, &error))
     return error;
   return drainEvents();
+}
+
+// Playback and the viewport ///////////////////////////////////////////////////
+
+CommandRunner::Failure CommandRunner::setTime(const Command &command)
+{
+  long long frame = 0;
+  if (command.args.size() != 2 || !parseInteger(command.args[1], frame)
+      || frame < std::numeric_limits<int>::min()
+      || frame > std::numeric_limits<int>::max())
+    return usageError(command, "<shotId|active> <frame>");
+  std::string error;
+  const auto shotId = shotIdArgument(command.args[0], error);
+  if (!shotId)
+    return error;
+  // Optimistic and latest-wins: nothing to await. The rest snapshot the
+  // server debounces is await-snapshot's.
+  SetTime scrub;
+  scrub.shotId = *shotId;
+  scrub.frame = int(frame);
+  if (!m_session->send(scrub, &error))
+    return error;
+  return drainEvents();
+}
+
+CommandRunner::Failure CommandRunner::pick(
+    const Command &command, Deadline deadline)
+{
+  long long x = 0;
+  long long y = 0;
+  if (command.args.size() != 2 || !parseInteger(command.args[0], x)
+      || !parseInteger(command.args[1], y))
+    return usageError(command, "<x> <y>");
+  // Frame-header pixels, x right and y down from the top-left; the server
+  // clamps what lies outside the frame.
+  Pick request;
+  request.requestId = m_session->nextRequestId();
+  request.x = int(x);
+  request.y = int(y);
+  m_variables["lastRequestId"] = std::to_string(request.requestId);
+  std::string error;
+  if (!m_session->send(request, &error))
+    return error;
+
+  // A PickReply is a plain message, not a ProjectOpReply, but it is matched
+  // the same way: by the request id in its record.
+  const auto idText = std::to_string(request.requestId);
+  const PickReply *reply = nullptr;
+  const auto wait = pumpUntilEvent(
+      [&](const Event &event) {
+        if (event.name != "PickReply")
+          return false;
+        for (const auto &[key, value] : event.fields) {
+          if (key == "requestId" && value == idText) {
+            reply = m_session->pickReply(request.requestId);
+            return true;
+          }
+        }
+        return false;
+      },
+      deadline);
+  if (wait != Wait::Done)
+    return waitFailure(wait, "the PickReply to request " + idText, deadline);
+  if (!reply)
+    return "the PickReply to request " + idText + " did not decode";
+  m_lastPick = *reply;
+  // The identity feeds set-outline; a miss leaves the variables unset so a
+  // script that outlines what it did not hit FAILs by name.
+  if (reply->objectIdentity) {
+    m_variables["lastPickType"] = shortTypeName(reply->objectIdentity->type);
+    m_variables["lastPickIndex"] =
+        std::to_string(reply->objectIdentity->objectIndex);
+  } else {
+    m_variables.erase("lastPickType");
+    m_variables.erase("lastPickIndex");
+  }
+  return {};
+}
+
+CommandRunner::Failure CommandRunner::setOutline(const Command &command)
+{
+  SetOutline outline;
+  if (!(command.args.empty()
+          || (command.args.size() == 1 && lower(command.args[0]) == "none"))) {
+    SceneObjectRef ref;
+    size_t consumed = 0;
+    std::string error;
+    if (!parseObjectRefArgs(command.args, 0, ref, consumed, error)
+        || consumed != command.args.size())
+      return usageError(command, "[<type> <index> | <type:index> | none]");
+    outline.objectIdentity = ref;
+  }
+  std::string error;
+  if (!m_session->send(outline, &error))
+    return error;
+  return drainEvents();
+}
+
+CommandRunner::Failure CommandRunner::viewportSettings(const Command &command)
+{
+  // Edits land on the remembered copy, which goes out whole every time, so
+  // `viewport-settings visualizeAOV=DEPTH` then `... showWorldBounds=on`
+  // leaves both in force. With no edits the current copy is sent again.
+  auto settings = m_viewportSettings;
+  std::string error;
+  for (const auto &edit : command.args) {
+    const auto eq = edit.find('=');
+    if (eq == std::string::npos || eq == 0) {
+      return usageError(command,
+          ("<key>=<value>... with keys " + std::string(VIEWPORT_SETTINGS_KEYS))
+              .c_str());
+    }
+    if (!applyViewportField(
+            settings, edit.substr(0, eq), edit.substr(eq + 1), error))
+      return error;
+  }
+  if (!m_session->send(settings, &error))
+    return error;
+  m_viewportSettings = settings;
+  return drainEvents();
+}
+
+CommandRunner::Failure CommandRunner::findObject(const Command &command)
+{
+  if (command.args.empty() || command.args.size() > 2)
+    return usageError(command, "<type> [first|name=<name>]");
+  auto type = parseAnariType(command.args[0]);
+  if (!type || !anari::isObject(*type))
+    return "not a scene object type: " + command.args[0];
+  // Every array kind lives in the mirror's one array pool.
+  if (anari::isArray(*type))
+    type = ANARI_ARRAY;
+  std::optional<std::string> wanted;
+  if (command.args.size() == 2) {
+    const auto &selector = command.args[1];
+    if (selector.rfind("name=", 0) == 0)
+      wanted = selector.substr(5);
+    else if (selector != "first")
+      return usageError(command, "<type> [first|name=<name>]");
+  }
+  if (const auto pending = drainEvents())
+    return pending;
+
+  const vsr::scene::Object *found = nullptr;
+  forEachObjectPool(m_session->mirror().objectDB(),
+      [&](anari::DataType poolType, const auto &pool) {
+        if (poolType != *type)
+          return;
+        vsr::core::foreach_item_const(pool, [&](const vsr::scene::Object *obj) {
+          if (!obj || found)
+            return;
+          if (!wanted || obj->name() == *wanted)
+            found = obj;
+        });
+      });
+  if (!found) {
+    std::string what = "no " + shortTypeName(*type);
+    if (wanted)
+      what += " named \"" + *wanted + "\"";
+    return what + " in the mirror";
+  }
+  SceneObjectRef ref;
+  ref.type = *type;
+  ref.objectIndex = found->index();
+  m_variables["lastObjectRef"] = objectRefText(ref);
+  m_variables["lastObjectType"] = shortTypeName(*type);
+  m_variables["lastObjectIndex"] = std::to_string(ref.objectIndex);
+  printRecord("EVT Object type=" + shortTypeName(*type)
+      + " index=" + std::to_string(found->index()) + " subtype="
+      + found->subtype().str() + " name=" + quoted(found->name())
+      + " params=" + std::to_string(found->numParameters()));
+  return {};
 }
 
 // Inspection /////////////////////////////////////////////////////////////////
@@ -1389,8 +1777,10 @@ std::optional<std::string> CommandRunner::namedValue(
     }
     if (!project)
       return needProject();
-    const auto id = name.substr(prefix.size(), idEnd - prefix.size());
+    auto id = name.substr(prefix.size(), idEnd - prefix.size());
     const auto field = name.substr(idEnd + 1);
+    if (prefix == "shot." && id == "active")
+      id = project->activeShotId;
     const auto missing = [&](const char *what) -> std::optional<std::string> {
       error = name + ": the replica has no " + what + " '" + id + "'";
       return {};
@@ -1497,6 +1887,10 @@ std::optional<std::string> CommandRunner::namedValue(
     return frame ? std::optional(std::to_string(frame->frame)) : needFrame();
   if (name == "frames.received")
     return std::to_string(m_session->framesReceived());
+  if (name == "frames.advanced")
+    return std::to_string(m_session->framesAdvanced());
+  if (name == "frames.maxStep")
+    return std::to_string(m_session->frameMaxStep());
   if (name == "frameConfig.width")
     return std::to_string(m_session->frameConfig().width);
   if (name == "frameConfig.height")
@@ -1505,6 +1899,53 @@ std::optional<std::string> CommandRunner::namedValue(
     return std::to_string(m_session->errorsReceived());
   if (name == "lastError")
     return m_session->lastError();
+  if (name == "lastReplyError")
+    return m_session->lastReplyError();
+  if (name == "warnings.received")
+    return std::to_string(m_session->warningsReceived());
+  if (name == "lastWarning") {
+    const auto &warning = m_session->lastWarning();
+    return warning ? warning->message : std::string();
+  }
+  if (name.rfind("pick.", 0) == 0) {
+    if (!m_lastPick) {
+      error = name + ": no pick has been answered yet";
+      return {};
+    }
+    const auto field = name.substr(5);
+    const auto &identity = m_lastPick->objectIdentity;
+    if (field == "hit")
+      return std::string(boolText(m_lastPick->hit));
+    if (field == "worldPosition") {
+      const auto &p = m_lastPick->worldPosition;
+      return numberText(p.x) + " " + numberText(p.y) + " " + numberText(p.z);
+    }
+    if (field == "objectType")
+      return identity ? shortTypeName(identity->type) : std::string("none");
+    if (field == "objectIndex") {
+      return identity ? std::to_string(identity->objectIndex)
+                      : std::string("none");
+    }
+  }
+  if (name.rfind("histogram.", 0) == 0) {
+    if (!m_histogram) {
+      error = name + ": no histogram has been answered yet";
+      return {};
+    }
+    const auto field = name.substr(10);
+    if (field == "bins")
+      return std::to_string(m_histogram->bins.size());
+    if (field == "min")
+      return numberText(m_histogram->minValue);
+    if (field == "max")
+      return numberText(m_histogram->maxValue);
+    if (field == "total") {
+      uint64_t total = 0;
+      for (const auto count : m_histogram->bins)
+        total += count;
+      return std::to_string(total);
+    }
+  }
 
   if (name.rfind("param.", 0) == 0) {
     // param.<type>.<index>.<name>; the parameter name may itself hold dots.
@@ -1617,6 +2058,10 @@ CommandRunner::Failure CommandRunner::executeRequest(
   }
   if (name == "update-shot")
     return updateShot(command, deadline);
+  if (name == "set-playing")
+    return setPlaying(command, deadline);
+  if (name == "request-array-histogram")
+    return requestArrayHistogram(command, deadline);
 
   // Light rigs
   const auto lightRigCreated = [&] {
@@ -1978,6 +2423,52 @@ CommandRunner::Failure CommandRunner::updateShot(
   return sendRequest(std::move(request), deadline);
 }
 
+CommandRunner::Failure CommandRunner::setPlaying(
+    const Command &command, Deadline deadline)
+{
+  bool playing = false;
+  if (command.args.size() != 2 || !parseBool(command.args[1], playing))
+    return usageError(command, "<shotId|active> on|off");
+  std::string error;
+  const auto shotId = shotIdArgument(command.args[0], error);
+  if (!shotId)
+    return error;
+  SetPlaying request;
+  request.shotId = *shotId;
+  request.playing = playing;
+  return sendRequest(std::move(request), deadline);
+}
+
+CommandRunner::Failure CommandRunner::requestArrayHistogram(
+    const Command &command, Deadline deadline)
+{
+  RequestArrayHistogram request;
+  size_t consumed = 0;
+  std::string error;
+  unsigned long long bins = 0;
+  if (!parseObjectRefArgs(command.args, 0, request.array, consumed, error)
+      || command.args.size() != consumed + 1
+      || !parseNonNegative(command.args[consumed], bins)
+      || bins > std::numeric_limits<uint32_t>::max())
+    return usageError(command, "<type> <index> <bins>  (or <type:index> <bins>)");
+  request.binCount = uint32_t(bins);
+  m_histogram.reset();
+  return sendRequest(std::move(request),
+      deadline,
+      [this](const ProjectOpReply &reply,
+          Event &event,
+          std::vector<Event> &) -> Failure {
+        const auto result = results<ArrayHistogramResult>(reply);
+        if (!result)
+          return "the reply carries no ArrayHistogramResult";
+        event.fields.emplace_back("bins", std::to_string(result->bins.size()));
+        event.fields.emplace_back("min", numberText(result->minValue));
+        event.fields.emplace_back("max", numberText(result->maxValue));
+        m_histogram = *result;
+        return {};
+      });
+}
+
 CommandRunner::Failure CommandRunner::addLight(
     const Command &command, Deadline deadline)
 {
@@ -2298,15 +2789,26 @@ std::optional<std::string> CommandRunner::variable(
 const Shot *CommandRunner::replicaShot(
     const std::string &id, std::string &error) const
 {
+  const auto resolved = shotIdArgument(id, error);
+  if (!resolved)
+    return nullptr;
+  const auto *shot = project::findShot(*m_session->project(), *resolved);
+  if (!shot)
+    error = "the replica has no shot '" + *resolved + "'";
+  return shot;
+}
+
+std::optional<std::string> CommandRunner::shotIdArgument(
+    const std::string &text, std::string &error) const
+{
   const auto *project = m_session->project();
   if (!project) {
     error = "no Project Replica";
-    return nullptr;
+    return {};
   }
-  const auto *shot = project::findShot(*project, id);
-  if (!shot)
-    error = "the replica has no shot '" + id + "'";
-  return shot;
+  if (text == "active")
+    return project->activeShotId;
+  return text;
 }
 
 // Pumping and output /////////////////////////////////////////////////////////

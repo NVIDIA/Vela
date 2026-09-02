@@ -7,9 +7,11 @@
 #include "TestSession.h"
 // vsr_scivis_studio_protocol
 #include "BrowseMessages.h"
+#include "PlaybackMessages.h"
 #include "ProjectOpReply.h"
 #include "ProjectRequests.h"
 #include "StudioEndpoint.h"
+#include "ViewportMessages.h"
 // vsr_core
 #include "vsr/core/FlatMap.hpp"
 // std
@@ -50,16 +52,18 @@ struct RunnerOptions
  * as the session consumes it. Every line is one record, so a shell script or
  * a reader can grep the output.
  *
- * The command vocabulary is the server surface through milestone 5: session
+ * The command vocabulary is the server surface through milestone 6: session
  * (connect, disconnect, shutdown, ping, expect-pong, await-lost, reconnect,
  * sleep, expect-error, send-raw), rendering (set-frame-config, set-encodings,
  * start-rendering, stop-rendering, await-frame, save-frame), scene edits
  * (set-param, remove-param, set-node-transform), one request command per
  * Project Op, Remote Browse and task message (new-project, create-shot,
- * list-directory, cancel-task, ...), the waits that go with them (await-task,
- * await-snapshot, await-reply), inspection (dump-scene, dump-layers,
- * dump-project, dump-frame) and `assert <value> <op> <rhs>` over the named
- * values assertNames() lists. Waiting commands take a trailing `timeout=<ms>`
+ * list-directory, cancel-task, set-playing, request-array-histogram, ...),
+ * the waits that go with them (await-task, await-snapshot, await-reply),
+ * playback and the viewport (set-time, await-frame-at, await-frame-advance,
+ * await-warning, pick, set-outline, viewport-settings), inspection
+ * (dump-scene, dump-layers, dump-project, dump-frame, find-object) and
+ * `assert <value> <op> <rhs>` over the named values assertNames() lists. Waiting commands take a trailing `timeout=<ms>`
  * and FAIL as soon as the connection is Lost. An Error the server sends while
  * any command but expect-error runs FAILs that command: only Project Ops
  * carry request ids, so for everything else the command in flight is the best
@@ -141,6 +145,14 @@ struct CommandRunner
   Failure stopRendering(const Command &);
   Failure awaitFrame(const Command &, Deadline);
   Failure saveFrame(const Command &);
+  Failure awaitFrameAt(const Command &, Deadline);
+  Failure awaitFrameAdvance(const Command &, Deadline);
+  Failure awaitWarning(const Command &, Deadline);
+  Failure setTime(const Command &);
+  Failure pick(const Command &, Deadline);
+  Failure setOutline(const Command &);
+  Failure viewportSettings(const Command &);
+  Failure findObject(const Command &);
   Failure setParam(const Command &);
   Failure removeParam(const Command &);
   Failure setNodeTransform(const Command &);
@@ -161,6 +173,8 @@ struct CommandRunner
   Failure discoverDatasetCandidates(const Command &, Deadline);
   Failure incorporateDatasetCandidate(const Command &, Deadline);
   Failure updateShot(const Command &, Deadline);
+  Failure setPlaying(const Command &, Deadline);
+  Failure requestArrayHistogram(const Command &, Deadline);
   Failure addLight(const Command &, Deadline);
   Failure removeLight(const Command &, Deadline);
   Failure listRoots(const Command &, Deadline);
@@ -212,8 +226,13 @@ struct CommandRunner
   Describe taskStarted();
   // The value a `$name` expands to; empty when there is no such variable.
   std::optional<std::string> variable(const std::string &name) const;
-  // The replica's Shot with that id, or null with the reason.
+  // The replica's Shot with that id (`active` names the active shot), or
+  // null with the reason.
   const Shot *replicaShot(const std::string &id, std::string &error) const;
+  // The shot id a command named, `active` resolved through the replica;
+  // empty with the reason when there is no replica to resolve it against.
+  std::optional<std::string> shotIdArgument(
+      const std::string &text, std::string &error) const;
 
   // The current text of a named value; empty with the reason when it is
   // unknown or not available yet (no frame, no replica, ...).
@@ -263,6 +282,12 @@ struct CommandRunner
   size_t m_snapshotMark{0};
   // What the last list-directory returned (`browse.entries`).
   std::vector<protocol::DirectoryEntry> m_browseEntries;
+  // The last ViewportSettings sent: every viewport-settings command edits
+  // this copy and sends it whole, so the commands compose.
+  protocol::ViewportSettings m_viewportSettings;
+  // The reply of the last pick, and the result of the last ok histogram.
+  std::optional<protocol::PickReply> m_lastPick;
+  std::optional<protocol::ArrayHistogramResult> m_histogram;
 };
 
 } // namespace vsr::scivis_studio::test_client
