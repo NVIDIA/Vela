@@ -54,6 +54,7 @@ struct ForestNode
 
   Ref insert_first_child(T &&v);
   Ref insert_last_child(T &&v);
+  Ref insert_last_child_at(size_t index, T &&v);
 
   void erase_subtree();
   void erase_self(); // remove this node from the forest
@@ -165,6 +166,10 @@ struct Forest
 
   NodeRef insert_first_child(NodeRef n, T &&v);
   NodeRef insert_last_child(NodeRef n, T &&v);
+  // Append a child that occupies node slot `index`, so a forest rebuilt from
+  // a record of another forest keeps that forest's node indices; returns an
+  // invalid ref when the slot is occupied.
+  NodeRef insert_last_child_at(NodeRef n, size_t index, T &&v);
 
   void erase(NodeRef n);
   void erase_subtree(NodeRef n);
@@ -197,6 +202,8 @@ struct Forest
   void traverse_impl_const(
       NodeRef n, ForestVisitor<T> &visitor, int level) const;
   NodeRef make_ForestNode(T &&v);
+  NodeRef make_ForestNode_at(size_t index, T &&v);
+  void link_last_child(NodeRef n, NodeRef newForestNode);
 
   ObjectPool<ForestNode<T>> m_nodes;
   NodeRef m_root;
@@ -328,6 +335,16 @@ inline typename ForestNode<T>::Ref ForestNode<T>::insert_last_child(T &&v)
 {
   if (auto *f = forest(); f != nullptr)
     return f->insert_last_child(self(), std::forward<T>(v));
+  else
+    return {};
+}
+
+template <typename T>
+inline typename ForestNode<T>::Ref ForestNode<T>::insert_last_child_at(
+    size_t index, T &&v)
+{
+  if (auto *f = forest(); f != nullptr)
+    return f->insert_last_child_at(self(), index, std::forward<T>(v));
   else
     return {};
 }
@@ -469,6 +486,25 @@ inline typename Forest<T>::NodeRef Forest<T>::insert_last_child(
     Forest<T>::NodeRef n, T &&v)
 {
   auto newForestNode = make_ForestNode(std::forward<T>(v));
+  link_last_child(n, newForestNode);
+  return newForestNode;
+}
+
+template <typename T>
+inline typename Forest<T>::NodeRef Forest<T>::insert_last_child_at(
+    Forest<T>::NodeRef n, size_t index, T &&v)
+{
+  auto newForestNode = make_ForestNode_at(index, std::forward<T>(v));
+  if (!newForestNode)
+    return {};
+  link_last_child(n, newForestNode);
+  return newForestNode;
+}
+
+template <typename T>
+inline void Forest<T>::link_last_child(
+    Forest<T>::NodeRef n, Forest<T>::NodeRef newForestNode)
+{
   newForestNode->m_parent = n;
   newForestNode->m_prev = n->m_children_end;
   newForestNode->m_next = n->self();
@@ -477,7 +513,6 @@ inline typename Forest<T>::NodeRef Forest<T>::insert_last_child(
   else
     n->m_children_end->m_next = newForestNode;
   n->m_children_end = newForestNode;
-  return newForestNode;
 }
 
 template <typename T>
@@ -763,6 +798,19 @@ template <typename T>
 inline typename Forest<T>::NodeRef Forest<T>::make_ForestNode(T &&v)
 {
   auto n = m_nodes.emplace(std::forward<T>(v), this);
+  n->m_self = n;
+  n->m_children_end = n;
+  n->m_children_begin = n;
+  return n;
+}
+
+template <typename T>
+inline typename Forest<T>::NodeRef Forest<T>::make_ForestNode_at(
+    size_t index, T &&v)
+{
+  auto n = m_nodes.emplace_at(index, std::forward<T>(v), this);
+  if (!n)
+    return {};
   n->m_self = n;
   n->m_children_end = n;
   n->m_children_begin = n;

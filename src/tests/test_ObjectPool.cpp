@@ -201,3 +201,75 @@ SCENARIO("vsr::core::ObjectPool defragmentation", "[ObjectPool]")
     }
   }
 }
+
+SCENARIO("vsr::core::ObjectPool placement at a chosen slot", "[ObjectPool]")
+{
+  GIVEN("A pool holding one value")
+  {
+    vsr::core::ObjectPool<std::string> pool;
+    pool.insert("zero");
+
+    WHEN("A value is placed beyond the current capacity")
+    {
+      auto ref = pool.insert_at(3, "three");
+
+      THEN("It lands in that slot and the gap stays empty")
+      {
+        REQUIRE(ref);
+        REQUIRE(ref.index() == 3);
+        REQUIRE(*ref == "three");
+        REQUIRE(pool.capacity() == 4);
+        REQUIRE(pool.size() == 2);
+        REQUIRE(pool.slot_empty(1));
+        REQUIRE(pool.slot_empty(2));
+        REQUIRE(!pool.at(1));
+        REQUIRE(pool.at(3) == ref);
+      }
+
+      THEN("The gap slots are recycled by later plain inserts")
+      {
+        auto a = pool.insert("a");
+        auto b = pool.insert("b");
+        REQUIRE(a.index() < 3);
+        REQUIRE(b.index() < 3);
+        REQUIRE(a.index() != b.index());
+        REQUIRE(pool.is_dense());
+      }
+
+      THEN("A gap slot can be filled by index as well")
+      {
+        auto one = pool.emplace_at(1, "one");
+        REQUIRE(one);
+        REQUIRE(one.index() == 1);
+        REQUIRE(pool.size() == 3);
+        auto next = pool.insert("next");
+        REQUIRE(next.index() == 2);
+        REQUIRE(pool.is_dense());
+      }
+
+      THEN("An occupied slot refuses the placement")
+      {
+        REQUIRE(!pool.insert_at(0, "clash"));
+        REQUIRE(!pool.insert_at(3, "clash"));
+        REQUIRE(*pool.at(0) == "zero");
+        REQUIRE(*pool.at(3) == "three");
+        REQUIRE(pool.size() == 2);
+      }
+    }
+
+    WHEN("A slot freed by erase is filled by index")
+    {
+      pool.insert("one");
+      pool.insert("two");
+      pool.erase(1);
+      auto ref = pool.insert_at(1, "again");
+
+      THEN("The pool is dense once more")
+      {
+        REQUIRE(ref.index() == 1);
+        REQUIRE(pool.is_dense());
+        REQUIRE(pool.size() == 3);
+      }
+    }
+  }
+}
