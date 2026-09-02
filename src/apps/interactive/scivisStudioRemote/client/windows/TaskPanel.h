@@ -12,11 +12,15 @@ namespace vsr::scivis_studio::client {
 
 /*
  * The Server Tasks this client knows about, one row per TaskRecord: label,
- * state, progress (indeterminate while the server reports no total), the
- * last message, and the error of a failed task. Cancel is offered only for a
- * Queued task -- the running one cannot be interrupted in this milestone --
- * and "Clear finished" drops completed and failed rows. Records are the
- * connection's; disconnecting empties the panel.
+ * state, progress (determinate when the server reports a total, as a render
+ * does per frame), the last message plus the frame count of a finished
+ * render, and the error of a failed task. Cancel is offered for Queued and
+ * Running tasks alike; the server decides (a queued task is removed, a
+ * running render stops at its next frame, anything else is refused with a
+ * toast). "Clear finished" drops completed and failed rows. Records are the
+ * connection's; disconnecting empties the panel, a reconnect fails the open
+ * ones with "connection lost" and the bootstrap's replay revives what the
+ * server still knows.
  */
 struct TaskPanel : public vsr::ui::imgui::Window
 {

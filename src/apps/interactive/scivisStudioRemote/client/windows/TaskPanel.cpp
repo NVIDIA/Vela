@@ -10,6 +10,7 @@
 #include <imgui.h>
 // std
 #include <algorithm>
+#include <string>
 
 namespace vsr::scivis_studio::client {
 
@@ -86,7 +87,9 @@ void TaskPanel::buildUI()
       } else {
         const float fraction =
             float(double(progress.current) / double(progress.total));
-        ImGui::ProgressBar(fraction);
+        const std::string overlay = std::to_string(progress.current) + "/"
+            + std::to_string(progress.total);
+        ImGui::ProgressBar(fraction, ImVec2(-FLT_MIN, 0.f), overlay.c_str());
       }
       break;
     case TaskState::Completed:
@@ -98,13 +101,18 @@ void TaskPanel::buildUI()
     }
 
     ImGui::TableNextColumn();
-    if (task.state == TaskState::Failed)
+    if (task.state == TaskState::Failed) {
       ImGui::TextColored(ui::ERROR_TEXT_COLOR, "%s", task.error.c_str());
-    else
+    } else if (task.framesCompleted != 0) {
+      ImGui::TextWrapped("%llu frames  %s",
+          static_cast<unsigned long long>(task.framesCompleted),
+          progress.message.c_str());
+    } else {
       ImGui::TextWrapped("%s", progress.message.c_str());
+    }
 
     ImGui::TableNextColumn();
-    if (task.state == TaskState::Queued) {
+    if (!task.finished()) {
       ImGui::BeginDisabled(!canCancel);
       if (ImGui::SmallButton("Cancel"))
         ops.cancelTask(task.taskId, m_context->errorReporter());

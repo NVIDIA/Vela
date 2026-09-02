@@ -19,7 +19,9 @@ namespace vsr::scivis_studio::client {
  * Replica and sends Project Ops; it never mutates the replica (nothing is
  * applied optimistically) and never touches ProjectContext or files. The
  * body is disabled whenever the connection cannot take requests (Lost,
- * bootstrapping), and shows a hint instead of a project while there is none.
+ * bootstrapping), shows a hint instead of a project while there is none, and
+ * a note while a render this client launched is queued or running (the
+ * server refuses edits until it ends).
  *
  * Subclasses draw the editor in buildEditorUI() and their popups (confirm
  * dialogs, the Remote Browse dialog) in buildPopups(), which runs outside

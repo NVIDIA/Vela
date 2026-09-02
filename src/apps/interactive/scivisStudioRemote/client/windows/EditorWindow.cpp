@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "EditorWindow.h"
+// scivisStudioClient
+#include "UICommon.h"
 // vsr_scivis_studio_model
 #include "Project.h"
 // imgui
@@ -23,6 +25,10 @@ void EditorWindow::buildUI()
     ImGui::TextDisabled("Not connected");
     return;
   }
+
+  if (m_context->renderInProgress())
+    ui::warningText(
+        "Render in progress: the server refuses edits until it ends");
 
   ImGui::BeginDisabled(!canSend());
   buildEditorUI(*project);

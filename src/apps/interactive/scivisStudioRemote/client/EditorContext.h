@@ -48,6 +48,10 @@ struct EditorContext
   // Connected, bootstrapped and holding a replica: the only time an editor
   // may send. Lost and bootstrapping leave the panels read-only.
   bool canSend() const;
+  // A render this client launched is queued or running: the server refuses
+  // every mutating request with "render in progress" until it ends, so the
+  // editors say so up front (the refusal still surfaces as a toast).
+  bool renderInProgress() const;
   // A ReplyCallback that reports a failed reply's error and nothing else.
   ReplyCallback errorReporter() const;
   void error(const std::string &message) const;
