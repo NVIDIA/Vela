@@ -5,6 +5,7 @@
 # delegate, Project Replica, Project Ops and Server Task tracking. No vsr_ui_imgui dependency so it stays unit
 # testable; the scivisStudioClient executable builds on it below.
 add_library(vsr_scivis_studio_client_core OBJECT
+  ArchiveRenameFollowUp.cpp
   MirrorUpdateDelegate.cpp
   ProjectOps.cpp
   ReplicaView.cpp

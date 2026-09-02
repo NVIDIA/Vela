@@ -3,16 +3,15 @@
 
 #pragma once
 
-// vsr_scivis_studio_client
+// scivisStudioClient
 #include "EditorContext.h"
 #include "RemoteBrowseDialog.h"
-// vsr_scivis_studio_model
-#include "Dataset.h"
+// vsr_scivis_studio_client_core
+#include "ArchiveRenameFollowUp.h"
 // vsr_ui_imgui
 #include "vsr/ui/imgui/modals/Modal.h"
 // std
 #include <string>
-#include <vector>
 
 namespace vsr::scivis_studio::client {
 
@@ -47,16 +46,8 @@ struct AddStaticDatasetDialog : public vsr::ui::imgui::Modal
   std::string m_error;
   RequestHandle m_pending;
   RemoteBrowseDialog m_browse;
-
-  // Archive load awaiting its rename: the dataset ids before the load, the
-  // task, and the name to apply.
-  struct ArchiveRename
-  {
-    uint64_t taskId{0};
-    std::vector<DatasetID> datasetIdsBefore;
-    std::string name;
-  };
-  std::optional<ArchiveRename> m_archiveRename;
+  // The archive load awaiting its rename, if any.
+  ArchiveRenameFollowUp m_archiveRename;
 };
 
 } // namespace vsr::scivis_studio::client

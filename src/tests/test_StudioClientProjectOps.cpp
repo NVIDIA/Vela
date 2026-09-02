@@ -6,6 +6,7 @@
 #include "StudioRemoteTestHelpers.h"
 #include "catch.hpp"
 // vsr_scivis_studio_client_core
+#include "ArchiveRenameFollowUp.h"
 #include "ProjectOps.h"
 #include "ReplicaView.h"
 #include "ServerConnection.h"
@@ -795,6 +796,95 @@ SCENARIO("ServerConnection applies snapshots outside the bootstrap",
         REQUIRE(pollUntil(
             f.connection, [&] { return f.connection.uiState() != nullptr; }));
         REQUIRE(f.connection.uiState()->root().child("layout"));
+      }
+    }
+  }
+}
+
+SCENARIO("ArchiveRenameFollowUp names the dataset an archive load adds",
+    "[StudioClient]")
+{
+  GIVEN("a connected client that submits a LoadDatasetArchive with a name")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+    REQUIRE(f.connection.project()->datasets.empty());
+
+    // What the dialog does on submit: copy the ids, send, arm on the reply.
+    ArchiveRenameFollowUp follow;
+    const auto idsBefore =
+        ArchiveRenameFollowUp::datasetIds(f.connection.project());
+    f.ops().loadDatasetArchive("/data/a.vsr",
+        [&](const ProjectOpReply &reply,
+            const std::optional<TaskStartedResult> &started) {
+          if (reply.ok && started)
+            follow.arm(started->taskId, idsBefore, "Typed");
+        });
+    REQUIRE(f.waitForRequests(1));
+    const auto load = f.requests().front();
+    REQUIRE(load.type == StudioMessageType::LoadDatasetArchive);
+
+    WHEN("a snapshot replaces the replica before the reply arrives")
+    {
+      ProjectSnapshot unrelated;
+      unrelated.project.name = "fake project";
+      f.server.send(encode(unrelated));
+      REQUIRE(pollUntil(f.connection, [&] { return f.projectReplaced == 2; }));
+
+      auto reply = makeOkReply(load.requestId);
+      setResults(reply, TaskStartedResult{3});
+      f.server.send(encode(reply));
+      REQUIRE(pollUntil(f.connection, [&] { return follow.armed(); }));
+
+      AND_WHEN("the snapshot after the load shows one new dataset")
+      {
+        ProjectSnapshot loaded;
+        loaded.project.name = "fake project";
+        Dataset dataset;
+        dataset.id = "dataset_0001";
+        dataset.name = "as stored in the archive";
+        loaded.project.datasets.push_back(dataset);
+        f.server.send(encode(loaded));
+        REQUIRE(
+            pollUntil(f.connection, [&] { return f.projectReplaced == 3; }));
+
+        const auto sent =
+            follow.apply(*f.connection.project(), f.ops(), [](const auto &) {});
+
+        THEN("RenameDataset goes out for that id with the typed name")
+        {
+          REQUIRE(sent.valid());
+          REQUIRE_FALSE(follow.armed());
+          REQUIRE(f.waitForRequests(2));
+          const auto rename = f.requests().back();
+          REQUIRE(rename.type == StudioMessageType::RenameDataset);
+          const auto decoded = decode<RenameDataset>(rename.raw);
+          REQUIRE(decoded);
+          REQUIRE(decoded->datasetId == "dataset_0001");
+          REQUIRE(decoded->newName == "Typed");
+        }
+      }
+
+      AND_WHEN("the task fails instead")
+      {
+        TaskFailed failed;
+        failed.taskId = 3;
+        failed.error = "no such archive";
+        f.server.send(encode(failed));
+        REQUIRE(pollUntil(f.connection, [&] {
+          const auto *task = f.ops().task(3);
+          return task && task->state == TaskState::Failed;
+        }));
+        const auto sent =
+            follow.apply(*f.connection.project(), f.ops(), [](const auto &) {});
+
+        THEN("the follow-up is dropped and nothing is sent")
+        {
+          REQUIRE_FALSE(sent.valid());
+          REQUIRE_FALSE(follow.armed());
+          REQUIRE(f.requests().size() == 1);
+        }
       }
     }
   }
