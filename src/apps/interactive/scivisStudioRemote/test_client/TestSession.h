@@ -164,8 +164,9 @@ struct TestSession
       int port,
       std::chrono::milliseconds deadline,
       std::string *error = nullptr);
-  // connect() again to the last host and port: a fresh handshake and
-  // Bootstrap that wholesale-replace mirror and replica.
+  // connect() again to the last host and port, retrying refused attempts
+  // until the deadline: a fresh handshake and Bootstrap that wholesale-replace
+  // mirror and replica.
   bool reconnect(
       std::chrono::milliseconds deadline, std::string *error = nullptr);
   // Sends Disconnect, closes, clears mirror and replica -> Disconnected.

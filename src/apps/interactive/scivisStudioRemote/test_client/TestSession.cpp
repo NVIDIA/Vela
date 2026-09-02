@@ -34,6 +34,8 @@ namespace {
 // Bound on flushing a courtesy Disconnect before the socket closes.
 constexpr std::chrono::milliseconds COURTESY_SEND_TIMEOUT{200};
 constexpr std::chrono::milliseconds POLL_INTERVAL{1};
+// Between reconnect attempts a restarting server refuses.
+constexpr std::chrono::milliseconds RECONNECT_PAUSE{100};
 constexpr const char *BUILD_INFO = "scivisStudioTestClient";
 
 std::string endpointText(const std::string &host, int port)
@@ -233,7 +235,19 @@ bool TestSession::reconnect(
       *error = "never connected: nothing to reconnect to";
     return false;
   }
-  return connect(m_host, m_port, deadline, error);
+  // Lost is auto-retrying (CONTEXT.md): a server still coming back refuses
+  // at once, so attempts repeat until the deadline, each bounded by what is
+  // left of it.
+  const auto end = Clock::now() + deadline;
+  while (true) {
+    const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+        end - Clock::now());
+    if (connect(m_host, m_port, std::max(left, {}), error))
+      return true;
+    if (Clock::now() + RECONNECT_PAUSE >= end)
+      return false;
+    std::this_thread::sleep_for(RECONNECT_PAUSE);
+  }
 }
 
 void TestSession::disconnect()
@@ -255,13 +269,7 @@ bool TestSession::shutdown(
   send(encode(Shutdown{}));
   m_phase = Phase::Closing;
 
-  const auto end = Clock::now() + deadline;
-  while (m_phase == Phase::Closing && Clock::now() < end) {
-    poll();
-    std::this_thread::sleep_for(POLL_INTERVAL);
-  }
-  poll();
-  if (m_phase != Phase::Closing)
+  if (pollUntil([&] { return m_phase != Phase::Closing; }, deadline))
     return true;
 
   // The server kept the socket open; we still meant to leave.

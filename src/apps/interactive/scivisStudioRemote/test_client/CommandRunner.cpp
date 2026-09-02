@@ -543,7 +543,7 @@ const std::vector<std::string> &CommandRunner::commandHelp()
       "ping                         send Ping",
       "expect-pong                  the next server message (Frames aside) must be a Pong",
       "await-lost                   wait until the connection is Lost",
-      "reconnect                    connect again to the last host and port",
+      "reconnect                    connect again to the last host and port, retrying until the deadline",
       "sleep MS                     keep polling for MS milliseconds",
       "expect-error [SUBSTRING]     the next server message (Frames aside) must be an Error",
       "send-raw TYPE [HEX ...]      send a message of type byte TYPE with raw payload bytes",

@@ -66,7 +66,7 @@ its Error is to land on it.
 | `ping` | send Ping; the Pong is for `expect-pong` |
 | `expect-pong` | the next non-Frame server message must be a Pong |
 | `await-lost` | wait until the connection is Lost (mirror and replica stay as a frozen view) |
-| `reconnect` | connect again to the last host and port; a fresh handshake and Bootstrap |
+| `reconnect` | connect again to the last host and port, retrying refused attempts until its deadline (a server being restarted refuses at once); a fresh handshake and Bootstrap |
 | `sleep MS` | keep polling (events still print) for MS milliseconds; a loss meanwhile is the next command's to notice. MS, like every `timeout=MS`, must fit a deadline |
 | `expect-error [SUBSTRING]` | the next server message other than a Frame or a liveness Pong must be an Error, containing SUBSTRING if given |
 | `send-raw TYPE [HEX ...]` | send a message of type byte TYPE (0..255) with the given payload bytes, verbatim |
@@ -178,10 +178,13 @@ test_client/scenarios/run_scenario.sh build/scivisStudioServer \
   build/scivisStudioTestClient test_client/scenarios/frames_raw.studio
 ```
 
-`loss.studio` starts with the hint `# runner: kill-restart-after 3`: once the
-client has printed three `OK` records the runner kills the server (SIGKILL)
-and starts a new one on the same port, which is what the script's
-`await-lost` and `reconnect` need. Run without the runner, `await-lost`
+`loss.studio` carries the hint `# runner: kill-restart-after 3` in its
+opening comment block: once the client has printed three `OK` records the
+runner kills the server (SIGKILL) and starts a new one on the same port,
+which is what the script's `await-lost` and `reconnect` need. The runner
+gives the restarted server 30 s to reach `Listening on port` and the
+script's `reconnect timeout=45000` outlasts that, retrying while the port is
+refused, so no fixed sleep is involved. Run without the runner, `await-lost`
 FAILs after its deadline because nothing kills the server.
 
 ### Under ctest

@@ -905,27 +905,34 @@ SCENARIO(
         REQUIRE(lost.records.back().rfind("FAIL ping", 0) == 0);
         REQUIRE(lost.records.back().find("Lost") != std::string::npos);
 
-        AND_THEN("reconnect bootstraps from a restarted server")
+        AND_THEN("reconnect retries until a restarted server listens")
         {
-          server = std::make_unique<RunningServer>(int(port));
-          REQUIRE(server->started);
-          REQUIRE(server->port() == port);
-
+          // The server comes back while reconnect is already being refused.
+          std::thread restarter([&] {
+            std::this_thread::sleep_for(500ms);
+            server = std::make_unique<RunningServer>(int(port));
+          });
           const auto back = runScript(session,
-              "reconnect\n"
+              "reconnect timeout=20000\n"
               "assert state == Connected\n"
               "assert scene.objects > 0\n"
               "ping\n"
+              "expect-pong\n"
               "shutdown\n"
               "assert state == Disconnected\n"
-              "reconnect\n");
+              "reconnect timeout=300\n");
+          restarter.join();
+          REQUIRE(server->started);
           REQUIRE_FALSE(back.ok);
-          REQUIRE(hasLine(back.records, "OK reconnect"));
+          REQUIRE(hasLine(back.records, "OK reconnect timeout=20000"));
           REQUIRE(hasLine(back.records, "OK assert state == Connected"));
-          REQUIRE(hasLine(back.records, "OK ping"));
+          REQUIRE(hasLine(back.records, "OK expect-pong"));
           REQUIRE(hasLine(back.records, "OK shutdown"));
           REQUIRE(hasLine(back.records, "OK assert state == Disconnected"));
-          REQUIRE(back.records.back().rfind("FAIL reconnect", 0) == 0);
+          REQUIRE(
+              back.records.back().rfind("FAIL reconnect timeout=300", 0) == 0);
+          REQUIRE(
+              back.records.back().find("connect failed") != std::string::npos);
           REQUIRE(waitFor([&] { return server->finished.load(); }));
         }
       }
