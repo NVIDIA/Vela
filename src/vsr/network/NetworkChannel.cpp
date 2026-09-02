@@ -167,10 +167,13 @@ void NetworkChannel::read_header()
 
   auto message = std::make_shared<Message>();
   auto self = shared_from_this();
+  const auto generation = m_socketGeneration;
   asio::async_read(m_socket,
       asio::buffer(&message->header, sizeof(Message::Header)),
-      [this, self, message](const boost::system::error_code &error,
+      [this, self, message, generation](const boost::system::error_code &error,
           std::size_t bytes_transferred) {
+        if (generation != m_socketGeneration)
+          return; // a cut-off read on a socket since replaced
         log_asio_error(error, "ReadHeader");
         if (!error)
           read_payload(message); // Read next message
@@ -195,10 +198,13 @@ void NetworkChannel::read_payload(std::shared_ptr<Message> msg)
   msg->payload.resize(msg->header.payload_length);
 
   auto self = shared_from_this();
+  const auto generation = m_socketGeneration;
   asio::async_read(m_socket,
       asio::buffer(msg->payload.data(), msg->header.payload_length),
-      [this, self, msg](const boost::system::error_code &error,
+      [this, self, msg, generation](const boost::system::error_code &error,
           std::size_t bytes_transferred) {
+        if (generation != m_socketGeneration)
+          return;
         log_asio_error(error, "ReadPayload");
         if (!error) {
           invoke_handler(msg);
@@ -244,6 +250,7 @@ void NetworkChannel::log_asio_error(
 
 void NetworkChannel::notify_connected()
 {
+  ++m_socketGeneration;
   m_disconnectReported.store(false);
   ConnectHandler handler;
   {
@@ -304,9 +311,18 @@ void NetworkChannel::start_next_write()
   }
 
   auto self = shared_from_this();
+  const auto generation = m_socketGeneration;
   asio::async_write(m_socket,
       asio::buffer(pending->wireData),
-      [self, pending](const boost::system::error_code &error, std::size_t) {
+      [self, pending, generation](
+          const boost::system::error_code &error, std::size_t) {
+        if (generation != self->m_socketGeneration) {
+          // The socket was replaced under this write; its queue was failed
+          // with it, so only the promise (if still open) needs settling.
+          self->complete_write(
+              pending, error ? error : asio::error::operation_aborted);
+          return;
+        }
         {
           std::lock_guard lock(self->m_writeMutex);
           if (!self->m_pendingWrites.empty()
@@ -404,6 +420,15 @@ void NetworkServer::start_accept()
         if (!error) {
           vsr::core::logStatus("[NetworkServer] New connection from %s",
               socket->remote_endpoint().address().to_string().c_str());
+          if (m_socket.is_open()) {
+            // A second client over a live one: the first connection ends
+            // here, reported before the new one is announced, instead of
+            // dying silently under the move below.
+            vsr::core::logWarning(
+                "[NetworkServer] New connection replaces the current one");
+            fail_pending_writes(asio::error::connection_aborted);
+            close_socket(asio::error::connection_aborted);
+          }
           m_socket = std::move(*socket);
           notify_connected();
           read_header();

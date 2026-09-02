@@ -85,6 +85,8 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
   void notify_connected();
   // Closes the socket (if open) and runs the disconnect handler once.
   void close_socket(const boost::system::error_code &reason);
+  // Settles every queued write with `error`.
+  void fail_pending_writes(const boost::system::error_code &error);
 
   asio::io_context m_io_context;
   std::thread m_io_thread;
@@ -97,6 +99,11 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
   // True once the current connection's loss has been reported (or when there
   // is no connection to report on); armed by notify_connected().
   std::atomic<bool> m_disconnectReported{true};
+  // Bumped by notify_connected(). Every read and write completion carries the
+  // generation it was issued under and does nothing when the socket has been
+  // replaced since, so a cut-off operation on the old socket never closes the
+  // new one. IO thread only.
+  uint64_t m_socketGeneration{0};
 
  private:
   struct PendingWrite
@@ -108,7 +115,6 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
 
   void enqueue_write(std::shared_ptr<PendingWrite> pending);
   void start_next_write();
-  void fail_pending_writes(const boost::system::error_code &error);
   void complete_write(const std::shared_ptr<PendingWrite> &pending,
       const boost::system::error_code &error);
   void notify_disconnected(const boost::system::error_code &reason);
@@ -154,7 +160,8 @@ struct NetworkServer : public NetworkChannel
 
  private:
   // Queues one async_accept unless one is already pending, so repeated
-  // restart() calls do not stack accepts.
+  // restart() calls do not stack accepts. A connection accepted over a live
+  // one replaces it: the old connection is closed and reported lost first.
   void start_accept();
 
   tcp::acceptor m_acceptor;
