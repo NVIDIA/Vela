@@ -2,31 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // catch
+#include "NetworkTestHelpers.h"
 #include "catch.hpp"
 // vsr_network
 #include "vsr/network/NetworkChannel.hpp"
 // std
 #include <atomic>
 #include <chrono>
-#include <functional>
 #include <memory>
 #include <thread>
 
 using namespace vsr::network;
 
 namespace {
-
-bool waitFor(const std::function<bool()> &done,
-    std::chrono::milliseconds timeout = std::chrono::seconds(5))
-{
-  const auto deadline = std::chrono::steady_clock::now() + timeout;
-  while (std::chrono::steady_clock::now() < deadline) {
-    if (done())
-      return true;
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  }
-  return done();
-}
 
 struct LifecycleCounters
 {
