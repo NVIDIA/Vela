@@ -399,6 +399,7 @@ void ServerConnection::beginAttempt()
 
 void ServerConnection::closeChannel()
 {
+  m_bootstrapped = false;
   setDelegateEnabled(false);
   // Fires our disconnect handler on this thread if the socket was open; that
   // report describes a close we asked for, so it is consumed here.
@@ -417,6 +418,11 @@ void ServerConnection::setState(ConnectionState to)
       "[ServerConnection] %s -> %s", toString(from), toString(to));
   if (onStateChanged)
     onStateChanged(from, to);
+}
+
+bool ServerConnection::canEmitEdits() const
+{
+  return m_phase == Phase::Established && m_bootstrapped && !m_bootstrapping;
 }
 
 void ServerConnection::setDelegateEnabled(bool enabled)
@@ -512,6 +518,7 @@ void ServerConnection::handleMessage(const vsr::network::Message &msg)
   }
   case StudioMessageType::BootstrapBegin:
     m_bootstrapping = true;
+    m_bootstrapped = false;
     setDelegateEnabled(false);
     if (onBootstrapBegin)
       onBootstrapBegin();
@@ -519,7 +526,8 @@ void ServerConnection::handleMessage(const vsr::network::Message &msg)
     return;
   case StudioMessageType::BootstrapEnd:
     m_bootstrapping = false;
-    setDelegateEnabled(m_phase == Phase::Established);
+    m_bootstrapped = true;
+    setDelegateEnabled(canEmitEdits());
     if (onBootstrapComplete)
       onBootstrapComplete();
     return;
@@ -575,7 +583,9 @@ void ServerConnection::handleHello(const vsr::network::Message &msg)
   m_status = "connected to " + endpointText(m_host, m_port);
   if (!hello->buildInfo.empty())
     m_status += " (" + hello->buildInfo + ")";
-  setDelegateEnabled(true);
+  // The delegate stays off until BootstrapEnd: between here and the bootstrap
+  // the mirror is a frozen view of the previous session (or empty) and an
+  // edit to it must not reach the new server.
   setState(ConnectionState::Connected);
 }
 
@@ -603,18 +613,16 @@ void ServerConnection::applySceneMessage(
   default:
     break;
   }
-  setDelegateEnabled(m_phase == Phase::Established && !m_bootstrapping);
+  setDelegateEnabled(canEmitEdits());
 }
 
 void ServerConnection::clearMirror()
 {
   if (!m_mirror)
     return;
-  const bool wasEnabled = m_delegate && m_delegate->enabled();
   setDelegateEnabled(false);
   m_mirror->removeAllObjects();
-  setDelegateEnabled(
-      wasEnabled && m_phase == Phase::Established && !m_bootstrapping);
+  setDelegateEnabled(canEmitEdits());
 }
 
 } // namespace vsr::scivis_studio::client

@@ -171,6 +171,10 @@ struct ServerConnection
   void beginAttempt();
   void closeChannel();
   void setState(ConnectionState to);
+  // Edits leave the mirror only on an Established connection whose bootstrap
+  // has completed and is not being redone; the delegate is enabled exactly
+  // then.
+  bool canEmitEdits() const;
   void setDelegateEnabled(bool enabled);
   void declareLoss(const std::string &reason);
   void attemptFailed(const std::string &reason);
@@ -196,6 +200,9 @@ struct ServerConnection
   Phase m_phase{Phase::Idle};
   std::string m_status;
   bool m_bootstrapping{false};
+  // BootstrapEnd seen on this connection; until then the mirror is either
+  // empty or a frozen view from an earlier session and must not emit.
+  bool m_bootstrapped{false};
 
   Clock::time_point m_attemptStart{};
   Clock::time_point m_pingSentAt{};
