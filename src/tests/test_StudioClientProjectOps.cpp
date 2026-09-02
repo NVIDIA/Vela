@@ -465,6 +465,7 @@ SCENARIO("ProjectOps decodes typed results for the callback", "[StudioClient]")
       expect(StudioMessageType::RemoveColorMap, ops.removeColorMap("colormap_0001", ignore));
       expect(StudioMessageType::ListRoots, ops.listRoots(ignoreR));
       expect(StudioMessageType::ListDirectory, ops.listDirectory("/d", ignoreR));
+      expect(StudioMessageType::RenderShot, ops.renderShot("shot_0001", ignoreR));
       expect(StudioMessageType::CancelTask, ops.cancelTask(3, ignore));
       // clang-format on
 
@@ -489,6 +490,9 @@ SCENARIO("ProjectOps decodes typed results for the callback", "[StudioClient]")
         REQUIRE(light);
         REQUIRE(light->lightNode.layerName == "studio");
         REQUIRE(light->lightNode.nodeIndex == 7);
+        const auto render = decode<RenderShot>(seen[seen.size() - 2].raw);
+        REQUIRE(render);
+        REQUIRE(render->shotId == "shot_0001");
         const auto cancel = decode<CancelTask>(seen.back().raw);
         REQUIRE(cancel);
         REQUIRE(cancel->taskId == 3);
@@ -777,11 +781,17 @@ SCENARIO("ServerConnection applies snapshots outside the bootstrap",
 
       f.server.sendBootstrap();
 
-      THEN("the record goes with the mirror: nothing of it survives")
+      THEN("the record is failed with 'connection lost' and marked stale")
       {
         REQUIRE(f.waitConnectedAndBootstrapped(2));
-        REQUIRE(f.ops().tasks().empty());
+        REQUIRE(f.ops().tasks().size() == 1);
         REQUIRE_FALSE(f.ops().tasksActive());
+        const TaskRecord *task = f.ops().task(5);
+        REQUIRE(task);
+        REQUIRE(task->state == TaskState::Failed);
+        REQUIRE(task->error == "connection lost");
+        REQUIRE(task->stale);
+        REQUIRE(task->label == "importing");
       }
     }
 
@@ -818,6 +828,194 @@ SCENARIO("ServerConnection applies snapshots outside the bootstrap",
         REQUIRE(pollUntil(
             f.connection, [&] { return f.connection.uiState() != nullptr; }));
         REQUIRE(f.connection.uiState()->root().child("layout"));
+      }
+    }
+  }
+}
+
+SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
+    "[StudioClient]")
+{
+  GIVEN("a connected client with a queued task of its own and a running one")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+
+    const auto handle = f.ops().openProject("/d/p", nullptr);
+    REQUIRE(f.waitForRequests(1));
+    auto reply = makeOkReply(handle.requestId);
+    setResults(reply, TaskStartedResult{5});
+    f.server.send(encode(reply));
+    TaskProgress progress;
+    progress.taskId = 6;
+    progress.message = "importing";
+    f.server.send(encode(progress));
+    REQUIRE(
+        pollUntil(f.connection, [&] { return f.ops().tasks().size() == 2; }));
+    REQUIRE(f.ops().task(5)->state == TaskState::Queued);
+    REQUIRE(f.ops().task(6)->state == TaskState::Running);
+
+    WHEN("the next bootstrap replays one outcome and one running task")
+    {
+      TaskCompleted completed;
+      completed.taskId = 5;
+      completed.message = "/d/p/renders/shot_0001";
+      completed.framesCompleted = 3;
+      f.server.bootstrap.push_back(encode(completed));
+      TaskProgress running;
+      running.taskId = 9;
+      running.current = 2;
+      running.total = 10;
+      running.message = "render shot 'shot_0001'";
+      f.server.bootstrap.push_back(encode(running));
+      f.server.sendBootstrap();
+      REQUIRE(f.waitConnectedAndBootstrapped(2));
+
+      THEN("the replayed outcome revives the record under its own label")
+      {
+        const TaskRecord *task = f.ops().task(5);
+        REQUIRE(task);
+        REQUIRE(task->state == TaskState::Completed);
+        REQUIRE_FALSE(task->stale);
+        REQUIRE(task->label == "Open project '/d/p'");
+        REQUIRE(task->lastProgress.message == "/d/p/renders/shot_0001");
+        REQUIRE(task->framesCompleted == 3);
+        REQUIRE(task->error.empty());
+      }
+
+      THEN("the task the server never mentioned again stays failed")
+      {
+        const TaskRecord *task = f.ops().task(6);
+        REQUIRE(task);
+        REQUIRE(task->state == TaskState::Failed);
+        REQUIRE(task->error == "connection lost");
+        REQUIRE(task->stale);
+      }
+
+      THEN("the running task is created, labelled with its description")
+      {
+        const TaskRecord *task = f.ops().task(9);
+        REQUIRE(task);
+        REQUIRE(task->state == TaskState::Running);
+        REQUIRE(task->label == "render shot 'shot_0001'");
+        REQUIRE(task->lastProgress.current == 2);
+        REQUIRE(task->lastProgress.total == 10);
+        REQUIRE(f.ops().tasksActive());
+
+        AND_THEN("its live progress keeps the label, its end finishes it")
+        {
+          TaskProgress frame;
+          frame.taskId = 9;
+          frame.current = 3;
+          frame.total = 10;
+          frame.message = "frame 3/10";
+          f.server.send(encode(frame));
+          REQUIRE(pollUntil(f.connection,
+              [&] { return f.ops().task(9)->lastProgress.current == 3; }));
+          REQUIRE(f.ops().task(9)->label == "render shot 'shot_0001'");
+          REQUIRE(f.ops().task(9)->lastProgress.message == "frame 3/10");
+
+          TaskCompleted done;
+          done.taskId = 9;
+          done.framesCompleted = 10;
+          f.server.send(encode(done));
+          REQUIRE(pollUntil(f.connection,
+              [&] { return f.ops().task(9)->state == TaskState::Completed; }));
+          REQUIRE(f.ops().task(9)->framesCompleted == 10);
+          REQUIRE_FALSE(f.ops().tasksActive());
+        }
+      }
+    }
+
+    WHEN("a restarted server hands a new task the id of a stale record")
+    {
+      f.server.sendBootstrap();
+      REQUIRE(f.waitConnectedAndBootstrapped(2));
+      REQUIRE(f.ops().task(5)->stale);
+
+      const auto again = f.ops().importStaticDataset(
+          "n", "/d/f.obj", vsr::io::ImporterType::OBJ, false, nullptr);
+      REQUIRE(f.waitForRequests(2));
+      auto restarted = makeOkReply(again.requestId);
+      setResults(restarted, TaskStartedResult{5});
+      f.server.send(encode(restarted));
+
+      THEN("the record starts over under the new request's label")
+      {
+        REQUIRE(
+            pollUntil(f.connection, [&] { return !f.ops().task(5)->stale; }));
+        const TaskRecord *task = f.ops().task(5);
+        REQUIRE(task->state == TaskState::Queued);
+        REQUIRE(task->label == "Import '/d/f.obj'");
+        REQUIRE(task->error.empty());
+        REQUIRE(f.ops().tasksActive());
+
+        TaskProgress progress2;
+        progress2.taskId = 5;
+        progress2.current = 1;
+        progress2.total = 1;
+        f.server.send(encode(progress2));
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.ops().task(5)->state == TaskState::Running; }));
+      }
+    }
+  }
+}
+
+SCENARIO("ProjectOps flags the render it launched", "[StudioClient]")
+{
+  GIVEN("a connected client that asked for a render")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+    REQUIRE_FALSE(f.ops().renderActive());
+
+    bool answered = false;
+    const auto handle = f.ops().renderShot("shot_0001",
+        [&](const ProjectOpReply &reply,
+            const std::optional<TaskStartedResult> &r) {
+          answered = reply.ok && r && r->taskId == 7;
+        });
+    REQUIRE(f.waitForRequests(1));
+    REQUIRE(f.requests()[0].type == StudioMessageType::RenderShot);
+
+    WHEN("the reply starts a task")
+    {
+      auto reply = makeOkReply(handle.requestId);
+      setResults(reply, TaskStartedResult{7});
+      f.server.send(encode(reply));
+      REQUIRE(pollUntil(f.connection, [&] { return answered; }));
+
+      THEN("the record is a render until it finishes")
+      {
+        const TaskRecord *task = f.ops().task(7);
+        REQUIRE(task);
+        REQUIRE(task->render);
+        REQUIRE(task->label == "Render shot 'shot_0001'");
+        REQUIRE(f.ops().renderActive());
+
+        TaskFailed failed;
+        failed.taskId = 7;
+        failed.error = "cancelled";
+        f.server.send(encode(failed));
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.ops().task(7)->state == TaskState::Failed; }));
+        REQUIRE_FALSE(f.ops().renderActive());
+      }
+    }
+
+    WHEN("the server refuses because a render is in progress")
+    {
+      f.server.send(
+          encode(makeErrorReply(handle.requestId, "render in progress")));
+      pollUntil(f.connection, [&] { return f.ops().pendingCount() == 0; });
+
+      THEN("no record is made")
+      {
+        REQUIRE(f.ops().tasks().empty());
+        REQUIRE_FALSE(f.ops().renderActive());
       }
     }
   }

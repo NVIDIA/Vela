@@ -546,6 +546,17 @@ RequestHandle ProjectOps::setPlaying(
   return send(std::move(req), std::move(callback));
 }
 
+// Offline render /////////////////////////////////////////////////////////////
+
+RequestHandle ProjectOps::renderShot(
+    const ShotID &shotId, ResultCallback<TaskStartedResult> callback)
+{
+  RenderShot req;
+  req.shotId = shotId;
+  return sendForResult(
+      std::move(req), std::move(callback), "Render shot " + quoted(shotId));
+}
+
 // Array histogram ////////////////////////////////////////////////////////////
 
 RequestHandle ProjectOps::requestArrayHistogram(const SceneObjectRef &array,
@@ -599,6 +610,13 @@ bool ProjectOps::tasksActive() const
   });
 }
 
+bool ProjectOps::renderActive() const
+{
+  return std::any_of(m_tasks.begin(), m_tasks.end(), [](const auto &t) {
+    return t.render && !t.finished();
+  });
+}
+
 void ProjectOps::clearFinishedTasks()
 {
   m_tasks.erase(std::remove_if(m_tasks.begin(),
@@ -612,8 +630,18 @@ TaskRecord &ProjectOps::recordFor(uint64_t taskId)
   auto it = std::find_if(m_tasks.begin(), m_tasks.end(), [&](const auto &t) {
     return t.taskId == taskId;
   });
-  if (it != m_tasks.end())
+  if (it != m_tasks.end()) {
+    if (it->stale) {
+      // The server speaks of this id again: the client-side failure was
+      // provisional. Keep the label, start the state over.
+      it->stale = false;
+      it->state = TaskState::Queued;
+      it->lastProgress = {};
+      it->error.clear();
+      it->framesCompleted = 0;
+    }
     return *it;
+  }
   TaskRecord record;
   record.taskId = taskId;
   record.label = "Task " + std::to_string(taskId);
@@ -645,6 +673,7 @@ void ProjectOps::handleReply(const ProjectOpReply &reply)
     TaskRecord &record = recordFor(started->taskId);
     if (!entry.taskLabel.empty())
       record.label = entry.taskLabel;
+    record.render = entry.type == StudioMessageType::RenderShot;
   }
   if (auto *cb = std::get_if<ReplyCallback>(&entry.callback); cb && *cb)
     (*cb)(reply);
@@ -665,7 +694,10 @@ void ProjectOps::handlePickReply(const PickReply &reply)
 
 void ProjectOps::handleTaskProgress(const TaskProgress &progress)
 {
+  const bool known = task(progress.taskId) != nullptr;
   TaskRecord &record = recordFor(progress.taskId);
+  if (!known && !progress.message.empty())
+    record.label = progress.message; // the replay's description
   if (!record.finished())
     record.state = TaskState::Running;
   record.lastProgress.current = progress.current;
@@ -679,6 +711,7 @@ void ProjectOps::handleTaskCompleted(const TaskCompleted &completed)
   record.state = TaskState::Completed;
   if (!completed.message.empty())
     record.lastProgress.message = completed.message;
+  record.framesCompleted = completed.framesCompleted;
   record.error.clear();
 }
 
@@ -714,6 +747,17 @@ void ProjectOps::failAllPending(const std::string &error)
   m_undeliverable.clear();
   for (auto &entry : pending)
     fail(entry, makeErrorReply(entry.requestId, error));
+}
+
+void ProjectOps::failUnfinishedTasks(const std::string &error)
+{
+  for (auto &record : m_tasks) {
+    if (record.finished())
+      continue;
+    record.state = TaskState::Failed;
+    record.error = error;
+    record.stale = true;
+  }
 }
 
 void ProjectOps::clearTasks()

@@ -79,6 +79,14 @@ struct TaskRecord
   TaskState state{TaskState::Queued};
   TaskProgressInfo lastProgress;
   std::string error; // TaskFailed::error
+  uint64_t framesCompleted{0}; // TaskCompleted::framesCompleted (renders)
+  // Launched by this client's RenderShot: the editors show a note while it
+  // is active, since the server refuses edits until the render ends.
+  bool render{false};
+  // Failed by the client at the last BootstrapBegin ("connection lost"), not
+  // by the server; the next event naming its id revives the record (the
+  // task-status replay, or a restarted server reusing the id).
+  bool stale{false};
 
   bool finished() const;
 };
@@ -272,6 +280,14 @@ struct ProjectOps
   RequestHandle setPlaying(
       const ShotID &shotId, bool playing, ReplyCallback callback);
 
+  // Offline render (60) //////////////////////////////////////////////////////
+
+  // Makes the shot active and renders its frames as a Server Task with
+  // determinate progress; refused unless the project is saved and no render
+  // is queued or running. The record is flagged `render`.
+  RequestHandle renderShot(const ShotID &shotId,
+      ResultCallback<protocol::TaskStartedResult> callback);
+
   // Array histogram (59) /////////////////////////////////////////////////////
 
   // Sync on the server: scalar element types only, binCount clamped to
@@ -287,7 +303,9 @@ struct ProjectOps
 
   // Server Tasks (61) ////////////////////////////////////////////////////////
 
-  // Cooperative: removes a queued task; the running one is refused.
+  // Cooperative: removes a queued task; the running one is stopped at its
+  // next frame boundary if it is a render, refused otherwise (the server
+  // decides).
   RequestHandle cancelTask(uint64_t taskId, ReplyCallback callback);
 
   // In the order the tasks were first heard of.
@@ -295,6 +313,8 @@ struct ProjectOps
   const TaskRecord *task(uint64_t taskId) const;
   // Any task Queued or Running.
   bool tasksActive() const;
+  // A render this client launched is Queued or Running.
+  bool renderActive() const;
   void clearFinishedTasks();
 
   // Driven by ServerConnection ///////////////////////////////////////////////
@@ -311,7 +331,9 @@ struct ProjectOps
   // Matches a PickReply to its pick() callback; unknown ids are logged.
   void handlePickReply(const protocol::PickReply &reply);
   // Task events create a record when the task is unknown (a task-status
-  // replay during bootstrap, or one another client launched).
+  // replay during bootstrap, or one another client launched); a record
+  // created by a TaskProgress takes its message as label, which is how the
+  // bootstrap replay names the running task.
   void handleTaskProgress(const protocol::TaskProgress &progress);
   void handleTaskCompleted(const protocol::TaskCompleted &completed);
   void handleTaskFailed(const protocol::TaskFailed &failed);
@@ -319,6 +341,10 @@ struct ProjectOps
   // (picks with an absent reply), and the pending list is emptied first so a
   // callback may send anew.
   void failAllPending(const std::string &error);
+  // BootstrapBegin: every Queued or Running record becomes Failed with
+  // `error` and is marked stale; the bootstrap's task-status replay then
+  // revives the ones the server still knows about.
+  void failUnfinishedTasks(const std::string &error);
   void clearTasks();
   // Delivers the failures of sends the connection dropped.
   void poll();
