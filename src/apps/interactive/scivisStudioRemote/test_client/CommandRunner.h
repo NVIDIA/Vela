@@ -74,35 +74,35 @@ struct CommandRunner
   static const std::vector<std::string> &commandHelp();
 
  private:
-  // The failure reason, or empty for OK.
-  using Outcome = std::optional<std::string>;
+  // Why a command FAILed; empty when it is OK.
+  using Failure = std::optional<std::string>;
   using Deadline = std::chrono::milliseconds;
 
-  Outcome execute(Command command);
+  Failure execute(Command command);
 
-  Outcome connect(const Command &, Deadline);
-  Outcome disconnect(const Command &);
-  Outcome shutdown(const Command &, Deadline);
-  Outcome ping(const Command &, Deadline);
-  Outcome awaitLost(const Command &, Deadline);
-  Outcome reconnect(const Command &, Deadline);
-  Outcome sleep(const Command &);
-  Outcome expectError(const Command &, Deadline);
-  Outcome sendRaw(const Command &);
-  Outcome setFrameConfig(const Command &, Deadline);
-  Outcome setEncodings(const Command &);
-  Outcome startRendering(const Command &);
-  Outcome stopRendering(const Command &);
-  Outcome awaitFrame(const Command &, Deadline);
-  Outcome saveFrame(const Command &);
-  Outcome setParam(const Command &);
-  Outcome removeParam(const Command &);
-  Outcome setNodeTransform(const Command &);
-  Outcome dumpScene(const Command &);
-  Outcome dumpLayers(const Command &);
-  Outcome dumpProject(const Command &);
-  Outcome dumpFrame(const Command &);
-  Outcome assertValue(const Command &);
+  Failure connect(const Command &, Deadline);
+  Failure disconnect(const Command &);
+  Failure shutdown(const Command &, Deadline);
+  Failure ping(const Command &, Deadline);
+  Failure awaitLost(const Command &, Deadline);
+  Failure reconnect(const Command &, Deadline);
+  Failure sleep(const Command &);
+  Failure expectError(const Command &, Deadline);
+  Failure sendRaw(const Command &);
+  Failure setFrameConfig(const Command &, Deadline);
+  Failure setEncodings(const Command &);
+  Failure startRendering(const Command &);
+  Failure stopRendering(const Command &);
+  Failure awaitFrame(const Command &, Deadline);
+  Failure saveFrame(const Command &);
+  Failure setParam(const Command &);
+  Failure removeParam(const Command &);
+  Failure setNodeTransform(const Command &);
+  Failure dumpScene(const Command &);
+  Failure dumpLayers(const Command &);
+  Failure dumpProject(const Command &);
+  Failure dumpFrame(const Command &);
+  Failure assertValue(const Command &);
 
   // The current text of a named value; empty with the reason when it is
   // unknown or not available yet (no frame, no replica, ...).

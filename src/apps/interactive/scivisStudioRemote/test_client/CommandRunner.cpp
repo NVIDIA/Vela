@@ -493,14 +493,9 @@ bool writePPM(const std::string &path,
   return true;
 }
 
-std::string argCountError(const Command &command, const char *usage)
+std::string usageError(const Command &command, const char *usage)
 {
   return "usage: " + command.name + " " + usage;
-}
-
-const char *frameEncodingName(FrameEncoding encoding)
-{
-  return toString(encoding);
 }
 
 } // namespace
@@ -530,10 +525,10 @@ bool CommandRunner::run(const std::vector<Command> &commands)
 
 bool CommandRunner::runCommand(const Command &command)
 {
-  const auto outcome = execute(command);
-  if (outcome) {
+  const auto failure = execute(command);
+  if (failure) {
     ++m_failures;
-    printRecord("FAIL " + command.text + ": " + *outcome);
+    printRecord("FAIL " + command.text + ": " + *failure);
     return false;
   }
   printRecord("OK " + command.text);
@@ -602,7 +597,7 @@ const std::vector<std::string> &CommandRunner::commandHelp()
   return lines;
 }
 
-CommandRunner::Outcome CommandRunner::execute(Command command)
+CommandRunner::Failure CommandRunner::execute(Command command)
 {
   std::string error;
   const auto suffix = takeTimeoutSuffix(command, &error);
@@ -662,11 +657,11 @@ CommandRunner::Outcome CommandRunner::execute(Command command)
 
 // Session commands ///////////////////////////////////////////////////////////
 
-CommandRunner::Outcome CommandRunner::connect(
+CommandRunner::Failure CommandRunner::connect(
     const Command &command, Deadline deadline)
 {
   if (command.args.size() > 2)
-    return argCountError(command, "[host] [port]");
+    return usageError(command, "[host] [port]");
   if (m_session->state() == SessionState::Connected)
     return "already connected to " + m_session->host() + ":"
         + std::to_string(m_session->port());
@@ -685,10 +680,10 @@ CommandRunner::Outcome CommandRunner::connect(
   return {};
 }
 
-CommandRunner::Outcome CommandRunner::disconnect(const Command &command)
+CommandRunner::Failure CommandRunner::disconnect(const Command &command)
 {
   if (!command.args.empty())
-    return argCountError(command, "");
+    return usageError(command, "");
   if (m_session->state() != SessionState::Connected
       && m_session->state() != SessionState::Lost)
     return std::string("not connected (") + toString(m_session->state()) + ")";
@@ -697,11 +692,11 @@ CommandRunner::Outcome CommandRunner::disconnect(const Command &command)
   return {};
 }
 
-CommandRunner::Outcome CommandRunner::shutdown(
+CommandRunner::Failure CommandRunner::shutdown(
     const Command &command, Deadline deadline)
 {
   if (!command.args.empty())
-    return argCountError(command, "");
+    return usageError(command, "");
   std::string error;
   // Events keep flowing while the socket is still open; print them after.
   const bool ok = m_session->shutdown(deadline, &error);
@@ -711,11 +706,11 @@ CommandRunner::Outcome CommandRunner::shutdown(
   return {};
 }
 
-CommandRunner::Outcome CommandRunner::ping(
+CommandRunner::Failure CommandRunner::ping(
     const Command &command, Deadline deadline)
 {
   if (!command.args.empty())
-    return argCountError(command, "");
+    return usageError(command, "");
   std::string error;
   if (!m_session->ping(&error))
     return error;
@@ -726,11 +721,11 @@ CommandRunner::Outcome CommandRunner::ping(
   return {};
 }
 
-CommandRunner::Outcome CommandRunner::awaitLost(
+CommandRunner::Failure CommandRunner::awaitLost(
     const Command &command, Deadline deadline)
 {
   if (!command.args.empty())
-    return argCountError(command, "");
+    return usageError(command, "");
   if (!pumpUntil(
           [&] { return m_session->state() == SessionState::Lost; }, deadline)) {
     return std::string("still ") + toString(m_session->state()) + " after "
@@ -739,11 +734,11 @@ CommandRunner::Outcome CommandRunner::awaitLost(
   return {};
 }
 
-CommandRunner::Outcome CommandRunner::reconnect(
+CommandRunner::Failure CommandRunner::reconnect(
     const Command &command, Deadline deadline)
 {
   if (!command.args.empty())
-    return argCountError(command, "");
+    return usageError(command, "");
   if (m_session->state() == SessionState::Connected)
     return "already connected";
   std::string error;
@@ -754,20 +749,20 @@ CommandRunner::Outcome CommandRunner::reconnect(
   return {};
 }
 
-CommandRunner::Outcome CommandRunner::sleep(const Command &command)
+CommandRunner::Failure CommandRunner::sleep(const Command &command)
 {
   unsigned long long ms = 0;
   if (command.args.size() != 1 || !parseUnsigned(command.args[0], ms))
-    return argCountError(command, "<ms>");
+    return usageError(command, "<ms>");
   pumpUntil([] { return false; }, std::chrono::milliseconds(ms));
   return {};
 }
 
-CommandRunner::Outcome CommandRunner::expectError(
+CommandRunner::Failure CommandRunner::expectError(
     const Command &command, Deadline deadline)
 {
   if (command.args.size() > 1)
-    return argCountError(command, "[substring]");
+    return usageError(command, "[substring]");
   // Frames are stream data, not replies: one still in flight after
   // stop-rendering must not stand in for the answer.
   Event next;
@@ -786,12 +781,12 @@ CommandRunner::Outcome CommandRunner::expectError(
   return {};
 }
 
-CommandRunner::Outcome CommandRunner::sendRaw(const Command &command)
+CommandRunner::Failure CommandRunner::sendRaw(const Command &command)
 {
   unsigned long long type = 0;
   if (command.args.empty() || !parseUnsigned(command.args[0], type)
       || type > 0xff)
-    return argCountError(command, "<typeByte 0..255> [hex bytes...]");
+    return usageError(command, "<typeByte 0..255> [hex bytes...]");
   std::vector<std::byte> payload;
   std::string error;
   if (!parseHexBytes(command.args, 1, payload, error))
@@ -804,14 +799,14 @@ CommandRunner::Outcome CommandRunner::sendRaw(const Command &command)
 
 // Rendering commands /////////////////////////////////////////////////////////
 
-CommandRunner::Outcome CommandRunner::setFrameConfig(
+CommandRunner::Failure CommandRunner::setFrameConfig(
     const Command &command, Deadline deadline)
 {
   unsigned long long width = 0;
   unsigned long long height = 0;
   if (command.args.size() != 2 || !parseUnsigned(command.args[0], width)
       || !parseUnsigned(command.args[1], height))
-    return argCountError(command, "<width> <height>");
+    return usageError(command, "<width> <height>");
   std::string error;
   if (!m_session->setFrameConfig(uint32_t(width), uint32_t(height), &error))
     return error;
@@ -823,10 +818,10 @@ CommandRunner::Outcome CommandRunner::setFrameConfig(
   return {};
 }
 
-CommandRunner::Outcome CommandRunner::setEncodings(const Command &command)
+CommandRunner::Failure CommandRunner::setEncodings(const Command &command)
 {
   if (command.args.size() != 1)
-    return argCountError(command, "<name>[,<name>...]");
+    return usageError(command, "<name>[,<name>...]");
   std::vector<FrameEncoding> preferred;
   std::stringstream list(command.args[0]);
   std::string item;
@@ -834,7 +829,7 @@ CommandRunner::Outcome CommandRunner::setEncodings(const Command &command)
     const auto wanted = lower(item);
     std::optional<FrameEncoding> match;
     for (auto encoding : {FrameEncoding::Raw, FrameEncoding::TurboJpeg}) {
-      if (lower(frameEncodingName(encoding)) == wanted)
+      if (lower(toString(encoding)) == wanted)
         match = encoding;
     }
     if (!match)
@@ -848,10 +843,10 @@ CommandRunner::Outcome CommandRunner::setEncodings(const Command &command)
   return {};
 }
 
-CommandRunner::Outcome CommandRunner::startRendering(const Command &command)
+CommandRunner::Failure CommandRunner::startRendering(const Command &command)
 {
   if (!command.args.empty())
-    return argCountError(command, "");
+    return usageError(command, "");
   std::string error;
   if (!m_session->startRendering(&error))
     return error;
@@ -859,10 +854,10 @@ CommandRunner::Outcome CommandRunner::startRendering(const Command &command)
   return {};
 }
 
-CommandRunner::Outcome CommandRunner::stopRendering(const Command &command)
+CommandRunner::Failure CommandRunner::stopRendering(const Command &command)
 {
   if (!command.args.empty())
-    return argCountError(command, "");
+    return usageError(command, "");
   std::string error;
   if (!m_session->stopRendering(&error))
     return error;
@@ -870,13 +865,13 @@ CommandRunner::Outcome CommandRunner::stopRendering(const Command &command)
   return {};
 }
 
-CommandRunner::Outcome CommandRunner::awaitFrame(
+CommandRunner::Failure CommandRunner::awaitFrame(
     const Command &command, Deadline deadline)
 {
   unsigned long long count = 1;
   if (command.args.size() > 1
       || (!command.args.empty() && !parseUnsigned(command.args[0], count)))
-    return argCountError(command, "[count]");
+    return usageError(command, "[count]");
   if (m_session->state() != SessionState::Connected)
     return std::string("not connected (") + toString(m_session->state()) + ")";
   size_t seen = 0;
@@ -893,10 +888,10 @@ CommandRunner::Outcome CommandRunner::awaitFrame(
   return {};
 }
 
-CommandRunner::Outcome CommandRunner::saveFrame(const Command &command)
+CommandRunner::Failure CommandRunner::saveFrame(const Command &command)
 {
   if (command.args.size() != 1)
-    return argCountError(command, "<path.ppm>");
+    return usageError(command, "<path.ppm>");
   if (!m_session->lastFrameHeader())
     return "no frame received yet";
   const auto view = decodeFrame(m_session->lastFrame());
@@ -919,11 +914,10 @@ CommandRunner::Outcome CommandRunner::saveFrame(const Command &command)
 
 // Scene edits ////////////////////////////////////////////////////////////////
 
-CommandRunner::Outcome CommandRunner::setParam(const Command &command)
+CommandRunner::Failure CommandRunner::setParam(const Command &command)
 {
   if (command.args.size() < 5)
-    return argCountError(
-        command, "<type> <index> <name> <anariType> <value...>");
+    return usageError(command, "<type> <index> <name> <anariType> <value...>");
   SceneObjectRef ref;
   std::string error;
   if (!parseObjectRef(command.args[0], command.args[1], ref, error))
@@ -942,10 +936,10 @@ CommandRunner::Outcome CommandRunner::setParam(const Command &command)
   return {};
 }
 
-CommandRunner::Outcome CommandRunner::removeParam(const Command &command)
+CommandRunner::Failure CommandRunner::removeParam(const Command &command)
 {
   if (command.args.size() != 3)
-    return argCountError(command, "<type> <index> <name>");
+    return usageError(command, "<type> <index> <name>");
   SceneObjectRef ref;
   std::string error;
   if (!parseObjectRef(command.args[0], command.args[1], ref, error))
@@ -956,10 +950,10 @@ CommandRunner::Outcome CommandRunner::removeParam(const Command &command)
   return {};
 }
 
-CommandRunner::Outcome CommandRunner::setNodeTransform(const Command &command)
+CommandRunner::Failure CommandRunner::setNodeTransform(const Command &command)
 {
   if (command.args.size() != 18)
-    return argCountError(command, "<layer> <node> <16 floats>");
+    return usageError(command, "<layer> <node> <16 floats>");
   SceneNodeRef node;
   node.layerName = command.args[0];
   unsigned long long index = 0;
@@ -984,10 +978,10 @@ CommandRunner::Outcome CommandRunner::setNodeTransform(const Command &command)
 
 // Inspection /////////////////////////////////////////////////////////////////
 
-CommandRunner::Outcome CommandRunner::dumpScene(const Command &command)
+CommandRunner::Failure CommandRunner::dumpScene(const Command &command)
 {
   if (!command.args.empty())
-    return argCountError(command, "");
+    return usageError(command, "");
   drainEvents();
   const auto &scene = m_session->mirror();
   const auto &db = scene.objectDB();
@@ -1014,10 +1008,10 @@ CommandRunner::Outcome CommandRunner::dumpScene(const Command &command)
   return {};
 }
 
-CommandRunner::Outcome CommandRunner::dumpLayers(const Command &command)
+CommandRunner::Failure CommandRunner::dumpLayers(const Command &command)
 {
   if (!command.args.empty())
-    return argCountError(command, "");
+    return usageError(command, "");
   drainEvents();
   const auto &scene = m_session->mirror();
   for (size_t i = 0; i < scene.numberOfLayers(); ++i) {
@@ -1031,10 +1025,10 @@ CommandRunner::Outcome CommandRunner::dumpLayers(const Command &command)
   return {};
 }
 
-CommandRunner::Outcome CommandRunner::dumpProject(const Command &command)
+CommandRunner::Failure CommandRunner::dumpProject(const Command &command)
 {
   if (!command.args.empty())
-    return argCountError(command, "");
+    return usageError(command, "");
   drainEvents();
   const auto *project = m_session->project();
   if (!project)
@@ -1049,10 +1043,10 @@ CommandRunner::Outcome CommandRunner::dumpProject(const Command &command)
   return {};
 }
 
-CommandRunner::Outcome CommandRunner::dumpFrame(const Command &command)
+CommandRunner::Failure CommandRunner::dumpFrame(const Command &command)
 {
   if (!command.args.empty())
-    return argCountError(command, "");
+    return usageError(command, "");
   drainEvents();
   const auto &header = m_session->lastFrameHeader();
   if (!header)
@@ -1069,10 +1063,10 @@ CommandRunner::Outcome CommandRunner::dumpFrame(const Command &command)
 
 // Assertions /////////////////////////////////////////////////////////////////
 
-CommandRunner::Outcome CommandRunner::assertValue(const Command &command)
+CommandRunner::Failure CommandRunner::assertValue(const Command &command)
 {
   if (command.args.size() != 3)
-    return argCountError(command, "<value> <op> <rhs>");
+    return usageError(command, "<value> <op> <rhs>");
   drainEvents();
   std::string error;
   const auto lhs = namedValue(command.args[0], error);
