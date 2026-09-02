@@ -22,11 +22,6 @@ namespace {
 constexpr int MIN_BINS = int(protocol::MIN_HISTOGRAM_BINS);
 constexpr int MAX_BINS = int(protocol::MAX_HISTOGRAM_BINS);
 
-bool sameRef(const SceneObjectRef &a, const SceneObjectRef &b)
-{
-  return a.type == b.type && a.objectIndex == b.objectIndex;
-}
-
 std::string objectLabel(const vsr::scene::Object &object)
 {
   std::string label = object.name();
@@ -129,7 +124,7 @@ void HistogramPanel::buildEditorUI(const Project &)
   } else {
     ImGui::TextUnformatted(objectLabel(*object).c_str());
     const SceneObjectRef current{object->type(), object->index()};
-    if (!sameRef(current, m_listedFor)) {
+    if (current != m_listedFor) {
       m_listedFor = current;
       m_choice = 0;
     }
