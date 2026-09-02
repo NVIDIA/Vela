@@ -177,13 +177,6 @@ bool waitsForQueuedTasks(const ProjectRequest &request)
   return !bypasses;
 }
 
-StudioMessageType requestType(const ProjectRequest &request)
-{
-  return std::visit(
-      [](const auto &r) { return std::decay_t<decltype(r)>::MESSAGE_TYPE; },
-      request);
-}
-
 // Dispatcher /////////////////////////////////////////////////////////////////
 
 ProjectOpDispatcher::ProjectOpDispatcher(Host host) : m_host(std::move(host)) {}
