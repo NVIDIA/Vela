@@ -8,7 +8,6 @@
 #include "vsr/core/Logging.hpp"
 // std
 #include <algorithm>
-#include <string>
 
 namespace vsr::scivis_studio::server {
 
@@ -18,24 +17,6 @@ namespace {
 
 constexpr uint32_t VOLUME_ID_BIT = 0x80000000u;
 constexpr float DEFAULT_FOVY = vsr::math::radians(40.f);
-
-// The monolith Viewport's check for the optional primitiveId frame channel.
-bool deviceSupportsExtension(anari::Device d, const char *extension)
-{
-  if (!d || !extension)
-    return false;
-
-  auto list = (const char *const *)anariGetObjectInfo(
-      d, ANARI_DEVICE, "default", "extension", ANARI_STRING_LIST);
-  if (!list)
-    return false;
-
-  for (const char *const *i = list; *i != nullptr; ++i) {
-    if (std::string(*i) == extension)
-      return true;
-  }
-  return false;
-}
 
 // The RenderIndex's id for a surface or volume; empty for anything else.
 std::optional<uint32_t> packedId(
@@ -62,8 +43,8 @@ void ViewportPasses::setup(vsr::rendering::ImagePipeline &pipeline,
   m_device = device;
   m_scenePass = scenePass;
 
-  m_primitiveIdSupported =
-      deviceSupportsExtension(device, "ANARI_KHR_FRAME_CHANNEL_PRIMITIVE_ID");
+  m_primitiveIdSupported = vsr::rendering::deviceSupportsExtension(
+      device, "ANARI_KHR_FRAME_CHANNEL_PRIMITIVE_ID");
   if (!m_primitiveIdSupported) {
     vsr::core::logStatus(
         "[StudioServer] device has no primitiveId channel: primitive outline"

@@ -9,6 +9,11 @@
 
 namespace vsr::rendering {
 
+// Whether `d` lists `extension` (an "ANARI_KHR_..." name) among its device
+// extensions; what a pass asks before enabling an optional frame channel.
+// False for a null device or extension.
+bool deviceSupportsExtension(anari::Device d, const char *extension);
+
 /*
  * ImagePass that drives a single ANARI Frame with a configurable camera,
  * renderer, and world; optionally captures auxiliary AOV buffers
