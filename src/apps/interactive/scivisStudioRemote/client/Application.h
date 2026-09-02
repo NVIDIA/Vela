@@ -108,7 +108,10 @@ class Application : public vsr::ui::imgui::Application
 
   // Notifications //
 
+  // Log line plus toast.
   void notify(const std::string &text, bool isError);
+  void pushToast(const std::string &text, bool isError);
+  void onTimeAdvanceWarning(const protocol::TimeAdvanceWarning &warning);
   void watchTasks();
 
   void uiMenu_File();
