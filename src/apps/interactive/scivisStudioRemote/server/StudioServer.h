@@ -55,12 +55,13 @@ const char *toString(SessionState state);
  *
  * Threading: run() is the render loop and the only thread that touches the
  * Scene, the Project or the pipeline. Network handlers run on the channel's
- * IO thread and do nothing but decode and latch into the Control-State Latch
- * (plus Ping -> Pong); the loop applies the latch once per iteration, so a
- * long-running bootstrap or scene edit never stalls the IO thread and the
- * IO thread never races the renderer. Frames follow the latest-frame-wins,
- * one-in-flight rule: while the previous Frame is still being written the
- * loop skips rendering.
+ * IO thread and do nothing but decode, then latch into the Control-State
+ * Latch or enqueue into the edit drain queue that rides alongside it (plus
+ * Ping -> Pong); the loop applies both once per iteration, so a long-running
+ * bootstrap or scene edit never stalls the IO thread and the IO thread never
+ * races the renderer. Frames follow the latest-frame-wins, one-in-flight
+ * rule: while the previous Frame is still being written the loop skips
+ * rendering.
  *
  * Milestone 3 answers Project Ops, Server Tasks, Remote Browse, playback,
  * picking and RenderShot with Error{"... not implemented in this server"}.
@@ -111,13 +112,17 @@ struct StudioServer
       protocol::RemoveObjectParameter,
       protocol::SetNodeTransform>;
 
-  // The Control-State Latch: written by the IO thread under m_controlMutex,
-  // swapped out and applied by the loop once per iteration. Session events
-  // name the connection they happened on (its serial, see
-  // m_connectionSerial) so the loop can tell a loss of the old client from a
-  // loss of the one accepted since; interactive values are latest-wins; scene
-  // edits are an ordered drain queue because dropping one would leave the
-  // mirror and the scene disagreeing.
+  // What the IO thread hands the loop, written under m_controlMutex and
+  // swapped out whole once per iteration. Two things live here side by side:
+  //
+  // - The Control-State Latch proper: one value per input, latest-wins.
+  //   Session events name the connection they happened on (its serial, see
+  //   m_connectionSerial) so the loop can tell a loss of the old client from
+  //   a loss of the one accepted since; frame config, encoding and the
+  //   rendering flag simply keep the newest value.
+  // - The edit drain queue: scene edits in arrival order, none dropped,
+  //   because coalescing them would leave the mirror and the scene
+  //   disagreeing. It is a queue, not a latch, and is drained in one go.
   struct ControlState
   {
     std::optional<uint64_t> accepted;
