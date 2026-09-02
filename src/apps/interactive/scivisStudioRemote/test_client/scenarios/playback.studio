@@ -16,9 +16,13 @@ assert shot.active.playing == false
 # goes on while a Frame is still on the wire (time must not freeze on a slow
 # link) and the frame rendered meanwhile is dropped, latest-frame-wins; at a
 # period near the wire's round trip (fps 1000 over a socket) that shows up
-# as a header skipping a frame. At 100 fps the loop iterates several times
-# per frame, so a skip here could only come from the tick catching up.
-update-shot active frameCount=12 fps=100 loop=on
+# as a header skipping a frame. The runner's frame slot is latest-wins too,
+# so a scheduling stall of this process longer than one frame period (a
+# loaded ctest -j run) would make consecutive headers skip although the
+# server ticked one frame at a time. At 25 fps a stall must exceed 40 ms;
+# the strict never-skip check lives in the in-process E2E test, whose client
+# polls without printing.
+update-shot active frameCount=12 fps=25 loop=on
 await-snapshot
 assert shot.active.frameCount == 12
 assert shot.active.loop == true
@@ -34,7 +38,8 @@ assert shot.active.playing == true
 
 # Five frames whose header frame differs from the previous one's. The tick
 # advances at most one frame per loop iteration and never catches up by
-# skipping, so no forward step between two consecutive headers exceeds 1.
+# skipping, so no forward step between two consecutive headers exceeds 1
+# unless this process missed a whole frame period (see above).
 # The loop wrap 11 -> 0 is a step backwards, which frames.maxStep ignores by
 # design (see the README's assert values).
 await-frame-advance 5 timeout=10000
