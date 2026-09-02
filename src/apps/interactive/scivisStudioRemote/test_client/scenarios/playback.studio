@@ -1,0 +1,53 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Playback: the server free-runs the active shot on its render loop, ticking
+# at most one frame per iteration (fps is a ceiling), and every Frame header
+# carries the frame that was actually rendered. SetPlaying is a Project Op
+# (reply plus snapshot); stopping commits Time at Rest in the snapshot.
+#
+# A fresh unsaved project has one shot, shot_0001, which is the active shot;
+# `active` names it without spelling the id.
+
+connect
+assert shot.active.playing == false
+
+# A short looping shot at a high fps ceiling, so the frames advance quickly.
+update-shot active frameCount=12 fps=1000 loop=on
+await-snapshot
+assert shot.active.frameCount == 12
+assert shot.active.loop == true
+
+set-encodings raw
+set-frame-config 32 24
+start-rendering
+await-frame
+
+set-playing active on
+await-snapshot
+assert shot.active.playing == true
+
+# Five frames whose header frame differs from the previous one's. Playback
+# never catches up by skipping, so no forward step between two consecutive
+# headers exceeds 1. The loop wrap 11 -> 0 is a step backwards, which
+# frames.maxStep ignores by design (see the README's assert values).
+await-frame-advance 5 timeout=10000
+assert frames.advanced >= 5
+assert frames.maxStep <= 1
+
+# Stopping writes playing=false and the frame it stopped at into the shot.
+set-playing active off
+await-snapshot
+assert shot.active.playing == false
+
+# Frames after the stop are rendered at Time at Rest: the header agrees with
+# the snapshot.
+await-frame 2
+assert shot.active.currentFrame == @frame.frame
+
+# Playing a shot that is not the active one is refused.
+expect-fail set-playing shot_9999 on
+assert lastReplyError contains shot_9999
+
+stop-rendering
+disconnect

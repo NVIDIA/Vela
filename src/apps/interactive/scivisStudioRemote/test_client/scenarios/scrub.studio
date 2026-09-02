@@ -1,0 +1,48 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Scrubbing while paused: SetTime is a one-way, latest-wins latch slot. The
+# frame shows in the next Frame header at once; Time at Rest is committed
+# with one debounced ProjectSnapshot once no SetTime has arrived for 250 ms
+# and the frame differs from the last committed one. A SetTime naming a shot
+# other than the active one is logged and ignored.
+
+connect
+set-encodings raw
+set-frame-config 32 24
+start-rendering
+await-frame
+assert shot.active.playing == false
+assert frame.frame == 0
+
+# Two scrubs back to back: the later one wins; a frame at 7 arrives.
+set-time active 3
+set-time active 7
+await-frame-at 7
+
+# The debounced rest snapshot: one, for the frame the scrub ended on.
+await-snapshot
+assert shot.active.currentFrame == 7
+assert snapshots.received == 2
+
+# Not the active shot: no frame moves, no snapshot follows, no Error either.
+set-time shot_9999 9
+sleep 500
+assert snapshots.received == 2
+assert frame.frame == 7
+assert errors.received == 0
+
+# Scrubbing to the frame already committed changes nothing to commit.
+set-time active 7
+sleep 500
+assert snapshots.received == 2
+
+# And a scrub elsewhere commits again.
+set-time active 2
+await-frame-at 2
+await-snapshot
+assert shot.active.currentFrame == 2
+assert snapshots.received == 3
+
+stop-rendering
+disconnect

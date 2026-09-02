@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# runner: fixture fixtures/triangle.obj
+#
+# RequestArrayHistogram: a sync Project Op that bins a scalar array on the
+# server (the client's mirror holds array descriptors, not data) and answers
+# with bins, min and max in the reply. Vector, matrix and object arrays are
+# refused, as is anything that is not an array.
+#
+# The fixture OBJ imports vector arrays only (vertex positions, indices), so
+# this scenario exercises the refusals; the binning itself is covered by the
+# server's unit tests until a scalar fixture exists.
+
+connect
+list-roots
+import-static-dataset $dataRoot/triangle.obj Tri OBJ
+await-task
+await-snapshot
+dump-scene
+
+# The first array of the mirror is a vector array: refused as not scalar.
+find-object array first
+expect-fail request-array-histogram $lastObjectRef 16
+assert lastReplyError contains scalar
+assert replies.failed == 1
+
+# An array index the scene has no object for.
+expect-fail request-array-histogram array 9999 16
+assert replies.failed == 2
+
+# Not an array at all.
+expect-fail request-array-histogram camera 0 16
+assert replies.failed == 3
+
+# Refusals mutate nothing: no snapshot follows them.
+assert snapshots.received == 2
+assert errors.received == 0
+disconnect

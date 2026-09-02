@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Auto-stop: a shot that does not loop stops on its last frame, and the stop
+# is a confirmed mutation, so the server sends one ProjectSnapshot with
+# playing=false and currentFrame=last without any request from the client.
+
+connect
+
+# Six frames at 24 fps: a quarter of a second of playback.
+update-shot active frameCount=6 fps=24 loop=off
+await-snapshot
+assert shot.active.frameCount == 6
+assert shot.active.loop == false
+
+set-encodings raw
+set-frame-config 32 24
+start-rendering
+await-frame
+
+# Start from frame 0 (already at rest there: no snapshot to await), then play.
+set-time active 0
+set-playing active on
+
+# Two snapshots follow: the SetPlaying's (playing=true) and, a quarter of a
+# second later, the auto-stop's. Each await-snapshot consumes one, so they are
+# awaited one at a time even when both land in the same poll; the replica is
+# only asserted after the second.
+await-snapshot
+await-snapshot timeout=10000
+assert shot.active.playing == false
+assert shot.active.currentFrame == 5
+
+# Time at Rest holds: frames after the stop stay on the last frame.
+await-frame 2
+assert frame.frame == 5
+
+stop-rendering
+disconnect

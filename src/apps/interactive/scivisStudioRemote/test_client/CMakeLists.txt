@@ -92,3 +92,11 @@ add_studio_scenario(errors_project)
 # The whole milestone-5 surface in one session, in orders the per-area
 # scenarios do not take (save, new, reopen; sync ops queued behind tasks).
 add_studio_scenario(all_m5)
+# Milestone 6: playback, picking, viewport passes and the array histogram.
+# pick and histogram import the fixture OBJ.
+add_studio_scenario(playback)
+add_studio_scenario(autostop)
+add_studio_scenario(scrub)
+add_studio_scenario(pick)
+add_studio_scenario(viewport)
+add_studio_scenario(histogram)
