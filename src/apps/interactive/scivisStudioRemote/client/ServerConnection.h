@@ -5,6 +5,8 @@
 
 // vsr_scivis_studio_protocol
 #include "FrameMessages.h"
+#include "PayloadCommon.h"
+#include "PlaybackMessages.h"
 #include "StudioCodec.h"
 // vsr_network
 #include "vsr/network/Message.hpp"
@@ -33,6 +35,7 @@ struct Project;
 namespace vsr::scivis_studio::client {
 
 struct MirrorUpdateDelegate;
+struct ProjectOps;
 
 // The client's explicit Connection State toward its server (CONTEXT.md):
 // Lost is involuntary and retries, Disconnected is a completed user intention.
@@ -72,6 +75,11 @@ struct ConnectionTimings
  * Connect is reconnect: every successful connection runs the full handshake
  * and bootstrap, which wholesale-replaces the mirror and replica. While Lost
  * both are kept as a frozen view until a reconnect or disconnect().
+ *
+ * Project Ops, Server Task tracking and Remote Browse live in projectOps():
+ * replies, task events and Project Snapshots arriving on this connection are
+ * dispatched there and to onProjectReplaced from poll(); declaring loss (or
+ * disconnecting) fails every pending reply once with "connection lost".
  *
  * The mirror must outlive this object; it owns the MirrorUpdateDelegate that
  * is installed on the mirror for the connection's lifetime.
@@ -113,6 +121,17 @@ struct ServerConnection
   // Latest-wins single slot: true and the newest Frame message if one arrived
   // since the last take.
   bool takeLatestFrame(vsr::network::Message &out);
+  // Project Ops, Server Task records and Remote Browse; their callbacks run
+  // from poll().
+  ProjectOps &projectOps();
+  const ProjectOps &projectOps() const;
+  // The newest TimeAdvanceWarning since the last clear; playback is a later
+  // milestone but the message may already arrive.
+  const std::optional<protocol::TimeAdvanceWarning> &lastTimeAdvanceWarning()
+      const;
+  void clearTimeAdvanceWarning();
+  // The opaque UI-state tree the bootstrap handed over; null when none.
+  const protocol::SubtreePtr &uiState() const;
 
   // User intentions //
 
@@ -150,6 +169,10 @@ struct ServerConnection
   std::function<void()> onMirrorReplaceBegin;
   // BootstrapEnd received: mirror and replica are fresh.
   std::function<void()> onBootstrapComplete;
+  // A Project Snapshot replaced the replica (project() is new; pointers into
+  // the old one are dead). Fires for the bootstrap's snapshot too, before
+  // onBootstrapComplete.
+  std::function<void()> onProjectReplaced;
   std::function<void(const std::string &)> onServerError;
 
  private:
@@ -181,6 +204,8 @@ struct ServerConnection
   void attemptFailed(const std::string &reason);
   void scheduleRetry();
   void sendMessage(vsr::network::Message &&msg);
+  // False when the message was dropped (not Established).
+  bool trySend(vsr::network::Message &&msg);
   void replyError(const std::string &text);
   void checkSendFailures();
   void handleMessage(const vsr::network::Message &msg);
@@ -215,6 +240,9 @@ struct ServerConnection
 
   protocol::FrameConfig m_frameConfig;
   std::unique_ptr<Project> m_project;
+  std::unique_ptr<ProjectOps> m_projectOps;
+  std::optional<protocol::TimeAdvanceWarning> m_timeAdvanceWarning;
+  protocol::SubtreePtr m_uiState;
   std::vector<vsr::network::MessageFuture> m_sendFutures;
 
   // Shared with the IO thread
