@@ -19,7 +19,7 @@ namespace {
 
 using namespace vsr::scivis_studio::test_client;
 
-// The script text and the line its first command sits on.
+// The script text: the --script file, the -e pieces one per line, or stdin.
 bool readScript(
     const TestClientOptions &options, std::string &script, std::string &error)
 {
@@ -30,10 +30,14 @@ bool readScript(
       return false;
     }
     script.assign(std::istreambuf_iterator<char>(file), {});
+    // A directory opens but does not read.
+    if (file.bad()) {
+      error = "cannot read script " + options.scriptPath;
+      return false;
+    }
     return true;
   }
   if (!options.inlineScripts.empty()) {
-    // Each -e is one script line, so records name it by its ordinal.
     for (const auto &piece : options.inlineScripts)
       script += piece + '\n';
     return true;
@@ -68,6 +72,12 @@ int main(int argc, const char **argv)
   std::vector<Command> commands;
   if (!parseScript(script, commands, &error)) {
     std::cerr << "script: " << error << '\n';
+    return 2;
+  }
+  // An empty, comment-only or misnamed script must not pass by running
+  // nothing.
+  if (commands.empty()) {
+    std::cerr << "script: no commands to run\n";
     return 2;
   }
 

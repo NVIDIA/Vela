@@ -61,6 +61,15 @@ function(add_studio_scenario name)
   )
 endfunction()
 
+# The executable itself: a script with nothing to run exits 2 with a message
+# instead of passing by running nothing.
+add_test(NAME vsr::StudioTestClient.emptyScript
+  COMMAND scivisStudioTestClient -e "# nothing to run"
+)
+set_tests_properties(vsr::StudioTestClient.emptyScript PROPERTIES
+  PASS_REGULAR_EXPRESSION "no commands to run"
+)
+
 add_studio_scenario(session)
 add_studio_scenario(frames_raw)
 if (VSR_USE_TURBOJPEG)

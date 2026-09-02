@@ -56,8 +56,8 @@ bool splitLine(std::string_view line,
   return true;
 }
 
-} // namespace
-
+// Splits `text` into tokens with the quoting rules of the language. False on
+// an unterminated quote.
 bool tokenize(
     std::string_view text, std::vector<std::string> &out, std::string *error)
 {
@@ -90,12 +90,12 @@ bool tokenize(
   return true;
 }
 
-bool parseScript(std::string_view script,
-    std::vector<Command> &out,
-    std::string *error,
-    int firstLine)
+} // namespace
+
+bool parseScript(
+    std::string_view script, std::vector<Command> &out, std::string *error)
 {
-  int lineNumber = firstLine;
+  int lineNumber = 1;
   while (!script.empty()) {
     const auto newline = script.find('\n');
     std::string_view line = script.substr(0, newline);

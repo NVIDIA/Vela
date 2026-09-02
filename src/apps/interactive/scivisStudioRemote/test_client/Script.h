@@ -39,18 +39,11 @@ struct Command
   std::string text;
 };
 
-// Appends every command of `script` to `out`, numbering lines from
-// `firstLine`. False with the reason on an unterminated quote; `out` then
-// holds the commands parsed before the offending line.
+// Appends every command of `script` to `out`, numbering lines from 1. False
+// with the reason on an unterminated quote; `out` then holds the commands
+// parsed before the offending line.
 bool parseScript(std::string_view script,
     std::vector<Command> &out,
-    std::string *error = nullptr,
-    int firstLine = 1);
-
-// Splits `text` into tokens with the quoting rules above. False on an
-// unterminated quote.
-bool tokenize(std::string_view text,
-    std::vector<std::string> &out,
     std::string *error = nullptr);
 
 // Removes a trailing `timeout=<ms>` argument, if any, and returns the span it

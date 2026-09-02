@@ -514,17 +514,11 @@ bool CommandRunner::runCommand(const Command &command)
 {
   const auto failure = execute(command);
   if (failure) {
-    ++m_failures;
     printRecord("FAIL " + command.text + ": " + *failure);
     return false;
   }
   printRecord("OK " + command.text);
   return true;
-}
-
-size_t CommandRunner::failures() const
-{
-  return m_failures;
 }
 
 const std::vector<std::string> &CommandRunner::assertNames()

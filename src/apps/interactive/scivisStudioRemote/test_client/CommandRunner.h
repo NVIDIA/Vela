@@ -66,9 +66,6 @@ struct CommandRunner
   // Runs the commands in order, stopping at the first FAIL unless keepGoing.
   // True iff every command printed OK.
   bool run(const std::vector<Command> &commands);
-  // One command: its events, then its OK or FAIL record. True on OK.
-  bool runCommand(const Command &command);
-  size_t failures() const;
 
   // Every value `assert` can name, as documented in --help; the pattern
   // param.<type>.<index>.<name> is listed as written.
@@ -96,6 +93,8 @@ struct CommandRunner
     Nothing
   };
 
+  // One command: its events, then its OK or FAIL record. True on OK.
+  bool runCommand(const Command &command);
   Failure execute(Command command);
 
   Failure connect(const Command &, Deadline);
@@ -153,7 +152,6 @@ struct CommandRunner
   TestSession *m_session{nullptr};
   std::ostream *m_out{nullptr};
   RunnerOptions m_options;
-  size_t m_failures{0};
 };
 
 } // namespace vsr::scivis_studio::test_client
