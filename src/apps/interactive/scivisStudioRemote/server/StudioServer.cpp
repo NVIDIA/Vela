@@ -596,9 +596,8 @@ void StudioServer::dispatchPendingRequests()
     // it names would always come too late.
     auto next = m_pendingRequests.begin();
     if (m_tasks.queued() > 0 && waitsForQueuedTasks(*next)) {
-      next = std::find_if(std::next(next),
-          m_pendingRequests.end(),
-          independentOfQueuedTasks);
+      next = std::find_if(
+          std::next(next), m_pendingRequests.end(), independentOfQueuedTasks);
       if (next == m_pendingRequests.end())
         break;
     }
