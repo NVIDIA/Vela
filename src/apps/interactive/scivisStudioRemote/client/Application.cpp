@@ -6,7 +6,9 @@
 #include "modals/AddFileAnimationDatasetDialog.h"
 #include "modals/AddStaticDatasetDialog.h"
 #include "modals/ProjectLocationDialog.h"
+#include "windows/CameraRigEditor.h"
 #include "windows/DatasetEditor.h"
+#include "windows/LightRigEditor.h"
 #include "windows/ProjectWindow.h"
 #include "windows/ShotEditor.h"
 #include "windows/TaskPanel.h"
@@ -227,14 +229,22 @@ vsr_ui::WindowArray Application::setupWindows()
   auto *projectWindow = new ProjectWindow(this, &m_editorContext);
   auto *datasetEditor = new DatasetEditor(this, &m_editorContext);
   auto *shotEditor = new ShotEditor(this, &m_editorContext);
+  auto *lightRigEditor = new LightRigEditor(this, &m_editorContext);
+  auto *cameraRigEditor = new CameraRigEditor(this, &m_editorContext);
   m_taskPanel = new TaskPanel(this, &m_editorContext);
 
-  m_editors = {projectWindow, datasetEditor, shotEditor};
+  m_editors = {projectWindow,
+      datasetEditor,
+      shotEditor,
+      lightRigEditor,
+      cameraRigEditor};
 
   windows.emplace_back(m_viewport);
   windows.emplace_back(projectWindow);
   windows.emplace_back(datasetEditor);
   windows.emplace_back(shotEditor);
+  windows.emplace_back(lightRigEditor);
+  windows.emplace_back(cameraRigEditor);
   windows.emplace_back(log);
   windows.emplace_back(m_taskPanel);
   windows.emplace_back(layers);
@@ -872,11 +882,23 @@ Size=955,1341
 Collapsed=0
 DockId=0x00000005,2
 
-[Window][Layers]
+[Window][Light Rig]
 Pos=0,56
 Size=955,1341
 Collapsed=0
 DockId=0x00000005,3
+
+[Window][Camera Rig]
+Pos=0,56
+Size=955,1341
+Collapsed=0
+DockId=0x00000005,4
+
+[Window][Layers]
+Pos=0,56
+Size=955,1341
+Collapsed=0
+DockId=0x00000005,5
 
 [Window][Tasks]
 Pos=957,1741

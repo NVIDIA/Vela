@@ -32,8 +32,10 @@ add_executable(scivisStudioClient
   modals/AddFileAnimationDatasetDialog.cpp
   modals/AddStaticDatasetDialog.cpp
   modals/ProjectLocationDialog.cpp
+  windows/CameraRigEditor.cpp
   windows/DatasetEditor.cpp
   windows/EditorWindow.cpp
+  windows/LightRigEditor.cpp
   windows/ProjectWindow.cpp
   windows/ShotEditor.cpp
   windows/TaskPanel.cpp
