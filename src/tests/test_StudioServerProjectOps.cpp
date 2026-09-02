@@ -13,9 +13,9 @@
 // vsr_scivis_studio_protocol
 #include "BrowseMessages.h"
 #include "FrameMessages.h"
+#include "PlaybackMessages.h"
 #include "ProjectOpReply.h"
 #include "ProjectRequests.h"
-#include "PlaybackMessages.h"
 #include "ProjectSnapshot.h"
 #include "SessionMessages.h"
 #include "ShotRigRequests.h"
@@ -765,7 +765,8 @@ SCENARIO("StudioServer refuses unserviceable requests with a matching reply",
         REQUIRE(client.waitForCount(StudioMessageType::Error, 1));
         const auto error = client.lastDecoded<Error>();
         REQUIRE(error);
-        REQUIRE(error->message.find("malformed CreateShot") != std::string::npos);
+        REQUIRE(
+            error->message.find("malformed CreateShot") != std::string::npos);
         REQUIRE(client.count(StudioMessageType::ProjectOpReply) == 0);
       }
     }
