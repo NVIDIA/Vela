@@ -520,8 +520,7 @@ void ServerConnection::handleMessage(const vsr::network::Message &msg)
     m_bootstrapping = true;
     m_bootstrapped = false;
     setDelegateEnabled(false);
-    if (onBootstrapBegin)
-      onBootstrapBegin();
+    announceMirrorReplace();
     clearMirror();
     return;
   case StudioMessageType::BootstrapEnd:
@@ -599,6 +598,11 @@ void ServerConnection::applySceneMessage(
   setDelegateEnabled(false);
   switch (type) {
   case StudioMessageType::TransferScene:
+    // A whole-scene push outside the bootstrap (the server re-sent its scene)
+    // replaces every object too; inside one BootstrapBegin already announced
+    // it and the mirror is empty.
+    if (!m_bootstrapping)
+      announceMirrorReplace();
     messages::TransferScene(msg, m_mirror).execute();
     break;
   case StudioMessageType::TransferLayer:
@@ -614,6 +618,12 @@ void ServerConnection::applySceneMessage(
     break;
   }
   setDelegateEnabled(canEmitEdits());
+}
+
+void ServerConnection::announceMirrorReplace()
+{
+  if (onMirrorReplaceBegin)
+    onMirrorReplaceBegin();
 }
 
 void ServerConnection::clearMirror()
