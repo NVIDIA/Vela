@@ -5,6 +5,7 @@
 #include "StudioViewport.h"
 #include "modals/ProjectLocationDialog.h"
 #include "windows/ProjectWindow.h"
+#include "windows/ShotEditor.h"
 #include "windows/TaskPanel.h"
 // vsr_scivis_studio_client_core
 #include "ProjectOps.h"
@@ -221,12 +222,14 @@ vsr_ui::WindowArray Application::setupWindows()
       new LockableWindow<vsr_ui::DatabaseEditor>(this, &m_panelsReadOnly);
 
   auto *projectWindow = new ProjectWindow(this, &m_editorContext);
+  auto *shotEditor = new ShotEditor(this, &m_editorContext);
   m_taskPanel = new TaskPanel(this, &m_editorContext);
 
-  m_editors = {projectWindow};
+  m_editors = {projectWindow, shotEditor};
 
   windows.emplace_back(m_viewport);
   windows.emplace_back(projectWindow);
+  windows.emplace_back(shotEditor);
   windows.emplace_back(log);
   windows.emplace_back(m_taskPanel);
   windows.emplace_back(layers);
@@ -834,11 +837,17 @@ Size=955,1341
 Collapsed=0
 DockId=0x00000005,0
 
-[Window][Layers]
+[Window][Shot Editor]
 Pos=0,56
 Size=955,1341
 Collapsed=0
 DockId=0x00000005,1
+
+[Window][Layers]
+Pos=0,56
+Size=955,1341
+Collapsed=0
+DockId=0x00000005,2
 
 [Window][Tasks]
 Pos=957,1741
