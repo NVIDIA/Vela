@@ -115,7 +115,7 @@ PY
 start_server() {
   : > "$server_log"
   "$server_bin" --port "$port" --library helide --data-root "$data_root" \
-    "${server_args[@]}" >"$server_log" 2>&1 &
+    ${server_args[@]+"${server_args[@]}"} >"$server_log" 2>&1 &
   server_pid=$!
   local deadline=$((SECONDS + 30))
   while [ $SECONDS -lt $deadline ]; do
