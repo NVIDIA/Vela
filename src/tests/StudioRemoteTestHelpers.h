@@ -6,20 +6,36 @@
 #include "NetworkTestHelpers.h"
 // vsr_scivis_studio_client_core
 #include "ServerConnection.h"
+// vsr_scivis_studio_server_core
+#include "ServerOptions.h"
+#include "StudioServer.h"
+// vsr_scivis_studio_model
+#include "Project.h"
+// vsr_scene
+#include "vsr/scene/Layer.hpp"
+#include "vsr/scene/Scene.hpp"
 // anari
 #include <anari/anari_cpp.hpp>
 // std
+#include <atomic>
 #include <chrono>
+#include <filesystem>
+#include <memory>
+#include <string>
+#include <thread>
 
 /*
  * Helpers shared by the Studio remote tests (client core, server, end to
- * end): whether a real ANARI device is available, and connection timings
- * short enough to exercise every liveness timer inside a test.
+ * end, test client): whether a real ANARI device is available, connection
+ * timings short enough to exercise every liveness timer inside a test, and a
+ * StudioServer running on its own thread for the clients to talk to.
  *
  * Example:
  *   if (!helideAvailable())
  *     return;
+ *   RunningServer server(0);
  *   ServerConnection connection(&mirror, fastTimings());
+ *   connection.connect("127.0.0.1", server.port());
  */
 
 // The session tests need a real device; absent builds skip rather than fail.
@@ -54,4 +70,78 @@ inline vsr::scivis_studio::client::ConnectionTimings fastTimings(
   t.retryMaxDelay = std::chrono::milliseconds(200);
   t.autoRetryFor = autoRetryFor;
   return t;
+}
+
+// A StudioServer on the helide device, on its own loop thread. Stopping it is
+// what a client sees as the server going away: run() tears the listening
+// socket down. The studio layer gets one transform node so tests have a
+// node to address; a fresh project has none of its own.
+struct RunningServer
+{
+  explicit RunningServer(int port);
+  ~RunningServer();
+
+  void stop();
+  unsigned short port() const;
+  vsr::scene::Scene &scene();
+  const vsr::scivis_studio::Project &project();
+
+  std::unique_ptr<vsr::scivis_studio::server::StudioServer> server;
+  bool started{false};
+  std::string startError;
+  size_t transformNode{VSR_INVALID_INDEX};
+  std::atomic<bool> finished{false};
+  std::thread thread;
+};
+
+inline RunningServer::RunningServer(int port)
+{
+  vsr::scivis_studio::server::ServerOptions options;
+  options.port = port;
+  options.library = "helide";
+  options.dataRoots = {std::filesystem::temp_directory_path()};
+  server = std::make_unique<vsr::scivis_studio::server::StudioServer>(options);
+  started = server->start(&startError);
+  if (!started)
+    return;
+  // Before run(): start() is the last thing on this thread that may touch the
+  // scene.
+  auto &s = scene();
+  if (auto *layer = s.layer("studio")) {
+    auto node = s.insertChildTransformNode(
+        layer->root(), vsr::math::IDENTITY_MAT4, "test transform");
+    transformNode = node.index();
+  }
+  thread = std::thread([this] {
+    server->run();
+    finished.store(true);
+  });
+}
+
+inline RunningServer::~RunningServer()
+{
+  stop();
+}
+
+inline void RunningServer::stop()
+{
+  if (!thread.joinable())
+    return;
+  server->requestShutdown();
+  thread.join();
+}
+
+inline unsigned short RunningServer::port() const
+{
+  return server->port();
+}
+
+inline vsr::scene::Scene &RunningServer::scene()
+{
+  return server->appContext().vsr.scene;
+}
+
+inline const vsr::scivis_studio::Project &RunningServer::project()
+{
+  return server->projectContext().project();
 }
