@@ -709,8 +709,9 @@ void ProjectOps::handleTaskCompleted(const TaskCompleted &completed)
 {
   TaskRecord &record = recordFor(completed.taskId);
   record.state = TaskState::Completed;
-  if (!completed.message.empty())
-    record.lastProgress.message = completed.message;
+  // The outcome's message replaces the last phase text: an empty one means
+  // nothing to report, not "still writing".
+  record.lastProgress.message = completed.message;
   record.framesCompleted = completed.framesCompleted;
   record.error.clear();
 }
