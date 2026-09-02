@@ -60,7 +60,9 @@ struct StudioViewport : public vsr::ui::imgui::BaseViewport
   void buildUI() override;
 
   // Reports the current viewport size as SetFrameConfig, whatever was last
-  // reported; for the bootstrap, where the server starts from scratch.
+  // reported, and from then on reports every settled resize. For the
+  // bootstrap: before it the server has nothing to render for us, so resizes
+  // during connect (the undocked first-frame size, say) are not reported.
   void sendFrameConfig();
   // Points the manipulator at `camera`, the mirror's copy of the server's
   // camera. A null camera leaves the viewport without one; input then changes
@@ -116,6 +118,7 @@ struct StudioViewport : public vsr::ui::imgui::BaseViewport
   std::vector<uint8_t> m_decodeScratch; // so a failed decode keeps m_pixels
   vsr::math::int2 m_pipelineSize{0, 0};
   vsr::math::uint2 m_sentFrameConfig{0, 0};
+  bool m_reportResizes{false}; // armed by sendFrameConfig()
   std::deque<Clock::time_point> m_frameArrivals; // last second, for fps
 
   vsr::rendering::ClearBuffersPass *m_clearPass{nullptr};
