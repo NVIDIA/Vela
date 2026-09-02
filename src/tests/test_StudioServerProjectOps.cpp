@@ -36,6 +36,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -409,6 +410,46 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
         REQUIRE(runner.queued() == 0);
         REQUIRE(sent.empty());
         REQUIRE_FALSE(runner.runOne());
+      }
+    }
+  }
+
+  GIVEN("a task whose body throws")
+  {
+    const auto thrower =
+        runner.enqueue("thrower", [&](const TaskProgressFunction &) {
+          throw std::filesystem::filesystem_error("stat failed",
+              std::filesystem::path("/locked/dir"),
+              std::make_error_code(std::errc::permission_denied));
+          return TaskResult{};
+        });
+    const auto after = runner.enqueue(
+        "after", [&](const TaskProgressFunction &) { return TaskResult{}; });
+
+    WHEN("the queue is run")
+    {
+      const auto ranThrower = runner.runOne();
+      const auto ranAfter = runner.runOne();
+
+      THEN("the exception becomes that task's TaskFailed and the next runs")
+      {
+        REQUIRE(ranThrower);
+        REQUIRE(ranThrower->taskId == thrower);
+        REQUIRE_FALSE(ranThrower->result.ok);
+        REQUIRE(ranThrower->result.projectChanged);
+        REQUIRE(
+            ranThrower->result.error.find("stat failed") != std::string::npos);
+        REQUIRE_FALSE(runner.running());
+        REQUIRE(ranAfter);
+        REQUIRE(ranAfter->taskId == after);
+        REQUIRE(ranAfter->result.ok);
+
+        REQUIRE(sent.size() == 2);
+        const auto failed = decode<TaskFailed>(sent[0]);
+        REQUIRE(failed);
+        REQUIRE(failed->taskId == thrower);
+        REQUIRE(failed->error.find("task aborted") != std::string::npos);
+        REQUIRE(decode<TaskCompleted>(sent[1]));
       }
     }
   }
