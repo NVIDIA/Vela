@@ -253,6 +253,37 @@ SCENARIO("vsr::scene::Scene clears layer references when removing an object",
 }
 
 SCENARIO(
+    "vsr::scene::Scene removes an object leaf node with its object", "[Scene]")
+{
+  GIVEN("A light referenced by exactly one leaf node")
+  {
+    vsr::scene::Scene scene;
+    auto *layer = scene.defaultLayer();
+    auto group = scene.insertChildTransformNode(
+        layer->root(), vsr::math::IDENTITY_MAT4, "group");
+    auto light =
+        scene.createObject<vsr::scene::Light>(vsr::scene::tokens::light::point);
+    auto leaf = scene.insertChildObjectNode(group, light, "light");
+    const size_t lightIndex = light->index();
+    const size_t leafIndex = leaf.index();
+
+    WHEN("The leaf is removed together with its object")
+    {
+      scene.removeNode(leaf, true);
+
+      THEN("Both are gone once and the parent survives as an empty group")
+      {
+        REQUIRE(scene.getObject(ANARI_LIGHT, lightIndex) == nullptr);
+        REQUIRE_FALSE(layer->at(leafIndex));
+        REQUIRE(group.valid());
+        REQUIRE(group->isLeaf());
+        REQUIRE(findDirectChild(layer->root(), "group"));
+      }
+    }
+  }
+}
+
+SCENARIO(
     "vsr::scene::LayerNodeData preserves singular SRT transforms", "[Scene]")
 {
   GIVEN("A transform with elevation 90 and roll 270")
