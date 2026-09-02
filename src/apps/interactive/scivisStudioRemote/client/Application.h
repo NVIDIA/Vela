@@ -3,7 +3,7 @@
 
 #pragma once
 
-// vsr_scivis_studio_client
+// scivisStudioClient
 #include "EditorContext.h"
 // vsr_scivis_studio_client_core
 #include "ServerConnection.h"

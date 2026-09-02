@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "ProjectLocationDialog.h"
+// scivisStudioClient
 #include "UICommon.h"
 // vsr_scivis_studio_model
 #include "Project.h"

@@ -3,6 +3,7 @@
 
 #pragma once
 
+// scivisStudioClient
 #include "EditorWindow.h"
 // vsr_scivis_studio_model
 #include "Dataset.h"

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "ServerConnection.h"
+// vsr_scivis_studio_client_core
 #include "MirrorUpdateDelegate.h"
 #include "ProjectOps.h"
 // vsr_scivis_studio_protocol

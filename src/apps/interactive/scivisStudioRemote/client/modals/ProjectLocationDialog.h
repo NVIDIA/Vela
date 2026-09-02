@@ -3,7 +3,7 @@
 
 #pragma once
 
-// vsr_scivis_studio_client
+// scivisStudioClient
 #include "EditorContext.h"
 #include "RemoteBrowseDialog.h"
 // vsr_scivis_studio_protocol

@@ -3,7 +3,7 @@
 
 #pragma once
 
-// vsr_scivis_studio_client
+// scivisStudioClient
 #include "EditorContext.h"
 // vsr_ui_imgui
 #include "vsr/ui/imgui/windows/Window.h"

@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "DatasetEditor.h"
-#include "ReplicaView.h"
+// scivisStudioClient
 #include "UICommon.h"
+// vsr_scivis_studio_client_core
+#include "ReplicaView.h"
 // vsr_scivis_studio_model
 #include "Project.h"
 // vsr_ui_imgui
