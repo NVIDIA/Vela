@@ -11,6 +11,7 @@ PRIVATE
   AnimationManager.cpp
   Binding.cpp
   CallbackBinding.cpp
+  FileBinding.cpp
   ObjectParameterBinding.cpp
   TransformBinding.cpp
 )

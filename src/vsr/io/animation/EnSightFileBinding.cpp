@@ -150,6 +150,7 @@ void EnSightFileBinding::loadFrame(int frameIdx)
   if (m_geoFiles.empty()) {
     logWarning(
         "[EnSightFileBinding] no geo files; cannot load frame %d", frameIdx);
+    reportLoadFailure(frameIdx, "no EnSight geo files");
     return;
   }
 
@@ -159,6 +160,8 @@ void EnSightFileBinding::loadFrame(int frameIdx)
   if (!ensight::readGeoFile(m_geoFiles[geoIdx], parts)) {
     logWarning("[EnSightFileBinding] failed to read geo file '%s'",
         m_geoFiles[geoIdx].c_str());
+    reportLoadFailure(
+        frameIdx, "failed to read EnSight geo file '" + m_geoFiles[geoIdx] + "'");
     return;
   }
 
