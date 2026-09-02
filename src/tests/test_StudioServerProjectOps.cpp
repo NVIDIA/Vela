@@ -447,6 +447,11 @@ SCENARIO("StudioServer serves project, shot, rig and color map ops",
         REQUIRE(project.shots.size() == 1);
         REQUIRE(project.datasets.empty());
         REQUIRE(project.activeShotId == project.shots.front().id);
+        // Binding the server's renderer completes the shot's defaults; it is
+        // not an edit, so a fresh project starts clean.
+        REQUIRE_FALSE(project.dirty);
+        REQUIRE(project.shots.front().renderSettings.rendererObjectIndex
+            != VSR_INVALID_INDEX);
 
         AND_THEN("frames render the new project's shot")
         {

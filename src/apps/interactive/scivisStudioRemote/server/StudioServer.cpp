@@ -282,13 +282,18 @@ bool StudioServer::bindActiveShotRendering(std::string *error)
   }
   if (!renderer) {
     renderer = m_renderers.front();
+    // Filling in a shot that never picked a renderer object (a fresh
+    // project's, or one saved before any pick) completes its defaults and
+    // leaves the dirty flag alone; overriding a real pick is an edit.
+    const bool hadPick = settings.rendererObjectIndex != VSR_INVALID_INDEX;
     if (settings.rendererObjectIndex != renderer->index()
         || settings.rendererSubtype != renderer->subtype().str()
         || settings.rendererLibrary != m_libraryName) {
       settings.rendererObjectIndex = renderer->index();
       settings.rendererSubtype = renderer->subtype().str();
       settings.rendererLibrary = m_libraryName;
-      project.markDirty();
+      if (hadPick)
+        project.markDirty();
     }
   }
   m_renderer = renderer;
