@@ -225,6 +225,20 @@ uint64_t startedTaskId(const ProjectOpReply &reply)
   return started->taskId;
 }
 
+// Position of the ProjectOpReply answering `requestId`, or SIZE_MAX.
+size_t indexOfReply(TestClient &client, uint64_t requestId)
+{
+  const auto messages = client.messages();
+  for (size_t i = 0; i < messages.size(); ++i) {
+    if (messages[i].header.type != uint8_t(StudioMessageType::ProjectOpReply))
+      continue;
+    const auto reply = decode<ProjectOpReply>(messages[i]);
+    if (reply && reply->requestId == requestId)
+      return i;
+  }
+  return SIZE_MAX;
+}
+
 const DirectoryEntry *findEntry(
     const ListDirectoryResult &listing, const std::string &name)
 {
@@ -1088,6 +1102,54 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
         const auto project = session.latestSnapshot().project;
         REQUIRE(project.projectDirectory == canonicalizePath(saved));
         REQUIRE_FALSE(project.dirty);
+      }
+    }
+
+    WHEN("a sync op follows two imports and then the second is cancelled")
+    {
+      REQUIRE(session.waitForSnapshots(++snapshots));
+      ImportStaticDataset first;
+      first.requestId = session.nextRequestId++;
+      first.name = "GridA";
+      first.sourcePath = data.grid;
+      first.importerType = vsr::io::ImporterType::OBJ;
+      auto second = first;
+      second.requestId = session.nextRequestId++;
+      second.name = "GridB";
+      CreateShot shot;
+      shot.requestId = session.nextRequestId++;
+      shot.name = "after the imports";
+      CancelTask cancel;
+      cancel.requestId = session.nextRequestId++;
+      cancel.taskId = taskId + 2;
+      client.send(first);
+      client.send(second);
+      client.send(shot);
+      client.send(cancel);
+
+      THEN("the cancel is served past the waiting sync op, which then runs")
+      {
+        const auto cancelReply = client.waitForReply(cancel.requestId);
+        REQUIRE(cancelReply);
+        REQUIRE(cancelReply->ok);
+        const auto secondEnd = waitForTaskEnd(client, taskId + 2);
+        REQUIRE(secondEnd);
+        REQUIRE_FALSE(secondEnd->completed);
+        REQUIRE(secondEnd->text == "cancelled");
+
+        const auto shotReply = client.waitForReply(shot.requestId);
+        REQUIRE(shotReply);
+        REQUIRE(shotReply->ok);
+        const auto firstEnd = waitForTaskEnd(client, taskId + 1);
+        REQUIRE(firstEnd);
+        REQUIRE(firstEnd->completed);
+        // The shot was created after the surviving import, as sent.
+        REQUIRE(client.indexOf(StudioMessageType::TaskCompleted)
+            < indexOfReply(client, shot.requestId));
+        REQUIRE(session.waitForSnapshots(snapshots += 2));
+        const auto project = session.latestSnapshot().project;
+        REQUIRE(project.datasets.size() == 2);
+        REQUIRE(project.shots.back().name == "after the imports");
       }
     }
 

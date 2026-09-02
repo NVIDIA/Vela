@@ -21,7 +21,9 @@
 // vsr_core
 #include "vsr/core/Logging.hpp"
 // std
+#include <algorithm>
 #include <chrono>
+#include <iterator>
 #include <thread>
 
 namespace vsr::scivis_studio::server {
@@ -574,12 +576,20 @@ void StudioServer::dispatchPendingRequests()
   while (!m_pendingRequests.empty()) {
     // A sync op the client sent after a task waits for that task to run, so
     // the project sees requests in the order they were sent; task ops only
-    // queue (their TaskStarted goes out now), and cancel and browse touch
-    // nothing the task could.
-    if (m_tasks.queued() > 0 && waitsForQueuedTasks(m_pendingRequests.front()))
-      break;
-    auto request = std::move(m_pendingRequests.front());
-    m_pendingRequests.pop_front();
+    // queue (their TaskStarted goes out now). While the front waits, a
+    // cancel or browse behind it is served out of turn: it touches nothing
+    // the task or the sync op could, and a cancel that waited for the task
+    // it names would always come too late.
+    auto next = m_pendingRequests.begin();
+    if (m_tasks.queued() > 0 && waitsForQueuedTasks(*next)) {
+      next = std::find_if(std::next(next),
+          m_pendingRequests.end(),
+          independentOfQueuedTasks);
+      if (next == m_pendingRequests.end())
+        break;
+    }
+    auto request = std::move(*next);
+    m_pendingRequests.erase(next);
     m_dispatcher.dispatch(request);
   }
 }

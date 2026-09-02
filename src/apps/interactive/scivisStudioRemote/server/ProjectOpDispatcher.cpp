@@ -176,16 +176,20 @@ std::optional<ProjectRequest> decodeProjectRequest(const Message &msg)
 
 bool waitsForQueuedTasks(const ProjectRequest &request)
 {
-  const bool bypasses = isOneOf<OpenProject>(request)
+  const bool launchesTask = isOneOf<OpenProject>(request)
       || isOneOf<SaveProject>(request) || isOneOf<ImportStaticDataset>(request)
       || isOneOf<ImportFileAnimationDataset>(request)
       || isOneOf<ReimportDataset>(request) || isOneOf<LoadDataset>(request)
       || isOneOf<SaveDatasetArchive>(request)
       || isOneOf<LoadDatasetArchive>(request)
-      || isOneOf<IncorporateDatasetCandidate>(request)
-      || isOneOf<ListRoots>(request) || isOneOf<ListDirectory>(request)
+      || isOneOf<IncorporateDatasetCandidate>(request);
+  return !launchesTask && !independentOfQueuedTasks(request);
+}
+
+bool independentOfQueuedTasks(const ProjectRequest &request)
+{
+  return isOneOf<ListRoots>(request) || isOneOf<ListDirectory>(request)
       || isOneOf<CancelTask>(request);
-  return !bypasses;
 }
 
 // Dispatcher /////////////////////////////////////////////////////////////////
