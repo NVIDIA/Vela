@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Viewport passes: ViewportSettings is an optimistic latest-wins message that
+# always carries the whole struct. The client remembers the last struct it
+# sent and edits it, so each command below composes with the ones before;
+# the server recomputes which passes (and whether the id channel) it needs
+# after every change, and frames keep streaming through each.
+
+connect
+set-encodings raw
+set-frame-config 32 24
+start-rendering
+await-frame
+
+# Depth visualisation over a fixed range.
+viewport-settings visualizeAOV=DEPTH depthVisualMinimum=0 depthVisualMaximum=10
+await-frame 2
+
+# World bounds on top of the depth view (visualizeAOV stays DEPTH).
+viewport-settings showWorldBounds=on worldBoundsWidth=2 worldBoundsColor=1,0.5,0,1
+await-frame 2
+
+# Edges need the id channel; the server turns it on for this and off after.
+viewport-settings visualizeAOV=EDGES edgeInvert=on
+await-frame 2
+
+# Primitive outlines (silently off on a device without primitiveId).
+viewport-settings outlinePrimitives=on highlightSelection=off
+await-frame 2
+
+# Back to the plain image.
+viewport-settings visualizeAOV=NONE showWorldBounds=off outlinePrimitives=off highlightSelection=on edgeInvert=off
+await-frame 2
+
+# None of it provoked an Error. A malformed payload (a bad AOV name) cannot
+# be written from a script and is the server unit tests' business.
+assert errors.received == 0
+
+stop-rendering
+disconnect

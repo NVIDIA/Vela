@@ -1,0 +1,60 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# runner: fixture fixtures/triangle.obj
+#
+# Picking: the server renders one frame with the id channel on, reads the
+# object id and depth under the pixel and answers with a flat PickReply. The
+# pixel convention on the wire is x right, y down from the top-left, in
+# frame-header pixels; coordinates outside the frame are clamped, not
+# refused. `hit` means an object id was there; the identity is the
+# server-minted (type, pool index) that SetOutline takes back.
+#
+# The runner copies fixtures/triangle.obj (vertices (0,0,0), (1,0,0), (0,1,0))
+# into the data root, which `list-roots` reveals as $dataRoot.
+
+connect
+list-roots
+import-static-dataset $dataRoot/triangle.obj Tri OBJ
+await-task
+await-snapshot
+assert project.datasets == 1
+
+# Aim the active shot's camera straight at the triangle so the frame centre
+# lands on it and the top-left corner sees background. The server keeps its
+# manipulator in step with the shot camera object, so the pose sticks.
+find-object camera name=shot_0001_camera
+set-param camera $lastObjectIndex position float32_vec3 0.3 0.3 3
+set-param camera $lastObjectIndex direction float32_vec3 0 0 -1
+set-param camera $lastObjectIndex up float32_vec3 0 1 0
+
+set-encodings raw
+set-frame-config 64 48
+start-rendering
+await-frame 2
+
+# The centre pixel hits the triangle's surface.
+pick 32 24
+assert pick.hit == true
+assert pick.objectType == surface
+
+# Outline what was hit: the pick's identity, via the variables it set.
+set-outline $lastPickType $lastPickIndex
+await-frame 2
+
+# The top-left corner is background: no hit, no identity.
+pick 0 0
+assert pick.hit == false
+assert pick.objectType == none
+assert pick.objectIndex == none
+
+# Outside the frame: clamped to the nearest edge pixel, answered, no Error.
+pick -5 1000
+assert errors.received == 0
+
+# Clear the outline; frames keep coming.
+set-outline none
+await-frame 2
+
+stop-rendering
+disconnect
