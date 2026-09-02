@@ -161,8 +161,10 @@ latch slots (latest-wins); `RequestArrayHistogram` is a sync Project Op. See
   the previous one is dropped) and again in the client core's single slot,
   so at a period near the wire's round trip (fps 1000 over a real socket)
   consecutive headers can read `1 2 4`. At the fps of a real shot (the
-  scenarios use 30-100) the loop iterates several times per frame and every
-  frame reaches the client.
+  scenarios use 24-30) the loop iterates several times per frame and every
+  frame reaches the client; a client process stalled for longer than a frame
+  period still sees a skip in its slot, which is why `playback.studio` runs at
+  25 fps and the strict never-skip check lives in the in-process E2E test.
 - **Time at Rest is committed by snapshot.** `SetPlaying{shotId, bool}`
   (the active shot only, else an error reply) replies then snapshots;
   stopping writes `playing=false` and the frame it stopped on into the Shot.
@@ -230,9 +232,13 @@ latch slots (latest-wins); `RequestArrayHistogram` is a sync Project Op. See
   property every frame the box is shown.
 - **Histogram limits.** `RequestArrayHistogram` bins a scalar host array on
   the loop thread (frames pause for the duration; linear in the element
-  count): `binCount` is clamped to `[1, 4096]`, the last bin is closed, and
-  equal min and max put everything in bin 0. Fixed-point element types count
-  in ANARI's normalized range. Refused with an error: references that are not
+  count): `binCount` is clamped to `[MIN_HISTOGRAM_BINS, MAX_HISTOGRAM_BINS]`
+  (`[1, 4096]`, declared once in `protocol/ViewportMessages.h` for both
+  ends), the last bin is closed, and equal min and max put everything in bin
+  0. Fixed-point element types count in ANARI's normalized range. NaN and
+  infinite elements take no part in the range or the bins and are counted in
+  `ArrayHistogramResult::nonFinite` (an array with no finite element reports
+  range `(0, 0)` and empty bins). Refused with an error: references that are not
   arrays, proxy arrays (the mirror's descriptors), CUDA arrays and non-scalar
   element types (vectors, matrices, object handles). No snapshot follows.
 
