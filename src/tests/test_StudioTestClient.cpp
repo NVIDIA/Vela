@@ -112,74 +112,6 @@ RunResult runScript(
   return result;
 }
 
-// A StudioServer on its own loop thread. Stopping it is what the client sees
-// as the server going away: run() tears the listening socket down.
-struct RunningServer
-{
-  explicit RunningServer(int port);
-  ~RunningServer();
-
-  void stop();
-  unsigned short port() const;
-  vsr::scene::Scene &scene();
-
-  std::unique_ptr<StudioServer> server;
-  bool started{false};
-  std::string startError;
-  // A transform node the tests can address with set-node-transform; a fresh
-  // project has none of its own.
-  size_t transformNode{VSR_INVALID_INDEX};
-  std::atomic<bool> finished{false};
-  std::thread thread;
-};
-
-RunningServer::RunningServer(int port)
-{
-  ServerOptions options;
-  options.port = port;
-  options.library = "helide";
-  options.dataRoots = {std::filesystem::temp_directory_path()};
-  server = std::make_unique<StudioServer>(options);
-  started = server->start(&startError);
-  if (!started)
-    return;
-  // Before run(): start() is the last thing on this thread that may touch the
-  // scene.
-  auto &s = scene();
-  if (auto *layer = s.layer("studio")) {
-    auto node = s.insertChildTransformNode(
-        layer->root(), vsr::math::IDENTITY_MAT4, "test transform");
-    transformNode = node.index();
-  }
-  thread = std::thread([this] {
-    server->run();
-    finished.store(true);
-  });
-}
-
-RunningServer::~RunningServer()
-{
-  stop();
-}
-
-void RunningServer::stop()
-{
-  if (!thread.joinable())
-    return;
-  server->requestShutdown();
-  thread.join();
-}
-
-unsigned short RunningServer::port() const
-{
-  return server->port();
-}
-
-vsr::scene::Scene &RunningServer::scene()
-{
-  return server->appContext().vsr.scene;
-}
-
 // A fake server on a bare NetworkServer that misbehaves in one scripted way,
 // so the client's failure paths run without a StudioServer.
 struct ScriptedServer
@@ -736,7 +668,7 @@ SCENARIO(
     const auto port = server->port();
     const auto endpoint = "127.0.0.1 " + std::to_string(port);
 
-    const auto &project = server->server->projectContext().project();
+    const auto &project = server->project();
     const auto *shot = project::activeShot(project);
     REQUIRE(shot);
     const auto cameraIndex = std::to_string(shot->camera.objectIndex);

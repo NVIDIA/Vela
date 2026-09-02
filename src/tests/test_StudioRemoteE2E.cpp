@@ -104,69 +104,6 @@ void StructureCounter::signalLayerStructureUpdated(const vsr::scene::Layer *)
   mutations++;
 }
 
-// A StudioServer on its own loop thread. Stopping it is what the client sees
-// as the server going away: run() tears the listening socket down.
-struct RunningServer
-{
-  explicit RunningServer(int port);
-  ~RunningServer();
-
-  void stop();
-  unsigned short port() const;
-  vsr::scene::Scene &scene();
-  const Project &project();
-
-  std::unique_ptr<StudioServer> server;
-  bool started{false};
-  std::string startError;
-  std::atomic<bool> finished{false};
-  std::thread thread;
-};
-
-RunningServer::RunningServer(int port)
-{
-  ServerOptions options;
-  options.port = port;
-  options.library = "helide";
-  options.dataRoots = {std::filesystem::temp_directory_path()};
-  server = std::make_unique<StudioServer>(options);
-  started = server->start(&startError);
-  if (started) {
-    thread = std::thread([this] {
-      server->run();
-      finished.store(true);
-    });
-  }
-}
-
-RunningServer::~RunningServer()
-{
-  stop();
-}
-
-void RunningServer::stop()
-{
-  if (!thread.joinable())
-    return;
-  server->requestShutdown();
-  thread.join();
-}
-
-unsigned short RunningServer::port() const
-{
-  return server->port();
-}
-
-vsr::scene::Scene &RunningServer::scene()
-{
-  return server->appContext().vsr.scene;
-}
-
-const Project &RunningServer::project()
-{
-  return server->projectContext().project();
-}
-
 // The client core on a mirror that counts structural mutations.
 struct Client
 {
