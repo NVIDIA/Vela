@@ -11,6 +11,8 @@
 #include "vsr/io/importers.hpp"
 // vsr_core
 #include "vsr/core/DataTree.hpp"
+// vsr_network
+#include "vsr/network/Message.hpp"
 // std
 #include <cstdint>
 #include <filesystem>
@@ -225,6 +227,15 @@ struct DiscoverDatasetCandidatesResult
 {
   std::vector<DatasetCandidateEntry> candidates;
 };
+
+// Request plumbing ///////////////////////////////////////////////////////////
+
+// The requestId a request payload carries as its first field, read without
+// knowing the payload type, so a receiver can still answer a request whose
+// remaining fields it cannot decode (or a type it does not serve) with a
+// ProjectOpReply the sender can match. Empty when the payload has no
+// requestId or does not parse at all.
+std::optional<uint64_t> peekRequestId(const vsr::network::Message &msg);
 
 // Importer type names ////////////////////////////////////////////////////////
 

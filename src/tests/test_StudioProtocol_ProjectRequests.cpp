@@ -8,6 +8,7 @@
 #include "ProjectRequests.h"
 #include "StudioCodec.h"
 // std
+#include <cstddef>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -126,6 +127,43 @@ SCENARIO("Project request payloads", "[StudioProtocol]")
       SaveProject bad;
       REQUIRE_FALSE(fromNode(tree.root(), bad));
     }
+  }
+}
+
+SCENARIO("peekRequestId reads the id of any request", "[StudioProtocol]")
+{
+  GIVEN("a well-formed request")
+  {
+    RenameDataset req;
+    req.requestId = 77;
+    req.datasetId = "ds1";
+    req.newName = "pressure";
+    REQUIRE(peekRequestId(encode(req)) == 77);
+  }
+
+  GIVEN("a request missing everything but its id")
+  {
+    vsr::core::DataTree tree;
+    writeChild(tree.root(), "requestId", uint64_t(78));
+    vsr::network::Message msg;
+    msg.header.type = uint8_t(StudioMessageType::RenameDataset);
+    tree.write(msg.payload);
+    msg.header.payload_length = uint32_t(msg.payload.size());
+    REQUIRE_FALSE(decode<RenameDataset>(msg));
+    REQUIRE(peekRequestId(msg) == 78);
+  }
+
+  GIVEN("payloads without an id")
+  {
+    vsr::network::Message empty;
+    empty.header.type = uint8_t(StudioMessageType::NewProject);
+    REQUIRE_FALSE(peekRequestId(empty));
+
+    vsr::network::Message garbage;
+    garbage.header.type = uint8_t(StudioMessageType::NewProject);
+    garbage.payload = {std::byte{0xff}, std::byte{0x00}, std::byte{0x13}};
+    garbage.header.payload_length = uint32_t(garbage.payload.size());
+    REQUIRE_FALSE(peekRequestId(garbage));
   }
 }
 
