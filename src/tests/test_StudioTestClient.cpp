@@ -14,6 +14,8 @@
 #include "StudioServer.h"
 // vsr_scivis_studio_protocol
 #include "BrowseMessages.h"
+#include "FrameMessages.h"
+#include "PlaybackMessages.h"
 #include "ProjectOpReply.h"
 #include "ProjectRequests.h"
 #include "ProjectSnapshot.h"
@@ -22,6 +24,7 @@
 #include "StudioCodec.h"
 #include "StudioProtocol.h"
 #include "TaskMessages.h"
+#include "ViewportMessages.h"
 // vsr_scivis_studio_model
 #include "Project.h"
 #include "Shot.h"
@@ -203,6 +206,15 @@ unsigned short ScriptedServer::port() const
  * Task messages, a ProjectSnapshot after every mutation. Every handler runs
  * on the server's IO thread and answers at once, so a task's completion is
  * usually in the client's queue before the script awaits it.
+ *
+ * Milestone 6: SetPlaying flips the active shot's `playing` (another shot id
+ * is refused); StartRendering streams four 2x2 frames at frames 0, 1, 2, 0
+ * (a loop wrap), spaced so the client's latest-wins slot sees each; SetTime
+ * answers with one frame at the scrubbed frame, or with a TimeAdvanceWarning
+ * when the frame is 99; Pick misses at (0,0) and hits surface 4 elsewhere,
+ * after a stray PickReply nobody asked for; RequestArrayHistogram bins
+ * array 0 and refuses every other array as not scalar. SetOutline and
+ * ViewportSettings are only recorded.
  */
 struct ProjectOpsServer
 {
@@ -241,6 +253,12 @@ struct ProjectOpsServer
   std::chrono::milliseconds snapshotDelay{0};
   std::vector<Message> deferred;
   std::vector<std::thread> delayedSends;
+  // StartRendering's frames go out from here: a send posted from a handler
+  // is only written once the handler returns, so pacing them needs a thread
+  // of their own.
+  std::thread streamer;
+
+  void sendFrame(const std::string &shotId, int frame);
 };
 
 ProjectOpsServer::ProjectOpsServer()
@@ -280,6 +298,8 @@ ProjectOpsServer::~ProjectOpsServer()
 {
   for (auto &thread : delayedSends)
     thread.join();
+  if (streamer.joinable())
+    streamer.join();
   channel->stop();
 }
 
@@ -345,6 +365,17 @@ uint64_t ProjectOpsServer::startTask(uint64_t requestId)
   const auto taskId = nextTaskId++;
   reply(requestId, TaskStartedResult{taskId});
   return taskId;
+}
+
+void ProjectOpsServer::sendFrame(const std::string &shotId, int frame)
+{
+  FrameHeader header;
+  header.width = 2;
+  header.height = 2;
+  header.shotId = shotId;
+  header.frame = frame;
+  const std::vector<std::byte> pixels(2 * 2 * 4, std::byte{0x7f});
+  send(encodeFrame(header, pixels.data(), pixels.size()));
 }
 
 void ProjectOpsServer::onMessage(const Message &msg)
@@ -564,6 +595,82 @@ void ProjectOpsServer::onMessage(const Message &msg)
     reply(req.requestId, result);
     return;
   }
+
+  case StudioMessageType::SetPlaying: {
+    const auto req = *decode<SetPlaying>(msg);
+    if (req.shotId != project.activeShotId) {
+      replyError(req.requestId,
+          "shot '" + req.shotId + "' is not the active shot");
+      return;
+    }
+    project::findShot(project, req.shotId)->playing = req.playing;
+    replyOk(req.requestId);
+    sendSnapshot();
+    return;
+  }
+  case StudioMessageType::StartRendering: {
+    // Paced so the client's latest-wins slot consumes every header.
+    if (streamer.joinable())
+      streamer.join();
+    streamer = std::thread([this, shotId = project.activeShotId] {
+      for (const int frame : {0, 1, 2, 0}) {
+        sendFrame(shotId, frame);
+        std::this_thread::sleep_for(30ms);
+      }
+    });
+    return;
+  }
+  case StudioMessageType::SetTime: {
+    const auto req = *decode<SetTime>(msg);
+    if (req.frame == 99) {
+      TimeAdvanceWarning warning;
+      warning.shotId = req.shotId;
+      warning.frame = req.frame;
+      warning.message = "frame 99 failed to load";
+      send(encode(warning));
+      return;
+    }
+    sendFrame(req.shotId, req.frame);
+    return;
+  }
+  case StudioMessageType::Pick: {
+    const auto req = *decode<Pick>(msg);
+    // A reply to a pick nobody sent: the runner must look past it.
+    PickReply stray;
+    stray.requestId = 777;
+    send(encode(stray));
+    PickReply reply;
+    reply.requestId = req.requestId;
+    reply.hit = !(req.x == 0 && req.y == 0);
+    if (reply.hit) {
+      reply.worldPosition = {0.5f, 0.25f, -1.f};
+      SceneObjectRef identity;
+      identity.type = ANARI_SURFACE;
+      identity.objectIndex = 4;
+      reply.objectIdentity = identity;
+    }
+    send(encode(reply));
+    return;
+  }
+  case StudioMessageType::SetOutline:
+  case StudioMessageType::ViewportSettings:
+    return; // recorded above, nothing to answer
+  case StudioMessageType::RequestArrayHistogram: {
+    const auto req = *decode<RequestArrayHistogram>(msg);
+    if (req.array.type != ANARI_ARRAY || req.array.objectIndex != 0) {
+      replyError(req.requestId,
+          "array " + std::to_string(req.array.objectIndex)
+              + " element type ANARI_FLOAT32_VEC3 is not scalar");
+      return;
+    }
+    ArrayHistogramResult result;
+    result.bins = {1, 2, 3};
+    result.minValue = 0.f;
+    result.maxValue = 1.f;
+    reply(req.requestId, result);
+    return;
+  }
+
   default: {
     Error error;
     error.message = std::string(toString(*type)) + " is not served by the fake";
@@ -1271,6 +1378,231 @@ SCENARIO("the test client drives project ops against a fake server",
       }
     }
 
+    WHEN("a script runs the playback, pick, viewport and histogram commands")
+    {
+      const std::string script =
+          "connect " + endpoint + "\n"
+          "assert shot.active.playing == false\n"
+          "set-playing active on\n"
+          "await-snapshot\n"
+          "assert shot.active.playing == true\n"
+          "assert shot.shot_0001.playing == true\n"
+          "expect-fail set-playing shot_9999 on\n"
+          "assert lastReplyError contains active\n"
+          "assert replies.failed == 1\n"
+          // Frames 0, 1, 2, 0: three advances, the wrap is not a step.
+          "start-rendering\n"
+          "await-frame-advance 3\n"
+          "assert frames.advanced == 3\n"
+          "assert frames.maxStep == 1\n"
+          "assert frame.frame == 0\n"
+          "set-time active 7\n"
+          "await-frame-at 7\n"
+          "assert frame.frame == 7\n"
+          "assert frames.advanced == 4\n"
+          // A forward scrub is a forward step; only backward ones are not.
+          "assert frames.maxStep == 7\n"
+          "set-time shot_0001 99\n"
+          "await-warning\n"
+          "assert warnings.received == 1\n"
+          "assert lastWarning contains load\n"
+          "pick 0 0\n"
+          "assert pick.hit == false\n"
+          "assert pick.objectType == none\n"
+          "assert pick.objectIndex == none\n"
+          "pick 10 5\n"
+          "assert pick.hit == true\n"
+          "assert pick.objectType == surface\n"
+          "assert pick.objectIndex == 4\n"
+          "assert pick.worldPosition == \"0.5 0.25 -1\"\n"
+          "assert var.lastPickType == surface\n"
+          "assert var.lastPickIndex == 4\n"
+          "set-outline $lastPickType $lastPickIndex\n"
+          "set-outline volume:2\n"
+          "set-outline none\n"
+          "set-outline\n"
+          "viewport-settings visualizeAOV=depth depthVisualMinimum=0 depthVisualMaximum=10\n"
+          "viewport-settings showWorldBounds=on worldBoundsWidth=2 worldBoundsColor=1,0,0,1\n"
+          "viewport-settings\n"
+          "request-array-histogram array 0 3\n"
+          "assert histogram.bins == 3\n"
+          "assert histogram.total == 6\n"
+          "assert histogram.min == 0\n"
+          "assert histogram.max == 1\n"
+          "expect-fail request-array-histogram array:5 16\n"
+          "assert lastReplyError contains scalar\n"
+          "assert errors.received == 0\n"
+          "disconnect\n";
+      const auto result = runScript(session, script);
+      for (const auto &f : failLines(result.records))
+        WARN(f);
+      REQUIRE(result.ok);
+
+      THEN("the records show the snapshot's time, the frames and the replies")
+      {
+        const auto &r = result.records;
+        REQUIRE(hasLine(r,
+            "EVT ProjectSnapshot activeShot=shot_0001 shots=1 datasets=0"
+            " lightRigs=1 cameraRigs=1 colorMaps=0 dirty=true playing=true"
+            " currentFrame=0"));
+        REQUIRE(hasLine(r,
+            "EVT ProjectOpReply requestId=2 ok=false error=\"shot 'shot_9999'"
+            " is not the active shot\""));
+        REQUIRE(countStarting(r,
+                    "EVT Frame width=2 height=2 encoding=Raw"
+                    " pixelFormat=RGBA8_sRGB shotId=shot_0001 frame=0 bytes=16")
+            == 2);
+        REQUIRE(hasLine(r,
+            "EVT Frame width=2 height=2 encoding=Raw pixelFormat=RGBA8_sRGB"
+            " shotId=shot_0001 frame=7 bytes=16"));
+        REQUIRE(hasLine(r,
+            "EVT TimeAdvanceWarning shotId=shot_0001 frame=99"
+            " message=\"frame 99 failed to load\""));
+        REQUIRE(countStarting(r,
+                    "EVT PickReply requestId=777 hit=false"
+                    " worldPosition=\"0 0 0\" objectType=none objectIndex=none")
+            == 2);
+        REQUIRE(hasLine(r,
+            "EVT PickReply requestId=3 hit=false worldPosition=\"0 0 0\""
+            " objectType=none objectIndex=none"));
+        REQUIRE(hasLine(r,
+            "EVT PickReply requestId=4 hit=true worldPosition=\"0.5 0.25 -1\""
+            " objectType=surface objectIndex=4"));
+        REQUIRE(hasLine(r,
+            "EVT ProjectOpReply requestId=5 ok=true error=\"\" bins=3 min=0"
+            " max=1"));
+        REQUIRE(hasLine(r, "OK set-outline $lastPickType $lastPickIndex"));
+      }
+
+      THEN("the wire carries the resolved ids, pixels and composed settings")
+      {
+        const auto playing = server.requests<SetPlaying>();
+        REQUIRE(playing.size() == 2);
+        REQUIRE(playing[0].shotId == "shot_0001");
+        REQUIRE(playing[0].playing);
+        REQUIRE(playing[1].shotId == "shot_9999");
+        const auto times = server.requests<SetTime>();
+        REQUIRE(times.size() == 2);
+        REQUIRE(times[0].shotId == "shot_0001");
+        REQUIRE(times[0].frame == 7);
+        REQUIRE(times[1].frame == 99);
+        const auto picks = server.requests<Pick>();
+        REQUIRE(picks.size() == 2);
+        REQUIRE(picks[0].x == 0);
+        REQUIRE(picks[0].y == 0);
+        REQUIRE(picks[1].x == 10);
+        REQUIRE(picks[1].y == 5);
+        const auto outlines = server.requests<SetOutline>();
+        REQUIRE(outlines.size() == 4);
+        REQUIRE(outlines[0].objectIdentity);
+        REQUIRE(outlines[0].objectIdentity->type == ANARI_SURFACE);
+        REQUIRE(outlines[0].objectIdentity->objectIndex == 4);
+        REQUIRE(outlines[1].objectIdentity);
+        REQUIRE(outlines[1].objectIdentity->type == ANARI_VOLUME);
+        REQUIRE(outlines[1].objectIdentity->objectIndex == 2);
+        REQUIRE_FALSE(outlines[2].objectIdentity);
+        REQUIRE_FALSE(outlines[3].objectIdentity);
+        const auto settings = server.requests<ViewportSettings>();
+        REQUIRE(settings.size() == 3);
+        REQUIRE(settings[0].visualizeAOV == vsr::rendering::AOVType::DEPTH);
+        REQUIRE(settings[0].depthVisualMaximum == 10.f);
+        REQUIRE_FALSE(settings[0].showWorldBounds);
+        REQUIRE(settings[0].highlightSelection); // the default, sent whole
+        REQUIRE(settings[1].visualizeAOV == vsr::rendering::AOVType::DEPTH);
+        REQUIRE(settings[1].depthVisualMaximum == 10.f);
+        REQUIRE(settings[1].showWorldBounds);
+        REQUIRE(settings[1].worldBoundsWidth == 2);
+        REQUIRE(settings[1].worldBoundsColor.x == 1.f);
+        REQUIRE(settings[1].worldBoundsColor.y == 0.f);
+        REQUIRE(settings[1].worldBoundsColor.w == 1.f);
+        REQUIRE(settings[2].showWorldBounds);
+        REQUIRE(settings[2].visualizeAOV == vsr::rendering::AOVType::DEPTH);
+        const auto histograms = server.requests<RequestArrayHistogram>();
+        REQUIRE(histograms.size() == 2);
+        REQUIRE(histograms[0].array.type == ANARI_ARRAY);
+        REQUIRE(histograms[0].array.objectIndex == 0);
+        REQUIRE(histograms[0].binCount == 3);
+        REQUIRE(histograms[1].array.objectIndex == 5);
+        REQUIRE(histograms[1].binCount == 16);
+      }
+    }
+
+    WHEN("a script misuses the playback, pick and viewport commands")
+    {
+      const auto result = runScript(session,
+          "connect " + endpoint + "\n"
+          "set-playing active\n"
+          "set-playing shot_0001 maybe\n"
+          "set-time active x\n"
+          "await-frame-at\n"
+          "await-frame-advance two\n"
+          "pick 1\n"
+          "set-outline camera\n"
+          "set-outline camera 1 extra\n"
+          "viewport-settings nokey\n"
+          "viewport-settings bogus=1\n"
+          "viewport-settings worldBoundsColor=1,2\n"
+          "viewport-settings visualizeAOV=SHINY\n"
+          "request-array-histogram array 0\n"
+          "find-object camera first\n"
+          "find-object camera name=Main\n"
+          "find-object camera last\n"
+          "assert pick.hit == false\n"
+          "expect-fail request-array-histogram array 9 4\n"
+          "assert histogram.bins == 0\n"
+          "assert shot.active.bogus == 1\n"
+          "assert frames.advanced == 0\n"
+          "disconnect\n",
+          [] {
+            RunnerOptions o;
+            o.keepGoing = true;
+            return o;
+          }());
+
+      THEN("each FAILs by name and nothing reached the wire")
+      {
+        REQUIRE_FALSE(result.ok);
+        const auto fails = failLines(result.records);
+        REQUIRE(fails.size() == 19);
+        REQUIRE(fails[0].find("usage: set-playing") != std::string::npos);
+        REQUIRE(fails[1].find("usage: set-playing") != std::string::npos);
+        REQUIRE(fails[2].find("usage: set-time") != std::string::npos);
+        REQUIRE(fails[3].find("usage: await-frame-at") != std::string::npos);
+        REQUIRE(
+            fails[4].find("usage: await-frame-advance") != std::string::npos);
+        REQUIRE(fails[5].find("usage: pick") != std::string::npos);
+        REQUIRE(fails[6].find("usage: set-outline") != std::string::npos);
+        REQUIRE(fails[7].find("usage: set-outline") != std::string::npos);
+        REQUIRE(
+            fails[8].find("usage: viewport-settings") != std::string::npos);
+        REQUIRE(fails[9].find("unknown viewport setting 'bogus'")
+            != std::string::npos);
+        REQUIRE(fails[10].find("not a valid worldBoundsColor")
+            != std::string::npos);
+        REQUIRE(
+            fails[11].find("not a valid visualizeAOV") != std::string::npos);
+        REQUIRE(fails[12].find("usage: request-array-histogram")
+            != std::string::npos);
+        // The fake bootstraps no scene, so the mirror has nothing to find.
+        REQUIRE(fails[13].find("no camera in the mirror") != std::string::npos);
+        REQUIRE(fails[14].find("no camera named \"Main\" in the mirror")
+            != std::string::npos);
+        REQUIRE(fails[15].find("usage: find-object") != std::string::npos);
+        REQUIRE(fails[16].find("no pick has been answered") != std::string::npos);
+        // A refused histogram request leaves no histogram to assert on.
+        REQUIRE(
+            fails[17].find("no histogram has been answered") != std::string::npos);
+        REQUIRE(fails[18].find("unknown shot field 'bogus'") != std::string::npos);
+        REQUIRE(hasLine(result.records, "OK assert frames.advanced == 0"));
+        REQUIRE(server.requests<SetPlaying>().empty());
+        REQUIRE(server.requests<SetTime>().empty());
+        REQUIRE(server.requests<Pick>().empty());
+        REQUIRE(server.requests<SetOutline>().empty());
+        REQUIRE(server.requests<ViewportSettings>().empty());
+        REQUIRE(server.requests<RequestArrayHistogram>().size() == 1);
+      }
+    }
+
     WHEN("a script misuses the prefixes, variables and waits")
     {
       const auto result = runScript(session,
@@ -1363,6 +1695,10 @@ SCENARIO(
     const auto cameraIndex = std::to_string(shot->camera.objectIndex);
     const auto camera = "camera " + cameraIndex;
     const auto cameraParam = "param.camera." + cameraIndex + ".";
+    const auto *cameraObject =
+        server->scene().getObject(ANARI_CAMERA, shot->camera.objectIndex);
+    REQUIRE(cameraObject);
+    const std::string cameraName = cameraObject->name();
     const auto ppm = (std::filesystem::temp_directory_path()
         / ("vsrStudioTestClient-" + std::to_string(port) + ".ppm"))
                          .string();
@@ -1385,6 +1721,13 @@ SCENARIO(
           "dump-scene\n"
           "dump-layers\n"
           "dump-project\n"
+          "find-object camera first\n"
+          "assert var.lastObjectType == camera\n"
+          "find-object camera name=" + cameraName + "\n"
+          "assert var.lastObjectIndex == " + cameraIndex + "\n"
+          "assert var.lastObjectRef == camera:" + cameraIndex + "\n"
+          "assert shot.active.playing == false\n"
+          "assert shot.active.currentFrame == " + std::to_string(shot->currentFrame) + "\n"
           "ping\n"
           "expect-pong\n"
           "set-encodings raw\n"
@@ -1482,6 +1825,9 @@ SCENARIO(
         REQUIRE(
             hasLineStarting(r, "EVT Object type=camera index=" + cameraIndex));
         REQUIRE(hasLineStarting(r, "EVT Object type=renderer"));
+        REQUIRE(countStarting(r,
+                    "EVT Object type=camera index=" + cameraIndex + " subtype=")
+            >= 2); // dump-scene's line and find-object's
         REQUIRE(hasLineStarting(r, "EVT Layer index=0 name=\"studio\""));
         REQUIRE(hasLineStarting(r,
             "EVT Project name=\"" + project.name + "\" activeShot="
