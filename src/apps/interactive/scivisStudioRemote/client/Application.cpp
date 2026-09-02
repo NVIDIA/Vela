@@ -53,6 +53,9 @@ struct LockableWindow : public WindowT
   const bool *m_locked{nullptr};
 };
 
+// ImGui docking needs a couple of frames before window sizes are final.
+constexpr int AUTO_CONNECT_DELAY_FRAMES = 3;
+
 const char *usage()
 {
   return "scivisStudioClient [--host H] [--port N] [--connect]"
@@ -195,13 +198,16 @@ vsr_ui::WindowArray Application::setupWindows()
   setWindowArray(windows);
 
   if (m_options.connectAtStartup)
-    connect();
+    m_autoConnectInFrames = AUTO_CONNECT_DELAY_FRAMES;
 
   return windows;
 }
 
 void Application::uiFrameStart()
 {
+  if (m_autoConnectInFrames >= 0 && m_autoConnectInFrames-- == 0)
+    connect();
+
   // Everything the network delivered since the last frame lands in the
   // mirror, replica and callbacks here, before any panel reads them.
   m_connection->poll();

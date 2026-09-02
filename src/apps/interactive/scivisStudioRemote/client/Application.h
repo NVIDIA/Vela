@@ -94,6 +94,9 @@ class Application : public vsr::ui::imgui::Application
 
   // True while Lost: the panels show the frozen mirror but must not edit it.
   bool m_panelsReadOnly{false};
+  // --connect waits until the dock layout has settled so the bootstrap
+  // reports the viewport's real size, not the undocked first-frame size.
+  int m_autoConnectInFrames{-1};
 };
 
 } // namespace vsr::scivis_studio::client

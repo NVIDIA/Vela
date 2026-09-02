@@ -198,6 +198,7 @@ void StudioViewport::sendFrameConfig()
     return;
   m_sentFrameConfig = vsr::math::uint2(m_viewport.size.x, m_viewport.size.y);
   m_connection->setFrameConfig(m_sentFrameConfig.x, m_sentFrameConfig.y);
+  m_reportResizes = true;
 }
 
 void StudioViewport::adoptCamera(vsr::scene::CameraAppRef camera)
@@ -232,6 +233,8 @@ void StudioViewport::dropMirrorReferences()
   m_manipulatorSynchronized = false;
   m_renderers.objects.clear();
   m_renderers.current = {};
+  m_reportResizes = false;
+  m_sentFrameConfig = vsr::math::uint2(0, 0);
 }
 
 void StudioViewport::reset()
@@ -239,7 +242,6 @@ void StudioViewport::reset()
   dropMirrorReferences();
   m_hasFrame = false;
   m_lastHeader = {};
-  m_sentFrameConfig = vsr::math::uint2(0, 0);
   m_frameArrivals.clear();
 }
 
@@ -344,7 +346,8 @@ void StudioViewport::viewport_reshape(vsr::math::int2 newWindowSize)
 
   // The base only reshapes on a settled size change, so this is at most one
   // SetFrameConfig per UI frame and none for a size the server already has.
-  if (!m_connection || m_connection->state() != ConnectionState::Connected)
+  if (!m_reportResizes || !m_connection
+      || m_connection->state() != ConnectionState::Connected)
     return;
   const auto size = vsr::math::uint2(newWindowSize.x, newWindowSize.y);
   if (size == m_sentFrameConfig)
