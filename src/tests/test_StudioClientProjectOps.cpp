@@ -12,6 +12,7 @@
 #include "ServerConnection.h"
 // vsr_scivis_studio_protocol
 #include "BrowseMessages.h"
+#include "FrameMessages.h"
 #include "PlaybackMessages.h"
 #include "ProjectOpReply.h"
 #include "ProjectRequests.h"
@@ -21,6 +22,7 @@
 #include "StudioCodec.h"
 #include "StudioProtocol.h"
 #include "TaskMessages.h"
+#include "ViewportMessages.h"
 // vsr_scene
 #include "vsr/scene/Scene.hpp"
 // std
@@ -1114,6 +1116,279 @@ SCENARIO("ReplicaView reads the Project Replica", "[StudioClient]")
       // The collections themselves are untouched.
       REQUIRE(project.datasets[0].id == "dataset_0001");
       REQUIRE(project.shots[0].id == "shot_0001");
+    }
+  }
+}
+
+SCENARIO("ProjectOps matches PickReply messages to picks by id",
+    "[StudioClient]")
+{
+  GIVEN("a connected client with two picks in flight")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+
+    std::vector<std::optional<PickReply>> first, second;
+    const auto h1 = f.ops().pick(10, 20, [&](const auto &r) {
+      first.push_back(r);
+    });
+    const auto h2 = f.ops().pick(30, 40, [&](const auto &r) {
+      second.push_back(r);
+    });
+    REQUIRE(h1.valid());
+    REQUIRE(h2.valid());
+    REQUIRE(h1.requestId != h2.requestId);
+    REQUIRE(f.ops().pendingCount() == 2);
+    REQUIRE(f.ops().pending(h1));
+    REQUIRE(f.ops().pending(h2));
+
+    REQUIRE(f.waitForRequests(2));
+    const auto seen = f.requests();
+    REQUIRE(seen[0].type == StudioMessageType::Pick);
+    REQUIRE(seen[0].requestId == h1.requestId);
+    REQUIRE(seen[1].type == StudioMessageType::Pick);
+    const auto decodedPick = decode<Pick>(seen[1].raw);
+    REQUIRE(decodedPick);
+    REQUIRE(decodedPick->x == 30);
+    REQUIRE(decodedPick->y == 40);
+
+    WHEN("the server answers the second pick first, with a hit")
+    {
+      PickReply reply;
+      reply.requestId = h2.requestId;
+      reply.hit = true;
+      reply.worldPosition = {1.f, 2.f, 3.f};
+      reply.objectIdentity = SceneObjectRef{ANARI_VOLUME, 7};
+      f.server.send(encode(reply));
+
+      THEN("only the second callback runs, with the decoded reply")
+      {
+        REQUIRE(pollUntil(f.connection, [&] { return second.size() == 1; }));
+        REQUIRE(first.empty());
+        REQUIRE(second[0].has_value());
+        REQUIRE(second[0]->hit);
+        REQUIRE(second[0]->worldPosition.y == 2.f);
+        REQUIRE(second[0]->objectIdentity);
+        REQUIRE(second[0]->objectIdentity->type == ANARI_VOLUME);
+        REQUIRE(second[0]->objectIdentity->objectIndex == 7);
+        REQUIRE(f.ops().pending(h1));
+        REQUIRE_FALSE(f.ops().pending(h2));
+
+        AND_THEN("a background reply retires the first pick once")
+        {
+          PickReply miss;
+          miss.requestId = h1.requestId;
+          f.server.send(encode(miss));
+          REQUIRE(pollUntil(f.connection, [&] { return first.size() == 1; }));
+          REQUIRE(first[0].has_value());
+          REQUIRE_FALSE(first[0]->hit);
+          REQUIRE_FALSE(first[0]->objectIdentity);
+          REQUIRE(f.ops().pendingCount() == 0);
+
+          f.server.send(encode(miss));
+          pollFor(f.connection, 50ms);
+          REQUIRE(first.size() == 1);
+        }
+      }
+    }
+
+    WHEN("the user disconnects")
+    {
+      f.connection.disconnect();
+
+      THEN("both picks fail once with an absent reply")
+      {
+        REQUIRE(first.size() == 1);
+        REQUIRE(second.size() == 1);
+        REQUIRE_FALSE(first[0].has_value());
+        REQUIRE_FALSE(second[0].has_value());
+        REQUIRE(f.ops().pendingCount() == 0);
+      }
+    }
+  }
+
+  GIVEN("a client that is not connected")
+  {
+    Fixture f;
+    std::vector<std::optional<PickReply>> replies;
+
+    WHEN("a pick is sent anyway")
+    {
+      const auto handle = f.ops().pick(1, 1, [&](const auto &r) {
+        replies.push_back(r);
+      });
+      REQUIRE(handle.valid());
+
+      THEN("the callback fails from the next poll(), not from pick()")
+      {
+        REQUIRE(replies.empty());
+        f.connection.poll();
+        REQUIRE(replies.size() == 1);
+        REQUIRE_FALSE(replies[0].has_value());
+        REQUIRE(f.ops().pendingCount() == 0);
+      }
+    }
+  }
+}
+
+SCENARIO("ServerConnection carries playback and viewport messages",
+    "[StudioClient]")
+{
+  GIVEN("a connected client")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+
+    WHEN("setPlaying is answered ok")
+    {
+      Recorded recorded;
+      const auto handle =
+          f.ops().setPlaying("shot_0001", true, recorded.recorder());
+      REQUIRE(f.waitForRequests(1));
+      const auto seen = f.requests();
+      REQUIRE(seen[0].type == StudioMessageType::SetPlaying);
+      const auto request = decode<SetPlaying>(seen[0].raw);
+      REQUIRE(request);
+      REQUIRE(request->shotId == "shot_0001");
+      REQUIRE(request->playing);
+      REQUIRE(request->requestId == handle.requestId);
+
+      f.server.send(encode(makeOkReply(handle.requestId)));
+
+      THEN("the callback sees the reply")
+      {
+        REQUIRE(
+            pollUntil(f.connection, [&] { return recorded.count() == 1; }));
+        REQUIRE(recorded.replies[0].ok);
+      }
+    }
+
+    WHEN("requestArrayHistogram is answered with bins")
+    {
+      std::optional<ArrayHistogramResult> result;
+      int calls = 0;
+      const auto handle = f.ops().requestArrayHistogram(
+          SceneObjectRef{ANARI_ARRAY1D, 3},
+          16,
+          [&](const ProjectOpReply &reply,
+              const std::optional<ArrayHistogramResult> &r) {
+            calls++;
+            if (reply.ok)
+              result = r;
+          });
+      REQUIRE(f.waitForRequests(1));
+      const auto request =
+          decode<RequestArrayHistogram>(f.requests()[0].raw);
+      REQUIRE(request);
+      REQUIRE(request->array.type == ANARI_ARRAY1D);
+      REQUIRE(request->array.objectIndex == 3);
+      REQUIRE(request->binCount == 16);
+
+      ArrayHistogramResult histogram;
+      histogram.bins = {1, 2, 3};
+      histogram.minValue = -1.f;
+      histogram.maxValue = 4.f;
+      auto reply = makeOkReply(handle.requestId);
+      setResults(reply, histogram);
+      f.server.send(encode(reply));
+
+      THEN("the callback receives the decoded histogram")
+      {
+        REQUIRE(pollUntil(f.connection, [&] { return calls == 1; }));
+        REQUIRE(result);
+        REQUIRE(result->bins == std::vector<uint64_t>{1, 2, 3});
+        REQUIRE(result->minValue == -1.f);
+        REQUIRE(result->maxValue == 4.f);
+      }
+    }
+
+    WHEN("the optimistic time and viewport messages are sent")
+    {
+      f.connection.setTime("shot_0001", 42);
+      f.connection.setOutline(SceneObjectRef{ANARI_SURFACE, 5});
+      f.connection.setOutline(std::nullopt);
+      ViewportSettings settings;
+      settings.visualizeAOV = vsr::rendering::AOVType::DEPTH;
+      settings.depthVisualMaximum = 12.f;
+      settings.showWorldBounds = true;
+      f.connection.setViewportSettings(settings);
+
+      THEN("the server receives each with its fields")
+      {
+        REQUIRE(f.waitForRequests(4));
+        const auto seen = f.requests();
+        REQUIRE(seen[0].type == StudioMessageType::SetTime);
+        const auto time = decode<SetTime>(seen[0].raw);
+        REQUIRE(time);
+        REQUIRE(time->shotId == "shot_0001");
+        REQUIRE(time->frame == 42);
+        REQUIRE(seen[1].type == StudioMessageType::SetOutline);
+        const auto outline = decode<SetOutline>(seen[1].raw);
+        REQUIRE(outline);
+        REQUIRE(outline->objectIdentity);
+        REQUIRE(outline->objectIdentity->objectIndex == 5);
+        const auto cleared = decode<SetOutline>(seen[2].raw);
+        REQUIRE(cleared);
+        REQUIRE_FALSE(cleared->objectIdentity);
+        REQUIRE(seen[3].type == StudioMessageType::ViewportSettings);
+        const auto received = decode<ViewportSettings>(seen[3].raw);
+        REQUIRE(received);
+        REQUIRE(received->visualizeAOV == vsr::rendering::AOVType::DEPTH);
+        REQUIRE(received->depthVisualMaximum == 12.f);
+        REQUIRE(received->showWorldBounds);
+        REQUIRE(received->highlightSelection); // default travelled too
+      }
+    }
+
+    WHEN("a TimeAdvanceWarning arrives")
+    {
+      std::vector<TimeAdvanceWarning> warnings;
+      f.connection.onTimeAdvanceWarning = [&](const TimeAdvanceWarning &w) {
+        warnings.push_back(w);
+      };
+      TimeAdvanceWarning warning;
+      warning.shotId = "shot_0001";
+      warning.frame = 12;
+      warning.message = "file missing";
+      f.server.send(encode(warning));
+
+      THEN("the callback fires and the newest warning is kept until cleared")
+      {
+        REQUIRE(pollUntil(f.connection, [&] { return warnings.size() == 1; }));
+        REQUIRE(warnings[0].frame == 12);
+        REQUIRE(warnings[0].message == "file missing");
+        REQUIRE(f.connection.lastTimeAdvanceWarning());
+        REQUIRE(f.connection.lastTimeAdvanceWarning()->frame == 12);
+        f.connection.clearTimeAdvanceWarning();
+        REQUIRE_FALSE(f.connection.lastTimeAdvanceWarning());
+      }
+    }
+
+    WHEN("a Frame is taken")
+    {
+      REQUIRE_FALSE(f.connection.lastFrameHeader());
+      FrameHeader header;
+      header.width = 2;
+      header.height = 1;
+      header.shotId = "shot_0001";
+      header.frame = 9;
+      const std::vector<std::byte> pixels(2 * 1 * 4, std::byte{0});
+      f.server.send(encodeFrame(header, pixels.data(), pixels.size()));
+
+      THEN("its header is the last frame header")
+      {
+        Message frame;
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.connection.takeLatestFrame(frame); }));
+        REQUIRE(f.connection.lastFrameHeader());
+        REQUIRE(f.connection.lastFrameHeader()->frame == 9);
+        REQUIRE(f.connection.lastFrameHeader()->shotId == "shot_0001");
+
+        f.connection.disconnect();
+        REQUIRE_FALSE(f.connection.lastFrameHeader());
+      }
     }
   }
 }

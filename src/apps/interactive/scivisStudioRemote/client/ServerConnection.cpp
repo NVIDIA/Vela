@@ -9,6 +9,7 @@
 #include "ProjectOpReply.h"
 #include "ProjectSnapshot.h"
 #include "SceneMessages.h"
+#include "ViewportMessages.h"
 #include "SessionMessages.h"
 #include "StudioProtocol.h"
 #include "TaskMessages.h"
@@ -147,7 +148,14 @@ bool ServerConnection::takeLatestFrame(vsr::network::Message &out)
     return false;
   out = std::move(*m_latestFrame);
   m_latestFrame.reset();
+  if (const auto view = decodeFrame(out))
+    m_lastFrameHeader = view->header;
   return true;
+}
+
+const std::optional<FrameHeader> &ServerConnection::lastFrameHeader() const
+{
+  return m_lastFrameHeader;
 }
 
 ProjectOps &ServerConnection::projectOps()
@@ -218,6 +226,7 @@ void ServerConnection::disconnect()
   m_project.reset();
   m_frameConfig = {};
   m_timeAdvanceWarning.reset();
+  m_lastFrameHeader.reset();
   m_uiState.reset();
   {
     std::lock_guard lock(m_inboundMutex);
@@ -334,6 +343,27 @@ void ServerConnection::startRendering()
 void ServerConnection::stopRendering()
 {
   send(StopRendering{});
+}
+
+void ServerConnection::setTime(const ShotID &shotId, int frame)
+{
+  SetTime time;
+  time.shotId = shotId;
+  time.frame = frame;
+  send(time);
+}
+
+void ServerConnection::setOutline(
+    const std::optional<SceneObjectRef> &objectIdentity)
+{
+  SetOutline outline;
+  outline.objectIdentity = objectIdentity;
+  send(outline);
+}
+
+void ServerConnection::setViewportSettings(const ViewportSettings &settings)
+{
+  send(settings);
 }
 
 void ServerConnection::sendMessage(vsr::network::Message &&msg)
@@ -653,6 +683,17 @@ void ServerConnection::handleMessage(const vsr::network::Message &msg)
         warning->frame,
         warning->message.c_str());
     m_timeAdvanceWarning = *warning;
+    if (onTimeAdvanceWarning)
+      onTimeAdvanceWarning(*warning);
+    return;
+  }
+  case StudioMessageType::PickReply: {
+    const auto reply = decode<PickReply>(msg);
+    if (!reply) {
+      vsr::core::logError("[ServerConnection] undecodable PickReply");
+      return;
+    }
+    m_projectOps->handlePickReply(*reply);
     return;
   }
   case StudioMessageType::UIState: {

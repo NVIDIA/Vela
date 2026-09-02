@@ -8,6 +8,7 @@
 #include "PayloadCommon.h"
 #include "PlaybackMessages.h"
 #include "StudioCodec.h"
+#include "ViewportMessages.h"
 // vsr_network
 #include "vsr/network/Message.hpp"
 #include "vsr/network/NetworkChannel.hpp"
@@ -121,12 +122,16 @@ struct ServerConnection
   // Latest-wins single slot: true and the newest Frame message if one arrived
   // since the last take.
   bool takeLatestFrame(vsr::network::Message &out);
+  // Header of the newest Frame handed out by takeLatestFrame(): the frame the
+  // server actually rendered (Time in Motion while playing). Absent until a
+  // frame was taken; kept while Lost, dropped by disconnect().
+  const std::optional<protocol::FrameHeader> &lastFrameHeader() const;
   // Project Ops, Server Task records and Remote Browse; their callbacks run
   // from poll().
   ProjectOps &projectOps();
   const ProjectOps &projectOps() const;
-  // The newest TimeAdvanceWarning since the last clear; playback is a later
-  // milestone but the message may already arrive.
+  // The newest TimeAdvanceWarning since the last clear; onTimeAdvanceWarning
+  // fires for each one as it arrives.
   const std::optional<protocol::TimeAdvanceWarning> &lastTimeAdvanceWarning()
       const;
   void clearTimeAdvanceWarning();
@@ -157,6 +162,13 @@ struct ServerConnection
   void setEncodings(const std::vector<protocol::FrameEncoding> &preferred);
   void startRendering();
   void stopRendering();
+  // Scrub: the latest-wins Control-State Latch slot; only the active shot's
+  // id is honoured by the server.
+  void setTime(const ShotID &shotId, int frame);
+  // Which object the server outlines; absent clears it.
+  void setOutline(const std::optional<SceneObjectRef> &objectIdentity);
+  // The whole struct every time: the server resets absent fields to defaults.
+  void setViewportSettings(const protocol::ViewportSettings &settings);
   template <typename T>
   void send(const T &payload);
 
@@ -174,6 +186,9 @@ struct ServerConnection
   // onBootstrapComplete.
   std::function<void()> onProjectReplaced;
   std::function<void(const std::string &)> onServerError;
+  // The server failed to load a frame's data and kept playing; non-modal.
+  std::function<void(const protocol::TimeAdvanceWarning &)>
+      onTimeAdvanceWarning;
 
  private:
   using Clock = std::chrono::steady_clock;
@@ -242,6 +257,7 @@ struct ServerConnection
   std::unique_ptr<Project> m_project;
   std::unique_ptr<ProjectOps> m_projectOps;
   std::optional<protocol::TimeAdvanceWarning> m_timeAdvanceWarning;
+  std::optional<protocol::FrameHeader> m_lastFrameHeader;
   protocol::SubtreePtr m_uiState;
   std::vector<vsr::network::MessageFuture> m_sendFutures;
 
