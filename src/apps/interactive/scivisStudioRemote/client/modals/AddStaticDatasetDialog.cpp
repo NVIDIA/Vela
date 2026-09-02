@@ -70,15 +70,6 @@ std::vector<std::string> browseExtensions(const DatasetSourceChoice &choice)
   return {};
 }
 
-std::vector<DatasetID> datasetIds(const Project &project)
-{
-  std::vector<DatasetID> ids;
-  ids.reserve(project.datasets.size());
-  for (const auto &dataset : project.datasets)
-    ids.push_back(dataset.id);
-  return ids;
-}
-
 } // namespace
 
 AddStaticDatasetDialog::AddStaticDatasetDialog(
@@ -96,36 +87,13 @@ void AddStaticDatasetDialog::reset()
   m_pending = {};
 }
 
-// The archive load has landed when the replica holds exactly one dataset id
-// it did not hold before; then the typed name is applied.
 void AddStaticDatasetDialog::onProjectReplaced()
 {
-  if (!m_archiveRename)
-    return;
   const Project *project = m_context->project();
-  if (!project)
+  if (!project || !m_archiveRename.armed() || !m_context->canSend())
     return;
-
-  if (const TaskRecord *task = m_context->ops().task(m_archiveRename->taskId)) {
-    if (task->state == TaskState::Failed) {
-      m_archiveRename.reset();
-      return;
-    }
-  }
-
-  std::vector<DatasetID> added;
-  for (const auto &dataset : project->datasets) {
-    const auto &before = m_archiveRename->datasetIdsBefore;
-    if (std::find(before.begin(), before.end(), dataset.id) == before.end())
-      added.push_back(dataset.id);
-  }
-  if (added.empty())
-    return;
-  if (added.size() == 1 && m_context->canSend()) {
-    m_context->ops().renameDataset(
-        added.front(), m_archiveRename->name, m_context->errorReporter());
-  }
-  m_archiveRename.reset();
+  m_archiveRename.apply(
+      *project, m_context->ops(), m_context->errorReporter());
 }
 
 void AddStaticDatasetDialog::submit()
@@ -137,9 +105,12 @@ void AddStaticDatasetDialog::submit()
   const auto &choice = SOURCES[m_selectedSource];
   const std::filesystem::path sourcePath(m_sourcePath);
   const std::string name = m_name;
-  const Project *project = m_context->project();
+  // Copied now: a snapshot arriving before the reply replaces the replica,
+  // so the callback must not reach back into it.
+  const auto idsBefore =
+      ArchiveRenameFollowUp::datasetIds(m_context->project());
 
-  auto onReply = [this, choice, name, project](const ProjectOpReply &reply,
+  auto onReply = [this, choice, name, idsBefore](const ProjectOpReply &reply,
                      const std::optional<TaskStartedResult> &started) {
     if (reply.requestId != m_pending.requestId)
       return;
@@ -148,13 +119,8 @@ void AddStaticDatasetDialog::submit()
       m_error = reply.error;
       return;
     }
-    if (!choice.importer && !choice.subtree && !name.empty() && started) {
-      ArchiveRename rename;
-      rename.taskId = started->taskId;
-      rename.datasetIdsBefore = project ? datasetIds(*project) : std::vector<DatasetID>{};
-      rename.name = name;
-      m_archiveRename = std::move(rename);
-    }
+    if (!choice.importer && !choice.subtree && !name.empty() && started)
+      m_archiveRename.arm(started->taskId, idsBefore, name);
     reset();
     hide();
   };
