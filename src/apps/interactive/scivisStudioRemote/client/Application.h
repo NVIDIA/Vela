@@ -13,10 +13,11 @@
 #include "StudioEndpoint.h"
 // vsr_ui_imgui
 #include "vsr/ui/imgui/Application.h"
+// vsr_core
+#include "vsr/core/FlatMap.hpp"
 // std
 #include <deque>
 #include <functional>
-#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -159,7 +160,7 @@ class Application : public vsr::ui::imgui::Application
   };
   std::deque<Toast> m_toasts;
   // Task states already announced, so each completion toasts once.
-  std::map<uint64_t, TaskState> m_announcedTasks;
+  vsr::core::FlatMap<uint64_t, TaskState> m_announcedTasks;
 };
 
 } // namespace vsr::scivis_studio::client

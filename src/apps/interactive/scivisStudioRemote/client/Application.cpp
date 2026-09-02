@@ -463,8 +463,8 @@ void Application::uiTaskIndicator()
   const std::string text = std::string(toString(shown->state)) + ": "
       + (shown->label.empty() ? "<task>" : shown->label);
   const float width = ImGui::CalcTextSize(text.c_str()).x;
-  ImGui::SameLine(ImGui::GetWindowWidth() - width
-      - ImGui::GetStyle().FramePadding.x * 4.f);
+  ImGui::SameLine(
+      ImGui::GetWindowWidth() - width - ImGui::GetStyle().FramePadding.x * 4.f);
   ImGui::TextColored(ImVec4(1.f, 0.85f, 0.4f, 1.f), "%s", text.c_str());
   if (ImGui::IsItemHovered() && !shown->lastProgress.message.empty())
     ImGui::SetTooltip("%s", shown->lastProgress.message.c_str());
@@ -513,9 +513,8 @@ void Application::uiConfirmation()
     ImGui::OpenPopup(CONFIRMATION_POPUP);
 
   const ImGuiViewport *mainViewport = ImGui::GetMainViewport();
-  ImGui::SetNextWindowPos(mainViewport->GetCenter(),
-      ImGuiCond_Appearing,
-      ImVec2(0.5f, 0.5f));
+  ImGui::SetNextWindowPos(
+      mainViewport->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
   if (!ImGui::BeginPopupModal(
           CONFIRMATION_POPUP, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
     return;
@@ -561,7 +560,8 @@ void Application::uiToasts()
     ImGui::PushTextWrapPos(520.f);
     for (const Toast &toast : m_toasts) {
       if (toast.isError)
-        ImGui::TextColored(ImVec4(1.f, 0.4f, 0.4f, 1.f), "%s", toast.text.c_str());
+        ImGui::TextColored(
+            ImVec4(1.f, 0.4f, 0.4f, 1.f), "%s", toast.text.c_str());
       else
         ImGui::TextUnformatted(toast.text.c_str());
     }
@@ -585,20 +585,20 @@ void Application::uiModals()
 
 void Application::newProject()
 {
-  requestDirtyAction("Discard unsaved changes and start a new project?",
-      [this] {
-        m_connection->projectOps().newProject([this](
-                                                  const ProjectOpReply &reply) {
-          if (!reply.ok)
-            notify(reply.error, true);
-        });
+  requestDirtyAction(
+      "Discard unsaved changes and start a new project?", [this] {
+        m_connection->projectOps().newProject(
+            [this](const ProjectOpReply &reply) {
+              if (!reply.ok)
+                notify(reply.error, true);
+            });
       });
 }
 
 void Application::openProjectDialog()
 {
-  requestDirtyAction("Discard unsaved changes and open another project?",
-      [this] {
+  requestDirtyAction(
+      "Discard unsaved changes and open another project?", [this] {
         m_projectLocationDialog->configure(ProjectLocationMode::OpenProject);
         m_projectLocationDialog->show();
       });
@@ -671,8 +671,8 @@ void Application::notify(const std::string &text, bool isError)
   Toast toast;
   toast.text = text;
   toast.isError = isError;
-  toast.expiresAt = ImGui::GetTime()
-      + (isError ? ERROR_TOAST_SECONDS : STATUS_TOAST_SECONDS);
+  toast.expiresAt =
+      ImGui::GetTime() + (isError ? ERROR_TOAST_SECONDS : STATUS_TOAST_SECONDS);
   m_toasts.push_back(std::move(toast));
   while (m_toasts.size() > MAX_TOASTS)
     m_toasts.pop_front();
@@ -684,16 +684,20 @@ void Application::watchTasks()
 {
   const auto &tasks = m_connection->projectOps().tasks();
 
-  for (auto it = m_announcedTasks.begin(); it != m_announcedTasks.end();) {
+  // Forget the tasks the panel cleared (kept: the ones still listed).
+  vsr::core::FlatMap<uint64_t, TaskState> stillListed;
+  for (const auto &[announcedId, state] : m_announcedTasks) {
     const bool present = std::any_of(tasks.begin(),
         tasks.end(),
-        [&](const TaskRecord &t) { return t.taskId == it->first; });
-    it = present ? std::next(it) : m_announcedTasks.erase(it);
+        [&](const TaskRecord &t) { return t.taskId == announcedId; });
+    if (present)
+      stillListed[announcedId] = state;
   }
+  m_announcedTasks = std::move(stillListed);
 
   for (const TaskRecord &task : tasks) {
-    auto it = m_announcedTasks.find(task.taskId);
-    if (it != m_announcedTasks.end() && it->second == task.state)
+    const auto *announced = m_announcedTasks.at(task.taskId);
+    if (announced && *announced == task.state)
       continue;
     m_announcedTasks[task.taskId] = task.state;
     const std::string label = task.label.empty() ? "<task>" : task.label;
