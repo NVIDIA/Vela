@@ -187,7 +187,10 @@ struct ProjectOpDispatcher
   // when asked), then the snapshot when the project changed.
   void finish(
       const protocol::ProjectOpReply &reply, bool projectChanged, bool rebind);
-  void fail(uint64_t requestId, const std::string &error);
+  // An error reply; `projectChanged` when the refused call still mutated.
+  void fail(uint64_t requestId,
+      const std::string &error,
+      bool projectChanged = false);
   // Queues `body` and answers with its task id.
   void startTask(uint64_t requestId, std::string description, TaskBody body);
   // Runs `body`, then -- however it ended -- rebinds (if asked) and flushes

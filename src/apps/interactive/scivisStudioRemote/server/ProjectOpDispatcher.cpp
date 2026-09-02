@@ -47,6 +47,35 @@ TaskResult datasetNotFound()
   return result;
 }
 
+// What an import task reports for the dataset the context handed back: null
+// is a refusal; a record that is not Available is a failed import, which
+// still changed the project (the ImportFailed record stays in it).
+TaskResult importResult(const Dataset *dataset)
+{
+  TaskResult result;
+  if (!dataset) {
+    result.ok = false;
+    result.error = "import failed";
+    return result;
+  }
+  result.projectChanged = true;
+  result.message = dataset->id;
+  if (dataset->status != DatasetStatus::Available) {
+    result.ok = false;
+    result.error = "dataset '" + dataset->name + "' import failed ("
+        + dataset::displayStatus(*dataset) + "); see the server log";
+  }
+  return result;
+}
+
+// The status `id` has, or Unavailable for a dataset that is not there; the
+// before/after pair tells whether a failed load or unload still changed it.
+DatasetStatus statusOf(const Project &project, const DatasetID &id)
+{
+  const auto *dataset = project::findDataset(project, id);
+  return dataset ? dataset->status : DatasetStatus::Unavailable;
+}
+
 // The UI-state pieces saveProject() takes, read from an opaque tree.
 struct UIStateParts
 {
@@ -225,12 +254,13 @@ void ProjectOpDispatcher::finish(
     sendSnapshot();
 }
 
-void ProjectOpDispatcher::fail(uint64_t requestId, const std::string &error)
+void ProjectOpDispatcher::fail(
+    uint64_t requestId, const std::string &error, bool projectChanged)
 {
   vsr::core::logWarning("[StudioServer] request %llu refused: %s",
       static_cast<unsigned long long>(requestId),
       error.c_str());
-  finish(makeErrorReply(requestId, error), false, false);
+  finish(makeErrorReply(requestId, error), projectChanged, false);
 }
 
 void ProjectOpDispatcher::startTask(
@@ -397,27 +427,11 @@ void ProjectOpDispatcher::handle(const ImportStaticDataset &req)
       [this, req, source = *source](const TaskProgressFunction &progress) {
         return runTaskBody(
             [&] {
-              TaskResult result;
               progress("importing");
-              auto *dataset = req.fromSubtreeArchive
-                  ? context().addStaticDatasetFromSubtree(req.name, source)
-                  : context().addStaticDataset(
-                        req.name, source, req.importerType);
-              if (!dataset) {
-                result.ok = false;
-                result.error = "import failed";
-                return result;
-              }
-              // A failed import still leaves its record in the project.
-              result.projectChanged = true;
-              result.message = dataset->id;
-              if (dataset->status != DatasetStatus::Available) {
-                result.ok = false;
-                result.error = "dataset '" + dataset->name + "' import failed ("
-                    + dataset::displayStatus(*dataset)
-                    + "); see the server log";
-              }
-              return result;
+              return importResult(req.fromSubtreeArchive
+                      ? context().addStaticDatasetFromSubtree(req.name, source)
+                      : context().addStaticDataset(
+                            req.name, source, req.importerType));
             },
             false);
       });
@@ -447,26 +461,11 @@ void ProjectOpDispatcher::handle(const ImportFileAnimationDataset &req)
           const TaskProgressFunction &progress) {
         return runTaskBody(
             [&] {
-              TaskResult result;
               progress("importing");
               FileAnimationDatasetOptions options;
               options.setActiveShotFrameCount = req.setActiveShotFrameCount;
-              auto *dataset = context().addFileAnimationDataset(
-                  req.name, sources, req.importerType, options);
-              if (!dataset) {
-                result.ok = false;
-                result.error = "import failed";
-                return result;
-              }
-              result.projectChanged = true;
-              result.message = dataset->id;
-              if (dataset->status != DatasetStatus::Available) {
-                result.ok = false;
-                result.error = "dataset '" + dataset->name + "' import failed ("
-                    + dataset::displayStatus(*dataset)
-                    + "); see the server log";
-              }
-              return result;
+              return importResult(context().addFileAnimationDataset(
+                  req.name, sources, req.importerType, options));
             },
             false);
       });
@@ -538,16 +537,14 @@ void ProjectOpDispatcher::handle(const LoadDataset &req)
         return runTaskBody(
             [&] {
               TaskResult result;
-              const auto *before = project::findDataset(project(), id);
-              if (!before)
+              if (!project::findDataset(project(), id))
                 return datasetNotFound();
               progress("loading");
-              const auto statusBefore = before->status;
+              const auto statusBefore = statusOf(project(), id);
               result.ok = context().loadDataset(id, &result.error);
               // A failed load marks the dataset Unavailable: still a change.
-              const auto *after = project::findDataset(project(), id);
               result.projectChanged =
-                  result.ok || (after && after->status != statusBefore);
+                  result.ok || statusOf(project(), id) != statusBefore;
               return result;
             },
             false);
@@ -556,18 +553,13 @@ void ProjectOpDispatcher::handle(const LoadDataset &req)
 
 void ProjectOpDispatcher::handle(const UnloadDataset &req)
 {
-  const auto *before = project::findDataset(project(), req.datasetId);
-  const auto statusBefore =
-      before ? before->status : DatasetStatus::Unavailable;
+  const auto statusBefore = statusOf(project(), req.datasetId);
   std::string error;
-  const bool ok = context().unloadDataset(req.datasetId, &error);
-  const auto *after = project::findDataset(project(), req.datasetId);
-  const bool changed = ok || (after && after->status != statusBefore);
-  if (!ok) {
-    vsr::core::logWarning("[StudioServer] request %llu refused: %s",
-        static_cast<unsigned long long>(req.requestId),
-        error.c_str());
-    finish(makeErrorReply(req.requestId, error), changed, false);
+  if (!context().unloadDataset(req.datasetId, &error)) {
+    // A refused unload may still have re-marked the dataset.
+    fail(req.requestId,
+        error,
+        statusOf(project(), req.datasetId) != statusBefore);
     return;
   }
   finish(makeOkReply(req.requestId), true, false);
