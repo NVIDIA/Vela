@@ -181,6 +181,11 @@ const std::string &TestSession::lastError() const
   return m_lastError;
 }
 
+const std::string &TestSession::failure() const
+{
+  return m_failure;
+}
+
 // Session ////////////////////////////////////////////////////////////////////
 
 bool TestSession::connect(const std::string &host,

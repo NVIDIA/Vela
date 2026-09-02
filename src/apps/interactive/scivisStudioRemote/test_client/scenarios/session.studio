@@ -14,8 +14,9 @@ assert scene.cameras >= 1
 assert project.shots >= 1
 assert project.activeShot != ""
 
-# Ping/Pong liveness answers within the deadline.
+# Ping/Pong liveness: the Pong answers within the deadline.
 ping
+expect-pong
 
 # Disconnected is a completed intention: mirror and replica are gone.
 disconnect

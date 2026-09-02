@@ -53,7 +53,7 @@ enum class SessionState
 const char *toString(SessionState state);
 
 // Liveness timings: a Ping after this much quiet, loss after this much
-// silence. The spec's defaults; tests shrink them.
+// silence. The spec's defaults; the liveness test shrinks them.
 struct SessionTimings
 {
   std::chrono::milliseconds pingAfterQuiet{5000};
@@ -126,6 +126,8 @@ struct TestSession
   size_t framesReceived() const;
   size_t errorsReceived() const;
   const std::string &lastError() const;
+  // Why the last connect attempt failed or the link was Lost.
+  const std::string &failure() const;
 
   // Session //
 

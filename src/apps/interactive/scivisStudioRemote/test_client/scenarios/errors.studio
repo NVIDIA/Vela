@@ -23,5 +23,6 @@ assert errors.received == 4
 
 # The session survived every rejection.
 ping
+expect-pong
 assert state == Connected
 disconnect

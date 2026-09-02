@@ -49,20 +49,26 @@ string). Waiting commands take a trailing `timeout=MS` that overrides
 
 ## Commands
 
-The vocabulary is the milestone-3 server surface. A command that the server
-answers with `Error` fails the script unless it was written as an expectation
-(`expect-error`).
+The vocabulary is the milestone-3 server surface. An `Error` the server sends
+while any command but `expect-error` runs FAILs that command with the Error's
+text (the protocol carries no request ids, so the command in flight is the
+attribution); a waiting command also FAILs as soon as the connection is Lost,
+naming the loss, rather than at its deadline. Write the Errors a script
+provokes as expectations (`send-raw 20` then `expect-error`), and let the
+reply of a fire-and-forget command settle (`sleep`) before the next one if
+its Error is to land on it.
 
 | command | does |
 |---------|------|
 | `connect [HOST] [PORT]` | TCP connect, exchange Hellos (exact `PROTOCOL_VERSION` match), await the complete Bootstrap |
 | `disconnect` | send Disconnect and close; mirror and replica are cleared -> Disconnected |
 | `shutdown` | send Shutdown and await the server closing the socket -> Disconnected |
-| `ping` | send Ping, await Pong |
+| `ping` | send Ping; the Pong is for `expect-pong` |
+| `expect-pong` | the next non-Frame server message must be a Pong |
 | `await-lost` | wait until the connection is Lost (mirror and replica stay as a frozen view) |
 | `reconnect` | connect again to the last host and port; a fresh handshake and Bootstrap |
-| `sleep MS` | keep polling (events still print) for MS milliseconds |
-| `expect-error [SUBSTRING]` | the next non-Frame server message must be an Error, containing SUBSTRING if given |
+| `sleep MS` | keep polling (events still print) for MS milliseconds; a loss meanwhile is the next command's to notice |
+| `expect-error [SUBSTRING]` | the next server message other than a Frame or a liveness Pong must be an Error, containing SUBSTRING if given |
 | `send-raw TYPE [HEX ...]` | send a message of type byte TYPE (0..255) with the given payload bytes, verbatim |
 | `set-frame-config W H` | request a frame size, await the FrameConfig ack |
 | `set-encodings NAME[,NAME]` | offer frame encodings, most preferred first (`raw`, `turbojpeg`; case-insensitive) |
