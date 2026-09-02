@@ -82,8 +82,11 @@ struct FakeStudioServer
   using Message = vsr::network::Message;
   using StudioMessageType = vsr::scivis_studio::protocol::StudioMessageType;
 
+  // `port` 0 picks a free one; a test standing in for a server that went
+  // away binds that server's port so the client's retry finds it.
   FakeStudioServer(
-      int helloVersion = vsr::scivis_studio::protocol::PROTOCOL_VERSION);
+      int helloVersion = vsr::scivis_studio::protocol::PROTOCOL_VERSION,
+      int port = 0);
   ~FakeStudioServer();
 
   unsigned short port() const;
@@ -113,12 +116,12 @@ struct FakeStudioServer
 
 // Inlined definitions ////////////////////////////////////////////////////////
 
-inline FakeStudioServer::FakeStudioServer(int helloVersion)
+inline FakeStudioServer::FakeStudioServer(int helloVersion, int port)
     : helloVersion(helloVersion)
 {
   using namespace vsr::scivis_studio::protocol;
 
-  channel = std::make_shared<vsr::network::NetworkServer>(0);
+  channel = std::make_shared<vsr::network::NetworkServer>(port);
   channel->setConnectHandler([this]() {
     accepts++;
     Hello hello;
