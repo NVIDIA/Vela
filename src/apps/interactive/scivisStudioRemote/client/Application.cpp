@@ -42,16 +42,19 @@ struct LockableWindow : public WindowT
       : WindowT(app), m_locked(locked)
   {}
 
-  void buildUI() override
-  {
-    ImGui::BeginDisabled(*m_locked);
-    WindowT::buildUI();
-    ImGui::EndDisabled();
-  }
+  void buildUI() override;
 
  private:
   const bool *m_locked{nullptr};
 };
+
+template <typename WindowT>
+void LockableWindow<WindowT>::buildUI()
+{
+  ImGui::BeginDisabled(*m_locked);
+  WindowT::buildUI();
+  ImGui::EndDisabled();
+}
 
 // ImGui docking needs a couple of frames before window sizes are final.
 constexpr int AUTO_CONNECT_DELAY_FRAMES = 3;
