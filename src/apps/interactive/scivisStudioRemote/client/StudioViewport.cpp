@@ -44,14 +44,6 @@ const char *hintFor(ConnectionState state)
   return "Not connected -- Client > Connect";
 }
 
-bool sameIdentity(const std::optional<SceneObjectRef> &a,
-    const std::optional<SceneObjectRef> &b)
-{
-  if (a.has_value() != b.has_value())
-    return false;
-  return !a || (a->type == b->type && a->objectIndex == b->objectIndex);
-}
-
 constexpr int AOV_TYPE_COUNT = int(vsr::rendering::AOVType::INSTANCE_ID) + 1;
 
 } // namespace
@@ -360,7 +352,7 @@ void StudioViewport::syncOutline()
   if (!m_serverReady || !m_connection)
     return;
   const auto identity = selectedIdentity();
-  if (sameIdentity(identity, m_sentOutline))
+  if (identity == m_sentOutline)
     return;
   m_connection->setOutline(identity);
   m_sentOutline = identity;
