@@ -68,11 +68,14 @@ using ProjectRequest = std::variant<protocol::NewProject,
     protocol::ListDirectory,
     protocol::CancelTask>;
 
-// True for the message types ProjectRequest covers.
+// True for the message types ProjectRequest covers. Derived from the
+// variant's alternatives (their MESSAGE_TYPE), so adding a request means
+// adding it there and nowhere else.
 bool isProjectRequestType(protocol::StudioMessageType type);
 
 // Decodes `msg` into the alternative its type byte names; empty when the type
-// is not a project request or the payload is malformed.
+// is not a project request or the payload is malformed. Also derived from
+// the alternatives.
 std::optional<ProjectRequest> decodeProjectRequest(
     const vsr::network::Message &msg);
 
