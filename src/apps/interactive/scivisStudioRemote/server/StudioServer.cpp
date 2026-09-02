@@ -617,8 +617,8 @@ void StudioServer::applyControlState()
   if (!established) {
     const bool dropped = control.frameConfig || control.encoding
         || control.rendering || !control.edits.empty()
-        || !control.requests.empty() || control.pick || control.outline
-        || control.viewportSettings;
+        || !control.requests.empty() || control.time || control.pick
+        || control.outline || control.viewportSettings;
     if (dropped) {
       vsr::core::logWarning(
           "[StudioServer] control messages dropped: no session (%s)",
