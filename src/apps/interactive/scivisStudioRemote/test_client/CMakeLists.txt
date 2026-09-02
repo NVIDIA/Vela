@@ -35,3 +35,39 @@ PRIVATE
   vsr_scivis_studio_protocol
   vsr_scivis_studio_model
 )
+
+## Scenario tests ##
+
+# One ctest per scenario script, run through run_scenario.sh against a server
+# started on a free port. Exit 77 from the runner (no ANARI device loads) is a
+# SKIP, not a failure. The turbojpeg scenario needs both ends to encode and
+# decode JPEG, so it exists only when the tree has it.
+if (NOT BUILD_TESTING)
+  return()
+endif()
+
+set(scenario_dir ${CMAKE_CURRENT_LIST_DIR}/scenarios)
+
+function(add_studio_scenario name)
+  add_test(NAME vsr::StudioScenario.${name}
+    COMMAND ${scenario_dir}/run_scenario.sh
+      $<TARGET_FILE:scivisStudioServer>
+      $<TARGET_FILE:scivisStudioTestClient>
+      ${scenario_dir}/${name}.studio
+  )
+  set_tests_properties(vsr::StudioScenario.${name} PROPERTIES
+    SKIP_RETURN_CODE 77
+    TIMEOUT 120
+  )
+endfunction()
+
+add_studio_scenario(session)
+add_studio_scenario(frames_raw)
+if (VSR_USE_TURBOJPEG)
+  add_studio_scenario(frames_turbojpeg)
+endif()
+add_studio_scenario(scene_edits)
+add_studio_scenario(errors)
+# loss.studio carries the `# runner: kill-restart-after` hint, so the same
+# runner kills and restarts the server mid-script.
+add_studio_scenario(loss)
