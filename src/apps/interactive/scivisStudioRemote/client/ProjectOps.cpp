@@ -650,6 +650,15 @@ TaskRecord &ProjectOps::recordFor(uint64_t taskId)
   return m_tasks.back();
 }
 
+TaskRecord &ProjectOps::freshRecordFor(uint64_t taskId)
+{
+  TaskRecord &record = recordFor(taskId);
+  record = TaskRecord{};
+  record.taskId = taskId;
+  record.label = "Task " + std::to_string(taskId);
+  return record;
+}
+
 // Driven by ServerConnection /////////////////////////////////////////////////
 
 void ProjectOps::handleReply(const ProjectOpReply &reply)
@@ -671,7 +680,10 @@ void ProjectOps::handleReply(const ProjectOpReply &reply)
     return;
   }
   if (auto started = results<TaskStartedResult>(reply)) {
-    TaskRecord &record = recordFor(started->taskId);
+    // A TaskStarted names a new task whatever record its id has: a stale one
+    // the replay never revived, or a finished one of a server process since
+    // restarted (ids count from 1 again).
+    TaskRecord &record = freshRecordFor(started->taskId);
     if (!entry.taskLabel.empty())
       record.label = entry.taskLabel;
     record.render = entry.type == StudioMessageType::RenderShot;
@@ -695,12 +707,18 @@ void ProjectOps::handlePickReply(const PickReply &reply)
 
 void ProjectOps::handleTaskProgress(const TaskProgress &progress)
 {
-  const bool known = task(progress.taskId) != nullptr;
-  TaskRecord &record = recordFor(progress.taskId);
-  if (!known && !progress.message.empty())
+  // A task ends once and the replay repeats endings, not progress, so
+  // progress for a record that finished (and was not failed by this client)
+  // is a new task of a restarted server under a reused id: it starts over,
+  // named like one never heard of.
+  const TaskRecord *existing = task(progress.taskId);
+  const bool fresh =
+      !existing || (existing->finished() && !existing->stale);
+  TaskRecord &record =
+      fresh ? freshRecordFor(progress.taskId) : recordFor(progress.taskId);
+  if (fresh && !progress.message.empty())
     record.label = progress.message; // the replay's description
-  if (!record.finished())
-    record.state = TaskState::Running;
+  record.state = TaskState::Running;
   record.lastProgress.current = progress.current;
   record.lastProgress.total = progress.total;
   record.lastProgress.message = progress.message;
