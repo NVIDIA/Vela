@@ -16,6 +16,7 @@
 #include "vsr/scene/Scene.hpp"
 // vsr_core
 #include "vsr/core/Any.hpp"
+#include "vsr/core/FlatMap.hpp"
 #include "vsr/core/TypeMacros.hpp"
 #include "vsr/core/VSRMath.hpp"
 // std
@@ -25,7 +26,6 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
-#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -187,6 +187,10 @@ struct TestSession
   // The reply the server sent to that request id; null until it arrives, and
   // once the session is Disconnected.
   const protocol::ProjectOpReply *reply(uint64_t requestId) const;
+  // How many snapshots had been applied when that reply was; the server
+  // sends an op's snapshot after its reply, so a snapshot past this count is
+  // one the request (or a later one) caused. Empty until the reply arrives.
+  std::optional<size_t> snapshotsAtReply(uint64_t requestId) const;
   // Replies with ok == false, counted over the session's lifetime.
   size_t repliesFailed() const;
   // What the session has heard of a task; null before its first message and
@@ -324,9 +328,14 @@ struct TestSession
   size_t m_errorsReceived{0};
   std::string m_lastError;
   uint64_t m_nextRequestId{1};
-  std::map<uint64_t, protocol::ProjectOpReply> m_replies;
+  struct ReceivedReply
+  {
+    protocol::ProjectOpReply reply;
+    size_t snapshotsReceived{0}; // when it arrived
+  };
+  vsr::core::FlatMap<uint64_t, ReceivedReply> m_replies;
   size_t m_repliesFailed{0};
-  std::map<uint64_t, TaskRecord> m_tasks;
+  vsr::core::FlatMap<uint64_t, TaskRecord> m_tasks;
   size_t m_tasksCompleted{0};
   size_t m_tasksFailed{0};
   size_t m_snapshotsReceived{0};

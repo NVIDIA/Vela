@@ -155,7 +155,7 @@ printed again.
 | `list-directory PATH` | one `EVT DirectoryEntry name= kind= size= mtime=` per entry (`File`, `Directory`, `ProjectDirectory`); FAIL (or `expect-fail`) outside every root |
 | `cancel-task TASKID` | sync; removes a queued task (it then ends as `TaskFailed "cancelled"`); a running or finished one is an error reply |
 | `await-task [TASKID] [expect-fail]` | wait for the task (default `$lastTaskId`) to end; FAIL on `TaskFailed` unless `expect-fail` follows, then FAIL on `TaskCompleted` |
-| `await-snapshot` | wait for a `ProjectSnapshot` newer than the last request command sent (or than the previous `await-snapshot`) |
+| `await-snapshot` | wait for a `ProjectSnapshot` newer than the reply to the last request command (or than the previous `await-snapshot`); a snapshot that arrived before that reply belongs to an earlier request |
 | `await-reply [REQUESTID]` | collect the reply of a `no-wait` request, the oldest pending by default |
 
 ### Variables

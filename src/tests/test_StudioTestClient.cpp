@@ -232,6 +232,15 @@ struct ProjectOpsServer
   uint64_t nextTaskId{1};
   int nextShot{2};
   int nextDataset{1};
+  // Network lag, staged: the next `deferSnapshots` snapshots are held back
+  // until the request after them arrives (and go out ahead of its reply,
+  // as the order on the wire demands); every snapshot sent normally waits
+  // `snapshotDelay` first, off the IO thread so the reply before it is not
+  // held up too.
+  std::atomic<int> deferSnapshots{0};
+  std::chrono::milliseconds snapshotDelay{0};
+  std::vector<Message> deferred;
+  std::vector<std::thread> delayedSends;
 };
 
 ProjectOpsServer::ProjectOpsServer()
@@ -269,6 +278,8 @@ ProjectOpsServer::ProjectOpsServer()
 
 ProjectOpsServer::~ProjectOpsServer()
 {
+  for (auto &thread : delayedSends)
+    thread.join();
   channel->stop();
 }
 
@@ -295,6 +306,19 @@ void ProjectOpsServer::send(Message msg)
 
 void ProjectOpsServer::sendSnapshot()
 {
+  if (deferSnapshots > 0) {
+    --deferSnapshots;
+    deferred.push_back(encode(ProjectSnapshot{project}));
+    return;
+  }
+  if (snapshotDelay.count() > 0) {
+    delayedSends.emplace_back(
+        [this, snapshot = encode(ProjectSnapshot{project})]() mutable {
+          std::this_thread::sleep_for(snapshotDelay);
+          send(std::move(snapshot));
+        });
+    return;
+  }
   send(encode(ProjectSnapshot{project}));
 }
 
@@ -338,14 +362,23 @@ void ProjectOpsServer::onMessage(const Message &msg)
     config.width = 640;
     config.height = 480;
     send(encode(config));
-    sendSnapshot();
+    send(encode(ProjectSnapshot{project})); // never staged: the bootstrap's
     send(encode(BootstrapEnd{}));
     return;
   }
   case StudioMessageType::Ping:
     send(encode(Pong{}));
     return;
+  default:
+    break;
+  }
 
+  // A request arrived: whatever earlier snapshots were held back go first.
+  for (auto &held : deferred)
+    send(std::move(held));
+  deferred.clear();
+
+  switch (*type) {
   case StudioMessageType::CreateShot: {
     const auto req = *decode<CreateShot>(msg);
     // A reply to a request nobody sent: the runner must look past it.
@@ -1048,6 +1081,27 @@ SCENARIO("the test client drives project ops against a fake server",
     ProjectOpsServer server;
     TestSession session;
     const auto endpoint = "127.0.0.1 " + std::to_string(server.port());
+
+    WHEN("the previous request's snapshot lags behind the next request")
+    {
+      server.deferSnapshots = 1;
+      server.snapshotDelay = 150ms;
+      // await-snapshot must not take A's late snapshot for B's.
+      const auto result = runScript(session,
+          "connect " + endpoint + "\n"
+          "create-shot A\n"
+          "create-shot B\n"
+          "await-snapshot\n"
+          "assert project.shots == 3\n"
+          "assert project.activeShot == $lastShotId\n"
+          "assert snapshots.received == 3\n"
+          "disconnect\n");
+
+      THEN("the wait ends on the snapshot that follows B's reply")
+      {
+        REQUIRE(result.ok);
+      }
+    }
 
     WHEN("a script runs the request, task, browse and wait commands")
     {

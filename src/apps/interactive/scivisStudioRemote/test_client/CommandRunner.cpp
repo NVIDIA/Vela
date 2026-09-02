@@ -2102,10 +2102,10 @@ CommandRunner::Failure CommandRunner::awaitTask(
   if (args.size() > 1 || (!args.empty() && !parseNonNegative(args[0], taskId)))
     return usageError(command, "[taskId] [expect-fail]");
   if (args.empty()) {
-    const auto last = m_variables.find("lastTaskId");
-    if (last == m_variables.end())
+    const auto *last = m_variables.at("lastTaskId");
+    if (!last)
       return "no task has been started yet ($lastTaskId is unset)";
-    parseNonNegative(last->second, taskId);
+    parseNonNegative(*last, taskId);
   }
   if (m_session->state() != SessionState::Connected)
     return std::string("not connected (") + toString(m_session->state()) + ")";
@@ -2186,7 +2186,8 @@ CommandRunner::Failure CommandRunner::sendRequest(
 {
   request.requestId = m_session->nextRequestId();
   m_variables["lastRequestId"] = std::to_string(request.requestId);
-  // A snapshot this request causes is one past the count as it goes out.
+  // Until the reply is collected (at once, or by await-reply under no-wait)
+  // the best mark is the count as the request goes out.
   m_snapshotMark = m_session->snapshotsReceived();
   std::string error;
   if (!m_session->send(request, &error))
@@ -2238,6 +2239,10 @@ CommandRunner::Failure CommandRunner::awaitReply(
     if (!reply)
       return "the reply to request " + idText + " did not decode";
   }
+  // A snapshot this request caused follows its reply; whatever arrived up to
+  // the reply belongs to earlier requests.
+  m_snapshotMark =
+      m_session->snapshotsAtReply(requestId).value_or(m_snapshotMark);
   for (const auto &event : following)
     printEvent(event);
 
@@ -2281,10 +2286,10 @@ CommandRunner::Describe CommandRunner::taskStarted()
 std::optional<std::string> CommandRunner::variable(
     const std::string &name) const
 {
-  const auto it = m_variables.find(name);
-  if (it == m_variables.end())
+  const auto *value = m_variables.at(name);
+  if (!value)
     return {};
-  return it->second;
+  return *value;
 }
 
 const Shot *CommandRunner::replicaShot(
