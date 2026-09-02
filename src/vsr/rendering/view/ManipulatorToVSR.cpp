@@ -52,4 +52,20 @@ void updateManipulatorFromCamera(Manipulator &m, const vsr::scene::Camera &c)
   m.setFixedDistance(fd);
 }
 
+void updateManipulatorFromCameraPose(Manipulator &m, const vsr::scene::Camera &c)
+{
+  const auto *position = c.parameter("position");
+  const auto *direction = c.parameter("direction");
+  const auto *up = c.parameter("up");
+  if (!position || !direction || !up)
+    return;
+  if (!position->value().is<vsr::math::float3>()
+      || !direction->value().is<vsr::math::float3>()
+      || !up->value().is<vsr::math::float3>())
+    return;
+  m.setPose(position->value().get<vsr::math::float3>(),
+      direction->value().get<vsr::math::float3>(),
+      up->value().get<vsr::math::float3>());
+}
+
 } // namespace vsr::rendering
