@@ -2,12 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "ProjectOpDispatcher.h"
+#include "ArrayHistogram.h"
 #include "RemoteBrowse.h"
 // vsr_scivis_studio_protocol
 #include "ProjectSnapshot.h"
 #include "StudioCodec.h"
 // vsr_scivis_studio_model
 #include "ProjectPersistence.h"
+// vsr_scene
+#include "vsr/scene/Scene.hpp"
 // vsr_core
 #include "vsr/core/Logging.hpp"
 // std
@@ -935,6 +938,36 @@ void ProjectOpDispatcher::handle(const CancelTask &req)
     return;
   }
   finish(makeOkReply(req.requestId), false, false);
+}
+
+// Viewport ///////////////////////////////////////////////////////////////////
+
+void ProjectOpDispatcher::handle(const RequestArrayHistogram &req)
+{
+  auto *appContext = context().appContext();
+  const auto &ref = req.array;
+  vsr::scene::Object *obj = nullptr;
+  if (appContext && ref.type == ANARI_ARRAY)
+    obj = appContext->vsr.scene.getObject(ref.type, ref.objectIndex);
+  if (!obj) {
+    fail(req.requestId,
+        std::string("(") + anari::toString(ref.type) + ", "
+            + std::to_string(ref.objectIndex) + ") is not an array");
+    return;
+  }
+
+  ArrayHistogramResult result;
+  std::string error;
+  if (!computeArrayHistogram(*static_cast<const vsr::scene::Array *>(obj),
+          req.binCount,
+          result,
+          &error)) {
+    fail(req.requestId, error);
+    return;
+  }
+  auto reply = makeOkReply(req.requestId);
+  setResults(reply, result);
+  finish(reply, false, false);
 }
 
 } // namespace vsr::scivis_studio::server
