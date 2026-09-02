@@ -188,7 +188,9 @@ latch slots (latest-wins); `RequestArrayHistogram` is a sync Project Op. See
   `applyActiveShot()`, which re-samples the camera from the rig on every time
   change, writes the client's own pose back instead of a stale one, and a
   scrub or `SetPlaying` never snaps the view; a rig with keyframes drives the
-  camera during playback as designed.
+  camera during playback as designed. An orthographic shot camera is followed
+  through its `height` and `position` too (`Manipulator::setFixedDistancePose`),
+  since `updateCameraObject` derives both from the manipulator's distances.
 
 ### Viewport
 

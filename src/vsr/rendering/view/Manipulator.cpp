@@ -30,10 +30,44 @@ void Manipulator::setPose(anari::math::float3 eye,
     anari::math::float3 direction,
     anari::math::float3 up)
 {
+  auto dir = direction;
+  if (!adoptOrientation(dir, up))
+    return;
+
+  const float distance =
+      std::abs(m_distance) > 0.f ? std::abs(m_distance) : 1.f;
+  m_distance = distance;
+  m_speed = distance;
+  m_eye = eye;
+  m_at = eye + dir * distance;
+  update();
+}
+
+void Manipulator::setFixedDistancePose(anari::math::float3 eye,
+    anari::math::float3 direction,
+    anari::math::float3 up,
+    float distance)
+{
+  auto dir = direction;
+  if (!adoptOrientation(dir, up))
+    return;
+
+  m_distance = distance > 0.f ? distance : 1.f;
+  m_speed = m_distance;
+  if (!(m_fixedDistance < vsr::math::inf) || !(m_fixedDistance > 0.f))
+    m_fixedDistance = m_distance;
+  m_at = eye + dir * m_fixedDistance;
+  m_eye = m_at - dir * m_distance;
+  update();
+}
+
+bool Manipulator::adoptOrientation(
+    anari::math::float3 &direction, const anari::math::float3 &up)
+{
   const float length = linalg::length(direction);
   if (!(length > 0.f))
-    return;
-  const auto dir = direction / length;
+    return false;
+  direction = direction / length;
 
   if (linalg::length2(up) > 0.f) {
     // The axis the up vector leans along most.
@@ -51,14 +85,8 @@ void Manipulator::setPose(anari::math::float3 eye,
     m_axis = static_cast<UpAxis>(best);
   }
 
-  const float distance =
-      std::abs(m_distance) > 0.f ? std::abs(m_distance) : 1.f;
-  m_distance = distance;
-  m_speed = distance;
-  m_eye = eye;
-  m_at = eye + dir * distance;
-  m_azel = directionToAzel(-dir, m_axis);
-  update();
+  m_azel = directionToAzel(-direction, m_axis);
+  return true;
 }
 
 void Manipulator::setCenter(anari::math::float3 center)
