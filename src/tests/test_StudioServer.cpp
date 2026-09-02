@@ -461,6 +461,29 @@ SCENARIO("StudioServer runs a viewer-parity session", "[StudioServer]")
             REQUIRE(client.count(StudioMessageType::ObjectAdded) == 0);
             REQUIRE(client.count(StudioMessageType::TransferScene) == 0);
 
+            AND_THEN(
+                "a replacement client greeting right after the drop is"
+                " served")
+            {
+              // No wait for Listening: the drop, the accept and the Hello may
+              // all reach the loop in one latch batch, and the accepted Hello
+              // must survive the old session's teardown.
+              client.channel->disconnect();
+              TestClient next;
+              next.connect(port);
+              REQUIRE(next.waitForCount(StudioMessageType::Hello, 1));
+              next.send(Hello{});
+              REQUIRE(next.waitForCount(StudioMessageType::BootstrapEnd, 1));
+
+              next.clear();
+              SetFrameConfig resize;
+              resize.width = 32;
+              resize.height = 24;
+              next.send(resize);
+              REQUIRE(next.waitForCount(StudioMessageType::FrameConfig, 1));
+              REQUIRE(next.count(StudioMessageType::Error) == 0);
+            }
+
             AND_THEN("a dropped client returns the server to Listening")
             {
               client.channel->disconnect();

@@ -113,16 +113,18 @@ struct StudioServer
 
   // The Control-State Latch: written by the IO thread under m_controlMutex,
   // swapped out and applied by the loop once per iteration. Session events
-  // are flags; interactive values are latest-wins; scene edits are an ordered
-  // drain queue because dropping one would leave the mirror and the scene
-  // disagreeing.
+  // name the connection they happened on (its serial, see
+  // m_connectionSerial) so the loop can tell a loss of the old client from a
+  // loss of the one accepted since; interactive values are latest-wins; scene
+  // edits are an ordered drain queue because dropping one would leave the
+  // mirror and the scene disagreeing.
   struct ControlState
   {
-    bool accepted{false};
-    bool helloReceived{false};
-    bool disconnected{false};
+    std::optional<uint64_t> accepted;
+    std::optional<uint64_t> helloReceived;
+    std::optional<uint64_t> disconnected;
     std::string disconnectReason;
-    bool closeRequested{false};
+    std::optional<uint64_t> closeRequested;
     std::string closeReason;
     vsr::network::MessageFuture farewell; // flushed before the close
     std::optional<protocol::SetFrameConfig> frameConfig;
@@ -143,12 +145,17 @@ struct StudioServer
   void onDisconnected(const boost::system::error_code &error);
   void onMessage(const vsr::network::Message &msg);
   void onHello(const vsr::network::Message &msg);
+  void requestClose(
+      const std::string &reason, vsr::network::MessageFuture farewell = {});
   void replyError(const std::string &text);
 
   // Loop thread
   void applyControlState();
-  void beginSession();
-  void endSession(const std::string &reason);
+  void beginSession(uint64_t serial);
+  // closeSocket: the socket is still open (a close the server decided on) and
+  // must be shut; false when the peer already closed it, in which case the
+  // transport is left alone so a connection accepted since survives.
+  void endSession(const std::string &reason, bool closeSocket);
   void bootstrap();
   void sendSceneSnapshot();
   void applyFrameConfig(uint32_t width, uint32_t height);
@@ -182,6 +189,7 @@ struct StudioServer
 
   // Session state, loop thread only (m_state is mirrored for queries)
   std::atomic<SessionState> m_state{SessionState::Listening};
+  uint64_t m_sessionSerial{0}; // the connection the session runs on
   uint32_t m_frameWidth{0};
   uint32_t m_frameHeight{0};
   protocol::FrameEncoding m_encoding{protocol::FrameEncoding::Raw};
@@ -193,9 +201,15 @@ struct StudioServer
   std::mutex m_controlMutex;
   ControlState m_control;
   std::atomic<bool> m_shutdownRequested{false};
-  // Set by the IO thread on a matching Hello, cleared when the session ends;
-  // gates every message that needs an established session.
-  std::atomic<bool> m_helloAccepted{false};
+
+  // IO thread only. The serial counts accepted connections and tags every
+  // session event in the latch. The Hello flag is set on a matching Hello and
+  // cleared by the next accept (the socket a Hello arrived on is the one every
+  // later message shares); the loop never touches it, so a disconnect, accept
+  // and Hello applied from one latch batch cannot clear a Hello the IO thread
+  // already accepted.
+  uint64_t m_connectionSerial{0};
+  bool m_helloAccepted{false};
 };
 
 } // namespace vsr::scivis_studio::server
