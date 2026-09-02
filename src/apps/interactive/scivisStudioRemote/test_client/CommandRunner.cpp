@@ -671,6 +671,7 @@ const std::vector<std::string> &CommandRunner::assertNames()
       "replies.pending",
       "snapshots.received",
       "browse.entries",
+      "var.<name>",
       "frame.width",
       "frame.height",
       "frame.encoding",
@@ -1365,6 +1366,14 @@ std::optional<std::string> CommandRunner::namedValue(
     return std::to_string(m_session->snapshotsReceived());
   if (name == "browse.entries")
     return std::to_string(m_browseEntries.size());
+  if (name.rfind("var.", 0) == 0) {
+    // The variable itself, since `$name` in this position would expand to a
+    // value name.
+    const auto value = variable(name.substr(4));
+    if (!value)
+      error = name + ": unknown variable $" + name.substr(4);
+    return value;
+  }
 
   // <collection>.<id>.<field>: ids carry no dots, fields may.
   for (const char *collection :
@@ -1583,7 +1592,7 @@ CommandRunner::Failure CommandRunner::executeRequest(
   }
   if (name == "save-dataset-archive") {
     return saveArchiveRequest<SaveDatasetArchive>(
-        command, deadline, &SaveDatasetArchive::datasetId, "id");
+        command, deadline, &SaveDatasetArchive::datasetId, "id", taskStarted());
   }
   if (name == "load-dataset-archive") {
     return loadArchiveRequest<LoadDatasetArchive>(
@@ -1778,7 +1787,8 @@ template <typename R>
 CommandRunner::Failure CommandRunner::saveArchiveRequest(const Command &command,
     Deadline deadline,
     std::string R::*id,
-    const char *idName)
+    const char *idName,
+    const Describe &describe)
 {
   if (command.args.size() != 2)
     return usageError(
@@ -1786,7 +1796,7 @@ CommandRunner::Failure CommandRunner::saveArchiveRequest(const Command &command,
   R request;
   request.*id = command.args[0];
   request.file = command.args[1];
-  return sendRequest(std::move(request), deadline, taskStarted());
+  return sendRequest(std::move(request), deadline, describe);
 }
 
 template <typename R>
