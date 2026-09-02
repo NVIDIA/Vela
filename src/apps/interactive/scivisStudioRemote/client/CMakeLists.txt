@@ -40,6 +40,7 @@ add_executable(scivisStudioClient
   windows/ProjectWindow.cpp
   windows/ShotEditor.cpp
   windows/TaskPanel.cpp
+  windows/Timeline.cpp
 )
 
 # OBJECT libraries only contribute their objects to direct linkers, so the
