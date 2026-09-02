@@ -220,6 +220,8 @@ struct ProjectContext
   void installAnimationManagerCallback();
   void updateActiveShotFromAnimationTime();
   void onAnimationPlaybackStopped();
+  // The manager's frame and playing flag into `shot`, clamped to its ranges.
+  void writeAnimationStateToShot(Shot &shot) const;
 
   vsr::app::Context *m_ctx{nullptr};
   Project m_project;
