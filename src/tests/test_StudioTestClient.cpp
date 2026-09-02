@@ -1436,10 +1436,10 @@ SCENARIO(
           "send-raw 0\n"
           "expect-error \"unknown message type 0\"\n"
           "ping\n"
-          "send-raw 62 0a0b 0c\n"
+          "send-raw 60 0a0b 0c\n"
           "expect-error \"not implemented\"\n"
           "assert errors.received == 3\n"
-          "assert lastError contains Pick\n"
+          "assert lastError contains RenderShot\n"
           "sleep 20\n"
           "disconnect\n"
           "assert state == Disconnected\n"
@@ -1488,8 +1488,8 @@ SCENARIO(
                 + project.activeShotId + " shots=1 datasets=0"));
         REQUIRE(hasLine(r, "EVT Error message=\"unknown message type 255\""));
         REQUIRE(hasLine(r, "EVT Error message=\"unknown message type 0\""));
-        REQUIRE(
-            hasLineStarting(r, "EVT Error message=\"Pick is not implemented"));
+        REQUIRE(hasLineStarting(
+            r, "EVT Error message=\"RenderShot is not implemented"));
         REQUIRE(hasLine(r, "OK expect-error \"not implemented\""));
         REQUIRE(hasLine(r, "OK assert state == Disconnected"));
         REQUIRE(r.back() == "OK assert state == Disconnected");
@@ -1539,7 +1539,7 @@ SCENARIO(
     {
       const auto result = runScript(session,
           "connect " + endpoint + "\n"
-          "send-raw 62\n"
+          "send-raw 60\n"
           "sleep 300\n"
           "assert errors.received == 1\n"
           "disconnect\n",
@@ -1555,7 +1555,7 @@ SCENARIO(
         const auto fails = failLines(result.records);
         REQUIRE(fails.size() == 1);
         REQUIRE(fails[0].rfind("FAIL sleep 300: server answered Error"
-                               " \"Pick is not implemented",
+                               " \"RenderShot is not implemented",
                     0)
             == 0);
         REQUIRE(hasLine(result.records, "OK assert errors.received == 1"));
