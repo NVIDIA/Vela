@@ -169,7 +169,9 @@ struct ServerTaskRunner
   std::optional<RanTask> runOne();
 
   // Forgets every queued task without a word: the session they were sent on
-  // is gone and their ids mean nothing to the next client.
+  // is gone and their ids mean nothing to the next client. An exclusive task
+  // (the shot render) is kept: like a running one it outlives its session,
+  // and the next bootstrap's replay reports how it ended.
   void dropQueued();
 
   // The task-status replay: every ending since the last replay, verbatim,

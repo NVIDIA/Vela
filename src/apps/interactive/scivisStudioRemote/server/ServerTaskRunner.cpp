@@ -10,6 +10,7 @@
 // std
 #include <algorithm>
 #include <exception>
+#include <iterator>
 #include <string>
 #include <utility>
 
@@ -31,6 +32,7 @@ vsr::network::Message endingOf(const FinishedTask &task)
   TaskFailed failed;
   failed.taskId = task.taskId;
   failed.error = task.error;
+  failed.framesCompleted = task.framesCompleted;
   return encode(failed);
 }
 
@@ -221,12 +223,22 @@ std::optional<RanTask> ServerTaskRunner::runOne()
 
 void ServerTaskRunner::dropQueued()
 {
-  if (!m_queue.empty()) {
+  const auto kept = std::stable_partition(m_queue.begin(),
+      m_queue.end(),
+      [](const QueuedTask &task) { return task.exclusive; });
+  const auto dropped = size_t(std::distance(kept, m_queue.end()));
+  if (dropped > 0) {
     vsr::core::logWarning(
         "[StudioServer] %zu queued task(s) dropped with the session",
-        m_queue.size());
+        dropped);
   }
-  m_queue.clear();
+  m_queue.erase(kept, m_queue.end());
+  for (const auto &task : m_queue) {
+    vsr::core::logStatus(
+        "[StudioServer] task %llu kept across the session end: %s",
+        static_cast<unsigned long long>(task.id),
+        task.description.c_str());
+  }
 }
 
 void ServerTaskRunner::replayTo(const SendFunction &send)
