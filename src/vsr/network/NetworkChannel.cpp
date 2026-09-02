@@ -451,41 +451,55 @@ void NetworkClient::connect(const std::string &host, short port)
   // a failed or closed connection behaves like a first connect. The latch is
   // armed here so that a failure below is reported exactly once.
   start_messaging();
+  const auto generation = ++m_connectGeneration;
   m_disconnectReported.store(false);
 
   // The port travels as `short` for API symmetry with NetworkServer, whose
   // tcp::endpoint converts it to unsigned; the resolver needs the same
   // unsigned spelling or ports above 32767 come out negative.
   const auto service = std::to_string(static_cast<unsigned short>(port));
-  boost::system::error_code resolveError;
-  asio::ip::tcp::resolver resolver(m_io_context);
-  auto endpoints = resolver.resolve(host, service, resolveError);
-  if (resolveError) {
-    vsr::core::logError("[NetworkClient] Cannot resolve %s:%s: %s",
-        host.c_str(),
-        service.c_str(),
-        resolveError.message().c_str());
-    close_socket(resolveError);
-    return;
-  }
 
-  asio::async_connect(m_socket,
-      endpoints,
-      [this](const boost::system::error_code &error, const tcp::endpoint &) {
-        if (!error) {
-          vsr::core::logStatus("[NetworkClient] Connected to server");
-          notify_connected();
-          read_header();
-        } else {
-          vsr::core::logError(
-              "[NetworkClient] Connection error: %s", error.message().c_str());
+  // Resolution can take as long as a DNS round trip, so it runs on the IO
+  // thread like the connect itself; the caller never waits on the network.
+  auto resolver = std::make_shared<tcp::resolver>(m_io_context);
+  resolver->async_resolve(host,
+      service,
+      [this, resolver, generation, host, service](
+          const boost::system::error_code &error,
+          const tcp::resolver::results_type &endpoints) {
+        if (generation != m_connectGeneration.load())
+          return; // superseded by a later connect() or disconnect()
+        if (error) {
+          vsr::core::logError("[NetworkClient] Cannot resolve %s:%s: %s",
+              host.c_str(),
+              service.c_str(),
+              error.message().c_str());
           close_socket(error);
+          return;
         }
+
+        asio::async_connect(m_socket,
+            endpoints,
+            [this, generation](
+                const boost::system::error_code &error, const tcp::endpoint &) {
+              if (generation != m_connectGeneration.load())
+                return;
+              if (!error) {
+                vsr::core::logStatus("[NetworkClient] Connected to server");
+                notify_connected();
+                read_header();
+              } else {
+                vsr::core::logError("[NetworkClient] Connection error: %s",
+                    error.message().c_str());
+                close_socket(error);
+              }
+            });
       });
 }
 
 void NetworkClient::disconnect()
 {
+  ++m_connectGeneration;
   stop_messaging();
   vsr::core::logStatus("[NetworkClient] Disconnected from server");
 }

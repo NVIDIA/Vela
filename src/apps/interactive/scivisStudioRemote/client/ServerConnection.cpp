@@ -381,8 +381,8 @@ void ServerConnection::beginAttempt()
   m_status =
       (m_state == ConnectionState::Lost ? "reconnecting to " : "connecting to ")
       + endpointText(m_host, m_port) + "...";
-  // Arm the latch before the socket exists: a synchronous failure inside
-  // connect() reports through the same handler as a later one.
+  // Arm the latch before the socket exists; resolution and connect run on
+  // the IO thread and report through the disconnect handler either way.
   m_ioDisconnected.store(false);
   m_channel->connect(m_host, m_port);
 }
