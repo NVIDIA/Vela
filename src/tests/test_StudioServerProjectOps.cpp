@@ -794,17 +794,17 @@ SCENARIO("StudioServer refuses unserviceable requests with a matching reply",
 
     WHEN("a request of a later milestone carries an id")
     {
-      SetPlaying playing;
-      playing.requestId = 502;
-      playing.shotId = session.server->projectContext().project().activeShotId;
-      client.send(playing);
+      RenderShot render;
+      render.requestId = 502;
+      render.shotId = session.server->projectContext().project().activeShotId;
+      client.send(render);
 
       THEN("the not-implemented refusal is a ProjectOpReply too")
       {
         const auto reply = client.waitForReply(502);
         REQUIRE(reply);
         REQUIRE_FALSE(reply->ok);
-        REQUIRE(reply->error.find("SetPlaying is not implemented")
+        REQUIRE(reply->error.find("RenderShot is not implemented")
             != std::string::npos);
         REQUIRE(client.count(StudioMessageType::Error) == 0);
       }
