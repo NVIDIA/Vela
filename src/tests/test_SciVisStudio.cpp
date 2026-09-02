@@ -4353,3 +4353,248 @@ SCENARIO("SciVis Studio tolerates a missing Light Rig Archive on open",
 
   std::filesystem::remove_all(root);
 }
+
+SCENARIO("SciVis Studio generated ids skip ids still in use", "[SciVisStudio]")
+{
+  vsr::app::Context appContext;
+  ProjectContext projectContext(&appContext);
+  projectContext.createUnsavedProject();
+  auto &project = projectContext.project();
+
+  GIVEN("a project whose second of three shots was removed")
+  {
+    REQUIRE(projectContext.addShot("two"));
+    REQUIRE(projectContext.addShot("three"));
+    const auto second = project.shots[1].id;
+    const auto third = project.shots[2].id;
+    REQUIRE(projectContext.removeShot(second));
+
+    THEN("the next shot id is not the surviving third shot's")
+    {
+      const auto next = project::nextShotId(project);
+      REQUIRE(next != third);
+      REQUIRE(project::findShot(project, next) == nullptr);
+      REQUIRE(projectContext.addShot("four"));
+      REQUIRE(project.shots.back().id == next);
+    }
+  }
+
+  GIVEN("rig and color map libraries with a gap")
+  {
+    auto *lightA = projectContext.createLightRig("A");
+    REQUIRE(lightA);
+    const auto lightAId = lightA->id;
+    REQUIRE(projectContext.createLightRig("B"));
+    REQUIRE(projectContext.removeLightRig(lightAId));
+
+    REQUIRE(projectContext.createCameraRig("A"));
+    REQUIRE(projectContext.createCameraRig("B"));
+    REQUIRE(projectContext.removeCameraRig(project.cameraRigs[1].id));
+
+    REQUIRE(projectContext.createColorMap("A"));
+    REQUIRE(projectContext.createColorMap("B"));
+    REQUIRE(projectContext.removeColorMap(project.colorMaps.front().id));
+
+    THEN("every generator mints an unused id")
+    {
+      REQUIRE(
+          light_rig::findLightRig(project, light_rig::nextLightRigId(project))
+          == nullptr);
+      REQUIRE(camera_rig::findCameraRig(
+                  project, camera_rig::nextCameraRigId(project))
+          == nullptr);
+      REQUIRE(project::findColorMap(project, project::nextColorMapId(project))
+          == nullptr);
+    }
+  }
+}
+
+SCENARIO(
+    "SciVis Studio shots are removed, updated and activated as whole "
+    "operations",
+    "[SciVisStudio]")
+{
+  vsr::app::Context appContext;
+  ProjectContext projectContext(&appContext);
+  projectContext.createUnsavedProject();
+  auto &project = projectContext.project();
+  auto &scene = appContext.vsr.scene;
+  std::string error;
+
+  GIVEN("a single-shot project")
+  {
+    THEN("the last shot cannot be removed")
+    {
+      REQUIRE_FALSE(
+          projectContext.removeShot(project.shots.front().id, &error));
+      REQUIRE(error.find("last shot") != std::string::npos);
+      REQUIRE(project.shots.size() == 1);
+    }
+
+    THEN("unknown ids are rejected by every shot call")
+    {
+      REQUIRE_FALSE(projectContext.removeShot("nope", &error));
+      REQUIRE(error == "shot not found");
+      REQUIRE_FALSE(projectContext.setActiveShot("nope", &error));
+      REQUIRE(error == "shot not found");
+      Shot stranger;
+      stranger.id = "nope";
+      REQUIRE_FALSE(projectContext.updateShot(stranger, &error));
+      REQUIRE(error == "shot not found");
+    }
+  }
+
+  GIVEN("two shots with the second active")
+  {
+    const auto firstId = project.shots.front().id;
+    REQUIRE(projectContext.addShot("second"));
+    const auto secondId = project.shots.back().id;
+    REQUIRE(project.activeShotId == secondId);
+    const auto cameraCount = scene.numberOfObjects(ANARI_CAMERA);
+
+    WHEN("the active shot is removed")
+    {
+      REQUIRE(projectContext.removeShot(secondId, &error));
+
+      THEN("the first shot becomes active and the camera object is gone")
+      {
+        REQUIRE(project.shots.size() == 1);
+        REQUIRE(project.activeShotId == firstId);
+        REQUIRE(scene.numberOfObjects(ANARI_CAMERA) == cameraCount - 1);
+        auto *layer = scene.layer("studio");
+        auto shotsRoot = findDirectChild(layer->root(), "shots");
+        REQUIRE_FALSE(findDirectChild(shotsRoot, secondId));
+        REQUIRE(findDirectChild(shotsRoot, firstId));
+        REQUIRE(project.dirty);
+      }
+    }
+
+    WHEN("the first shot is activated")
+    {
+      project.markClean();
+      REQUIRE(projectContext.setActiveShot(firstId, &error));
+
+      THEN("it is active, the project is dirty and the animation follows")
+      {
+        REQUIRE(project.activeShotId == firstId);
+        REQUIRE(project.dirty);
+        REQUIRE(appContext.vsr.animationMgr.getAnimationFrame()
+            == project.shots.front().currentFrame);
+      }
+    }
+
+    WHEN("the active shot is updated with out-of-range fields")
+    {
+      Shot edit = *project::findShot(project, secondId);
+      edit.name = "renamed";
+      edit.frameCount = 0;
+      edit.fps = 0.f;
+      edit.currentFrame = 50;
+      edit.playing = true;
+      edit.camera = {ANARI_CAMERA, 12345};
+      edit.renderSettings.width = 0;
+      edit.datasetBindings.push_back({"dataset_9999", true});
+      REQUIRE(projectContext.updateShot(edit, &error));
+
+      THEN("the stored shot is the normalized copy")
+      {
+        const auto *shot = project::findShot(project, secondId);
+        REQUIRE(shot->name == "renamed");
+        REQUIRE(shot->frameCount == 1);
+        REQUIRE(shot->fps == 1.f);
+        REQUIRE(shot->currentFrame == 0);
+        REQUIRE_FALSE(shot->playing);
+        REQUIRE(shot->camera.objectIndex != 12345);
+        REQUIRE(shot->renderSettings.width == 1);
+        REQUIRE(shot->datasetBindings.empty());
+      }
+    }
+
+    WHEN("an update names an unknown rig or a foreign renderer")
+    {
+      Shot edit = *project::findShot(project, secondId);
+      edit.lightRigId = "lightRig_9999";
+      REQUIRE_FALSE(projectContext.updateShot(edit, &error));
+      REQUIRE(error == "light rig not found");
+
+      edit = *project::findShot(project, secondId);
+      edit.cameraRigId = "cameraRig_9999";
+      REQUIRE_FALSE(projectContext.updateShot(edit, &error));
+      REQUIRE(error == "camera rig not found");
+
+      edit = *project::findShot(project, secondId);
+      edit.renderSettings.rendererObjectIndex = 7;
+      REQUIRE_FALSE(projectContext.updateShot(edit, &error));
+      REQUIRE(error.find("renderer") != std::string::npos);
+
+      THEN("the stored shot is untouched")
+      {
+        const auto *shot = project::findShot(project, secondId);
+        REQUIRE(shot->lightRigId == project.lightRigs.front().id);
+        REQUIRE(shot->renderSettings.rendererObjectIndex == VSR_INVALID_INDEX);
+      }
+    }
+  }
+}
+
+SCENARIO("SciVis Studio color maps pair a record with a scene array",
+    "[SciVisStudio]")
+{
+  vsr::app::Context appContext;
+  ProjectContext projectContext(&appContext);
+  projectContext.createUnsavedProject();
+  auto &project = projectContext.project();
+  auto &scene = appContext.vsr.scene;
+  std::string error;
+
+  WHEN("a color map is created")
+  {
+    const auto arrays = scene.numberOfObjects(ANARI_ARRAY1D);
+    auto *record = projectContext.createColorMap("Heat");
+    REQUIRE(record);
+    const auto id = record->id;
+
+    THEN("the record names an RGBA array that lives in the scene")
+    {
+      REQUIRE(record->name == "Heat");
+      REQUIRE(scene.numberOfObjects(ANARI_ARRAY1D) == arrays + 1);
+      auto array = projectContext.resolveColorMapArray(id);
+      REQUIRE(array);
+      REQUIRE(array->name() == id + "_colormap");
+      REQUIRE(array->elementType() == ANARI_FLOAT32_VEC4);
+      REQUIRE(array->size() == 256);
+      REQUIRE(project.dirty);
+    }
+
+    THEN("a second one with the same name is de-duplicated")
+    {
+      auto *other = projectContext.createColorMap("heat");
+      REQUIRE(other);
+      REQUIRE(other->name != "Heat");
+      REQUIRE(other->id != id);
+    }
+
+    THEN("rename validates format and collisions")
+    {
+      REQUIRE(projectContext.createColorMap("Cold"));
+      REQUIRE_FALSE(projectContext.renameColorMap(id, "cold", &error));
+      REQUIRE(error.find("already uses") != std::string::npos);
+      REQUIRE_FALSE(projectContext.renameColorMap(id, "", &error));
+      REQUIRE_FALSE(projectContext.renameColorMap("nope", "x", &error));
+      REQUIRE(error == "color map not found");
+      REQUIRE(projectContext.renameColorMap(id, "Warm", &error));
+      REQUIRE(project::findColorMap(project, id)->name == "Warm");
+      REQUIRE(projectContext.resolveColorMapArray(id));
+    }
+
+    THEN("remove takes the record and the array with it")
+    {
+      REQUIRE(projectContext.removeColorMap(id, &error));
+      REQUIRE(project.colorMaps.empty());
+      REQUIRE_FALSE(projectContext.resolveColorMapArray(id));
+      REQUIRE(scene.numberOfObjects(ANARI_ARRAY1D) == arrays);
+      REQUIRE_FALSE(projectContext.removeColorMap(id, &error));
+      REQUIRE(error == "color map not found");
+    }
+  }
+}

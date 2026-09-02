@@ -8,6 +8,7 @@
 
 #include "vsr/app/Context.h"
 #include "vsr/io/importers.hpp"
+#include "vsr/scene/objects/Array.hpp"
 
 #include <filesystem>
 #include <string>
@@ -42,6 +43,18 @@ struct ProjectContext
 
   void createUnsavedProject();
   bool addShot(const std::string &name = "");
+  // Shot edits as whole operations (the monolith's editors mutate Shot fields
+  // inline; the remote server needs them as validated calls). removeShot
+  // refuses the last shot and, when the active shot goes, makes the first
+  // remaining one active. updateShot replaces the stored Shot with a
+  // validated copy of `shot`: unknown rig ids and renderers of another
+  // library are rejected, bindings to unknown datasets are dropped, frame
+  // fields are clamped, the runtime camera ref is kept and `playing` is
+  // ignored (playback is driven through the AnimationManager, not this
+  // call). setActiveShot switches shots and re-syncs the animation manager.
+  bool removeShot(const ShotID &id, std::string *error = nullptr);
+  bool updateShot(const Shot &shot, std::string *error = nullptr);
+  bool setActiveShot(const ShotID &id, std::string *error = nullptr);
   Dataset *addStaticDataset(const std::string &name,
       const std::filesystem::path &sourcePath,
       vsr::io::ImporterType importerType);
@@ -130,6 +143,17 @@ struct ProjectContext
   int cameraRigUseCount(const CameraRigID &id) const;
   CameraRig *activeShotCameraRig();
 
+  // Color maps: a ColorMapRecord paired with a scene Array of RGBA samples
+  // named "<colorMapId>_colormap" (the record carries no scene ref, so the
+  // name is the link, as with "<shotId>_camera"). Create makes both, remove
+  // removes both; rename touches the record only.
+  ColorMapRecord *createColorMap(const std::string &name = "");
+  bool renameColorMap(const ColorMapID &id,
+      const std::string &newName,
+      std::string *error = nullptr);
+  bool removeColorMap(const ColorMapID &id, std::string *error = nullptr);
+  vsr::scene::ArrayRef resolveColorMapArray(const ColorMapID &id) const;
+
   // Standalone rig Archive IO. Save writes the named rig to a .vsr file; Load
   // adds a new library entry (with a fresh id and a de-duplicated name) and
   // never alters shot bindings. Load returns the new rig, or nullptr on error.
@@ -168,6 +192,9 @@ struct ProjectContext
   void ensureRendererDefaults(Shot &shot);
   LightRig *ensureDefaultLightRig();
   CameraRig *ensureDefaultCameraRig();
+  vsr::scene::ArrayRef createColorMapArray(const ColorMapID &id);
+  // Records loaded from a manifest have no Array yet: give each a default.
+  void ensureColorMapArrays();
   void installAnimationManagerCallback();
   void updateActiveShotFromAnimationTime();
 
