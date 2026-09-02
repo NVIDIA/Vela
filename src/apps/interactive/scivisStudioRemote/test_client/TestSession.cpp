@@ -22,6 +22,8 @@
 #include "vsr/core/Logging.hpp"
 // std
 #include <algorithm>
+#include <cctype>
+#include <charconv>
 #include <thread>
 
 namespace vsr::scivis_studio::test_client {
@@ -53,6 +55,25 @@ std::string objectText(const SceneObjectRef &ref)
 std::string quotedText(const std::string &text)
 {
   return "\"" + text + "\"";
+}
+
+// The shortest text that reads back as the same float.
+std::string numberText(float value)
+{
+  char buffer[32];
+  const auto result = std::to_chars(buffer, buffer + sizeof(buffer), value);
+  return std::string(buffer, result.ptr);
+}
+
+// "ANARI_SURFACE" -> "surface", the record stream's spelling of a type.
+std::string shortTypeName(anari::DataType type)
+{
+  std::string name = anari::toString(type);
+  if (name.rfind("ANARI_", 0) == 0)
+    name.erase(0, 6);
+  for (auto &c : name)
+    c = char(std::tolower(static_cast<unsigned char>(c)));
+  return name;
 }
 
 const char *boolText(bool value)
@@ -201,6 +222,16 @@ size_t TestSession::framesReceived() const
   return m_framesReceived;
 }
 
+size_t TestSession::framesAdvanced() const
+{
+  return m_framesAdvanced;
+}
+
+int TestSession::frameMaxStep() const
+{
+  return m_frameMaxStep;
+}
+
 size_t TestSession::errorsReceived() const
 {
   return m_errorsReceived;
@@ -258,6 +289,26 @@ size_t TestSession::tasksFailed() const
 size_t TestSession::snapshotsReceived() const
 {
   return m_snapshotsReceived;
+}
+
+const std::string &TestSession::lastReplyError() const
+{
+  return m_lastReplyError;
+}
+
+const PickReply *TestSession::pickReply(uint64_t requestId) const
+{
+  return m_pickReplies.at(requestId);
+}
+
+size_t TestSession::warningsReceived() const
+{
+  return m_warningsReceived;
+}
+
+const std::optional<TimeAdvanceWarning> &TestSession::lastWarning() const
+{
+  return m_lastWarning;
 }
 
 // Session ////////////////////////////////////////////////////////////////////
@@ -665,6 +716,7 @@ void TestSession::finishDisconnect()
   clearMirror();
   m_project.reset();
   m_replies.clear();
+  m_pickReplies.clear();
   m_tasks.clear();
   m_frameConfig = {};
   if (m_state != SessionState::NeverConnected)
@@ -834,6 +886,12 @@ void TestSession::handleMessage(const Message &msg)
     event.fields.emplace_back(
         "colorMaps", std::to_string(m_project->colorMaps.size()));
     event.fields.emplace_back("dirty", boolText(m_project->dirty));
+    // Time at Rest, as the snapshot carries it for the active shot.
+    if (const auto *shot = project::activeShot(*m_project)) {
+      event.fields.emplace_back("playing", boolText(shot->playing));
+      event.fields.emplace_back(
+          "currentFrame", std::to_string(shot->currentFrame));
+    }
     break;
   }
   case StudioMessageType::ProjectOpReply: {
@@ -846,9 +904,50 @@ void TestSession::handleMessage(const Message &msg)
     event.fields.emplace_back("requestId", std::to_string(reply->requestId));
     event.fields.emplace_back("ok", boolText(reply->ok));
     event.fields.emplace_back("error", quotedText(reply->error));
-    if (!reply->ok)
+    if (!reply->ok) {
       ++m_repliesFailed;
+      m_lastReplyError = reply->error;
+    }
     m_replies[reply->requestId] = {std::move(*reply), m_snapshotsReceived};
+    break;
+  }
+  case StudioMessageType::PickReply: {
+    auto reply = decode<PickReply>(msg);
+    if (!reply) {
+      vsr::core::logError("[TestSession] undecodable PickReply");
+      event.fields.emplace_back("malformed", "true");
+      break;
+    }
+    event.fields.emplace_back("requestId", std::to_string(reply->requestId));
+    event.fields.emplace_back("hit", boolText(reply->hit));
+    const auto &p = reply->worldPosition;
+    event.fields.emplace_back("worldPosition",
+        quotedText(numberText(p.x) + " " + numberText(p.y) + " "
+            + numberText(p.z)));
+    if (reply->objectIdentity) {
+      event.fields.emplace_back(
+          "objectType", shortTypeName(reply->objectIdentity->type));
+      event.fields.emplace_back("objectIndex",
+          std::to_string(reply->objectIdentity->objectIndex));
+    } else {
+      event.fields.emplace_back("objectType", "none");
+      event.fields.emplace_back("objectIndex", "none");
+    }
+    m_pickReplies[reply->requestId] = std::move(*reply);
+    break;
+  }
+  case StudioMessageType::TimeAdvanceWarning: {
+    const auto warning = decode<TimeAdvanceWarning>(msg);
+    if (!warning) {
+      vsr::core::logError("[TestSession] undecodable TimeAdvanceWarning");
+      event.fields.emplace_back("malformed", "true");
+      break;
+    }
+    event.fields.emplace_back("shotId", warning->shotId);
+    event.fields.emplace_back("frame", std::to_string(warning->frame));
+    event.fields.emplace_back("message", quotedText(warning->message));
+    ++m_warningsReceived;
+    m_lastWarning = *warning;
     break;
   }
   case StudioMessageType::TaskProgress: {
@@ -982,6 +1081,12 @@ void TestSession::consumeFrame()
     event.fields.emplace_back("malformed", "true");
     pushEvent(std::move(event));
     return;
+  }
+  if (m_lastFrameHeader && m_lastFrameHeader->frame != view->header.frame) {
+    ++m_framesAdvanced;
+    const int step = view->header.frame - m_lastFrameHeader->frame;
+    if (step > m_frameMaxStep)
+      m_frameMaxStep = step;
   }
   m_lastFrameHeader = view->header;
   m_lastFrame = std::move(*frame);
