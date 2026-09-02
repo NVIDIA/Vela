@@ -3,10 +3,14 @@
 
 #pragma once
 
+#include "DataRoots.h"
+#include "ProjectOpDispatcher.h"
 #include "ServerOptions.h"
 #include "ServerPushDelegate.h"
+#include "ServerTaskRunner.h"
 // vsr_scivis_studio_protocol
 #include "FrameMessages.h"
+#include "PayloadCommon.h"
 #include "SceneEditMessages.h"
 // vsr_scivis_studio_model
 #include "ProjectContext.h"
@@ -23,6 +27,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -56,15 +61,19 @@ const char *toString(SessionState state);
  * Threading: run() is the render loop and the only thread that touches the
  * Scene, the Project or the pipeline. Network handlers run on the channel's
  * IO thread and do nothing but decode, then latch into the Control-State
- * Latch or enqueue into the edit drain queue that rides alongside it (plus
- * Ping -> Pong); the loop applies both once per iteration, so a long-running
- * bootstrap or scene edit never stalls the IO thread and the IO thread never
- * races the renderer. Frames follow the latest-frame-wins, one-in-flight
- * rule: while the previous Frame is still being written the loop skips
- * rendering.
+ * Latch or enqueue into one of the two queues that ride alongside it (scene
+ * edits, project requests; plus Ping -> Pong); the loop applies all of it
+ * once per iteration, so a long-running bootstrap, scene edit or project op
+ * never stalls the IO thread and the IO thread never races the renderer.
+ * Frames follow the latest-frame-wins, one-in-flight rule: while the
+ * previous Frame is still being written the loop skips rendering.
  *
- * Milestone 3 answers Project Ops, Server Tasks, Remote Browse, playback,
- * picking and RenderShot with Error{"... not implemented in this server"}.
+ * Project Ops run through the ProjectOpDispatcher on the loop thread; task
+ * ops queue a Server Task that the loop runs to completion, one per
+ * iteration, between applying the latch and rendering, so frames pause while
+ * a task runs. Every path a request names must lie inside the Data Roots.
+ * Playback, picking and RenderShot are still answered with Error{"... not
+ * implemented in this server"}.
  *
  * Example:
  *   StudioServer server(options);
@@ -123,6 +132,10 @@ struct StudioServer
   // - The edit drain queue: scene edits in arrival order, none dropped,
   //   because coalescing them would leave the mirror and the scene
   //   disagreeing. It is a queue, not a latch, and is drained in one go.
+  // - The project request queue: decoded project requests in arrival order.
+  //   Also a queue; the loop moves it onto m_pendingRequests and dispatches
+  //   from there, holding a sync op back while a task the client sent
+  //   earlier is still queued so requests take effect in the order sent.
   struct ControlState
   {
     std::optional<uint64_t> accepted;
@@ -136,14 +149,21 @@ struct StudioServer
     std::optional<protocol::FrameEncoding> encoding;
     std::optional<bool> rendering;
     std::vector<SceneEdit> edits;
+    std::vector<ProjectRequest> requests;
   };
 
   // Startup and teardown (caller's thread)
+  ProjectOpDispatcher::Host makeDispatcherHost();
   bool loadDevice(std::string *error);
   bool setupProject(std::string *error);
   bool setupRendering(std::string *error);
   bool setupNetwork(std::string *error);
   void teardown();
+  // Points the pipeline's renderer and camera at the active shot's, creating
+  // the library's standard renderers when the scene has none (a fresh or
+  // reopened project) and recording the pick in the shot. Used at setup and
+  // after every project op that changes which shot or camera renders.
+  bool bindActiveShotRendering(std::string *error);
 
   // IO thread
   void onConnected();
@@ -163,6 +183,7 @@ struct StudioServer
   void endSession(const std::string &reason, bool closeSocket);
   void bootstrap();
   void sendSceneSnapshot();
+  void dispatchPendingRequests();
   void applyFrameConfig(uint32_t width, uint32_t height);
   void applyEdit(const protocol::SetObjectParameter &edit);
   void applyEdit(const protocol::RemoveObjectParameter &edit);
@@ -187,6 +208,13 @@ struct StudioServer
   std::vector<uint8_t> m_colorBytes; // RGBA8, filled by the pipeline
   std::vector<std::byte> m_encodedPixels;
   ServerPushDelegate *m_push{nullptr};
+
+  // Project Ops (loop thread)
+  DataRoots m_dataRoots;
+  ServerTaskRunner m_tasks;
+  ProjectOpDispatcher m_dispatcher;
+  std::deque<ProjectRequest> m_pendingRequests;
+  protocol::SubtreePtr m_uiState; // null until a project with UI state opens
 
   std::shared_ptr<vsr::network::NetworkServer> m_server;
   vsr::network::MessageFuture m_frameInFlight;
