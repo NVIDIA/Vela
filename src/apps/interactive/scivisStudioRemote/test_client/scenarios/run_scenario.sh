@@ -15,10 +15,12 @@
 # Exit 77 (ctest's SKIP_RETURN_CODE for these tests) when the server cannot
 # load any ANARI device, so a tree without helide skips instead of failing.
 #
-# A scenario whose first line is `# runner: kill-restart-after <n>` is run in
-# kill-restart mode: after the client has printed <n> `OK` records the server
-# is killed (SIGKILL, the "process went away" case), and a new one is started
-# on the same port. loss.studio uses this to script server loss and recovery.
+# A scenario whose opening comment block holds `# runner: kill-restart-after
+# <n>` is run in kill-restart mode: after the client has printed <n> `OK`
+# records the server is killed (SIGKILL, the "process went away" case), and a
+# new one is started on the same port with the usual 30 s to reach Listening;
+# the script's `reconnect` deadline must outlast that. loss.studio uses this
+# to script server loss and recovery.
 
 set -u
 
@@ -47,11 +49,13 @@ client_err=$work/client-stderr.log
 server_pid=""
 client_pid=""
 
-# The runner hint on the first line, if any.
+# The runner hint, if any, anywhere in the comment block that opens the file
+# (so the SPDX header can come first).
 kill_after=""
-first_line=$(head -n 1 "$scenario")
-if [[ $first_line =~ ^#[[:space:]]*runner:[[:space:]]*kill-restart-after[[:space:]]+([0-9]+) ]]; then
-  kill_after=${BASH_REMATCH[1]}
+hint=$(sed -n '/^#/!q;p' "$scenario" \
+  | grep -E -m1 '^#[[:space:]]*runner:[[:space:]]*kill-restart-after[[:space:]]+[0-9]+' || true)
+if [ -n "$hint" ]; then
+  kill_after=$(echo "$hint" | sed -E 's/.*kill-restart-after[[:space:]]+([0-9]+).*/\1/')
 fi
 
 log() { echo "[run_scenario] $*" >&2; }
