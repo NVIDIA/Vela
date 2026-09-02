@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <utility>
 
 namespace vsr::animation {
 
@@ -30,6 +31,21 @@ AnimationManager::~AnimationManager()
 void AnimationManager::setTimeChangedCallback(TimeChangedCallback cb)
 {
   m_timeChangedCallback = std::move(cb);
+}
+
+void AnimationManager::setPlaybackStoppedCallback(PlaybackStoppedCallback cb)
+{
+  m_playbackStoppedCallback = std::move(cb);
+}
+
+void AnimationManager::reportLoadFailure(int frame, std::string message)
+{
+  m_loadFailures.push_back({frame, std::move(message)});
+}
+
+std::vector<AnimationManager::LoadFailure> AnimationManager::takeLoadFailures()
+{
+  return std::exchange(m_loadFailures, {});
 }
 
 scene::Scene *AnimationManager::scene() const
@@ -194,47 +210,51 @@ void AnimationManager::incrementAnimationFrame()
   setAnimationFrame(frame);
 }
 
-void AnimationManager::tick(float elapsedSeconds)
+bool AnimationManager::tick(float elapsedSeconds)
 {
   if (!m_playing)
-    return;
+    return false;
 
   if (elapsedSeconds <= 0.f)
-    return;
+    return false;
 
   const float frameDuration = 1.f / m_animationFPS;
   m_playbackAccumulator += elapsedSeconds;
 
   if (m_playbackAccumulator < frameDuration)
-    return;
+    return false;
 
-  int steps = static_cast<int>(m_playbackAccumulator / frameDuration);
-  m_playbackAccumulator -= steps * frameDuration;
+  // One frame per tick; the leftover never exceeds one more frame's worth, so
+  // a slow iteration cannot be "caught up" later by skipping frames.
+  m_playbackAccumulator =
+      std::min(m_playbackAccumulator - frameDuration, frameDuration);
 
-  while (steps-- > 0 && m_playing) {
-    if (m_loop) {
-      int frame = getAnimationFrame() + 1;
-      if (frame >= m_totalFrames)
-        frame = 0;
-      setAnimationFrameInternal(frame, false);
-    } else {
-      int frame = getAnimationFrame();
-      if (frame >= m_totalFrames - 1) {
-        m_playing = false;
-        m_playbackAccumulator = 0.f;
-        break;
-      }
-
-      ++frame;
-      setAnimationFrameInternal(frame, false);
-
-      if (frame >= m_totalFrames - 1) {
-        m_playing = false;
-        m_playbackAccumulator = 0.f;
-        break;
-      }
-    }
+  if (m_loop) {
+    int frame = getAnimationFrame() + 1;
+    if (frame >= m_totalFrames)
+      frame = 0;
+    setAnimationFrameInternal(frame, false);
+    return true;
   }
+
+  const int frame = getAnimationFrame();
+  if (frame >= m_totalFrames - 1) {
+    stopAtEnd();
+    return false;
+  }
+
+  setAnimationFrameInternal(frame + 1, false);
+  if (frame + 1 >= m_totalFrames - 1)
+    stopAtEnd();
+  return true;
+}
+
+void AnimationManager::stopAtEnd()
+{
+  m_playing = false;
+  m_playbackAccumulator = 0.f;
+  if (m_playbackStoppedCallback)
+    m_playbackStoppedCallback();
 }
 
 void AnimationManager::play()

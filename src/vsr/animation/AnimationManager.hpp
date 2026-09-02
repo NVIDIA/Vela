@@ -7,6 +7,8 @@
 
 // std
 #include <functional>
+#include <string>
+#include <vector>
 
 namespace vsr::scene {
 struct Scene;
@@ -34,6 +36,24 @@ struct AnimationManager
 
   using TimeChangedCallback = std::function<void(float)>;
   void setTimeChangedCallback(TimeChangedCallback cb);
+
+  // Fired by tick() right after playback stops on its own at the end of a
+  // non-looping clock (m_playing is already false); stop() does not fire it.
+  // One slot, last setter wins, like the time-changed callback.
+  using PlaybackStoppedCallback = std::function<void()>;
+  void setPlaybackStoppedCallback(PlaybackStoppedCallback cb);
+
+  // A frame a FileBinding could not load: `frame` is the binding's own file
+  // index for the requested time, `message` the reason. Bindings report them
+  // through FileBinding::reportLoadFailure(); whoever drives time collects
+  // them with takeLoadFailures(), which returns and clears the list.
+  struct LoadFailure
+  {
+    int frame{0};
+    std::string message;
+  };
+  void reportLoadFailure(int frame, std::string message);
+  std::vector<LoadFailure> takeLoadFailures();
 
   scene::Scene *scene() const;
 
@@ -69,8 +89,13 @@ struct AnimationManager
   // so the caller can say so.
   bool widenClock(int frames, float fps);
 
-  // Playing state — call tick(elapsedSeconds) once per UI frame
-  void tick(float elapsedSeconds);
+  // Playing state — call tick(elapsedSeconds) once per UI frame. A tick
+  // advances at most one frame, however much wall-clock time has passed: fps
+  // is a ceiling, not a promise, so a slow iteration (a file binding loading
+  // an 800 ms frame) is never made up for by skipping frames -- every frame is
+  // the point. The elapsed time carried over to the next call is capped at
+  // one frame's worth. Returns true when the frame changed.
+  bool tick(float elapsedSeconds);
   void play();
   void stop();
   void togglePlay();
@@ -83,9 +108,13 @@ struct AnimationManager
  private:
   void setAnimationTimeInternal(float time, bool resetPlaybackAccumulator);
   void setAnimationFrameInternal(int frame, bool resetPlaybackAccumulator);
+  // Playback ran off the end of a non-looping clock.
+  void stopAtEnd();
 
   scene::Scene *m_scene{nullptr};
   TimeChangedCallback m_timeChangedCallback;
+  PlaybackStoppedCallback m_playbackStoppedCallback;
+  std::vector<LoadFailure> m_loadFailures;
   float m_incrementSize{0.01f};
   float m_animationFPS{30.f};
   float m_time{0.f};

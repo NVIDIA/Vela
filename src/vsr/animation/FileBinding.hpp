@@ -15,6 +15,7 @@
 namespace vsr::animation {
 
 struct Animation;
+struct AnimationManager;
 
 /*
  * Abstract base for animation bindings that load data from files.  Derived
@@ -29,6 +30,10 @@ struct Animation;
  *     std::string kind() const override { return "myKind"; }
  *     void toDataNode(core::DataNode &n) const override { ... }
  *     void addCallbackToAnimation(Animation &a) override { ... }
+ *     void update(float t) override {
+ *       if (!load(t))
+ *         reportLoadFailure(frameFor(t), "cannot read " + file);
+ *     }
  *   };
  */
 struct FileBinding : public Binding
@@ -55,7 +60,17 @@ struct FileBinding : public Binding
   // after reconstruction from a legacy application-state DataNode.
   virtual void addCallbackToAnimation(Animation &anim) = 0;
 
-  friend struct Animation; // allow Animation to call addCallbackToAnimation()
+  // Records that the file for `frame` (this binding's own index) could not be
+  // loaded with the owning AnimationManager, which hands the record on
+  // through takeLoadFailures(). Keep logging as well: the record is for
+  // whoever drives time, the log for whoever reads it. A no-op for a binding
+  // no Animation owns yet.
+  void reportLoadFailure(int frame, std::string message) const;
+
+ private:
+  AnimationManager *m_manager{nullptr}; // set by the owning Animation
+
+  friend struct Animation; // sets m_manager and calls addCallbackToAnimation()
                            // on new bindings
 };
 

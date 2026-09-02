@@ -124,6 +124,7 @@ inline T &Animation::emplaceFileBinding(Args &&...args)
       std::is_base_of_v<FileBinding, T>, "T must be derived from FileBinding");
   auto &ptr = m_fileBindings.emplace_back(
       std::make_unique<T>(std::forward<Args>(args)...));
+  ptr->m_manager = m_manager;
   ptr->addCallbackToAnimation(*this);
   return static_cast<T &>(*ptr);
 }
