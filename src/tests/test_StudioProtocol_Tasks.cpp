@@ -248,10 +248,12 @@ SCENARIO("Server Task payloads", "[StudioProtocol]")
     TaskFailed f;
     f.taskId = 9;
     f.error = "disk full";
+    f.framesCompleted = 17;
     const auto out = decode<TaskFailed>(encode(f));
     REQUIRE(out);
     REQUIRE(out->taskId == 9);
     REQUIRE(out->error == "disk full");
+    REQUIRE(out->framesCompleted == 17);
   }
 
   GIVEN("a CancelTask")

@@ -58,6 +58,9 @@ struct TaskFailed
       StudioMessageType::TaskFailed;
   uint64_t taskId{0};
   std::string error;
+  // RenderShot only: the frames written before the cancel or failure; they
+  // stay on disk. 0 otherwise.
+  uint64_t framesCompleted{0};
 };
 
 struct CancelTask
