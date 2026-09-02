@@ -129,6 +129,10 @@ ProjectOpDispatcher::Host StudioServer::makeDispatcherHost()
   };
   host.uiState = &m_uiState;
   host.shutdownRequested = [this] { return m_shutdownRequested.load(); };
+  host.dropLatchedInputs = [this] {
+    std::lock_guard lock(m_controlMutex);
+    discardStaleInputs(m_control);
+  };
   return host;
 }
 
@@ -497,12 +501,9 @@ void StudioServer::run()
       sendSceneSnapshot();
     // One Server Task per iteration; frames wait while it runs. A shot
     // render outlives its session (it runs with nobody listening and the
-    // next bootstrap replays its ending); inputs latched while it held the
-    // loop targeted a scene it was mutating.
-    if (sessionEstablished() || m_dispatcher.renderActive()) {
-      if (auto ran = m_dispatcher.runOneTask(); ran && ran->exclusive)
-        m_discardLatchedInputs = true;
-    }
+    // next bootstrap replays its ending).
+    if (sessionEstablished() || m_dispatcher.renderActive())
+      m_dispatcher.runOneTask();
     // A Frame still on the wire gets a moment to finish before time moves
     // on, so a fast link never sees a header skip a frame; on a slow link
     // the tick goes ahead regardless and time keeps its pace.
@@ -582,11 +583,6 @@ void StudioServer::applyControlState()
       vsr::core::logWarning(
           "[StudioServer] duplicate Hello ignored (%s)", toString(m_state));
     }
-  }
-
-  if (m_discardLatchedInputs) {
-    m_discardLatchedInputs = false;
-    discardStaleInputs(control);
   }
 
   const bool established = m_bootstrapPending

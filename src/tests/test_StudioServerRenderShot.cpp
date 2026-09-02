@@ -245,6 +245,16 @@ bool anyOfTypeBetween(
   return false;
 }
 
+// The frame the latest Frame message carries, or -1 without one.
+int latestFrame(TestClient &client)
+{
+  const auto msg = client.last(StudioMessageType::Frame);
+  if (msg.header.type != uint8_t(StudioMessageType::Frame))
+    return -1;
+  const auto view = decodeFrame(msg);
+  return view ? int(view->header.frame) : -1;
+}
+
 size_t countPNGs(const std::filesystem::path &directory)
 {
   std::error_code ec;
@@ -341,6 +351,47 @@ SCENARIO(
       REQUIRE_FALSE(reply.ok);
       REQUIRE(reply.error == "shot not found");
     }
+
+    WHEN("a save and a render of two frames are sent back-to-back")
+    {
+      REQUIRE(client.waitForCount(StudioMessageType::ProjectSnapshot, 1));
+      auto snapshot = client.lastDecoded<ProjectSnapshot>();
+      REQUIRE(snapshot);
+      UpdateShot update;
+      update.shot = *project::activeShot(snapshot->project);
+      update.shot.frameCount = 2;
+      update.shot.renderSettings.width = 32;
+      update.shot.renderSettings.height = 24;
+      update.shot.renderSettings.samples = 1;
+      REQUIRE(session.request(update).ok);
+
+      SaveProject save;
+      save.requestId = session.nextRequestId++;
+      save.directory = data.projectDir;
+      RenderShot render;
+      render.requestId = session.nextRequestId++;
+      render.shotId = shotId;
+      client.send(save);
+      client.send(render);
+
+      THEN("the render takes its turn behind the save and sees it saved")
+      {
+        const auto saveReply = client.waitForReply(save.requestId);
+        const auto renderReply =
+            client.waitForReply(render.requestId, RENDER_TIMEOUT);
+        REQUIRE(saveReply);
+        REQUIRE(renderReply);
+        const auto saved = waitForTaskEnd(client, session.startTask(*saveReply));
+        REQUIRE(saved);
+        REQUIRE(saved->completed);
+        const auto rendered =
+            waitForTaskEnd(client, session.startTask(*renderReply));
+        REQUIRE(rendered);
+        REQUIRE(rendered->completed);
+        REQUIRE(rendered->framesCompleted == 2);
+        REQUIRE(countPNGs(data.projectDir / "renders" / shotId) == 2);
+      }
+    }
   }
 
   GIVEN("a saved project with a four-frame shot and frames streaming")
@@ -357,6 +408,16 @@ SCENARIO(
       const auto taskId = session.startTask(reply);
       const auto end = waitForTaskEnd(client, taskId);
       REQUIRE(end);
+
+      THEN("a scrub sent on hearing the ending is served, not dropped")
+      {
+        // Only the inputs latched while the body held the loop are stale;
+        // this one follows the ending and lands on the scene the render
+        // left.
+        client.send(SetTime{shotId, 2});
+        REQUIRE(waitFor([&] { return latestFrame(client) == 2; }));
+        REQUIRE(client.count(StudioMessageType::Error) == 0);
+      }
 
       THEN("the reply, a snapshot, determinate progress and the ending arrive")
       {

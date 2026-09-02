@@ -85,9 +85,11 @@ bool isProjectRequestType(protocol::StudioMessageType type);
 std::optional<ProjectRequest> decodeProjectRequest(
     const vsr::network::Message &msg);
 
-// A sync op that reads or mutates the Project or Scene, and therefore must
-// wait until every task the client sent before it has run. Task-launching
-// requests (they only queue), CancelTask and Remote Browse are not.
+// A request that reads or mutates the Project or Scene at dispatch, and
+// therefore must wait until every task the client sent before it has run:
+// the sync ops, and RenderShot, whose sync prelude reads the Project.
+// Task-launching requests (they only queue), CancelTask and Remote Browse
+// are not.
 bool waitsForQueuedTasks(const ProjectRequest &request);
 
 // CancelTask and Remote Browse: they touch neither Project nor Scene, so the
@@ -102,14 +104,27 @@ bool independentOfQueuedTasks(const ProjectRequest &request);
 // CancelTask are not.
 bool refusedWhileRendering(const ProjectRequest &request);
 
+// How a task is queued: exclusive (the shot render), and what its sync
+// prelude did before the task was queued -- a Project change the reply's
+// snapshot must show, a rebind of the pipeline.
+struct TaskLaunch
+{
+  bool exclusive{false};
+  bool projectChanged{false};
+  bool rebind{false};
+};
+
 /*
  * Runs project requests on the loop thread against the server's
  * ProjectContext. RenderShot is a Server Task with a sync prelude: the shot
  * becomes the active one, the pipeline rebinds and a snapshot goes out
- * before the task is queued, so the client sees the switch at once; while
- * the render is queued or running every mutating request is refused with
- * "render in progress" (renderActive()) and the body polls its cancel flag
- * once per frame. Sync ops call the context, send the ProjectOpReply, then a
+ * before the task is queued, so the client sees the switch at once; because
+ * the prelude reads the Project, RenderShot waits for queued tasks like a
+ * sync op does. While the render is queued or running every mutating
+ * request is refused with "render in progress" (renderActive()) and the
+ * body polls its cancel flag once per frame; when the body returns, the
+ * host drops the inputs latched meanwhile (Host::dropLatchedInputs) before
+ * the ending goes out. Sync ops call the context, send the ProjectOpReply, then a
  * ProjectSnapshot whenever the Project changed (including "failed" calls that
  * still mutate: an import that leaves an ImportFailed record, a load that
  * marks a dataset Unavailable). Task ops reply with a TaskStartedResult and
@@ -148,6 +163,11 @@ struct ProjectOpDispatcher
     protocol::SubtreePtr *uiState{nullptr};
     // The server is going down: a running render stops at its next frame.
     std::function<bool()> shutdownRequested;
+    // The render body has returned: scene edits, SetTime and Pick latched
+    // while it held the loop targeted the scene it was mutating and are
+    // dropped now, before the ending is sent, so nothing sent in reaction
+    // to the ending is lost with them.
+    std::function<void()> dropLatchedInputs;
   };
 
   explicit ProjectOpDispatcher(Host host);
@@ -223,14 +243,11 @@ struct ProjectOpDispatcher
   void fail(uint64_t requestId,
       const std::string &error,
       bool projectChanged = false);
-  // Queues `body` and answers with its task id; `projectChanged` and
-  // `rebind` describe what a sync prelude did before the task was queued.
+  // Queues `body` and answers with its task id.
   void startTask(uint64_t requestId,
       std::string description,
       TaskBody body,
-      bool exclusive = false,
-      bool projectChanged = false,
-      bool rebind = false);
+      TaskLaunch launch = {});
   // Runs `body`, then -- however it ended -- rebinds (if asked) and flushes
   // scene pushes so the completion report follows them.
   TaskResult runTaskBody(const std::function<TaskResult()> &body, bool rebind);

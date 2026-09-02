@@ -157,7 +157,10 @@ std::optional<ProjectRequest> decodeProjectRequest(const Message &msg)
 
 namespace {
 
-bool launchesTask(const ProjectRequest &request)
+// The task ops whose dispatch reads nothing from the Project. RenderShot
+// also launches a task, but its prelude looks the shot up and needs the
+// project saved, so it takes its turn behind the queue like a sync op.
+bool queuesWithoutReadingProject(const ProjectRequest &request)
 {
   return isOneOf<OpenProject>(request) || isOneOf<SaveProject>(request)
       || isOneOf<ImportStaticDataset>(request)
@@ -165,15 +168,15 @@ bool launchesTask(const ProjectRequest &request)
       || isOneOf<ReimportDataset>(request) || isOneOf<LoadDataset>(request)
       || isOneOf<SaveDatasetArchive>(request)
       || isOneOf<LoadDatasetArchive>(request)
-      || isOneOf<IncorporateDatasetCandidate>(request)
-      || isOneOf<RenderShot>(request);
+      || isOneOf<IncorporateDatasetCandidate>(request);
 }
 
 } // namespace
 
 bool waitsForQueuedTasks(const ProjectRequest &request)
 {
-  return !launchesTask(request) && !independentOfQueuedTasks(request);
+  return !queuesWithoutReadingProject(request)
+      && !independentOfQueuedTasks(request);
 }
 
 bool independentOfQueuedTasks(const ProjectRequest &request)
@@ -251,15 +254,13 @@ void ProjectOpDispatcher::fail(
 void ProjectOpDispatcher::startTask(uint64_t requestId,
     std::string description,
     TaskBody body,
-    bool exclusive,
-    bool projectChanged,
-    bool rebind)
+    TaskLaunch launch)
 {
-  const auto taskId =
-      m_host.tasks->enqueue(std::move(description), std::move(body), exclusive);
+  const auto taskId = m_host.tasks->enqueue(
+      std::move(description), std::move(body), launch.exclusive);
   auto reply = makeOkReply(requestId);
   setResults(reply, TaskStartedResult{taskId});
-  finish(reply, projectChanged, rebind);
+  finish(reply, launch.projectChanged, launch.rebind);
 }
 
 TaskResult ProjectOpDispatcher::runTaskBody(
@@ -969,7 +970,9 @@ void ProjectOpDispatcher::handle(const ListDirectory &req)
 // body walks the frames, reporting each and stopping at the next boundary
 // once a cancel or the shutdown is asked for. Partial frames stay on disk;
 // the ending carries how many were written. dispatch() has already refused
-// this request when a render is pending.
+// this request when a render is pending, and the host held it back until
+// the tasks sent before it had run, so the prelude reads the Project those
+// left.
 void ProjectOpDispatcher::handle(const RenderShot &req)
 {
   if (!project::findShot(project(), req.shotId)) {
@@ -988,12 +991,25 @@ void ProjectOpDispatcher::handle(const RenderShot &req)
     }
   }
 
+  TaskLaunch launch;
+  launch.exclusive = true;
+  launch.projectChanged = true; // the shot switch, and the rebind's pick
+  launch.rebind = true;
   startTask(
       req.requestId,
       "render shot '" + req.shotId + "'",
-      [this](const TaskControl &task) {
+      [this, shotId = req.shotId](const TaskControl &task) {
         return runTaskBody(
             [&] {
+              TaskResult result;
+              // Mutations are refused while the render is pending, so the
+              // shot made active by the prelude is still the one; a body
+              // that found otherwise would render the wrong shot.
+              if (project().activeShotId != shotId) {
+                result.ok = false;
+                result.error = "shot '" + shotId + "' is no longer active";
+                return result;
+              }
               RenderShotProgress progress;
               progress.onFrame = [&](int frame, int totalFrames) {
                 if (task.cancelRequested())
@@ -1012,7 +1028,8 @@ void ProjectOpDispatcher::handle(const RenderShot &req)
               };
               RenderShotResult rendered;
               renderActiveShotToFrames(context(), &progress, &rendered);
-              TaskResult result;
+              if (m_host.dropLatchedInputs)
+                m_host.dropLatchedInputs();
               result.ok = rendered.completed;
               result.error = rendered.cancelled ? "cancelled" : rendered.error;
               result.message = rendered.outputDirectory.string();
@@ -1024,9 +1041,7 @@ void ProjectOpDispatcher::handle(const RenderShot &req)
             },
             true);
       },
-      /*exclusive*/ true,
-      /*projectChanged*/ true, // the shot switch, and the rebind's pick
-      /*rebind*/ true);
+      launch);
 }
 
 void ProjectOpDispatcher::handle(const CancelTask &req)
