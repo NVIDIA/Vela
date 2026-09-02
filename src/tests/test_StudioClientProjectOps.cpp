@@ -1120,8 +1120,8 @@ SCENARIO("ReplicaView reads the Project Replica", "[StudioClient]")
   }
 }
 
-SCENARIO("ProjectOps matches PickReply messages to picks by id",
-    "[StudioClient]")
+SCENARIO(
+    "ProjectOps matches PickReply messages to picks by id", "[StudioClient]")
 {
   GIVEN("a connected client with two picks in flight")
   {
@@ -1130,12 +1130,10 @@ SCENARIO("ProjectOps matches PickReply messages to picks by id",
     REQUIRE(f.waitConnectedAndBootstrapped());
 
     std::vector<std::optional<PickReply>> first, second;
-    const auto h1 = f.ops().pick(10, 20, [&](const auto &r) {
-      first.push_back(r);
-    });
-    const auto h2 = f.ops().pick(30, 40, [&](const auto &r) {
-      second.push_back(r);
-    });
+    const auto h1 =
+        f.ops().pick(10, 20, [&](const auto &r) { first.push_back(r); });
+    const auto h2 =
+        f.ops().pick(30, 40, [&](const auto &r) { second.push_back(r); });
     REQUIRE(h1.valid());
     REQUIRE(h2.valid());
     REQUIRE(h1.requestId != h2.requestId);
@@ -1193,6 +1191,47 @@ SCENARIO("ProjectOps matches PickReply messages to picks by id",
       }
     }
 
+    WHEN("the first pick is forgotten")
+    {
+      f.ops().forget(h1);
+
+      THEN(
+          "it is retired outright: the server never answers a superseded"
+          " Pick")
+      {
+        REQUIRE_FALSE(f.ops().pending(h1));
+        REQUIRE(f.ops().pending(h2));
+        REQUIRE(f.ops().pendingCount() == 1);
+
+        AND_THEN("a late reply for it is ignored")
+        {
+          PickReply late;
+          late.requestId = h1.requestId;
+          late.hit = true;
+          f.server.send(encode(late));
+          pollFor(f.connection, 50ms);
+          REQUIRE(first.empty());
+          REQUIRE(f.ops().pendingCount() == 1);
+        }
+      }
+    }
+
+    WHEN("the server refuses a Pick with a bare Error")
+    {
+      Error error;
+      error.message = "Pick 12345 refused: no active shot to render";
+      f.server.send(encode(error));
+
+      THEN("the oldest pending pick fails once with an absent reply")
+      {
+        REQUIRE(pollUntil(f.connection, [&] { return first.size() == 1; }));
+        REQUIRE_FALSE(first[0].has_value());
+        REQUIRE(second.empty());
+        REQUIRE_FALSE(f.ops().pending(h1));
+        REQUIRE(f.ops().pending(h2));
+      }
+    }
+
     WHEN("the user disconnects")
     {
       f.connection.disconnect();
@@ -1215,9 +1254,8 @@ SCENARIO("ProjectOps matches PickReply messages to picks by id",
 
     WHEN("a pick is sent anyway")
     {
-      const auto handle = f.ops().pick(1, 1, [&](const auto &r) {
-        replies.push_back(r);
-      });
+      const auto handle =
+          f.ops().pick(1, 1, [&](const auto &r) { replies.push_back(r); });
       REQUIRE(handle.valid());
 
       THEN("the callback fails from the next poll(), not from pick()")
@@ -1232,8 +1270,8 @@ SCENARIO("ProjectOps matches PickReply messages to picks by id",
   }
 }
 
-SCENARIO("ServerConnection carries playback and viewport messages",
-    "[StudioClient]")
+SCENARIO(
+    "ServerConnection carries playback and viewport messages", "[StudioClient]")
 {
   GIVEN("a connected client")
   {
@@ -1259,8 +1297,7 @@ SCENARIO("ServerConnection carries playback and viewport messages",
 
       THEN("the callback sees the reply")
       {
-        REQUIRE(
-            pollUntil(f.connection, [&] { return recorded.count() == 1; }));
+        REQUIRE(pollUntil(f.connection, [&] { return recorded.count() == 1; }));
         REQUIRE(recorded.replies[0].ok);
       }
     }
@@ -1269,18 +1306,17 @@ SCENARIO("ServerConnection carries playback and viewport messages",
     {
       std::optional<ArrayHistogramResult> result;
       int calls = 0;
-      const auto handle = f.ops().requestArrayHistogram(
-          SceneObjectRef{ANARI_ARRAY1D, 3},
-          16,
-          [&](const ProjectOpReply &reply,
-              const std::optional<ArrayHistogramResult> &r) {
-            calls++;
-            if (reply.ok)
-              result = r;
-          });
+      const auto handle =
+          f.ops().requestArrayHistogram(SceneObjectRef{ANARI_ARRAY1D, 3},
+              16,
+              [&](const ProjectOpReply &reply,
+                  const std::optional<ArrayHistogramResult> &r) {
+                calls++;
+                if (reply.ok)
+                  result = r;
+              });
       REQUIRE(f.waitForRequests(1));
-      const auto request =
-          decode<RequestArrayHistogram>(f.requests()[0].raw);
+      const auto request = decode<RequestArrayHistogram>(f.requests()[0].raw);
       REQUIRE(request);
       REQUIRE(request->array.type == ANARI_ARRAY1D);
       REQUIRE(request->array.objectIndex == 3);
@@ -1380,8 +1416,8 @@ SCENARIO("ServerConnection carries playback and viewport messages",
       THEN("its header is the last frame header")
       {
         Message frame;
-        REQUIRE(pollUntil(f.connection,
-            [&] { return f.connection.takeLatestFrame(frame); }));
+        REQUIRE(pollUntil(
+            f.connection, [&] { return f.connection.takeLatestFrame(frame); }));
         REQUIRE(f.connection.lastFrameHeader());
         REQUIRE(f.connection.lastFrameHeader()->frame == 9);
         REQUIRE(f.connection.lastFrameHeader()->shotId == "shot_0001");
