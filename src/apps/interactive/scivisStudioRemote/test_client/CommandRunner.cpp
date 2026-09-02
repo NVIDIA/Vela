@@ -5,6 +5,7 @@
 // vsr_scivis_studio_protocol
 #include "FrameCodec.h"
 #include "PayloadCommon.h"
+#include "PlaybackMessages.h"
 #include "ShotRigRequests.h"
 #include "TaskMessages.h"
 // vsr_scivis_studio_model
@@ -773,6 +774,11 @@ const std::vector<std::string> &CommandRunner::assertNames()
       "colorMap.<id>.name",
       "tasks.completed",
       "tasks.failed",
+      "tasks.replayed",
+      "task.<id>.<field>",
+      "task.last.<field>",
+      "uiState.present",
+      "uiState.<key>",
       "replies.failed",
       "replies.pending",
       "snapshots.received",
@@ -845,6 +851,8 @@ const std::vector<std::string> &CommandRunner::commandHelp()
       "                             set a transform node's matrix (column-major)",
       "dump-scene | dump-layers | dump-project | dump-frame",
       "                             print the mirror, replica or last frame header",
+      "set-ui-state KEY=VALUE...    build the windows/<key> UI state tree save-project sends",
+      "dump-ui-state                print the UIState tree the server sent last",
       "viewport-settings keys: highlightSelection outlinePrimitives showWorldBounds",
       "                             worldBoundsColor=r,g,b,a worldBoundsWidth visualizeAOV",
       "                             depthVisualMinimum depthVisualMaximum edgeInvert",
@@ -873,9 +881,11 @@ const std::vector<std::string> &CommandRunner::commandHelp()
       "save-camera-rig-archive ID PATH | load-camera-rig-archive PATH",
       "create-color-map [NAME] | rename-color-map ID NAME | remove-color-map ID",
       "list-roots | list-directory PATH   (one EVT DataRoot / DirectoryEntry per item)",
+      "render-shot SHOT             task: render the shot's frames offline; SHOT is an id or `active`",
       "cancel-task TASKID",
       "await-task [TASKID] [expect-fail]",
       "                             wait for the task (default $lastTaskId) to end",
+      "await-task-progress [TASKID] wait for the next TaskProgress of the task (default $lastTaskId)",
       "await-snapshot               wait for a ProjectSnapshot newer than the last request",
       "                             (or than the previous await-snapshot; one per await)",
       "await-reply [REQUESTID]      collect the reply of a no-wait request (default the oldest)",
@@ -988,6 +998,10 @@ CommandRunner::Failure CommandRunner::execute(Command command)
     return dumpProject(command);
   if (name == "dump-frame")
     return dumpFrame(command);
+  if (name == "set-ui-state")
+    return setUIState(command);
+  if (name == "dump-ui-state")
+    return dumpUIState(command);
   if (name == "assert")
     return assertValue(command);
   return "unknown command '" + name + "'";
@@ -1674,6 +1688,56 @@ CommandRunner::Failure CommandRunner::dumpFrame(const Command &command)
   return {};
 }
 
+// UI state ///////////////////////////////////////////////////////////////////
+
+CommandRunner::Failure CommandRunner::setUIState(const Command &command)
+{
+  if (command.args.empty())
+    return usageError(command, "<key>=<value>...");
+  // The shape the GUI saves is {windows/<Window>/..., layout, settings/...};
+  // the server reads no further than those child names, so string leaves
+  // under windows/ are all a round trip needs. Repeated commands compose:
+  // a key set again is overwritten, the others stay.
+  auto tree = m_uiStateToSave ? m_uiStateToSave : makeSubtree();
+  auto &windows = tree->root()["windows"];
+  for (const auto &edit : command.args) {
+    const auto eq = edit.find('=');
+    if (eq == std::string::npos || eq == 0)
+      return "not a <key>=<value> edit: " + edit;
+    windows[edit.substr(0, eq)] = edit.substr(eq + 1);
+  }
+  m_uiStateToSave = tree;
+  return {};
+}
+
+CommandRunner::Failure CommandRunner::dumpUIState(const Command &command)
+{
+  if (!command.args.empty())
+    return usageError(command, "");
+  if (const auto pending = drainEvents())
+    return pending;
+  const auto &tree = m_session->uiState();
+  printRecord(std::string("EVT UIState present=") + boolText(tree != nullptr)
+      + " children=" + std::to_string(tree ? tree->root().numChildren() : 0));
+  if (!tree)
+    return {};
+  // One line per leaf, its path from the root written with slashes.
+  const std::function<void(const vsr::core::DataNode &, const std::string &)>
+      walk = [&](const vsr::core::DataNode &node, const std::string &path) {
+        if (node.numChildren() == 0) {
+          printRecord("EVT UIStateEntry path=" + quoted(path)
+              + " value=" + quoted(anyText(node.getValue())));
+          return;
+        }
+        node.foreach_child_const([&](const vsr::core::DataNode &child) {
+          walk(child, path.empty() ? child.name() : path + "/" + child.name());
+        });
+      };
+  tree->root().foreach_child_const(
+      [&](const vsr::core::DataNode &child) { walk(child, child.name()); });
+  return {};
+}
+
 // Assertions /////////////////////////////////////////////////////////////////
 
 CommandRunner::Failure CommandRunner::assertValue(const Command &command)
@@ -1761,6 +1825,67 @@ std::optional<std::string> CommandRunner::namedValue(
     return std::to_string(m_session->tasksCompleted());
   if (name == "tasks.failed")
     return std::to_string(m_session->tasksFailed());
+  if (name == "tasks.replayed")
+    return std::to_string(m_session->tasksReplayed());
+  if (name.rfind("task.", 0) == 0) {
+    // task.<id>.<field>, `last` for $lastTaskId.
+    const auto idEnd = name.find('.', 5);
+    if (idEnd == std::string::npos || idEnd + 1 >= name.size()) {
+      error = "malformed value '" + name + "'; use task.<id|last>.<field>";
+      return {};
+    }
+    const auto idText = name.substr(5, idEnd - 5);
+    const auto field = name.substr(idEnd + 1);
+    unsigned long long taskId = 0;
+    if (idText == "last") {
+      const auto last = variable("lastTaskId");
+      if (!last) {
+        error = name + ": no task has been started yet ($lastTaskId is unset)";
+        return {};
+      }
+      parseNonNegative(*last, taskId);
+    } else if (!parseNonNegative(idText, taskId)) {
+      error = name + ": not a task id: " + idText;
+      return {};
+    }
+    const auto *task = m_session->task(taskId);
+    if (!task) {
+      error =
+          name + ": nothing has been heard of task " + std::to_string(taskId);
+      return {};
+    }
+    if (field == "state")
+      return std::string(toString(task->status));
+    if (field == "message")
+      return task->message;
+    if (field == "framesCompleted")
+      return std::to_string(task->framesCompleted);
+    if (field == "current")
+      return std::to_string(task->current);
+    if (field == "total")
+      return std::to_string(task->total);
+    error = name + ": unknown task field '" + field
+        + "'; valid: state, message, framesCompleted, current, total";
+    return {};
+  }
+  if (name.rfind("uiState.", 0) == 0) {
+    const auto &tree = m_session->uiState();
+    const auto key = name.substr(8);
+    if (key == "present")
+      return std::string(boolText(tree != nullptr));
+    if (!tree) {
+      error = name + ": the server has sent no UIState tree";
+      return {};
+    }
+    // What set-ui-state writes: a leaf under windows/.
+    const auto *windows = tree->root().child("windows");
+    const auto *leaf = windows ? windows->child(key) : nullptr;
+    if (!leaf) {
+      error = name + ": the UIState tree has no windows/" + key;
+      return {};
+    }
+    return anyText(leaf->getValue());
+  }
   if (name == "replies.failed")
     return std::to_string(m_session->repliesFailed());
   if (name == "replies.pending")
@@ -2175,10 +2300,14 @@ CommandRunner::Failure CommandRunner::executeRequest(
     return listRoots(command, deadline);
   if (name == "list-directory")
     return listDirectory(command, deadline);
+  if (name == "render-shot")
+    return renderShot(command, deadline);
   if (name == "cancel-task")
     return cancelTask(command, deadline);
   if (name == "await-task")
     return awaitTask(command, deadline);
+  if (name == "await-task-progress")
+    return awaitTaskProgress(command, deadline);
   if (name == "await-snapshot")
     return awaitSnapshot(command, deadline);
   if (name == "await-reply")
@@ -2290,6 +2419,10 @@ CommandRunner::Failure CommandRunner::saveProject(
   SaveProject request;
   if (!command.args.empty())
     request.directory = std::filesystem::path(command.args[0]);
+  // The GUI sends its live layout with every save; this client sends the
+  // tree set-ui-state built, or none, when the server keeps the one the
+  // project opened with.
+  request.uiState = m_uiStateToSave;
   return sendRequest(std::move(request), deadline, taskStarted());
 }
 
@@ -2588,6 +2721,20 @@ CommandRunner::Failure CommandRunner::listDirectory(
 
 // Tasks //
 
+CommandRunner::Failure CommandRunner::renderShot(
+    const Command &command, Deadline deadline)
+{
+  if (command.args.size() != 1)
+    return usageError(command, "<shotId|active>");
+  std::string error;
+  const auto shotId = shotIdArgument(command.args[0], error);
+  if (!shotId)
+    return error;
+  RenderShot request;
+  request.shotId = *shotId;
+  return sendRequest(std::move(request), deadline, taskStarted());
+}
+
 CommandRunner::Failure CommandRunner::cancelTask(
     const Command &command, Deadline deadline)
 {
@@ -2609,21 +2756,22 @@ CommandRunner::Failure CommandRunner::awaitTask(
     m_expectFail = true;
     args.pop_back();
   }
-  unsigned long long taskId = 0;
-  if (args.size() > 1 || (!args.empty() && !parseNonNegative(args[0], taskId)))
+  if (args.size() > 1)
     return usageError(command, "[taskId] [expect-fail]");
-  if (args.empty()) {
-    const auto *last = m_variables.at("lastTaskId");
-    if (!last)
-      return "no task has been started yet ($lastTaskId is unset)";
-    parseNonNegative(*last, taskId);
-  }
+  std::string error;
+  const auto id = taskIdArgument(args, error);
+  if (!id)
+    return error;
+  const auto taskId = *id;
   if (m_session->state() != SessionState::Connected)
     return std::string("not connected (") + toString(m_session->state()) + ")";
 
+  // The progress prints as it comes (determinate `current= total=` for a
+  // render); the end record carries the message and, for a render, the
+  // `framesCompleted=`.
   const auto ended = [&] {
     const auto *task = m_session->task(taskId);
-    return task && task->status != TaskRecord::Status::Running;
+    return task && task->finished();
   };
   const auto wait = pumpUntil(ended, deadline);
   if (wait != Wait::Done) {
@@ -2644,6 +2792,50 @@ CommandRunner::Failure CommandRunner::awaitTask(
   // Imports report the new dataset's id as their completion message.
   if (!failed && !task.message.empty())
     m_variables["lastDatasetId"] = task.message;
+  return {};
+}
+
+CommandRunner::Failure CommandRunner::awaitTaskProgress(
+    const Command &command, Deadline deadline)
+{
+  if (m_noWait || m_expectFail) {
+    return std::string(m_expectFail ? "expect-fail" : "no-wait")
+        + " applies to request commands, not to await-task-progress";
+  }
+  if (command.args.size() > 1)
+    return usageError(command, "[taskId]");
+  std::string error;
+  const auto id = taskIdArgument(command.args, error);
+  if (!id)
+    return error;
+  if (m_session->state() != SessionState::Connected)
+    return std::string("not connected (") + toString(m_session->state()) + ")";
+  // One TaskProgress of that task, from now on: what was heard before this
+  // command is not it. A task that ends first will send no more, so its end
+  // stops the wait as a FAIL rather than the deadline.
+  const auto idText = std::to_string(*id);
+  const auto wait = pumpUntilEvent(
+      [&](const Event &e) {
+        if (e.name != "TaskProgress")
+          return false;
+        for (const auto &[key, value] : e.fields)
+          if (key == "taskId")
+            return value == idText;
+        return false;
+      },
+      deadline,
+      nullptr,
+      LossEnds::Wait,
+      [&] {
+        const auto *task = m_session->task(*id);
+        return task && task->finished();
+      });
+  if (wait != Wait::Done)
+    return waitFailure(wait, "progress of task " + idText, deadline);
+  if (const auto *task = m_session->task(*id); task && task->finished()) {
+    return "task " + idText + " ended (" + toString(task->status)
+        + ") before reporting progress";
+  }
   return {};
 }
 
@@ -2830,6 +3022,26 @@ std::optional<std::string> CommandRunner::shotIdArgument(
   if (text == "active")
     return project->activeShotId;
   return text;
+}
+
+std::optional<uint64_t> CommandRunner::taskIdArgument(
+    const std::vector<std::string> &args, std::string &error) const
+{
+  unsigned long long taskId = 0;
+  if (!args.empty()) {
+    if (!parseNonNegative(args[0], taskId)) {
+      error = "not a task id: " + args[0];
+      return {};
+    }
+    return taskId;
+  }
+  const auto last = variable("lastTaskId");
+  if (!last) {
+    error = "no task has been started yet ($lastTaskId is unset)";
+    return {};
+  }
+  parseNonNegative(*last, taskId);
+  return taskId;
 }
 
 // Pumping and output /////////////////////////////////////////////////////////

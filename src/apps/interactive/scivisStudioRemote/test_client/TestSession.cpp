@@ -3,6 +3,7 @@
 
 #include "TestSession.h"
 // vsr_scivis_studio_protocol
+#include "PayloadCommon.h"
 #include "ProjectSnapshot.h"
 #include "SceneEditMessages.h"
 #include "SceneMessages.h"
@@ -40,6 +41,8 @@ constexpr std::chrono::milliseconds POLL_INTERVAL{1};
 // Between reconnect attempts a restarting server refuses.
 constexpr std::chrono::milliseconds RECONNECT_PAUSE{100};
 constexpr const char *BUILD_INFO = "scivisStudioTestClient";
+// What a BootstrapBegin says of the tasks the previous session left running.
+constexpr const char *CONNECTION_LOST = "connection lost";
 
 std::string endpointText(const std::string &host, int port)
 {
@@ -81,11 +84,25 @@ const char *boolText(bool value)
   return value ? "true" : "false";
 }
 
+// A TaskFailed's `framesCompleted`, read off the wire tree: a cancelled or
+// failed RenderShot reports the frames it left on disk there, and the payload
+// struct does not carry the field yet (milestone 7 server work). Absent or
+// mistyped reads as 0, like every optional child.
+uint64_t failedFramesCompleted(const Message &msg)
+{
+  vsr::core::DataTree tree;
+  if (msg.payload.empty() || !tree.read(msg.payload))
+    return 0;
+  return readChildOr(tree.root(), "framesCompleted", uint64_t(0));
+}
+
 } // namespace
 
 const char *toString(TaskRecord::Status status)
 {
   switch (status) {
+  case TaskRecord::Status::Queued:
+    return "Queued";
   case TaskRecord::Status::Running:
     return "Running";
   case TaskRecord::Status::Completed:
@@ -286,6 +303,11 @@ size_t TestSession::tasksFailed() const
   return m_tasksFailed;
 }
 
+size_t TestSession::tasksReplayed() const
+{
+  return m_tasksReplayed;
+}
+
 size_t TestSession::snapshotsReceived() const
 {
   return m_snapshotsReceived;
@@ -309,6 +331,11 @@ size_t TestSession::warningsReceived() const
 const std::optional<TimeAdvanceWarning> &TestSession::lastWarning() const
 {
   return m_lastWarning;
+}
+
+const SubtreePtr &TestSession::uiState() const
+{
+  return m_uiState;
 }
 
 // Session ////////////////////////////////////////////////////////////////////
@@ -718,6 +745,7 @@ void TestSession::finishDisconnect()
   m_replies.clear();
   m_pickReplies.clear();
   m_tasks.clear();
+  m_uiState.reset();
   m_frameConfig = {};
   if (m_state != SessionState::NeverConnected)
     setState(SessionState::Disconnected);
@@ -846,6 +874,18 @@ void TestSession::handleMessage(const Message &msg)
     m_bootstrapping = true;
     m_bootstrapped = false;
     clearMirror();
+    // A task still open here belonged to a session that is over: its end
+    // message, if any, went to a closed socket. The replay that follows
+    // carries what the server still knows; whatever it does not repeat stays
+    // failed. Not a message, so tasks.failed does not count it.
+    for (auto &[taskId, record] : m_tasks) {
+      if (record.finished())
+        continue;
+      record.status = TaskRecord::Status::Failed;
+      record.message = CONNECTION_LOST;
+      record.snapshotsAtEnd = m_snapshotsReceived;
+    }
+    m_tasksReplayed = 0;
     break;
   case StudioMessageType::BootstrapEnd:
     m_bootstrapping = false;
@@ -907,6 +947,10 @@ void TestSession::handleMessage(const Message &msg)
     if (!reply->ok) {
       ++m_repliesFailed;
       m_lastReplyError = reply->error;
+    } else if (const auto started = results<TaskStartedResult>(*reply)) {
+      // Queued from the launch, so a loss before its first progress still
+      // leaves a record to fail.
+      taskRecord(started->taskId);
     }
     m_replies[reply->requestId] = {std::move(*reply), m_snapshotsReceived};
     break;
@@ -962,8 +1006,14 @@ void TestSession::handleMessage(const Message &msg)
     event.fields.emplace_back("total", std::to_string(progress->total));
     event.fields.emplace_back("message", quotedText(progress->message));
     // Progress after the end would be the server's mistake; the end stands.
-    if (!m_tasks.contains(progress->taskId))
-      m_tasks.set(progress->taskId, TaskRecord{});
+    auto &record = taskRecord(progress->taskId);
+    if (!record.finished()) {
+      record.status = TaskRecord::Status::Running;
+      record.current = progress->current;
+      record.total = progress->total;
+    }
+    if (m_bootstrapping)
+      ++m_tasksReplayed;
     break;
   }
   case StudioMessageType::TaskCompleted: {
@@ -979,11 +1029,10 @@ void TestSession::handleMessage(const Message &msg)
       event.fields.emplace_back(
           "framesCompleted", std::to_string(completed->framesCompleted));
     }
-    auto &record = m_tasks[completed->taskId];
-    record.status = TaskRecord::Status::Completed;
-    record.message = completed->message;
-    record.snapshotsAtEnd = m_snapshotsReceived;
-    ++m_tasksCompleted;
+    handleTaskEnd(completed->taskId,
+        TaskRecord::Status::Completed,
+        std::move(completed->message),
+        completed->framesCompleted);
     break;
   }
   case StudioMessageType::TaskFailed: {
@@ -995,22 +1044,63 @@ void TestSession::handleMessage(const Message &msg)
     }
     event.fields.emplace_back("taskId", std::to_string(failed->taskId));
     event.fields.emplace_back("error", quotedText(failed->error));
-    auto &record = m_tasks[failed->taskId];
-    record.status = TaskRecord::Status::Failed;
-    record.message = failed->error;
-    record.snapshotsAtEnd = m_snapshotsReceived;
-    ++m_tasksFailed;
+    const auto framesCompleted = failedFramesCompleted(msg);
+    if (framesCompleted) {
+      event.fields.emplace_back(
+          "framesCompleted", std::to_string(framesCompleted));
+    }
+    handleTaskEnd(failed->taskId,
+        TaskRecord::Status::Failed,
+        std::move(failed->error),
+        framesCompleted);
     break;
   }
-  case StudioMessageType::UIState:
-    // Opaque to every client; the GUI keeps it, this one only notes it came.
+  case StudioMessageType::UIState: {
+    // Opaque to every client: kept for the uiState.* asserts, never read
+    // beyond the child names a script asks for.
+    const auto state = decode<UIState>(msg);
+    if (!state) {
+      vsr::core::logError("[TestSession] undecodable UIState");
+      event.fields.emplace_back("malformed", "true");
+      break;
+    }
+    m_uiState = state->tree;
+    event.fields.emplace_back("present", boolText(m_uiState != nullptr));
+    event.fields.emplace_back("children",
+        std::to_string(m_uiState ? m_uiState->root().numChildren() : 0));
     break;
+  }
   default:
     vsr::core::logWarning(
         "[TestSession] %s is not handled by this client", toString(*type));
     break;
   }
   pushEvent(std::move(event));
+}
+
+void TestSession::handleTaskEnd(uint64_t taskId,
+    TaskRecord::Status status,
+    std::string message,
+    uint64_t framesCompleted)
+{
+  auto &record = taskRecord(taskId);
+  record.status = status;
+  record.message = std::move(message);
+  record.framesCompleted = framesCompleted;
+  record.snapshotsAtEnd = m_snapshotsReceived;
+  // A replayed end may repeat one heard live before the link dropped; both
+  // are messages, and both count (README: assert values).
+  ++(status == TaskRecord::Status::Completed ? m_tasksCompleted
+                                             : m_tasksFailed);
+  if (m_bootstrapping)
+    ++m_tasksReplayed;
+}
+
+TaskRecord &TestSession::taskRecord(uint64_t taskId)
+{
+  if (!m_tasks.contains(taskId))
+    m_tasks.set(taskId, TaskRecord{});
+  return m_tasks[taskId];
 }
 
 void TestSession::handleHello(const Message &msg)
