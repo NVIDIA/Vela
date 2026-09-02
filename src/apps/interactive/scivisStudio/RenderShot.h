@@ -5,7 +5,9 @@
 
 #include "ProjectContext.h"
 
+#include <filesystem>
 #include <functional>
+#include <string>
 
 namespace vsr::scivis_studio {
 
@@ -35,7 +37,25 @@ bool makeShotDatasetsResident(ProjectContext &projectContext,
 void restoreShotDatasetResidency(ProjectContext &projectContext,
     const ShotDatasetResidencyRestore &restore);
 
-bool renderActiveShotToFrames(
-    ProjectContext &projectContext, RenderShotProgress *progress = nullptr);
+// How a shot render ended. `completed` when every frame was written;
+// `cancelled` when onFrame stopped it; otherwise `error` says why it never
+// started (an unsaved project, a missing camera, a dataset that could not be
+// made resident) or stopped early. framesCompleted counts the frames written
+// before it ended -- they stay on disk under outputDirectory.
+struct RenderShotResult
+{
+  bool completed{false};
+  bool cancelled{false};
+  std::string error;
+  int framesCompleted{0};
+  std::filesystem::path outputDirectory;
+};
+
+// Renders the active shot's frames to <project>/renders/<shotId>/. True when
+// every frame was written; `result`, when given, tells a cancel from a
+// failure and how far the render got.
+bool renderActiveShotToFrames(ProjectContext &projectContext,
+    RenderShotProgress *progress = nullptr,
+    RenderShotResult *result = nullptr);
 
 } // namespace vsr::scivis_studio

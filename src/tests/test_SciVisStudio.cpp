@@ -3135,6 +3135,28 @@ SCENARIO("SciVis Studio --openUnloaded overrides initial residency",
   std::filesystem::remove(source);
 }
 
+SCENARIO("SciVis Studio shot rendering reports why it did not run",
+    "[SciVisStudio]")
+{
+  vsr::app::Context appContext;
+  ProjectContext projectContext(&appContext);
+  projectContext.createUnsavedProject();
+
+  GIVEN("An unsaved project")
+  {
+    THEN("The render refuses with the reason and no frames")
+    {
+      RenderShotResult result;
+      REQUIRE_FALSE(renderActiveShotToFrames(projectContext, nullptr, &result));
+      REQUIRE_FALSE(result.completed);
+      REQUIRE_FALSE(result.cancelled);
+      REQUIRE(result.error == "Cannot render an unsaved project");
+      REQUIRE(result.framesCompleted == 0);
+      REQUIRE(result.outputDirectory.empty());
+    }
+  }
+}
+
 SCENARIO("SciVis Studio shot rendering materializes bound datasets",
     "[SciVisStudio]")
 {
