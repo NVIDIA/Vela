@@ -15,6 +15,7 @@
 #include "vsr/network/messages/TransferScene.hpp"
 #include "vsr/scene/Scene.hpp"
 // std
+#include <string>
 #include <vector>
 
 using namespace vsr::scivis_studio::protocol;
@@ -148,6 +149,108 @@ SCENARIO("Scene messages re-tag vsr::network messages", "[StudioProtocol]")
       REQUIRE(isSceneMessageType(StudioMessageType::ObjectRemoved));
       REQUIRE_FALSE(isSceneMessageType(StudioMessageType::ProjectSnapshot));
       REQUIRE_FALSE(isSceneMessageType(StudioMessageType::SetObjectParameter));
+    }
+  }
+}
+
+namespace {
+
+constexpr const char *SPARSE_LAYER = "sparse";
+
+// A layer whose forest has holes: two transform nodes are inserted, the one
+// between them is removed, and a third arrives after the gap. Returns the
+// node the client will address: the last one, whose forest index (3) is
+// not its traversal position (2).
+vsr::scene::LayerNodeRef populateSparseLayer(vsr::scene::Scene &scene)
+{
+  auto *layer = scene.addLayer(SPARSE_LAYER);
+  auto root = layer->root();
+  scene.insertChildTransformNode(root, vsr::math::IDENTITY_MAT4, "first");
+  auto doomed =
+      scene.insertChildTransformNode(root, vsr::math::IDENTITY_MAT4, "doomed");
+  auto target =
+      scene.insertChildTransformNode(root, vsr::math::IDENTITY_MAT4, "target");
+  scene.removeNode(doomed);
+  return target;
+}
+
+// The names of a layer's nodes by forest index; empty slots stay empty.
+std::vector<std::string> namesByIndex(const vsr::scene::Layer &layer)
+{
+  std::vector<std::string> names(layer.capacity());
+  for (size_t i = 0; i < layer.capacity(); ++i) {
+    if (auto node = layer.at(i))
+      names[i] = (*node)->name();
+  }
+  return names;
+}
+
+} // namespace
+
+SCENARIO("Scene transfers preserve the server's layer node indices",
+    "[StudioProtocol]")
+{
+  GIVEN("a server scene with a sparse layer and a client mirror")
+  {
+    vsr::scene::Scene server;
+    const auto target = populateSparseLayer(server);
+    const auto *serverLayer = server.layer(SPARSE_LAYER);
+    REQUIRE(target.index() == 3);
+    REQUIRE(serverLayer->size() == 3);
+    REQUIRE(serverLayer->capacity() == 4);
+    const auto serverNames = namesByIndex(*serverLayer);
+
+    WHEN("the layer arrives through TransferLayer")
+    {
+      messages::TransferLayer sender(&server, serverLayer);
+      const auto msg =
+          encodeSceneMessage(sender, StudioMessageType::TransferLayer);
+      vsr::scene::Scene mirror;
+      messages::TransferLayer(msg, &mirror).execute();
+
+      THEN("a SceneNodeRef's nodeIndex names the same node on both sides")
+      {
+        const auto *mirrorLayer = mirror.layer(SPARSE_LAYER);
+        REQUIRE(mirrorLayer != nullptr);
+        REQUIRE(mirrorLayer->size() == serverLayer->size());
+        REQUIRE(namesByIndex(*mirrorLayer) == serverNames);
+        auto mirrored = mirrorLayer->at(target.index());
+        REQUIRE(mirrored);
+        REQUIRE((*mirrored)->name() == "target");
+        REQUIRE((*mirrored)->isTransform());
+      }
+    }
+
+    WHEN("the whole scene arrives through TransferScene")
+    {
+      messages::TransferScene sender(&server, false);
+      const auto msg =
+          encodeSceneMessage(sender, StudioMessageType::TransferScene);
+      vsr::scene::Scene mirror;
+      messages::TransferScene(msg, &mirror).execute();
+
+      THEN("the mirror's layer carries the server's node indices too")
+      {
+        const auto *mirrorLayer = mirror.layer(SPARSE_LAYER);
+        REQUIRE(mirrorLayer != nullptr);
+        REQUIRE(namesByIndex(*mirrorLayer) == serverNames);
+      }
+    }
+
+    WHEN("a layer is transferred twice into the same mirror")
+    {
+      vsr::scene::Scene mirror;
+      for (int i = 0; i < 2; ++i) {
+        messages::TransferLayer sender(&server, serverLayer);
+        const auto msg =
+            encodeSceneMessage(sender, StudioMessageType::TransferLayer);
+        messages::TransferLayer(msg, &mirror).execute();
+      }
+
+      THEN("the rebuilt layer still agrees with the server")
+      {
+        REQUIRE(namesByIndex(*mirror.layer(SPARSE_LAYER)) == serverNames);
+      }
     }
   }
 }
