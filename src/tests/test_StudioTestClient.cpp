@@ -603,6 +603,53 @@ SCENARIO("the test client stays unconnected until the Bootstrap completes",
   }
 }
 
+SCENARIO("the test client's liveness timers end a wait on a silent server",
+    "[StudioTestClient]")
+{
+  GIVEN(
+      "a server that bootstraps and then never speaks again, and a session"
+      " with fast timings")
+  {
+    ScriptedServer server(ScriptedServer::Behaviour::SilentAfterBootstrap);
+    SessionTimings timings;
+    timings.pingAfterQuiet = 100ms;
+    timings.lossAfterSilence = 400ms;
+    TestSession session(timings);
+
+    const auto started = std::chrono::steady_clock::now();
+    const auto result = runScript(session,
+        "connect 127.0.0.1 " + std::to_string(server.port()) + "\n"
+        "assert state == Connected\n"
+        "ping\n"
+        "expect-pong timeout=8000\n"
+        "assert state == Lost\n",
+        [] {
+          RunnerOptions o;
+          o.keepGoing = true;
+          return o;
+        }());
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+
+    THEN(
+        "the session pings, declares the loss, and the wait FAILs at once"
+        " naming it")
+    {
+      REQUIRE_FALSE(result.ok);
+      REQUIRE(hasLine(result.records, "OK assert state == Connected"));
+      REQUIRE(hasLine(result.records, "OK ping"));
+      const auto fails = failLines(result.records);
+      REQUIRE(fails.size() == 1);
+      REQUIRE(fails[0]
+          == "FAIL expect-pong timeout=8000: connection lost while waiting"
+             " for Pong: no traffic from server for 400 ms");
+      REQUIRE(hasLine(result.records, "OK assert state == Lost"));
+      REQUIRE(elapsed < 4s);
+      // The script's Ping and at least one liveness Ping after the quiet.
+      REQUIRE(server.pingsReceived >= 2);
+    }
+  }
+}
+
 SCENARIO(
     "the test client runs the milestone-3 command surface against a"
     " StudioServer",
@@ -650,6 +697,7 @@ SCENARIO(
           "dump-layers\n"
           "dump-project\n"
           "ping\n"
+          "expect-pong\n"
           "set-encodings raw\n"
           "set-frame-config 32 24\n"
           "assert frameConfig.width == 32\n"
@@ -688,6 +736,7 @@ SCENARIO(
           "expect-error \"unknown message type 255\"\n"
           "send-raw 0\n"
           "expect-error \"unknown message type 0\"\n"
+          "ping\n"
           "send-raw 20 0a0b 0c\n"
           "expect-error \"not implemented\"\n"
           "assert errors.received == 3\n"
@@ -722,7 +771,9 @@ SCENARIO(
             "EVT ProjectSnapshot activeShot=" + project.activeShotId
                 + " shots=1 datasets=0"));
         REQUIRE(hasLine(r, "OK connect " + endpoint));
-        REQUIRE(hasLine(r, "EVT Pong"));
+        // One Pong for expect-pong, one that expect-error had to look past.
+        REQUIRE(countStarting(r, "EVT Pong") == 2);
+        REQUIRE(hasLine(r, "OK expect-pong"));
         REQUIRE(hasLine(r, "EVT FrameConfig width=32 height=24"));
         REQUIRE(countStarting(r,
                     "EVT Frame width=32 height=24 encoding=Raw"
@@ -782,6 +833,34 @@ SCENARIO(
         REQUIRE(xfm[0][0] == 2.f);
         REQUIRE(xfm[3][0] == 5.f);
         REQUIRE(xfm[3][2] == 7.f);
+      }
+    }
+
+    WHEN("the server answers a command nobody wrote as an expectation")
+    {
+      const auto result = runScript(session,
+          "connect " + endpoint + "\n"
+          "send-raw 20\n"
+          "sleep 300\n"
+          "assert errors.received == 1\n"
+          "disconnect\n",
+          [] {
+            RunnerOptions o;
+            o.keepGoing = true;
+            return o;
+          }());
+
+      THEN("the Error FAILs the command in flight and the script")
+      {
+        REQUIRE_FALSE(result.ok);
+        const auto fails = failLines(result.records);
+        REQUIRE(fails.size() == 1);
+        REQUIRE(fails[0].rfind("FAIL sleep 300: server answered Error"
+                               " \"NewProject is not implemented",
+                    0)
+            == 0);
+        REQUIRE(hasLine(result.records, "OK assert errors.received == 1"));
+        REQUIRE(hasLine(result.records, "OK disconnect"));
       }
     }
 

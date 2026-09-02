@@ -32,6 +32,7 @@ assert state == Connected
 assert scene.objects >= 1
 assert project.shots >= 1
 ping
+expect-pong
 
 shutdown
 assert state == Disconnected

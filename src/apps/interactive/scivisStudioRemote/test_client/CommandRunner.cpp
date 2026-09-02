@@ -22,7 +22,6 @@
 #include <fstream>
 #include <ostream>
 #include <sstream>
-#include <thread>
 
 namespace vsr::scivis_studio::test_client {
 
@@ -30,8 +29,6 @@ using namespace protocol;
 using vsr::core::Any;
 
 namespace {
-
-constexpr std::chrono::milliseconds POLL_INTERVAL{1};
 
 // Every object pool of a Scene, the order dump-scene lists them in.
 constexpr anari::DataType OBJECT_TYPES[] = {ANARI_ARRAY,
@@ -519,7 +516,7 @@ bool CommandRunner::run(const std::vector<Command> &commands)
         break;
     }
   }
-  drainEvents();
+  drainEvents(); // nothing is in flight any more for an Error to fail
   return ok;
 }
 
@@ -571,7 +568,8 @@ const std::vector<std::string> &CommandRunner::commandHelp()
       "connect [HOST] [PORT]        connect, exchange Hellos, await the Bootstrap",
       "disconnect                   send Disconnect and close -> Disconnected",
       "shutdown                     send Shutdown, await the server closing the socket",
-      "ping                         send Ping, await Pong",
+      "ping                         send Ping",
+      "expect-pong                  the next server message (Frames aside) must be a Pong",
       "await-lost                   wait until the connection is Lost",
       "reconnect                    connect again to the last host and port",
       "sleep MS                     keep polling for MS milliseconds",
@@ -592,7 +590,9 @@ const std::vector<std::string> &CommandRunner::commandHelp()
       "                             print the mirror, replica or last frame header",
       "assert VALUE OP RHS          OP in == != < <= > >= contains; VALUE one of the names below",
       "",
-      "Waiting commands take a trailing timeout=MS. assert values:"};
+      "Waiting commands take a trailing timeout=MS and FAIL as soon as the",
+      "connection is Lost. An Error the server sends during any command but",
+      "expect-error FAILs that command. assert values:"};
   // clang-format on
   return lines;
 }
@@ -613,7 +613,9 @@ CommandRunner::Failure CommandRunner::execute(Command command)
   if (name == "shutdown")
     return shutdown(command, deadline);
   if (name == "ping")
-    return ping(command, deadline);
+    return ping(command);
+  if (name == "expect-pong")
+    return expectPong(command, deadline);
   if (name == "await-lost")
     return awaitLost(command, deadline);
   if (name == "reconnect")
@@ -674,10 +676,10 @@ CommandRunner::Failure CommandRunner::connect(
 
   std::string error;
   const bool ok = m_session->connect(host, port, deadline, &error);
-  drainEvents();
+  const auto pending = drainEvents();
   if (!ok)
     return error;
-  return {};
+  return pending;
 }
 
 CommandRunner::Failure CommandRunner::disconnect(const Command &command)
@@ -687,9 +689,10 @@ CommandRunner::Failure CommandRunner::disconnect(const Command &command)
   if (m_session->state() != SessionState::Connected
       && m_session->state() != SessionState::Lost)
     return std::string("not connected (") + toString(m_session->state()) + ")";
+  // Before the close: whatever the server said last still counts.
+  const auto pending = drainEvents();
   m_session->disconnect();
-  drainEvents();
-  return {};
+  return pending;
 }
 
 CommandRunner::Failure CommandRunner::shutdown(
@@ -700,24 +703,36 @@ CommandRunner::Failure CommandRunner::shutdown(
   std::string error;
   // Events keep flowing while the socket is still open; print them after.
   const bool ok = m_session->shutdown(deadline, &error);
-  drainEvents();
+  const auto pending = drainEvents();
   if (!ok)
     return error;
-  return {};
+  return pending;
 }
 
-CommandRunner::Failure CommandRunner::ping(
-    const Command &command, Deadline deadline)
+CommandRunner::Failure CommandRunner::ping(const Command &command)
 {
   if (!command.args.empty())
     return usageError(command, "");
   std::string error;
   if (!m_session->ping(&error))
     return error;
-  if (!pumpUntilEvent(
-          [](const Event &e) { return e.name == "Pong"; }, deadline)) {
-    return "no Pong within " + std::to_string(deadline.count()) + " ms";
-  }
+  // No drain: the Pong belongs to the expect-pong that usually follows.
+  return {};
+}
+
+CommandRunner::Failure CommandRunner::expectPong(
+    const Command &command, Deadline deadline)
+{
+  if (!command.args.empty())
+    return usageError(command, "");
+  // Frames are stream data, not replies; any other message is the answer.
+  Event next;
+  const auto wait = pumpUntilEvent(
+      [](const Event &e) { return e.name != "Frame"; }, deadline, &next);
+  if (wait != Wait::Done)
+    return waitFailure(wait, "Pong", deadline);
+  if (next.name != "Pong")
+    return "expected Pong, got " + next.text();
   return {};
 }
 
@@ -726,10 +741,13 @@ CommandRunner::Failure CommandRunner::awaitLost(
 {
   if (!command.args.empty())
     return usageError(command, "");
-  if (!pumpUntil(
-          [&] { return m_session->state() == SessionState::Lost; }, deadline)) {
-    return std::string("still ") + toString(m_session->state()) + " after "
-        + std::to_string(deadline.count()) + " ms";
+  const auto wait = pumpUntil(
+      [&] { return m_session->state() == SessionState::Lost; }, deadline);
+  if (wait != Wait::Done) {
+    return wait == Wait::Error
+        ? waitFailure(wait, "the loss", deadline)
+        : std::string("still ") + toString(m_session->state()) + " after "
+            + std::to_string(deadline.count()) + " ms";
   }
   return {};
 }
@@ -743,10 +761,10 @@ CommandRunner::Failure CommandRunner::reconnect(
     return "already connected";
   std::string error;
   const bool ok = m_session->reconnect(deadline, &error);
-  drainEvents();
+  const auto pending = drainEvents();
   if (!ok)
     return error;
-  return {};
+  return pending;
 }
 
 CommandRunner::Failure CommandRunner::sleep(const Command &command)
@@ -754,7 +772,12 @@ CommandRunner::Failure CommandRunner::sleep(const Command &command)
   unsigned long long ms = 0;
   if (command.args.size() != 1 || !parseUnsigned(command.args[0], ms))
     return usageError(command, "<ms>");
-  pumpUntil([] { return false; }, std::chrono::milliseconds(ms));
+  // Passing time is the point, so a loss meanwhile is the next command's to
+  // notice; an Error is still an answer nobody asked for.
+  const auto wait = pumpUntil(
+      [] { return false; }, std::chrono::milliseconds(ms), LossEnds::Nothing);
+  if (wait == Wait::Error)
+    return waitFailure(wait, "the sleep to end", std::chrono::milliseconds(ms));
   return {};
 }
 
@@ -764,13 +787,15 @@ CommandRunner::Failure CommandRunner::expectError(
   if (command.args.size() > 1)
     return usageError(command, "[substring]");
   // Frames are stream data, not replies: one still in flight after
-  // stop-rendering must not stand in for the answer.
+  // stop-rendering must not stand in for the answer. Nor is a Pong: the
+  // session pings on its own after a quiet spell.
   Event next;
-  if (!pumpUntilEvent(
-          [](const Event &e) { return e.name != "Frame"; }, deadline, &next)) {
-    return "no server message within " + std::to_string(deadline.count())
-        + " ms";
-  }
+  const auto wait = pumpUntilEvent(
+      [](const Event &e) { return e.name != "Frame" && e.name != "Pong"; },
+      deadline,
+      &next);
+  if (wait != Wait::Done)
+    return waitFailure(wait, "server message", deadline);
   if (next.name != "Error")
     return "expected Error, got " + next.text();
   if (!command.args.empty()
@@ -810,11 +835,10 @@ CommandRunner::Failure CommandRunner::setFrameConfig(
   std::string error;
   if (!m_session->setFrameConfig(uint32_t(width), uint32_t(height), &error))
     return error;
-  if (!pumpUntilEvent(
-          [](const Event &e) { return e.name == "FrameConfig"; }, deadline)) {
-    return "no FrameConfig ack within " + std::to_string(deadline.count())
-        + " ms";
-  }
+  const auto wait = pumpUntilEvent(
+      [](const Event &e) { return e.name == "FrameConfig"; }, deadline);
+  if (wait != Wait::Done)
+    return waitFailure(wait, "FrameConfig ack", deadline);
   return {};
 }
 
@@ -839,8 +863,7 @@ CommandRunner::Failure CommandRunner::setEncodings(const Command &command)
   std::string error;
   if (!m_session->setEncodings(preferred, &error))
     return error;
-  drainEvents();
-  return {};
+  return drainEvents();
 }
 
 CommandRunner::Failure CommandRunner::startRendering(const Command &command)
@@ -850,8 +873,7 @@ CommandRunner::Failure CommandRunner::startRendering(const Command &command)
   std::string error;
   if (!m_session->startRendering(&error))
     return error;
-  drainEvents();
-  return {};
+  return drainEvents();
 }
 
 CommandRunner::Failure CommandRunner::stopRendering(const Command &command)
@@ -861,8 +883,7 @@ CommandRunner::Failure CommandRunner::stopRendering(const Command &command)
   std::string error;
   if (!m_session->stopRendering(&error))
     return error;
-  drainEvents();
-  return {};
+  return drainEvents();
 }
 
 CommandRunner::Failure CommandRunner::awaitFrame(
@@ -875,15 +896,17 @@ CommandRunner::Failure CommandRunner::awaitFrame(
   if (m_session->state() != SessionState::Connected)
     return std::string("not connected (") + toString(m_session->state()) + ")";
   size_t seen = 0;
-  if (!pumpUntilEvent(
-          [&](const Event &e) {
-            if (e.name == "Frame")
-              ++seen;
-            return seen >= count;
-          },
-          deadline)) {
-    return std::to_string(seen) + " of " + std::to_string(count)
-        + " frame(s) within " + std::to_string(deadline.count()) + " ms";
+  const auto wait = pumpUntilEvent(
+      [&](const Event &e) {
+        if (e.name == "Frame")
+          ++seen;
+        return seen >= count;
+      },
+      deadline);
+  if (wait != Wait::Done) {
+    return waitFailure(wait,
+        "frame " + std::to_string(seen + 1) + " of " + std::to_string(count),
+        deadline);
   }
   return {};
 }
@@ -932,8 +955,7 @@ CommandRunner::Failure CommandRunner::setParam(const Command &command)
     return error;
   if (!m_session->setParameter(ref, command.args[2], value, &error))
     return error;
-  drainEvents();
-  return {};
+  return drainEvents();
 }
 
 CommandRunner::Failure CommandRunner::removeParam(const Command &command)
@@ -946,8 +968,7 @@ CommandRunner::Failure CommandRunner::removeParam(const Command &command)
     return error;
   if (!m_session->removeParameter(ref, command.args[2], &error))
     return error;
-  drainEvents();
-  return {};
+  return drainEvents();
 }
 
 CommandRunner::Failure CommandRunner::setNodeTransform(const Command &command)
@@ -972,8 +993,7 @@ CommandRunner::Failure CommandRunner::setNodeTransform(const Command &command)
   std::string error;
   if (!m_session->setNodeTransform(node, transform, &error))
     return error;
-  drainEvents();
-  return {};
+  return drainEvents();
 }
 
 // Inspection /////////////////////////////////////////////////////////////////
@@ -982,7 +1002,8 @@ CommandRunner::Failure CommandRunner::dumpScene(const Command &command)
 {
   if (!command.args.empty())
     return usageError(command, "");
-  drainEvents();
+  if (const auto pending = drainEvents())
+    return pending;
   const auto &scene = m_session->mirror();
   const auto &db = scene.objectDB();
   const auto dump = [&](anari::DataType type, const auto &pool) {
@@ -1012,7 +1033,8 @@ CommandRunner::Failure CommandRunner::dumpLayers(const Command &command)
 {
   if (!command.args.empty())
     return usageError(command, "");
-  drainEvents();
+  if (const auto pending = drainEvents())
+    return pending;
   const auto &scene = m_session->mirror();
   for (size_t i = 0; i < scene.numberOfLayers(); ++i) {
     const auto *layer = scene.layer(i);
@@ -1029,7 +1051,8 @@ CommandRunner::Failure CommandRunner::dumpProject(const Command &command)
 {
   if (!command.args.empty())
     return usageError(command, "");
-  drainEvents();
+  if (const auto pending = drainEvents())
+    return pending;
   const auto *project = m_session->project();
   if (!project)
     return "no Project Replica";
@@ -1047,7 +1070,8 @@ CommandRunner::Failure CommandRunner::dumpFrame(const Command &command)
 {
   if (!command.args.empty())
     return usageError(command, "");
-  drainEvents();
+  if (const auto pending = drainEvents())
+    return pending;
   const auto &header = m_session->lastFrameHeader();
   if (!header)
     return "no frame received yet";
@@ -1067,7 +1091,8 @@ CommandRunner::Failure CommandRunner::assertValue(const Command &command)
 {
   if (command.args.size() != 3)
     return usageError(command, "<value> <op> <rhs>");
-  drainEvents();
+  if (const auto pending = drainEvents())
+    return pending;
   std::string error;
   const auto lhs = namedValue(command.args[0], error);
   if (!lhs)
@@ -1184,50 +1209,88 @@ std::optional<std::string> CommandRunner::namedValue(
 
 // Pumping and output /////////////////////////////////////////////////////////
 
-bool CommandRunner::pumpUntil(
-    const std::function<bool()> &done, Deadline deadline)
+CommandRunner::Wait CommandRunner::pumpUntil(
+    const std::function<bool()> &done, Deadline deadline, LossEnds lossEnds)
 {
-  const auto end = std::chrono::steady_clock::now() + deadline;
-  while (true) {
-    m_session->poll();
-    drainEvents();
-    if (done())
-      return true;
-    if (std::chrono::steady_clock::now() >= end)
-      return false;
-    std::this_thread::sleep_for(POLL_INTERVAL);
-  }
+  // Every event is taken as one, so the `done` test and the Error and Lost
+  // checks see the same picture.
+  return pumpUntilEvent(
+      [&](const Event &) { return false; }, deadline, nullptr, lossEnds, done);
 }
 
-bool CommandRunner::pumpUntilEvent(
+CommandRunner::Wait CommandRunner::pumpUntilEvent(
     const std::function<bool(const Event &)> &accept,
     Deadline deadline,
-    Event *matched)
+    Event *matched,
+    LossEnds lossEnds,
+    const std::function<bool()> &done)
 {
-  const auto end = std::chrono::steady_clock::now() + deadline;
-  while (true) {
-    m_session->poll();
-    Event event;
-    while (m_session->takeEvent(event)) {
-      printEvent(event);
-      if (accept(event)) {
-        if (matched)
-          *matched = std::move(event);
-        return true;
-      }
-    }
-    if (std::chrono::steady_clock::now() >= end)
-      return false;
-    std::this_thread::sleep_for(POLL_INTERVAL);
-  }
+  // A wait that starts in Lost is not ended by it (await-lost, sleep after a
+  // loss); one that watches the link go is.
+  const bool wasLost = m_session->state() == SessionState::Lost;
+  Wait wait = Wait::TimedOut;
+  m_session->pollUntil(
+      [&] {
+        Event event;
+        while (m_session->takeEvent(event)) {
+          printEvent(event);
+          if (accept(event)) {
+            if (matched)
+              *matched = std::move(event);
+            wait = Wait::Done;
+            return true;
+          }
+          if (event.name == "Error") {
+            // Not what this command waited for: the server is objecting to
+            // something, and the rest of the queue is the next command's.
+            wait = Wait::Error;
+            return true;
+          }
+        }
+        if (done && done()) {
+          wait = Wait::Done;
+          return true;
+        }
+        if (lossEnds == LossEnds::Wait && !wasLost
+            && m_session->state() == SessionState::Lost) {
+          wait = Wait::Lost;
+          return true;
+        }
+        return false;
+      },
+      deadline);
+  return wait;
 }
 
-void CommandRunner::drainEvents()
+std::string CommandRunner::waitFailure(
+    Wait wait, const std::string &awaited, Deadline deadline) const
+{
+  switch (wait) {
+  case Wait::Lost:
+    return "connection lost while waiting for " + awaited + ": "
+        + m_session->failure();
+  case Wait::Error:
+    return "server answered Error " + quoted(m_session->lastError())
+        + " while waiting for " + awaited;
+  case Wait::TimedOut:
+  case Wait::Done:
+    break;
+  }
+  return "no " + awaited + " within " + std::to_string(deadline.count())
+      + " ms";
+}
+
+CommandRunner::Failure CommandRunner::drainEvents()
 {
   m_session->poll();
   Event event;
-  while (m_session->takeEvent(event))
+  Failure failure;
+  while (m_session->takeEvent(event)) {
     printEvent(event);
+    if (event.name == "Error" && !failure && !event.fields.empty())
+      failure = "server answered Error " + event.fields.front().second;
+  }
+  return failure;
 }
 
 void CommandRunner::printEvent(const Event &event)

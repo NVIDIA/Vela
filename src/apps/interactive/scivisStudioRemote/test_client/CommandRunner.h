@@ -40,13 +40,16 @@ struct RunnerOptions
  * a reader can grep the output.
  *
  * The command vocabulary is the milestone-3 server surface: session
- * (connect, disconnect, shutdown, ping, await-lost, reconnect, sleep,
- * expect-error, send-raw), rendering (set-frame-config, set-encodings,
+ * (connect, disconnect, shutdown, ping, expect-pong, await-lost, reconnect,
+ * sleep, expect-error, send-raw), rendering (set-frame-config, set-encodings,
  * start-rendering, stop-rendering, await-frame, save-frame), scene edits
  * (set-param, remove-param, set-node-transform), inspection (dump-scene,
  * dump-layers, dump-project, dump-frame) and `assert <value> <op> <rhs>` over
  * the named values assertNames() lists. Waiting commands take a trailing
- * `timeout=<ms>`.
+ * `timeout=<ms>` and FAIL as soon as the connection is Lost. An Error the
+ * server sends while any command but expect-error runs FAILs that command:
+ * the protocol carries no request ids, so the command in flight is the best
+ * attribution there is.
  *
  * Example:
  *   TestSession session;
@@ -77,13 +80,29 @@ struct CommandRunner
   // Why a command FAILed; empty when it is OK.
   using Failure = std::optional<std::string>;
   using Deadline = std::chrono::milliseconds;
+  // How a wait ended: with what it waited for, at the deadline, with the link
+  // Lost meanwhile, or with an Error nobody expected.
+  enum class Wait
+  {
+    Done,
+    TimedOut,
+    Lost,
+    Error
+  };
+  // Whether a loss during the wait ends it.
+  enum class LossEnds
+  {
+    Wait,
+    Nothing
+  };
 
   Failure execute(Command command);
 
   Failure connect(const Command &, Deadline);
   Failure disconnect(const Command &);
   Failure shutdown(const Command &, Deadline);
-  Failure ping(const Command &, Deadline);
+  Failure ping(const Command &);
+  Failure expectPong(const Command &, Deadline);
   Failure awaitLost(const Command &, Deadline);
   Failure reconnect(const Command &, Deadline);
   Failure sleep(const Command &);
@@ -109,15 +128,25 @@ struct CommandRunner
   std::optional<std::string> namedValue(
       const std::string &name, std::string &error);
 
-  // Polls, printing events as they come, until `done` holds or the deadline
-  // passes; false on timeout.
-  bool pumpUntil(const std::function<bool()> &done, Deadline deadline);
-  // Polls until an event `accept`s (that event is returned in `matched`).
-  bool pumpUntilEvent(const std::function<bool(const Event &)> &accept,
+  // Polls, printing events as they come, until `done` holds, the deadline
+  // passes, the link goes Lost (unless LossEnds::Nothing) or an Error arrives.
+  Wait pumpUntil(const std::function<bool()> &done,
       Deadline deadline,
-      Event *matched = nullptr);
-  // Prints whatever events are already queued without waiting.
-  void drainEvents();
+      LossEnds lossEnds = LossEnds::Wait);
+  // Polls until an event `accept`s (that event is returned in `matched`) or
+  // `done` holds; an Error that `accept` does not take ends the wait as
+  // Wait::Error.
+  Wait pumpUntilEvent(const std::function<bool(const Event &)> &accept,
+      Deadline deadline,
+      Event *matched = nullptr,
+      LossEnds lossEnds = LossEnds::Wait,
+      const std::function<bool()> &done = {});
+  // The FAIL reason of a wait that ended without `awaited`.
+  std::string waitFailure(
+      Wait wait, const std::string &awaited, Deadline deadline) const;
+  // Prints whatever events are already queued without waiting; the reason
+  // when one of them was an Error, which fails the command that drained it.
+  Failure drainEvents();
   void printEvent(const Event &event);
   void printRecord(const std::string &line);
 
