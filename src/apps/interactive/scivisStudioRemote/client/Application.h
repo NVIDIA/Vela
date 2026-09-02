@@ -27,6 +27,8 @@ struct StudioViewport;
 struct EditorWindow;
 struct TaskPanel;
 struct ProjectLocationDialog;
+struct AddStaticDatasetDialog;
+struct AddFileAnimationDatasetDialog;
 
 // What `--host H`, `--port N` and `--connect` set; the rest of argv goes to
 // the vsr_ui_imgui Application.
@@ -127,6 +129,8 @@ class Application : public vsr::ui::imgui::Application
   std::vector<EditorWindow *> m_editors;
   TaskPanel *m_taskPanel{nullptr};
   std::unique_ptr<ProjectLocationDialog> m_projectLocationDialog;
+  std::unique_ptr<AddStaticDatasetDialog> m_addStaticDatasetDialog;
+  std::unique_ptr<AddFileAnimationDatasetDialog> m_addFileAnimationDialog;
 
   // Menu state //
 

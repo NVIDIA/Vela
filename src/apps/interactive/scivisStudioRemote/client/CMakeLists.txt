@@ -29,7 +29,10 @@ add_executable(scivisStudioClient
   StudioViewport.cpp
   UICommon.cpp
   scivisStudioClient.cpp
+  modals/AddFileAnimationDatasetDialog.cpp
+  modals/AddStaticDatasetDialog.cpp
   modals/ProjectLocationDialog.cpp
+  windows/DatasetEditor.cpp
   windows/EditorWindow.cpp
   windows/ProjectWindow.cpp
   windows/ShotEditor.cpp

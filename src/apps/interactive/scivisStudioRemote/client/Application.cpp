@@ -3,7 +3,10 @@
 
 #include "Application.h"
 #include "StudioViewport.h"
+#include "modals/AddFileAnimationDatasetDialog.h"
+#include "modals/AddStaticDatasetDialog.h"
 #include "modals/ProjectLocationDialog.h"
+#include "windows/DatasetEditor.h"
 #include "windows/ProjectWindow.h"
 #include "windows/ShotEditor.h"
 #include "windows/TaskPanel.h"
@@ -222,13 +225,15 @@ vsr_ui::WindowArray Application::setupWindows()
       new LockableWindow<vsr_ui::DatabaseEditor>(this, &m_panelsReadOnly);
 
   auto *projectWindow = new ProjectWindow(this, &m_editorContext);
+  auto *datasetEditor = new DatasetEditor(this, &m_editorContext);
   auto *shotEditor = new ShotEditor(this, &m_editorContext);
   m_taskPanel = new TaskPanel(this, &m_editorContext);
 
-  m_editors = {projectWindow, shotEditor};
+  m_editors = {projectWindow, datasetEditor, shotEditor};
 
   windows.emplace_back(m_viewport);
   windows.emplace_back(projectWindow);
+  windows.emplace_back(datasetEditor);
   windows.emplace_back(shotEditor);
   windows.emplace_back(log);
   windows.emplace_back(m_taskPanel);
@@ -240,6 +245,10 @@ vsr_ui::WindowArray Application::setupWindows()
 
   m_projectLocationDialog = std::make_unique<ProjectLocationDialog>(
       this, &m_editorContext, [this] { return buildUIState(); });
+  m_addStaticDatasetDialog =
+      std::make_unique<AddStaticDatasetDialog>(this, &m_editorContext);
+  m_addFileAnimationDialog =
+      std::make_unique<AddFileAnimationDatasetDialog>(this, &m_editorContext);
 
   if (m_options.connectAtStartup)
     m_autoConnectInFrames = AUTO_CONNECT_DELAY_FRAMES;
@@ -276,7 +285,9 @@ void Application::uiFrameStart()
   if (!typing && ImGui::IsKeyPressed(ImGuiKey_Escape))
     appContext()->clearSelected();
   if (!typing && ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_S)
-      && !m_confirmation.open && !m_projectLocationDialog->visible())
+      && !m_confirmation.open && !m_projectLocationDialog->visible()
+      && !m_addStaticDatasetDialog->visible()
+      && !m_addFileAnimationDialog->visible())
     saveProject();
 }
 
@@ -328,6 +339,13 @@ void Application::uiMenu_Studio()
   const bool canSend = m_editorContext.canSend();
   ImGui::BeginDisabled(!canSend);
   if (ImGui::BeginMenu("Studio")) {
+    if (ImGui::BeginMenu("Add Dataset")) {
+      if (ImGui::MenuItem("Static..."))
+        m_addStaticDatasetDialog->show();
+      if (ImGui::MenuItem("File Animation..."))
+        m_addFileAnimationDialog->show();
+      ImGui::EndMenu();
+    }
     if (ImGui::MenuItem("Add Shot")) {
       const Project *project = m_connection->project();
       const auto name = "Shot "
@@ -549,6 +567,10 @@ void Application::uiModals()
 {
   if (m_projectLocationDialog->visible())
     m_projectLocationDialog->renderUI();
+  if (m_addStaticDatasetDialog->visible())
+    m_addStaticDatasetDialog->renderUI();
+  if (m_addFileAnimationDialog->visible())
+    m_addFileAnimationDialog->renderUI();
 }
 
 // Project actions ////////////////////////////////////////////////////////////
@@ -732,6 +754,7 @@ void Application::onProjectReplaced()
 {
   for (auto *editor : m_editors)
     editor->onProjectReplaced();
+  m_addStaticDatasetDialog->onProjectReplaced();
   if (m_connection->bootstrapping())
     return;
   resolveActiveShotCamera();
@@ -837,17 +860,23 @@ Size=955,1341
 Collapsed=0
 DockId=0x00000005,0
 
-[Window][Shot Editor]
+[Window][Dataset Editor]
 Pos=0,56
 Size=955,1341
 Collapsed=0
 DockId=0x00000005,1
 
-[Window][Layers]
+[Window][Shot Editor]
 Pos=0,56
 Size=955,1341
 Collapsed=0
 DockId=0x00000005,2
+
+[Window][Layers]
+Pos=0,56
+Size=955,1341
+Collapsed=0
+DockId=0x00000005,3
 
 [Window][Tasks]
 Pos=957,1741
