@@ -440,7 +440,11 @@ right after, by `onServerReady()`.
 **Loss and reconnect** (`ServerConnection`). A loss keeps the mirror,
 replica and last frame as a frozen read-only view; pending requests fail
 once with "connection lost"; task records are handled at the next
-`BootstrapBegin` as above. A loss *during* a bootstrap empties the mirror
+`BootstrapBegin` as above. Between a reconnect's Hello and its
+`BootstrapBegin` the client is `Connected` but not `bootstrapped()`: the
+replica on screen is the previous session's, so the editors stay read-only
+(`EditorContext::canSend`) -- a wait that lasts as long as the render a busy
+server finishes before it bootstraps anyone. A loss *during* a bootstrap empties the mirror
 instead of leaving the part that arrived (the replica is still the previous
 session's, since its snapshot comes last in the bracket). A retry greeted
 with a mismatched protocol version ends in `Disconnected` with the mismatch

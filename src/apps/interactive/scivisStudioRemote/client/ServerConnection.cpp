@@ -133,6 +133,11 @@ bool ServerConnection::bootstrapping() const
   return m_bootstrapping;
 }
 
+bool ServerConnection::bootstrapped() const
+{
+  return m_bootstrapped;
+}
+
 const FrameConfig &ServerConnection::frameConfig() const
 {
   return m_frameConfig;

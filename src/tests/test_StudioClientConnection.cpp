@@ -282,6 +282,9 @@ SCENARIO("ServerConnection watches liveness", "[StudioClient]")
       }));
       REQUIRE(f.bootstraps == 1);
       REQUIRE_FALSE(f.connection.bootstrapping());
+      // Connected is not populated: the replica is the old session's.
+      REQUIRE_FALSE(f.connection.bootstrapped());
+      REQUIRE(f.connection.project() != nullptr);
 
       THEN("an edit to the frozen mirror emits nothing")
       {
@@ -295,6 +298,7 @@ SCENARIO("ServerConnection watches liveness", "[StudioClient]")
         {
           f.server.sendBootstrap();
           REQUIRE(f.waitConnectedAndBootstrapped(2));
+          REQUIRE(f.connection.bootstrapped());
           auto rebuilt = f.mirror.getObject<vsr::scene::Geometry>(0);
           REQUIRE(rebuilt);
           rebuilt->setParameter("radius", 0.6f);
