@@ -223,8 +223,16 @@ uint64_t TestSession::nextRequestId()
 
 const ProjectOpReply *TestSession::reply(uint64_t requestId) const
 {
-  const auto it = m_replies.find(requestId);
-  return it == m_replies.end() ? nullptr : &it->second;
+  const auto *received = m_replies.at(requestId);
+  return received ? &received->reply : nullptr;
+}
+
+std::optional<size_t> TestSession::snapshotsAtReply(uint64_t requestId) const
+{
+  const auto *received = m_replies.at(requestId);
+  if (!received)
+    return {};
+  return received->snapshotsReceived;
 }
 
 size_t TestSession::repliesFailed() const
@@ -234,8 +242,7 @@ size_t TestSession::repliesFailed() const
 
 const TaskRecord *TestSession::task(uint64_t taskId) const
 {
-  const auto it = m_tasks.find(taskId);
-  return it == m_tasks.end() ? nullptr : &it->second;
+  return m_tasks.at(taskId);
 }
 
 size_t TestSession::tasksCompleted() const
@@ -841,7 +848,7 @@ void TestSession::handleMessage(const Message &msg)
     event.fields.emplace_back("error", quotedText(reply->error));
     if (!reply->ok)
       ++m_repliesFailed;
-    m_replies[reply->requestId] = std::move(*reply);
+    m_replies[reply->requestId] = {std::move(*reply), m_snapshotsReceived};
     break;
   }
   case StudioMessageType::TaskProgress: {
@@ -856,7 +863,8 @@ void TestSession::handleMessage(const Message &msg)
     event.fields.emplace_back("total", std::to_string(progress->total));
     event.fields.emplace_back("message", quotedText(progress->message));
     // Progress after the end would be the server's mistake; the end stands.
-    m_tasks.try_emplace(progress->taskId);
+    if (!m_tasks.contains(progress->taskId))
+      m_tasks.set(progress->taskId, TaskRecord{});
     break;
   }
   case StudioMessageType::TaskCompleted: {
