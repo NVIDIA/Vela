@@ -32,6 +32,7 @@ add_executable(scivisStudioClient
   modals/ProjectLocationDialog.cpp
   windows/EditorWindow.cpp
   windows/ProjectWindow.cpp
+  windows/ShotEditor.cpp
   windows/TaskPanel.cpp
 )
 
