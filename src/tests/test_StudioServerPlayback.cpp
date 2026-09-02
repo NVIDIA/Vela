@@ -498,6 +498,8 @@ SCENARIO("Frames that fail to load raise TimeAdvanceWarning", "[StudioServer]")
 
         AND_THEN("playback across bad frames warns per frame and goes on")
         {
+          // The new clock rests on frame 0; playing from there crosses into
+          // the bad frames at 51.
           session.setClock(120, 500.f, true);
           session.client.clear();
           REQUIRE(session.request(SetPlaying{0, session.shotId, true}).ok);
@@ -505,10 +507,12 @@ SCENARIO("Frames that fail to load raise TimeAdvanceWarning", "[StudioServer]")
               StudioMessageType::TimeAdvanceWarning, 5));
           REQUIRE(session.waitForMoreFrames(3));
           const auto frames = session.frameNumbers();
-          REQUIRE(frames.back() > 60);
+          REQUIRE(frames.back() > 50);
           const auto warning = session.client.lastDecoded<TimeAdvanceWarning>();
           REQUIRE(warning);
-          REQUIRE(warning->frame > 60);
+          REQUIRE(warning->frame > 50);
+          REQUIRE(warning->message
+              == "frame " + std::to_string(warning->frame) + " is bad");
         }
       }
     }
