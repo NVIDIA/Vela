@@ -16,6 +16,8 @@
 #
 # Exit 77 (ctest's SKIP_RETURN_CODE for these tests) when the server cannot
 # load any ANARI device, so a tree without helide skips instead of failing.
+# A port another process grabs between the pick and the server's bind is
+# picked again, a few times.
 #
 # A scenario whose opening comment block holds `# runner: kill-restart-after
 # <n>` is run in kill-restart mode: after the client has printed <n> `OK`
@@ -116,8 +118,9 @@ PY
 
 # Starts the server on $port; waits for it to reach Listening (its own status
 # line, so the wait does not open a connection the server would see as a
-# client). Returns 77 when no ANARI device loads, 1 on any other startup
-# failure.
+# client). Returns 77 when no ANARI device loads, 2 when the port could not be
+# bound (someone took it between the pick and the bind), 1 on any other
+# startup failure.
 start_server() {
   : > "$server_log"
   "$server_bin" --port "$port" --library helide --data-root "$data_root" \
@@ -136,6 +139,10 @@ start_server() {
         cat "$server_log" >&2
         return 77
       fi
+      if grep -q "cannot listen on port $port" "$server_log"; then
+        log "port $port was taken before the server could bind it"
+        return 2
+      fi
       log "server exited before listening"
       return 1
     fi
@@ -149,11 +156,15 @@ count_ok() {
   grep -c '^OK ' "$client_log" 2>/dev/null || true
 }
 
-port=$(pick_port) || { log "no free port found"; exit 1; }
-log "scenario $name on port $port (work dir $work)"
-
-start_server
-status=$?
+# A port that was free when picked can be taken by the time the server binds
+# (ctest runs several of these at once): pick again, a few times.
+for _ in 1 2 3 4 5; do
+  port=$(pick_port) || { log "no free port found"; exit 1; }
+  log "scenario $name on port $port (work dir $work)"
+  start_server
+  status=$?
+  [ $status -eq 2 ] || break
+done
 if [ $status -ne 0 ]; then
   if [ $status -eq 77 ]; then
     rm -rf "$work"
