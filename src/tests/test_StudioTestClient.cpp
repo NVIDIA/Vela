@@ -850,7 +850,7 @@ SCENARIO(
     {
       const auto result = runScript(session,
           "connect " + endpoint + "\n"
-          "send-raw 20\n"
+          "send-raw 62\n"
           "sleep 300\n"
           "assert errors.received == 1\n"
           "disconnect\n",
@@ -866,7 +866,7 @@ SCENARIO(
         const auto fails = failLines(result.records);
         REQUIRE(fails.size() == 1);
         REQUIRE(fails[0].rfind("FAIL sleep 300: server answered Error"
-                               " \"NewProject is not implemented",
+                               " \"Pick is not implemented",
                     0)
             == 0);
         REQUIRE(hasLine(result.records, "OK assert errors.received == 1"));
