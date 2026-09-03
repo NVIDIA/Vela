@@ -671,6 +671,12 @@ TaskRecord &ProjectOps::startOver(uint64_t taskId)
     return m_tasks.back();
   }
   fresh.generation = existing->generation + 1;
+  // A record this client failed at BootstrapBegin (the only setter of
+  // announced) is one the server never finished, so a render it named may
+  // still be running and still refusing edits: keep the flag so the editors
+  // go on saying so. The label is not kept -- see startOver's comment in the
+  // header -- and a TaskStarted sets render itself right after.
+  fresh.render = existing->announced && existing->render;
   *existing = std::move(fresh);
   return *existing;
 }

@@ -432,10 +432,14 @@ record is failed with "connection lost", marked `announced`; a
 `TaskCompleted`/`TaskFailed` overwrites the record in place, replayed inside
 the bracket or not (same label, the server's ending). A `TaskStarted` reply,
 and a `TaskProgress` for a record that finished, start the record over
-(label, state, progress and outcome, `generation` bumped): a restarted
-server counts ids from 1 again, so an id that already finished here names a
-new task, and the replay's progress for a task this client failed is the
-same case (the record takes the replay's description as label). Records the
+(label, state, progress, outcome and `render`, `generation` bumped): a
+restarted server counts ids from 1 again, so an id that already finished
+here names a new task, and the replay's progress for a task this client
+failed is the same case (the record takes the replay's description as
+label). `render` is the one field a start-over keeps, and only on a record
+this client failed at `BootstrapBegin` (`announced`): the server never
+ended that task, so a render it named may still be running and still
+refusing edits, and the editors must go on saying so. Records the
 server never mentions again stay Failed until "Clear finished" -- they were
 queued tasks the server dropped with the old session. Completion toasts
 fire once per `{generation, state}` change, replayed outcomes included; the
@@ -735,9 +739,16 @@ Code-quality follow-ups to the M7 review:
   `watchTasks` skips such a record and keys what it announced on
   `{generation, state}`, so a task restarted under a reused id toasts again
   even when the restart and the ending land in one poll. One visible
-  difference: a replayed `TaskProgress` for a record the client failed
-  relabels it with the replay's description instead of keeping the
-  launching request's label (a replayed ending keeps it, as before).
+  difference, ratified rather than reverted: a replayed `TaskProgress` for a
+  record the client failed relabels it with the replay's description instead
+  of keeping the launching request's label (a replayed ending keeps it, as
+  before). Keeping the label unconditionally would show the previous task's
+  label when a `TaskStarted` carries an empty `taskLabel` under a reused id,
+  which `freshRecordFor` never did. `render` is kept, though: dropping it
+  let a reconnect during this client's own render clear the editors' "the
+  server refuses edits until it ends" note and re-enable "Render Shot..."
+  while the server still refused; `startOver` carries the flag when the
+  record it restarts is `announced`.
 - The server evicting a client for a newer one sent a bare `Error` through
   a transport escape hatch (`NetworkChannel::sendImmediately`, a non-blocking
   write past the queue with one caller), and the GUI client paired any bare
