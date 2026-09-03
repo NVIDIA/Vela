@@ -55,15 +55,6 @@ std::string objectText(const SceneObjectRef &ref)
       + std::to_string(ref.objectIndex);
 }
 
-// The reason a server's farewell gives, or a stand-in when it gives none.
-std::string farewellReason(const vsr::network::Message &msg)
-{
-  const auto farewell = decode<Disconnect>(msg);
-  if (farewell && !farewell->reason.empty())
-    return farewell->reason;
-  return "server closed the connection";
-}
-
 std::string quotedText(const std::string &text)
 {
   return "\"" + text + "\"";
@@ -834,7 +825,7 @@ void TestSession::handleMessage(const Message &msg)
       pushEvent(std::move(event));
       attemptFailed("server refused: " + text);
     } else if (*type == StudioMessageType::Disconnect) {
-      const auto reason = farewellReason(msg);
+      const auto reason = farewellReason(decode<Disconnect>(msg));
       event.fields.emplace_back("reason", quotedText(reason));
       pushEvent(std::move(event));
       attemptFailed(reason);
@@ -878,7 +869,7 @@ void TestSession::handleMessage(const Message &msg)
   }
   case StudioMessageType::Disconnect:
     // The server's farewell: the close that follows is explained by it.
-    m_farewellReason = farewellReason(msg);
+    m_farewellReason = farewellReason(decode<Disconnect>(msg));
     event.fields.emplace_back("reason", quotedText(m_farewellReason));
     break;
   case StudioMessageType::BootstrapBegin:

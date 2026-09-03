@@ -43,15 +43,6 @@ std::string endpointText(const std::string &host, short port)
   return host + ":" + std::to_string(static_cast<unsigned short>(port));
 }
 
-// The reason a server's farewell gives, or a stand-in when it gives none.
-std::string farewellReason(const vsr::network::Message &msg)
-{
-  const auto farewell = decode<Disconnect>(msg);
-  if (farewell && !farewell->reason.empty())
-    return farewell->reason;
-  return "server closed the connection";
-}
-
 } // namespace
 
 const char *toString(ConnectionState state)
@@ -596,7 +587,7 @@ void ServerConnection::handleMessage(const vsr::network::Message &msg)
       attemptFailed(
           "server refused: " + (error ? error->message : std::string("?")));
     } else if (*type == StudioMessageType::Disconnect) {
-      attemptFailed(farewellReason(msg));
+      attemptFailed(farewellReason(decode<Disconnect>(msg)));
     } else {
       vsr::core::logError(
           "[ServerConnection] %s received before the server's Hello",
@@ -635,7 +626,7 @@ void ServerConnection::handleMessage(const vsr::network::Message &msg)
   }
   case StudioMessageType::Disconnect:
     // The server's farewell: the close that follows is explained by it.
-    m_farewellReason = farewellReason(msg);
+    m_farewellReason = farewellReason(decode<Disconnect>(msg));
     vsr::core::logStatus("[ServerConnection] server closing the session: %s",
         m_farewellReason.c_str());
     return;

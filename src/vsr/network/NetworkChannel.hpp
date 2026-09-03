@@ -89,7 +89,7 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
   // Settles every queued write with `error`.
   void fail_pending_writes(const boost::system::error_code &error);
   // True when nothing is queued or on the wire.
-  bool writes_idle();
+  bool writes_idle() const;
 
   asio::io_context m_io_context;
   std::thread m_io_thread;
@@ -132,7 +132,7 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
   template <typename T>
   Message make_message(uint8_t type, const T *data, uint32_t count);
 
-  std::mutex m_writeMutex;
+  mutable std::mutex m_writeMutex;
   std::deque<std::shared_ptr<PendingWrite>> m_pendingWrites;
   bool m_writeInProgress{false};
 
@@ -173,6 +173,8 @@ struct NetworkServer : public NetworkChannel
 
   void start();
   void restart(); // must be running already
+  // Also drops a connection accepted during a replacement's drain window
+  // (it sees a plain close) and re-arms the accept.
   void stop();
 
  private:
@@ -182,7 +184,7 @@ struct NetworkServer : public NetworkChannel
   void start_accept();
   // The accepted socket becomes the connection: announced, read from, and
   // the next accept armed.
-  void adopt(tcp::socket &&socket);
+  void adopt_connection(tcp::socket &&socket);
   // Waits (polling on the IO thread) for the old connection's writes to
   // drain, until `deadline`, then closes it and adopts m_replacement.
   void replace_when_drained(std::chrono::steady_clock::time_point deadline);

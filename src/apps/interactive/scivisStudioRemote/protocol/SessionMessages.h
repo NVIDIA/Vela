@@ -7,6 +7,7 @@
 // vsr_core
 #include "vsr/core/DataTree.hpp"
 // std
+#include <optional>
 #include <string>
 
 namespace vsr::scivis_studio::protocol {
@@ -39,9 +40,11 @@ struct Pong
   static constexpr StudioMessageType MESSAGE_TYPE = StudioMessageType::Pong;
 };
 
-// The last message on a connection its sender is about to close. A client's
-// courtesy Disconnect carries no reason; the server's farewell says why it
-// ends the session (an evicted client shows it in its banner).
+/*
+ * The last message on a connection its sender is about to close. A client's
+ * courtesy Disconnect carries no reason; the server's farewell says why it
+ * ends the session (an evicted client shows it in its banner).
+ */
 struct Disconnect
 {
   static constexpr StudioMessageType MESSAGE_TYPE =
@@ -77,6 +80,9 @@ bool fromNode(const vsr::core::DataNode &, Error &);
 // reason is optional (an empty reason reads back as "").
 void toNode(const Disconnect &, vsr::core::DataNode &);
 bool fromNode(const vsr::core::DataNode &, Disconnect &);
+// The reason a received farewell gives (pass it decode<Disconnect>()'s
+// result), or a stand-in when it gives none or did not decode.
+std::string farewellReason(const std::optional<Disconnect> &farewell);
 
 // Empty payloads: toNode writes nothing, fromNode always succeeds.
 void toNode(const Ping &, vsr::core::DataNode &);
