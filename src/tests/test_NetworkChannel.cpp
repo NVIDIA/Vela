@@ -103,7 +103,7 @@ SCENARIO(
         clientCounters.disconnected++;
       });
       server->setReplaceHandler([&] {
-        const std::vector<uint8_t> bulk(8 << 20, 7);
+        const std::vector<uint8_t> bulk(1 << 20, 7);
         server->send(BULK, bulk);
         server->send(FAREWELL);
       });

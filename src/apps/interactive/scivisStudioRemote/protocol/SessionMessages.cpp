@@ -42,6 +42,13 @@ bool fromNode(const vsr::core::DataNode &n, Disconnect &d)
   return true;
 }
 
+std::string farewellReason(const std::optional<Disconnect> &farewell)
+{
+  if (farewell && !farewell->reason.empty())
+    return farewell->reason;
+  return "server closed the connection";
+}
+
 // Empty payloads /////////////////////////////////////////////////////////////
 
 VSR_STUDIO_EMPTY_PAYLOAD(Ping)

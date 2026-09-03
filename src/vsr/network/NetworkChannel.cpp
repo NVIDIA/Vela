@@ -10,10 +10,14 @@
 
 namespace vsr::network {
 
+namespace {
+
 // How long a replaced connection's queued writes (a farewell among them) get
 // to leave before its socket closes, and how often the queue is looked at.
 constexpr std::chrono::milliseconds REPLACE_DRAIN_TIMEOUT{200};
 constexpr std::chrono::milliseconds REPLACE_DRAIN_POLL{5};
+
+} // namespace
 
 // Helper functions ///////////////////////////////////////////////////////////
 
@@ -82,7 +86,9 @@ MessageFuture NetworkChannel::send(Message &&msg)
   pending->completed = std::make_shared<std::atomic<bool>>(false);
   pending->wireData = frame(msg);
 
-  boost::asio::post(m_io_context,
+  // dispatch, not post: a send() from the IO thread (a handler answering a
+  // message, a replace handler's farewell) is queued before it returns.
+  boost::asio::dispatch(m_io_context,
       [self, pending]() { self->enqueue_write(std::move(pending)); });
 
   return future;
@@ -364,7 +370,7 @@ void NetworkChannel::fail_pending_writes(const boost::system::error_code &error)
     complete_write(p, error);
 }
 
-bool NetworkChannel::writes_idle()
+bool NetworkChannel::writes_idle() const
 {
   std::lock_guard lock(m_writeMutex);
   return m_pendingWrites.empty() && !m_writeInProgress;
@@ -454,15 +460,14 @@ void NetworkServer::start_accept()
         vsr::core::logStatus("[NetworkServer] New connection from %s",
             socket->remote_endpoint().address().to_string().c_str());
         if (!m_socket.is_open()) {
-          adopt(std::move(*socket));
+          adopt_connection(std::move(*socket));
           return;
         }
         // A second client over a live one: the first connection ends here,
         // reported before the new one is announced, instead of dying
         // silently under the move. The replace handler gets its word in
-        // first; its send() posts the enqueue, and the drain check is posted
-        // after it so the farewell is in the queue when the check looks
-        // (handlers posted from one thread run in order).
+        // first (its send() has queued the farewell by the time it returns);
+        // the drain check then waits for the queue.
         vsr::core::logWarning(
             "[NetworkServer] New connection replaces the current one");
         if (m_replaceHandler)
@@ -475,7 +480,7 @@ void NetworkServer::start_accept()
       });
 }
 
-void NetworkServer::adopt(tcp::socket &&socket)
+void NetworkServer::adopt_connection(tcp::socket &&socket)
 {
   m_socket = std::move(socket);
   notify_connected();
@@ -501,7 +506,7 @@ void NetworkServer::replace_when_drained(
   fail_pending_writes(asio::error::connection_aborted);
   close_socket(asio::error::connection_aborted);
   auto replacement = std::move(m_replacement);
-  adopt(std::move(*replacement));
+  adopt_connection(std::move(*replacement));
 }
 
 // NetworkClient definitions //////////////////////////////////////////////////
