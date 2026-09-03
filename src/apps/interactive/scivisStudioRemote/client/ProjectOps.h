@@ -86,11 +86,16 @@ struct TaskRecord
   // Launched by this client's RenderShot: the editors show a note while it
   // is active, since the server refuses edits until the render ends.
   bool render{false};
-  // Failed by the client at the last BootstrapBegin ("connection lost"), not
-  // by the server; the next event naming its id revives the record (the
-  // task-status replay). A TaskStarted reply, or progress for a record that
-  // finished, starts the record over instead: a restarted server reuses ids.
-  bool stale{false};
+  // Counts the times the record started over: a TaskStarted reply, or
+  // progress for a record that finished, names a new task under a reused id
+  // (a restarted server counts from 1 again), so the record is reset as if
+  // newly heard of. Lets a watcher tell a new task's ending from a repeat.
+  uint32_t generation{0};
+  // The user has already been told of this state, so it must not toast: set
+  // with the client's own "connection lost" failure at BootstrapBegin (the
+  // banner says it), cleared as soon as the server speaks of the task again
+  // (the replay's ending overwrites the record, its progress starts it over).
+  bool announced{false};
 
   bool finished() const;
   // The one-line toast for a finished record: "<label> completed (N frames):
@@ -351,8 +356,8 @@ struct ProjectOps
   // callback may send anew.
   void failAllPending(const std::string &error);
   // BootstrapBegin: every Queued or Running record becomes Failed with
-  // `error` and is marked stale; the bootstrap's task-status replay then
-  // revives the ones the server still knows about.
+  // `error`, already `announced`; the bootstrap's task-status replay then
+  // overwrites the ones the server still knows about like any other event.
   void failUnfinishedTasks(const std::string &error);
   void clearTasks();
   // Delivers the failures of sends the connection dropped.
@@ -384,11 +389,13 @@ struct ProjectOps
   // Runs the entry's callback with a failed reply: the reply itself for a
   // project op, an absent PickReply for a pick.
   static void fail(Pending &entry, const protocol::ProjectOpReply &reply);
-  // The record of `taskId`, made if new; a stale one is revived.
+  TaskRecord *findRecord(uint64_t taskId);
+  // The record of `taskId`, made if new.
   TaskRecord &recordFor(uint64_t taskId);
-  // The record of `taskId` started over as Queued "Task N": a new task was
-  // launched under the id (a restarted server counts from 1 again).
-  TaskRecord &freshRecordFor(uint64_t taskId);
+  // The record of `taskId` as if newly heard of (Queued "Task N", nothing
+  // else kept), its generation bumped when there was one: a new task under
+  // the id.
+  TaskRecord &startOver(uint64_t taskId);
   Pending *findPending(uint64_t requestId);
   const Pending *findPending(uint64_t requestId) const;
 

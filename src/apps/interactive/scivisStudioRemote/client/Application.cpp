@@ -651,27 +651,28 @@ void Application::watchTasks()
   const auto &tasks = m_connection->projectOps().tasks();
 
   // Forget the tasks the panel cleared (kept: the ones still listed).
-  vsr::core::FlatMap<uint64_t, TaskState> stillListed;
-  for (const auto &[announcedId, state] : m_announcedTasks) {
+  vsr::core::FlatMap<uint64_t, AnnouncedTask> stillListed;
+  for (const auto &[announcedId, announced] : m_announcedTasks) {
     const bool present = std::any_of(tasks.begin(),
         tasks.end(),
         [&](const TaskRecord &t) { return t.taskId == announcedId; });
     if (present)
-      stillListed[announcedId] = state;
+      stillListed[announcedId] = announced;
   }
   m_announcedTasks = std::move(stillListed);
 
   for (const TaskRecord &task : tasks) {
     const auto *announced = m_announcedTasks.at(task.taskId);
-    if (announced && *announced == task.state)
+    if (announced && announced->generation == task.generation
+        && announced->state == task.state)
       continue;
-    // The client failed a stale record itself at BootstrapBegin; the banner
-    // already said the connection was lost, and the replay may yet revive
-    // it. Its Failed is not recorded as announced, so the ending the replay
-    // brings (Failed again, with the server's reason) still toasts.
-    if (task.stale)
+    // The record says so itself: the client failed it at BootstrapBegin and
+    // the banner already said the connection was lost. Not recorded either,
+    // so the ending the replay brings (Failed again, with the server's
+    // reason) still toasts.
+    if (task.announced)
       continue;
-    m_announcedTasks[task.taskId] = task.state;
+    m_announcedTasks[task.taskId] = {task.generation, task.state};
     if (task.finished())
       notify(task.describeEnding(), task.state == TaskState::Failed);
   }

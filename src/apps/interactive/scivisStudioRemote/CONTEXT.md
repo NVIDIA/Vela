@@ -51,8 +51,9 @@ The part of the Bootstrap that tells a client how every Server Task ended
 since the previous Bootstrap (each `TaskCompleted`/`TaskFailed` verbatim) and
 which one is running now (one `TaskProgress` naming it). It is what lets a
 task outlive the session that launched it: the client fails its open task
-records at `BootstrapBegin` and the replay revives the ones the server still
-speaks of. Idempotent — an ending heard live may be replayed once more.
+records at `BootstrapBegin` and the replay overwrites the ones the server
+still speaks of (an ending in place; progress starts the record over).
+Idempotent — an ending heard live may be replayed once more.
 _Avoid_: task history sync, task resume
 
 **Exclusive Server Task**:

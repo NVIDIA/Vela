@@ -427,17 +427,20 @@ naming an unknown id: a `TaskProgress` labels it with its message, which is
 how the bootstrap's replay names the task still running when a client
 reconnects; a replayed `TaskCompleted`/`TaskFailed` of a task nobody here
 launched is labelled "Task N". At `BootstrapBegin` every Queued or Running
-record is failed with "connection lost" and marked `stale`; the replay
-inside the bracket revives a stale record the server speaks of again (same
-label, state starts over). A `TaskStarted` reply, and a `TaskProgress` for a
-record that finished, start the record over instead (label, state, progress
-and outcome): a restarted server counts ids from 1 again, so an id that
-already finished here names a new task. Stale records the server never
-mentions again stay Failed until "Clear finished" -- they were queued tasks
-the server dropped with the old session. Completion toasts fire once per
-state change, replayed outcomes included; the client's own "connection
-lost" failures do not toast (the banner said it) and do not count as
-announced, so the ending the replay brings for that task still does.
+record is failed with "connection lost", marked `announced`; a
+`TaskCompleted`/`TaskFailed` overwrites the record in place, replayed inside
+the bracket or not (same label, the server's ending). A `TaskStarted` reply,
+and a `TaskProgress` for a record that finished, start the record over
+(label, state, progress and outcome, `generation` bumped): a restarted
+server counts ids from 1 again, so an id that already finished here names a
+new task, and the replay's progress for a task this client failed is the
+same case (the record takes the replay's description as label). Records the
+server never mentions again stay Failed until "Clear finished" -- they were
+queued tasks the server dropped with the old session. Completion toasts
+fire once per `{generation, state}` change, replayed outcomes included; the
+client's own "connection lost" failures do not toast (the banner said it,
+which is what `announced` records) and do not count as announced, so the
+ending the replay brings for that task still does.
 
 **UI state.** The bootstrap's `UIState` is applied in `onBootstrapComplete`
 exactly as the monolith applies a loaded project's: `windows/<name>` through
@@ -682,6 +685,23 @@ Code-quality follow-ups to the M7 review:
   so Retry and Disconnect behave as before (947 lines). `applyUIState` had
   already shrunk to the null check plus the base-class applier with the
   UI-state item above.
+- The GUI client's `TaskRecord::stale` ("failed by the client at
+  BootstrapBegin, not by the server") drove a revival in `recordFor`, a
+  `freshRecordFor` that revived and then overwrote, a `fresh` choice between
+  the two in `handleTaskProgress`, and a skip in `Application::watchTasks`;
+  the headless test client models the same server with none of it. The
+  client now has the test client's rule: `recordFor` finds or creates,
+  `startOver` resets a record as if newly heard of and bumps
+  `TaskRecord::generation`, a `TaskStarted` reply always starts over,
+  progress for a finished record starts over, an ending overwrites in place.
+  What the toast needed from `stale` is `TaskRecord::announced`, set only by
+  `failUnfinishedTasks` and cleared by any word from the server;
+  `watchTasks` skips such a record and keys what it announced on
+  `{generation, state}`, so a task restarted under a reused id toasts again
+  even when the restart and the ending land in one poll. One visible
+  difference: a replayed `TaskProgress` for a record the client failed
+  relabels it with the replay's description instead of keeping the
+  launching request's label (a replayed ending keeps it, as before).
 
 ### Spec conformance
 

@@ -800,7 +800,7 @@ SCENARIO("ServerConnection applies snapshots outside the bootstrap",
 
       f.server.sendBootstrap();
 
-      THEN("the record is failed with 'connection lost' and marked stale")
+      THEN("the record is failed with 'connection lost', already announced")
       {
         REQUIRE(f.waitConnectedAndBootstrapped(2));
         REQUIRE(f.ops().tasks().size() == 1);
@@ -809,7 +809,8 @@ SCENARIO("ServerConnection applies snapshots outside the bootstrap",
         REQUIRE(task);
         REQUIRE(task->state == TaskState::Failed);
         REQUIRE(task->error == "connection lost");
-        REQUIRE(task->stale);
+        REQUIRE(task->announced);
+        REQUIRE(task->generation == 0);
         REQUIRE(task->label == "importing");
       }
     }
@@ -896,7 +897,8 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
         const TaskRecord *task = f.ops().task(5);
         REQUIRE(task);
         REQUIRE(task->state == TaskState::Completed);
-        REQUIRE_FALSE(task->stale);
+        REQUIRE_FALSE(task->announced);
+        REQUIRE(task->generation == 0);
         REQUIRE(task->label == "Open project '/d/p'");
         REQUIRE(task->lastProgress.message == "/d/p/renders/shot_0001");
         REQUIRE(task->outcome == "/d/p/renders/shot_0001");
@@ -910,7 +912,7 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
         REQUIRE(task);
         REQUIRE(task->state == TaskState::Failed);
         REQUIRE(task->error == "connection lost");
-        REQUIRE(task->stale);
+        REQUIRE(task->announced);
       }
 
       THEN("the running task is created, labelled with its description")
@@ -948,6 +950,32 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
       }
     }
 
+    WHEN("the next bootstrap replays progress for the task the client failed")
+    {
+      TaskProgress running;
+      running.taskId = 6;
+      running.current = 3;
+      running.total = 8;
+      running.message = "import '/d/f.obj'";
+      f.server.bootstrap.push_back(encode(running));
+      f.server.sendBootstrap();
+      REQUIRE(f.waitConnectedAndBootstrapped(2));
+
+      THEN("the record starts over under the replay's description")
+      {
+        const TaskRecord *task = f.ops().task(6);
+        REQUIRE(task);
+        REQUIRE(task->state == TaskState::Running);
+        REQUIRE_FALSE(task->announced);
+        REQUIRE(task->generation == 1);
+        REQUIRE(task->label == "import '/d/f.obj'");
+        REQUIRE(task->error.empty());
+        REQUIRE(task->lastProgress.current == 3);
+        REQUIRE(task->lastProgress.total == 8);
+        REQUIRE(f.ops().tasksActive());
+      }
+    }
+
     WHEN("a restarted server hands a new task the id of a finished record")
     {
       TaskCompleted done;
@@ -956,7 +984,8 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
       f.server.send(encode(done));
       REQUIRE(pollUntil(f.connection,
           [&] { return f.ops().task(5)->state == TaskState::Completed; }));
-      REQUIRE_FALSE(f.ops().task(5)->stale);
+      REQUIRE_FALSE(f.ops().task(5)->announced);
+      REQUIRE(f.ops().task(5)->generation == 0);
 
       const auto again = f.ops().importStaticDataset(
           "n", "/d/f.obj", vsr::io::ImporterType::OBJ, false, nullptr);
@@ -971,6 +1000,7 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
             [&] { return f.ops().task(5)->state == TaskState::Queued; }));
         const TaskRecord *task = f.ops().task(5);
         REQUIRE(task->label == "Import '/d/f.obj'");
+        REQUIRE(task->generation == 1);
         REQUIRE(task->outcome.empty());
         REQUIRE(task->lastProgress.message.empty());
         REQUIRE(f.ops().tasksActive());
@@ -1013,16 +1043,18 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
             [&] { return f.ops().task(6)->state == TaskState::Running; }));
         const TaskRecord *task = f.ops().task(6);
         REQUIRE(task->label == "render shot 'shot_0002'");
+        REQUIRE(task->generation == 1);
         REQUIRE(task->lastProgress.total == 4);
         REQUIRE(f.ops().tasksActive());
       }
     }
 
-    WHEN("a restarted server hands a new task the id of a stale record")
+    WHEN(
+        "a restarted server hands a new task the id of a record the client failed")
     {
       f.server.sendBootstrap();
       REQUIRE(f.waitConnectedAndBootstrapped(2));
-      REQUIRE(f.ops().task(5)->stale);
+      REQUIRE(f.ops().task(5)->announced);
 
       const auto again = f.ops().importStaticDataset(
           "n", "/d/f.obj", vsr::io::ImporterType::OBJ, false, nullptr);
@@ -1033,10 +1065,11 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
 
       THEN("the record starts over under the new request's label")
       {
-        REQUIRE(
-            pollUntil(f.connection, [&] { return !f.ops().task(5)->stale; }));
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.ops().task(5)->state == TaskState::Queued; }));
         const TaskRecord *task = f.ops().task(5);
-        REQUIRE(task->state == TaskState::Queued);
+        REQUIRE_FALSE(task->announced);
+        REQUIRE(task->generation == 1);
         REQUIRE(task->label == "Import '/d/f.obj'");
         REQUIRE(task->error.empty());
         REQUIRE(f.ops().tasksActive());
