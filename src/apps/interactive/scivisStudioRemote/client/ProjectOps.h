@@ -93,6 +93,11 @@ struct TaskRecord
   bool stale{false};
 
   bool finished() const;
+  // The one-line toast for a finished record: "<label> completed (N frames):
+  // <outcome>" or "<label> failed after N frames: <error>", each part only
+  // when the record has it ("<task>" stands in for a missing label). Empty
+  // unless finished().
+  std::string describeEnding() const;
 };
 
 /*

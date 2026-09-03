@@ -27,6 +27,7 @@ add_executable(scivisStudioClient
   Application.cpp
   EditorContext.cpp
   RemoteBrowseDialog.cpp
+  StatusOverlay.cpp
   StudioViewport.cpp
   UICommon.cpp
   scivisStudioClient.cpp
