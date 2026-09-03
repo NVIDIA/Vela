@@ -55,6 +55,15 @@ std::string objectText(const SceneObjectRef &ref)
       + std::to_string(ref.objectIndex);
 }
 
+// The reason a server's farewell gives, or a stand-in when it gives none.
+std::string farewellReason(const vsr::network::Message &msg)
+{
+  const auto farewell = decode<Disconnect>(msg);
+  if (farewell && !farewell->reason.empty())
+    return farewell->reason;
+  return "server closed the connection";
+}
+
 std::string quotedText(const std::string &text)
 {
   return "\"" + text + "\"";
@@ -424,7 +433,8 @@ void TestSession::poll()
   const auto now = Clock::now();
 
   // 1. Inbound messages, on this thread only. They come before the disconnect
-  // latch so a peer's last words (an Error, then close) are still heard.
+  // latch so the server's farewell (a Disconnect with the reason, then the
+  // close) is still heard.
   std::vector<Message> batch;
   {
     std::lock_guard lock(m_inboundMutex);
@@ -666,6 +676,7 @@ void TestSession::beginAttempt()
   m_phase = Phase::AwaitingHello;
   m_pingSentAt = {};
   m_failure.clear();
+  m_farewellReason.clear();
   m_sendFutures.clear();
   {
     std::lock_guard lock(m_inboundMutex);
@@ -711,8 +722,10 @@ void TestSession::linkFailed(const std::string &reason)
 
 void TestSession::declareLoss(const std::string &reason)
 {
-  vsr::core::logWarning("[TestSession] connection lost: %s", reason.c_str());
-  m_failure = reason;
+  // The server's farewell, when it sent one, explains the close.
+  m_failure = m_farewellReason.empty() ? reason : m_farewellReason;
+  m_farewellReason.clear();
+  vsr::core::logWarning("[TestSession] connection lost: %s", m_failure.c_str());
   m_phase = Phase::Idle;
   closeChannel();
   setState(SessionState::Lost);
@@ -820,6 +833,11 @@ void TestSession::handleMessage(const Message &msg)
       event.fields.emplace_back("message", quotedText(text));
       pushEvent(std::move(event));
       attemptFailed("server refused: " + text);
+    } else if (*type == StudioMessageType::Disconnect) {
+      const auto reason = farewellReason(msg);
+      event.fields.emplace_back("reason", quotedText(reason));
+      pushEvent(std::move(event));
+      attemptFailed(reason);
     } else {
       pushEvent(std::move(event));
       vsr::core::logError("[TestSession] %s received before the server's Hello",
@@ -858,6 +876,11 @@ void TestSession::handleMessage(const Message &msg)
         "[TestSession] server error: %s", m_lastError.c_str());
     break;
   }
+  case StudioMessageType::Disconnect:
+    // The server's farewell: the close that follows is explained by it.
+    m_farewellReason = farewellReason(msg);
+    event.fields.emplace_back("reason", quotedText(m_farewellReason));
+    break;
   case StudioMessageType::BootstrapBegin:
     m_bootstrapping = true;
     m_bootstrapped = false;

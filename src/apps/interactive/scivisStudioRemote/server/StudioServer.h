@@ -104,8 +104,8 @@ const char *toString(SessionState state);
  * loses nothing.
  * The bootstrap replays how tasks ended since the last one (task-status
  * replay) between UIState and the ProjectSnapshot. A second client connecting
- * over a live session replaces it; the replaced client is sent
- * Error{"replaced by another client"} before its socket closes.
+ * over a live session replaces it; the replaced client is sent the farewell
+ * Disconnect{"replaced by another client"} before its socket closes.
  *
  * Example:
  *   StudioServer server(options);

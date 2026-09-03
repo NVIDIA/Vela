@@ -133,7 +133,8 @@ struct ScriptedServer
     MismatchedHello, // a Hello of the wrong version, nothing else
     HelloOnly, // the right Hello, then silence: no Bootstrap ever comes
     RefuseOnHello, // answers the client's Hello with an Error and closes
-    SilentAfterBootstrap // an empty Bootstrap, then nothing, Pings included
+    SilentAfterBootstrap, // an empty Bootstrap, then nothing, Pings included
+    FarewellAfterBootstrap // an empty Bootstrap, Disconnect{reason}, close
   };
 
   explicit ScriptedServer(Behaviour behaviour);
@@ -143,9 +144,12 @@ struct ScriptedServer
 
   std::shared_ptr<vsr::network::NetworkServer> channel;
   std::atomic<size_t> pingsReceived{0};
-  // RefuseOnHello: the Error is flushed and the socket closed off the IO
-  // thread, the way StudioServer's farewell works.
-  std::atomic<bool> refusing{false};
+  // RefuseOnHello and FarewellAfterBootstrap: the last message is flushed
+  // and the socket closed off the IO thread, the way StudioServer's
+  // farewell works; the farewell's close waits a little longer so the
+  // client's connect has settled before the loss lands.
+  std::atomic<bool> closing{false};
+  std::chrono::milliseconds closeDelay{0};
   vsr::network::MessageFuture farewell;
   std::thread closer;
 };
@@ -160,9 +164,16 @@ ScriptedServer::ScriptedServer(Behaviour behaviour)
         : PROTOCOL_VERSION;
     hello.buildInfo = "scripted server";
     channel->send(encode(hello));
-    if (behaviour == Behaviour::SilentAfterBootstrap) {
+    if (behaviour == Behaviour::SilentAfterBootstrap
+        || behaviour == Behaviour::FarewellAfterBootstrap) {
       channel->send(encode(BootstrapBegin{}));
       channel->send(encode(BootstrapEnd{}));
+    }
+    if (behaviour == Behaviour::FarewellAfterBootstrap) {
+      Disconnect goodbye;
+      goodbye.reason = "replaced by another client";
+      farewell = channel->send(encode(goodbye));
+      closing.store(true);
     }
   });
   channel->registerHandler(uint8_t(StudioMessageType::Ping),
@@ -173,13 +184,19 @@ ScriptedServer::ScriptedServer(Behaviour behaviour)
           Error error;
           error.message = "the scripted server refuses";
           farewell = channel->send(encode(error));
-          refusing.store(true);
+          closing.store(true);
         });
+  }
+  if (behaviour == Behaviour::RefuseOnHello
+      || behaviour == Behaviour::FarewellAfterBootstrap) {
+    if (behaviour == Behaviour::FarewellAfterBootstrap)
+      closeDelay = 300ms;
     closer = std::thread([this] {
       // Also woken by the destructor, with no farewell to flush.
-      if (!waitFor([&] { return refusing.load(); }) || !farewell.valid())
+      if (!waitFor([&] { return closing.load(); }) || !farewell.valid())
         return;
       farewell.wait_for(1s);
+      std::this_thread::sleep_for(closeDelay);
       channel->restart();
     });
   }
@@ -188,7 +205,7 @@ ScriptedServer::ScriptedServer(Behaviour behaviour)
 
 ScriptedServer::~ScriptedServer()
 {
-  refusing.store(true);
+  closing.store(true);
   if (closer.joinable())
     closer.join();
   channel->stop();
@@ -1256,6 +1273,29 @@ SCENARIO("the test client stays unconnected until the Bootstrap completes",
       REQUIRE(countStarting(result.records, "OK assert state == NeverConnected")
           == 2);
       REQUIRE(session.state() == test_client::SessionState::NeverConnected);
+    }
+  }
+}
+
+SCENARIO("the test client takes the loss reason from the server's farewell",
+    "[StudioTestClient]")
+{
+  GIVEN("a server that bootstraps, says Disconnect{reason} and closes")
+  {
+    ScriptedServer server(ScriptedServer::Behaviour::FarewellAfterBootstrap);
+    TestSession session;
+    const auto result = runScript(session,
+        "connect 127.0.0.1 " + std::to_string(server.port()) + "\n"
+        "await-lost timeout=3000\n"
+        "assert state == Lost\n");
+
+    THEN("the farewell is an event and its reason is why the link was lost")
+    {
+      REQUIRE(result.ok);
+      REQUIRE(hasLine(result.records,
+          "EVT Disconnect reason=\"replaced by another client\""));
+      REQUIRE(session.state() == test_client::SessionState::Lost);
+      REQUIRE(session.failure() == "replaced by another client");
     }
   }
 }

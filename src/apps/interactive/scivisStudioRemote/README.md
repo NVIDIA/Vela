@@ -332,12 +332,13 @@ no control stays greyed until the connection is lost. `PROTOCOL_VERSION` is
   more at the next bootstrap (the history is "since the last bootstrap"),
   which the clients treat as idempotent.
 - **Second client.** One client per server: a connection accepted over a
-  live session replaces it. The replaced client is sent `Error{"replaced by
-  another client"}` right before its socket closes
-  (`NetworkServer::setReplaceHandler` + `sendImmediately`, a non-blocking
-  write on the IO thread) so its banner can name the reason; best effort --
-  when a Frame is mid-write on a slow link the farewell is skipped and the
-  client sees the plain close.
+  live session replaces it. The replaced client is sent the farewell
+  `Disconnect{"replaced by another client"}` (v3) before its socket closes
+  (`NetworkServer::setReplaceHandler`; the transport gives the old
+  connection's write queue up to 200 ms to drain before closing it and
+  announcing the new connection) so its banner names the reason; on a link
+  too slow to drain a queued Frame in that time the client sees the plain
+  close.
 - **UI state round trip.** The server keeps the `{windows, layout,
   settings}` tree of the project it opened: from `--project` at startup
   (`setupProject` reads it with the same out-params the dispatcher uses),
@@ -470,12 +471,12 @@ instead of leaving the part that arrived (the replica is still the previous
 session's, since its snapshot comes last in the bracket). A retry greeted
 with a mismatched protocol version ends in `Disconnected` with the mismatch
 as the status text -- the server that came back cannot be talked to, so the
-banner offers no retry. When the server sends a bare `Error` and closes
-within two seconds, the Error's text is the loss reason the banner shows;
-that is how a client evicted by a second client learns why, if the server
-says so before closing (otherwise the reason is the socket's, "End of
-file"). Inbound messages are handled before the close latch in each poll
-so such an Error is never lost to the close it explains.
+banner offers no retry. When the server closes a session itself it says why
+first with `Disconnect{reason}` (its farewell, v3), and that reason is the
+one the banner shows for the loss that follows; that is how a client evicted
+by a second client learns why (a close with no farewell shows the socket's
+reason, "End of file"). Inbound messages are handled before the close latch
+in each poll so a farewell is never lost to the close it explains.
 
 ## Hardening dispositions (milestone 7)
 
@@ -565,10 +566,18 @@ reason. Nothing is silently open.
   *deferred (watch)*: the fixture joins the fake server before destroying
   client state; not reproduced in the five-run Studio-tag sweeps of M6 and
   M7.
+- **A `send()` racing a connection replacement lands on the next
+  connection** (M7 code-quality sweep) -- *deferred (watch)*: `send()` posts
+  its enqueue to the IO thread without a socket generation, so a message
+  sent just as the peer closes and a new connection is accepted is written
+  to the new one. Seen once, under a `ctest -j4` sweep, as the test-client
+  fake answering a courtesy `Disconnect` with `Error "Disconnect is not
+  served by the fake"` on the connection the script's `reconnect` had just
+  made; not reproduced in the single-suite runs or the following sweeps.
 - **Second client evicts the first, then both fight through auto-retry**
   (M6 notes) -- *v1 behaviour*, narrowed: the server still takes the newest
-  connection, but tells the evicted client why (`Error{"replaced by another
-  client"}`) so its banner names the cause; two clients pointed at one
+  connection, but tells the evicted client why (`Disconnect{"replaced by
+  another client"}`) so its banner names the cause; two clients pointed at one
   server will still take turns. Refusing the second connection instead is a
   one-line policy change in `NetworkServer::setReplaceHandler`'s caller if
   it is ever wanted.
@@ -702,6 +711,25 @@ Code-quality follow-ups to the M7 review:
   difference: a replayed `TaskProgress` for a record the client failed
   relabels it with the replay's description instead of keeping the
   launching request's label (a replayed ending keeps it, as before).
+- The server evicting a client for a newer one sent a bare `Error` through
+  a transport escape hatch (`NetworkChannel::sendImmediately`, a non-blocking
+  write past the queue with one caller), and the GUI client paired any bare
+  `Error` with a close inside two seconds to make it the loss reason (two
+  members and a timestamp comparison). Protocol v3 gives the server an
+  explicit farewell instead: `Disconnect` carries a `reason` and goes both
+  ways (a client's courtesy `Disconnect` leaves it empty; it is still not in
+  `isServerToClient`), the replace handler sends it with the ordinary
+  `send()`, and `NetworkServer` lets the replaced connection's queue drain
+  (200 ms at most, polled on the IO thread; a `stop()` in that window drops
+  the waiting replacement and re-arms the accept) before closing it and
+  adopting the new socket, so there is one write path. Both clients take the
+  loss reason from the farewell alone, with no timing involved; a bare
+  `Error` followed by a close is a toast plus the socket's reason again. The
+  other server-initiated closes keep their shape: a Hello with the wrong
+  version is answered with `Error` and closed (the spec's "Error + close";
+  the reply to a message, not a farewell), a malformed Hello gets an `Error`
+  and the connection stays, and a `Shutdown` or a client's own `Disconnect`
+  is a close the client asked for.
 
 ### Spec conformance
 

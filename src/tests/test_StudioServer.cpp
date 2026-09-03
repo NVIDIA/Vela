@@ -494,10 +494,13 @@ SCENARIO(
 
       THEN("the first hears the reason, then loses the connection")
       {
-        REQUIRE(first.waitForCount(StudioMessageType::Error, 1));
-        const auto reason = decode<Error>(first.last(StudioMessageType::Error));
-        REQUIRE(reason);
-        REQUIRE(reason->message == "replaced by another client");
+        // The farewell is a Disconnect naming the reason, not a bare Error.
+        REQUIRE(first.waitForCount(StudioMessageType::Disconnect, 1));
+        const auto farewell =
+            decode<Disconnect>(first.last(StudioMessageType::Disconnect));
+        REQUIRE(farewell);
+        REQUIRE(farewell->reason == "replaced by another client");
+        REQUIRE(first.count(StudioMessageType::Error) == 0);
         REQUIRE(waitFor([&] { return first.disconnects == 1; }));
 
         AND_THEN("the second bootstraps as the session's client")
