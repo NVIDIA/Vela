@@ -566,12 +566,17 @@ bool buildProjectSavePlan(const ProjectSaveRequest &request,
           PROJECT_SCHEMA,
           SCHEMA_VERSION});
   projectToNode(result.project, root["scivisStudio"]);
-  if (request.windows)
-    root["windows"] = *request.windows;
-  if (!request.layout.empty())
-    root["layout"] = request.layout;
-  if (request.settings)
-    root["settings"] = *request.settings;
+  if (request.uiState) {
+    if (auto *windows = request.uiState->child("windows"))
+      root["windows"] = *windows;
+    if (auto *layout = request.uiState->child("layout")) {
+      const auto ini = layout->getValueOr<std::string>("");
+      if (!ini.empty())
+        root["layout"] = ini;
+    }
+    if (auto *settings = request.uiState->child("settings"))
+      root["settings"] = *settings;
+  }
 
   plan.manifest.description = "project manifest";
   plan.manifest.target = PROJECT_MANIFEST_FILENAME;

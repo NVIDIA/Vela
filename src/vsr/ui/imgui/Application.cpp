@@ -830,17 +830,7 @@ void Application::loadApplicationState(const char *filename)
     return;
   }
 
-  // Window state
-  auto &windows = root["windows"];
-  for (auto *w : m_windows)
-    w->loadSettings(windows[w->name()]);
-
-  // ImGui window layout
-  if (auto *c = root.child("layout"); c != nullptr)
-    ImGui::LoadIniSettingsFromMemory(c->getValueAs<std::string>().c_str());
-
-  // ANARIDeviceManager settings
-  loadApplicationSettings(root);
+  applyUIStateTree(root);
 
   m_appSettingsDialog->applySettings();
 
@@ -859,6 +849,24 @@ void Application::saveApplicationSettings(vsr::core::DataNode &root)
   auto &settings = root["settings"];
   settings["fontScale"] = m_uiConfig.fontScale;
   settings["uiRounding"] = m_uiConfig.rounding;
+}
+
+void Application::applyUIStateTree(vsr::core::DataNode &root)
+{
+  if (auto *windows = root.child("windows")) {
+    for (auto *w : m_windows)
+      w->loadSettings((*windows)[w->name()]);
+  }
+
+  // ImGui applies the dock settings to the windows when they next Begin,
+  // later this frame.
+  if (auto *layout = root.child("layout")) {
+    const auto ini = layout->getValueOr<std::string>("");
+    if (!ini.empty())
+      ImGui::LoadIniSettingsFromMemory(ini.c_str());
+  }
+
+  loadApplicationSettings(root);
 }
 
 void Application::loadApplicationSettings(vsr::core::DataNode &root)

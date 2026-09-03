@@ -61,7 +61,7 @@ int main(int argc, const char **argv)
   vsr::app::Context appContext;
   ProjectContext projectContext(&appContext);
   if (!projectContext.openProject(
-          commandLine.projectDirectory, nullptr, nullptr, nullptr, &error)) {
+          commandLine.projectDirectory, nullptr, &error)) {
     std::cerr << "failed to open project: " << error << '\n';
     return 1;
   }

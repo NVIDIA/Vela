@@ -150,6 +150,10 @@ class Application
       const char *filename) const;
   void saveApplicationSettings(vsr::core::DataNode &root);
   void loadApplicationSettings(vsr::core::DataNode &root);
+  // Applies a {windows, layout, settings} tree: each window's settings, the
+  // ImGui dock layout, then the application settings. Missing children are
+  // skipped. Call between NewFrame and Render.
+  void applyUIStateTree(vsr::core::DataNode &root);
   void saveGlobalApplicationSettings();
   void loadGlobalApplicationSettings();
   std::filesystem::path globalApplicationSettingsFile() const;

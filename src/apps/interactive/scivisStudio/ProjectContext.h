@@ -117,15 +117,16 @@ struct ProjectContext
   void applyActiveShot();
   void syncAnimationManagerToActiveShot();
 
+  // The project's UI state is one {windows, layout, settings} tree, the shape
+  // the manifest, the wire and the applications' appliers share. saveProject
+  // stores those children of `uiState` (none when it is null; an empty
+  // layout is not written); the opens copy the manifest's into `uiStateOut`,
+  // replacing whatever it held.
   bool saveProject(const std::filesystem::path &directory,
-      vsr::core::DataNode *windows = nullptr,
-      const std::string &layout = "",
-      vsr::core::DataNode *settings = nullptr,
+      const vsr::core::DataNode *uiState = nullptr,
       std::string *error = nullptr);
   bool openProject(const std::filesystem::path &directory,
-      vsr::core::DataNode *windowsOut = nullptr,
-      std::string *layoutOut = nullptr,
-      vsr::core::DataNode *settingsOut = nullptr,
+      vsr::core::DataNode *uiStateOut = nullptr,
       std::string *error = nullptr,
       const ProjectOpenOptions &options = {});
   // The second half of openProject(): installs a stage that stageProjectOpen()
@@ -133,9 +134,7 @@ struct ProjectContext
   // without touching shared state, so a caller may run it elsewhere and
   // finish here; on failure the live project is unchanged.
   bool openStagedProject(ProjectOpenStage &stage,
-      vsr::core::DataNode *windowsOut = nullptr,
-      std::string *layoutOut = nullptr,
-      vsr::core::DataNode *settingsOut = nullptr,
+      vsr::core::DataNode *uiStateOut = nullptr,
       std::string *error = nullptr);
 
   vsr::scene::LayerNodeRef resolve(const SceneNodeRef &ref) const;

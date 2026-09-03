@@ -117,32 +117,6 @@ bool waitsForQueuedTasks(const ProjectRequest &request);
 // it.
 bool independentOfQueuedTasks(const ProjectRequest &request);
 
-/*
- * The UI-state tree a project open hands back: {windows, layout, settings},
- * the one shape the client's applyUIState reads and a SaveProject's tree is
- * taken apart into again. Give the open its out-params, then take the tree.
- *
- * Example:
- *   UIStateCapture ui;
- *   if (!context.openProject(
- *           directory, ui.windows(), &ui.layout, ui.settings(), &error))
- *     return false;
- *   m_uiState = ui.tree();
- */
-struct UIStateCapture
-{
-  UIStateCapture();
-
-  vsr::core::DataNode *windows();
-  vsr::core::DataNode *settings();
-  std::string layout;
-  // The tree, with `layout` stored under its key.
-  protocol::SubtreePtr tree();
-
- private:
-  protocol::SubtreePtr m_tree;
-};
-
 // How a task is queued: exclusive (the shot render), and what its sync
 // prelude did before the task was queued -- a Project change the reply's
 // snapshot must show, a rebind of the pipeline.

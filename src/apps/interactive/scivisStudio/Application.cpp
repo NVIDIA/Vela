@@ -204,28 +204,14 @@ void Application::teardown()
   VSRApplication::teardown();
 }
 
-void Application::saveWindowSettings(vsr::core::DataNode &node)
+void Application::saveUIStateTree(vsr::core::DataNode &root)
 {
-  node.reset();
+  auto &windows = root["windows"];
+  windows.reset();
   for (auto *w : m_windows)
-    w->saveSettings(node[w->name()]);
-}
-
-void Application::loadWindowSettings(vsr::core::DataNode &node)
-{
-  for (auto *w : m_windows)
-    w->loadSettings(node[w->name()]);
-}
-
-std::string Application::saveLayout() const
-{
-  return ImGui::SaveIniSettingsToMemory();
-}
-
-void Application::loadLayout(const std::string &layout)
-{
-  if (!layout.empty())
-    ImGui::LoadIniSettingsFromMemory(layout.c_str());
+    w->saveSettings(windows[w->name()]);
+  root["layout"] = std::string(ImGui::SaveIniSettingsToMemory());
+  saveApplicationSettings(root);
 }
 
 bool Application::saveProject()
@@ -242,16 +228,11 @@ bool Application::saveProject()
 bool Application::saveProjectAs(const std::filesystem::path &directory)
 {
   vsr::core::DataTree scratch;
-  auto &root = scratch.root();
-  saveWindowSettings(root["windows"]);
-  saveApplicationSettings(root);
+  saveUIStateTree(scratch.root());
 
   std::string error;
-  const bool ok = m_projectContext.saveProject(directory,
-      root.child("windows"),
-      saveLayout(),
-      root.child("settings"),
-      &error);
+  const bool ok =
+      m_projectContext.saveProject(directory, &scratch.root(), &error);
   if (!ok)
     vsr::core::logError("[SciVisStudio] Save failed: %s", error.c_str());
   else
@@ -266,14 +247,9 @@ bool Application::openProject(
     m_viewport->releaseSceneReferences();
 
   vsr::core::DataTree scratch;
-  std::string layout;
   std::string error;
-  const bool ok = m_projectContext.openProject(directory,
-      &scratch.root()["windows"],
-      &layout,
-      &scratch.root()["settings"],
-      &error,
-      options);
+  const bool ok =
+      m_projectContext.openProject(directory, &scratch.root(), &error, options);
   if (!ok) {
     vsr::core::logError("[SciVisStudio] Open failed: %s", error.c_str());
     if (m_viewport)
@@ -281,9 +257,7 @@ bool Application::openProject(
     return false;
   }
 
-  loadWindowSettings(scratch.root()["windows"]);
-  loadLayout(layout);
-  loadApplicationSettings(scratch.root());
+  applyUIStateTree(scratch.root());
   addRecentProject(directory);
   return true;
 }

@@ -77,27 +77,6 @@ DatasetStatus statusOf(const Project &project, const DatasetID &id)
   return dataset ? dataset->status : DatasetStatus::Unavailable;
 }
 
-// The UI-state pieces saveProject() takes, read from an opaque tree.
-struct UIStateParts
-{
-  vsr::core::DataNode *windows{nullptr};
-  std::string layout;
-  vsr::core::DataNode *settings{nullptr};
-};
-
-UIStateParts uiStateParts(const SubtreePtr &tree)
-{
-  UIStateParts parts;
-  if (!tree)
-    return parts;
-  auto &root = tree->root();
-  parts.windows = root.child("windows");
-  parts.settings = root.child("settings");
-  if (auto *layout = root.child("layout"))
-    parts.layout = layout->getValueOr<std::string>("");
-  return parts;
-}
-
 } // namespace
 
 // Request plumbing ///////////////////////////////////////////////////////////
@@ -248,26 +227,6 @@ bool independentOfQueuedTasks(const ProjectRequest &request)
       && !policy.mutates;
 }
 
-// UIStateCapture /////////////////////////////////////////////////////////////
-
-UIStateCapture::UIStateCapture() : m_tree(makeSubtree()) {}
-
-vsr::core::DataNode *UIStateCapture::windows()
-{
-  return &m_tree->root()["windows"];
-}
-
-vsr::core::DataNode *UIStateCapture::settings()
-{
-  return &m_tree->root()["settings"];
-}
-
-SubtreePtr UIStateCapture::tree()
-{
-  m_tree->root()["layout"] = layout;
-  return m_tree;
-}
-
 // Dispatcher /////////////////////////////////////////////////////////////////
 
 ProjectOpDispatcher::ProjectOpDispatcher(Host host) : m_host(std::move(host)) {}
@@ -402,16 +361,13 @@ void ProjectOpDispatcher::handle(const OpenProject &req)
                 return result;
               }
               progress("applying");
-              UIStateCapture ui;
-              if (!context().openStagedProject(stage,
-                      ui.windows(),
-                      &ui.layout,
-                      ui.settings(),
-                      &result.error)) {
+              auto uiState = makeSubtree();
+              if (!context().openStagedProject(
+                      stage, &uiState->root(), &result.error)) {
                 result.ok = false;
                 return result;
               }
-              *m_host.uiState = ui.tree();
+              *m_host.uiState = uiState;
               // The opened project's layout reaches the client that asked
               // before the snapshot that follows the task; a bootstrap
               // carries it too.
@@ -463,11 +419,8 @@ void ProjectOpDispatcher::handle(const SaveProject &req)
               // A save without UI state keeps what the project opened with,
               // so a headless save never drops the user's layout.
               const auto &tree = uiState ? uiState : *m_host.uiState;
-              const auto parts = uiStateParts(tree);
               if (!context().saveProject(*directory,
-                      parts.windows,
-                      parts.layout,
-                      parts.settings,
+                      tree ? &tree->root() : nullptr,
                       &result.error)) {
                 result.ok = false;
                 return result;
