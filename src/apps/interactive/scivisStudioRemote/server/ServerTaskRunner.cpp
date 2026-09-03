@@ -20,19 +20,19 @@ using namespace protocol;
 
 namespace {
 
-vsr::network::Message endingOf(const FinishedTask &task)
+vsr::network::Message endingOf(uint64_t taskId, const TaskResult &result)
 {
-  if (task.ok) {
+  if (result.ok) {
     TaskCompleted completed;
-    completed.taskId = task.taskId;
-    completed.message = task.message;
-    completed.framesCompleted = task.framesCompleted;
+    completed.taskId = taskId;
+    completed.message = result.message;
+    completed.framesCompleted = result.framesCompleted;
     return encode(completed);
   }
   TaskFailed failed;
-  failed.taskId = task.taskId;
-  failed.error = task.error;
-  failed.framesCompleted = task.framesCompleted;
+  failed.taskId = taskId;
+  failed.error = result.error;
+  failed.framesCompleted = result.framesCompleted;
   return encode(failed);
 }
 
@@ -91,7 +91,7 @@ uint64_t ServerTaskRunner::enqueue(
 
 bool ServerTaskRunner::cancel(uint64_t taskId, std::string *error)
 {
-  if (m_running && m_running->taskId == taskId) {
+  if (m_running && m_runningId.load() == taskId) {
     // Only reachable from inside the body (the loop is in it otherwise):
     // the running task is cancelled through requestCancelRunning().
     if (error)
@@ -105,7 +105,7 @@ bool ServerTaskRunner::cancel(uint64_t taskId, std::string *error)
   if (itr == m_queue.end()) {
     if (const auto *finished = findFinished(taskId)) {
       // The cancel this request asked for on the IO thread took effect.
-      if (finished->cancelled)
+      if (finished->result.cancelled)
         return true;
       if (error)
         *error = "task already finished";
@@ -122,9 +122,12 @@ bool ServerTaskRunner::cancel(uint64_t taskId, std::string *error)
   FinishedTask finished;
   finished.taskId = taskId;
   finished.description = std::move(itr->description);
-  finished.error = "cancelled";
+  finished.result.ok = false;
+  finished.result.error = "cancelled";
+  // No body ran, so result.cancelled stays false: this CancelTask is the
+  // one answered "ok" here, and a later one finds a task that ended.
   m_queue.erase(itr);
-  recordEnding(std::move(finished));
+  recordEnding(finished);
   return true;
 }
 
@@ -138,19 +141,14 @@ bool ServerTaskRunner::requestCancelRunning(uint64_t taskId)
   return true;
 }
 
-bool ServerTaskRunner::cancelRequested(uint64_t taskId) const
-{
-  return taskId != 0 && m_cancelRequested.load() == taskId;
-}
-
-std::optional<RanTask> ServerTaskRunner::runOne()
+std::optional<FinishedTask> ServerTaskRunner::runOne()
 {
   if (m_queue.empty())
     return {};
 
   QueuedTask task = std::move(m_queue.front());
   m_queue.pop_front();
-  m_running = RunningTask{task.id, task.description, 0, 0, task.exclusive};
+  m_running = RunningTask{task.description, 0, 0, task.exclusive};
   m_cancelRequested.store(0);
   m_runningId.store(task.id);
   vsr::core::logStatus("[StudioServer] task %llu started: %s",
@@ -171,35 +169,25 @@ std::optional<RanTask> ServerTaskRunner::runOne()
       },
       &m_cancelRequested);
 
-  RanTask ran;
-  ran.taskId = task.id;
+  FinishedTask finished;
+  finished.taskId = task.id;
+  finished.description = std::move(task.description);
   try {
-    ran.result = task.body(control);
+    finished.result = task.body(control);
   } catch (const std::exception &e) {
     // A body that throws (a std::filesystem_error for a path the Data Roots
     // admitted but the OS refuses, say) fails its task instead of taking the
     // server down. How far it got is unknown, so the Project counts as
     // changed and the client gets a snapshot to resync from.
-    ran.result = TaskResult{};
-    ran.result.ok = false;
-    ran.result.error = std::string("task aborted: ") + e.what();
-    ran.result.projectChanged = true;
+    finished.result = TaskResult{};
+    finished.result.ok = false;
+    finished.result.error = std::string("task aborted: ") + e.what();
+    finished.result.projectChanged = true;
   }
-
-  FinishedTask finished;
-  finished.taskId = task.id;
-  finished.description = std::move(task.description);
-  finished.ok = ran.result.ok;
-  finished.error = ran.result.error;
-  finished.message = ran.result.message;
-  finished.framesCompleted = ran.result.framesCompleted;
-  // A body that completed despite the flag was not cancelled: only the shot
-  // render polls it, and then reports "cancelled" when it stopped.
-  finished.cancelled = m_cancelRequested.load() == task.id && !finished.ok;
   m_runningId.store(0);
   m_running.reset();
 
-  if (finished.ok) {
+  if (finished.result.ok) {
     vsr::core::logStatus("[StudioServer] task %llu completed: %s",
         static_cast<unsigned long long>(task.id),
         finished.description.c_str());
@@ -207,10 +195,10 @@ std::optional<RanTask> ServerTaskRunner::runOne()
     vsr::core::logWarning("[StudioServer] task %llu failed: %s: %s",
         static_cast<unsigned long long>(task.id),
         finished.description.c_str(),
-        finished.error.c_str());
+        finished.result.error.c_str());
   }
-  recordEnding(std::move(finished));
-  return ran;
+  recordEnding(finished);
+  return finished;
 }
 
 void ServerTaskRunner::dropQueued()
@@ -237,12 +225,12 @@ void ServerTaskRunner::replayTo(const SendFunction &send)
   for (auto &finished : m_finished) {
     if (finished.replayed)
       continue;
-    send(endingOf(finished));
+    send(endingOf(finished.taskId, finished.result));
     finished.replayed = true;
   }
   if (m_running) {
     TaskProgress event;
-    event.taskId = m_running->taskId;
+    event.taskId = m_runningId.load();
     event.current = m_running->current;
     event.total = m_running->total;
     event.message = m_running->description;
@@ -287,10 +275,10 @@ const FinishedTask *ServerTaskRunner::findFinished(uint64_t taskId) const
   return itr == m_finished.end() ? nullptr : &*itr;
 }
 
-void ServerTaskRunner::recordEnding(FinishedTask finished)
+void ServerTaskRunner::recordEnding(const FinishedTask &finished)
 {
-  m_send(endingOf(finished));
-  m_finished.push_back(std::move(finished));
+  m_send(endingOf(finished.taskId, finished.result));
+  m_finished.push_back(finished);
   if (m_finished.size() > HISTORY_CAP)
     m_finished.pop_front();
 }

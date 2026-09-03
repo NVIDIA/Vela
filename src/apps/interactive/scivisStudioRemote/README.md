@@ -120,9 +120,10 @@ frame/frames). `CancelTask` removes a task still queued
 body that polls its cancel flag (today the shot render, see milestone 7) --
 the flag is raised on the IO thread the moment the `CancelTask` is decoded,
 the body stops at its next frame, and the `CancelTask` itself, dispatched
-once the body has returned, is answered "ok" because the body stopped short.
-A body that completed regardless of the flag (every other task) was not
-cancelled: that `CancelTask`, like one for any task that already ended, is
+once the body has returned, is answered "ok" because the body reported it
+stopped short. A body that completed regardless of the flag (every other
+task), or failed for a reason of its own, was not cancelled: that
+`CancelTask`, like one for any task that already ended, is
 refused with "task already finished" for as long as the runner's history
 holds the ending (the last 32); one for an id never issued gets "unknown
 task N". A body that throws (a filesystem
@@ -622,7 +623,8 @@ Code-quality follow-ups to the M7 review:
   `std::optional<RanTask>` return of `runOneTask()` built for a follow-up
   after the body were never consumed in production and are removed
   (`runOneTask()` is `void` again; the runner's `runOne()` still returns the
-  `RanTask` the snapshot decision reads).
+  record the snapshot decision reads, `RanTask` then, `FinishedTask` since
+  the cancellation item below).
 - The project's UI state crosses `ProjectContext` as one
   `{windows, layout, settings}` tree, the shape the manifest, the wire
   `UIState` and the appliers already shared: `saveProject`, `openProject`
@@ -643,6 +645,23 @@ Code-quality follow-ups to the M7 review:
   `SaveIniSettingsToMemory` is never empty, so nothing observable changes. The `m_appSettingsDialog->applySettings()` call after the
   session load stays there: neither the monolith nor the client made it
   after an open.
+- Cancellation is reported, not inferred. `TaskResult::cancelled` says the
+  body stopped because its `TaskControl` reported a cancel request; the
+  render body sets it from `RenderShotResult::cancelled` (the wire error
+  stays the string `"cancelled"`). The runner used to guess it from "the
+  flag was raised and the body did not succeed", which took a render that
+  failed for a reason of its own after a cancel for a successful cancel;
+  now that `CancelTask` is refused with "task already finished". A task
+  dropped from the queue keeps `cancelled == false` (the handoff's sketch
+  had it true, which would have acknowledged a repeat cancel and broken an
+  existing test): no body ran, the `CancelTask` that dropped it is answered
+  "ok" on the spot, and a later one is told the task finished, as before.
+  `FinishedTask` is
+  `{taskId, description, result, replayed}` and `RanTask` is gone:
+  `runOne()` returns the `FinishedTask` it recorded. The running task's id
+  lives only in the atomic the IO thread reads (`RunningTask` lost its
+  `taskId`), and the test-only `ServerTaskRunner::cancelRequested(id)` is
+  gone; the test observes the flag through `TaskControl` inside a body.
 
 ### Spec conformance
 
