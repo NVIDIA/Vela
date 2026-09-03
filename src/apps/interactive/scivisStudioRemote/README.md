@@ -622,9 +622,13 @@ Code-quality follow-ups to the M7 review:
   (`launchesTask`, `readsProjectAtDispatch`, `mutates`; the table in
   `server/ProjectOpDispatcher.cpp`). The table was transcribed from the
   predicates and checked equal to them for every alternative before they
-  went; `mutates` is therefore set for `DiscoverDatasetCandidates` and
-  `RefreshDatasetAvailability`, which the old lists refused during a render
-  too. A new alternative without a row fails to compile.
+  went, with one deliberate exception: `DiscoverDatasetCandidates` scans the
+  datasets directory and reports no change, so its `mutates` is false and it
+  is served during a render, as `RequestArrayHistogram` already was; the old
+  `refusedWhileRendering` list refused it. Adopting a candidate
+  (`IncorporateDatasetCandidate`) still is refused. `RefreshDatasetAvailability`
+  keeps `mutates` because it writes `dataset->status`. A new alternative
+  without a row fails to compile.
 - The render refusal is decided in one place: `ProjectOpDispatcher::refuses`
   (`renderActive() && policyOf(request).mutates`). `dispatch` answers it
   with "render in progress" and `StudioServer::dispatchPendingRequests` asks

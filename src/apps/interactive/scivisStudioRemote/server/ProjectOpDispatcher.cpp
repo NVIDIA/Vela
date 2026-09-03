@@ -122,7 +122,7 @@ VSR_REQUEST_POLICY(UnloadDataset,                  false,   true,  true)
 VSR_REQUEST_POLICY(RefreshDatasetAvailability,     false,   true,  true)
 VSR_REQUEST_POLICY(SaveDatasetArchive,             true,    false, true)
 VSR_REQUEST_POLICY(LoadDatasetArchive,             true,    false, true)
-VSR_REQUEST_POLICY(DiscoverDatasetCandidates,      false,   true,  true)
+VSR_REQUEST_POLICY(DiscoverDatasetCandidates,      false,   true,  false)
 VSR_REQUEST_POLICY(IncorporateDatasetCandidate,    true,    false, true)
 // Shots
 VSR_REQUEST_POLICY(CreateShot,                     false,   true,  true)
