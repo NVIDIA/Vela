@@ -68,12 +68,10 @@ struct TaskControl
 
 using TaskBody = std::function<TaskResult(const TaskControl &)>;
 
-// A task that ran, for the caller's follow-up (snapshot; the latch discard
-// after an exclusive task).
+// A task that ran: what its body returned, for the caller's snapshot.
 struct RanTask
 {
   uint64_t taskId{0};
-  bool exclusive{false};
   TaskResult result;
 };
 

@@ -433,8 +433,14 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
 
     WHEN("an exclusive task is queued behind them and the session ends")
     {
+      bool ranExclusive = false;
       const auto render = runner.enqueue(
-          "render", [&](const TaskControl &) { return TaskResult{}; }, true);
+          "render",
+          [&](const TaskControl &) {
+            ranExclusive = runner.runningTask()->exclusive;
+            return TaskResult{};
+          },
+          true);
       runner.dropQueued();
 
       THEN("only the exclusive task survives")
@@ -445,7 +451,7 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
         const auto ran = runner.runOne();
         REQUIRE(ran);
         REQUIRE(ran->taskId == render);
-        REQUIRE(ran->exclusive);
+        REQUIRE(ranExclusive);
       }
     }
   }
@@ -458,6 +464,7 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
         "render shot 'shot_0001'",
         [&](const TaskControl &task) {
           REQUIRE(runner.exclusivePending());
+          REQUIRE(runner.runningTask()->exclusive);
           REQUIRE(task.taskId() == render);
           TaskResult result;
           for (uint64_t frame = 1; frame <= 200; ++frame) {
@@ -494,7 +501,6 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
       THEN("it stopped at the next frame boundary and reports how far it got")
       {
         REQUIRE(ran);
-        REQUIRE(ran->exclusive);
         REQUIRE_FALSE(ran->result.ok);
         REQUIRE(ran->result.error == "cancelled");
         REQUIRE(frames == 3);

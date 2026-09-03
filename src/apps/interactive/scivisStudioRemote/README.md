@@ -612,6 +612,17 @@ Code-quality follow-ups to the M7 review:
   went; `mutates` is therefore set for `DiscoverDatasetCandidates` and
   `RefreshDatasetAvailability`, which the old lists refused during a render
   too. A new alternative without a row fails to compile.
+- The render refusal is decided in one place: `ProjectOpDispatcher::refuses`
+  (`renderActive() && policyOf(request).mutates`). `dispatch` answers it
+  with "render in progress" and `StudioServer::dispatchPendingRequests` asks
+  it so a doomed request does not wait behind the queue; the free function
+  `refusedWhileRendering` is gone. The post-render latch discard has one
+  path, `Host::dropLatchedInputs`, called from inside the render body so it
+  precedes the ending message; the `RanTask::exclusive` flag and the
+  `std::optional<RanTask>` return of `runOneTask()` built for a follow-up
+  after the body were never consumed in production and are removed
+  (`runOneTask()` is `void` again; the runner's `runOne()` still returns the
+  `RanTask` the snapshot decision reads).
 
 ### Spec conformance
 

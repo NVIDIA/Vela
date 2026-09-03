@@ -117,10 +117,6 @@ bool waitsForQueuedTasks(const ProjectRequest &request);
 // it.
 bool independentOfQueuedTasks(const ProjectRequest &request);
 
-// mutates: refused with "render in progress" while a shot render is queued or
-// running (pause-and-refuse).
-bool refusedWhileRendering(const ProjectRequest &request);
-
 /*
  * The UI-state tree a project open hands back: {windows, layout, settings},
  * the one shape the client's applyUIState reads and a SaveProject's tree is
@@ -164,7 +160,7 @@ struct TaskLaunch
  * before the task is queued, so the client sees the switch at once; because
  * the prelude reads the Project, RenderShot waits for queued tasks like a
  * sync op does. While the render is queued or running every mutating
- * request is refused with "render in progress" (renderActive()) and the
+ * request is refused with "render in progress" (refuses()) and the
  * body polls its cancel flag once per frame; when the body returns, the
  * host drops the inputs latched meanwhile (Host::dropLatchedInputs) before
  * the ending goes out. Sync ops call the context, send the ProjectOpReply, then
@@ -215,16 +211,21 @@ struct ProjectOpDispatcher
 
   explicit ProjectOpDispatcher(Host host);
 
-  // Serves `request`, or refuses it when a render is pending and the
-  // request would mutate (refusedWhileRendering).
-  void dispatch(const ProjectRequest &request);
-
-  // Runs one queued task (if any) and sends the snapshot it earned; what ran,
-  // for the host's follow-up.
-  std::optional<RanTask> runOneTask();
-
   // A shot render is queued or running.
   bool renderActive() const;
+
+  // True when dispatch() would answer this request with "render in
+  // progress": a shot render is queued or running and the request mutates
+  // (RequestPolicy::mutates). The loop asks before queueing a request behind
+  // the tasks, so a refusal never waits its turn.
+  bool refuses(const ProjectRequest &request) const;
+
+  // Serves `request`; a refused one gets its ProjectOpReply error and
+  // nothing else happens.
+  void dispatch(const ProjectRequest &request);
+
+  // Runs one queued task (if any) and sends the snapshot it earned.
+  void runOneTask();
 
  private:
   // Project
