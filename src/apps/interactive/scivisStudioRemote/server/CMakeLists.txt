@@ -7,6 +7,7 @@ add_library(vsr_scivis_studio_server_core OBJECT
   ArrayHistogram.cpp
   DataRoots.cpp
   ProjectOpDispatcher.cpp
+  ProjectOpDispatcherTasks.cpp
   RemoteBrowse.cpp
   ServerOptions.cpp
   ServerPushDelegate.cpp
