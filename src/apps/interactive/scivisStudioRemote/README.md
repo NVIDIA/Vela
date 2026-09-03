@@ -571,13 +571,22 @@ reason. Nothing is silently open.
   client state; not reproduced in the five-run Studio-tag sweeps of M6 and
   M7.
 - **A `send()` racing a connection replacement lands on the next
-  connection** (M7 code-quality sweep) -- *deferred (watch)*: `send()` posts
-  its enqueue to the IO thread without a socket generation, so a message
-  sent just as the peer closes and a new connection is accepted is written
-  to the new one. Seen once, under a `ctest -j4` sweep, as the test-client
-  fake answering a courtesy `Disconnect` with `Error "Disconnect is not
-  served by the fake"` on the connection the script's `reconnect` had just
-  made; not reproduced in the single-suite runs or the following sweeps.
+  connection** (M7 code-quality sweep) -- *deferred (watch)*: `send()`
+  queues without a socket generation, so a message sent just as the peer
+  closes and a new connection is accepted can be written to the new one.
+  (`start_next_write` does check `m_socketGeneration` at write completion;
+  applying it at enqueue time is the real fix, and is not small enough to
+  have ridden along with the farewell work.) Seen once, under a `ctest -j4`
+  sweep, as the test-client fake answering a courtesy `Disconnect` with
+  `Error "Disconnect is not served by the fake"` on the connection the
+  script's `reconnect` had just made; not reproduced in the single-suite
+  runs or the following sweeps. The mechanism pre-dates the farewell work
+  (at 1111d0d the fake already answered unhandled types that way and
+  `disconnect()` already sent the courtesy `Disconnect`), and `send()`
+  dispatching rather than posting now closes the observed window, since the
+  fake's `Error` is enqueued inline in the read handler; a `send()` from a
+  thread other than the IO thread still posts, so the race remains in
+  principle.
 - **Second client evicts the first, then both fight through auto-retry**
   (M6 notes) -- *v1 behaviour*, narrowed: the server still takes the newest
   connection, but tells the evicted client why (`Disconnect{"replaced by
@@ -767,7 +776,18 @@ Code-quality follow-ups to the M7 review:
   version is answered with `Error` and closed (the spec's "Error + close";
   the reply to a message, not a farewell), a malformed Hello gets an `Error`
   and the connection stays, and a `Shutdown` or a client's own `Disconnect`
-  is a close the client asked for.
+  is a close the client asked for. Two transport-side decisions came with
+  this and were ratified in review. `NetworkChannel::send()` dispatches its
+  enqueue rather than posting it, so a `send()` on the IO thread has queued
+  before it returns; the guarantee is documented on the declaration, it
+  degrades to a post off the IO thread, and it holds no lock across the
+  call, so the inline `enqueue_write` cannot deadlock. And the drain is
+  bounded at `REPLACE_DRAIN_TIMEOUT` (200 ms, matching the clients'
+  `COURTESY_SEND_TIMEOUT`) polled every `REPLACE_DRAIN_POLL` (5 ms): a
+  Frame mid-write on a link that cannot drain in time loses the farewell
+  and the evicted client sees "End of file", the pre-v3 behaviour. A
+  completion-driven drain would remove the poll, if it ever seems worth the
+  code in a shared transport.
 - Two boundary clean-ups. `renderActiveShotToFrames` returns its
   `RenderShotResult` by value (the `bool` it returned was the result's
   `completed`, and the optional out-param made the body alias a local); the
