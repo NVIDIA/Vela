@@ -211,7 +211,7 @@ printed again.
 | `$lastObjectRef` (`type:index`), `$lastObjectType`, `$lastObjectIndex` | `create-color-map`'s scene-side object, and `find-object` |
 | `$lastPickType`, `$lastPickIndex` | the identity a `pick` hit (unset again by a miss) |
 | `$lastLightLayer`, `$lastLightNode` | `add-light` |
-| `$lastDatasetId` | `declare-file-animation-dataset`'s reply, and the completion message of an import, archive-load or incorporate task after `await-task` (a message that names a dataset id, `dataset_...`) |
+| `$lastDatasetId` | `declare-file-animation-dataset`'s reply, and the completion message of an `import-static-dataset`, `import-file-animation-dataset`, `load-dataset-archive` or `incorporate-dataset-candidate` task after `await-task` (the runner remembers which command launched the task; the message is not inspected) |
 | `$lastTaskId` | every task-launching reply |
 | `$lastTaskMessage` | the completion message of the task `await-task` last saw complete (a render's output directory, an import's dataset id) |
 | `$lastRequestId` | every request sent |

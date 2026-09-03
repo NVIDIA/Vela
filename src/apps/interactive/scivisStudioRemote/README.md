@@ -730,6 +730,24 @@ Code-quality follow-ups to the M7 review:
   the reply to a message, not a farewell), a malformed Hello gets an `Error`
   and the connection stays, and a `Shutdown` or a client's own `Disconnect`
   is a close the client asked for.
+- Two boundary clean-ups. `renderActiveShotToFrames` returns its
+  `RenderShotResult` by value (the `bool` it returned was the result's
+  `completed`, and the optional out-param made the body alias a local); the
+  monolith's CLI reads `.completed`, the dispatcher and the unit tests take
+  the value. A throw from the frame loop therefore yields no result -- the
+  dispatcher never read one on that path (`runTaskBody` catches), and the
+  unit test that read `framesCompleted` after the throw now checks the one
+  frame file on disk instead. The test client's `await-task` used to fill
+  `$lastDatasetId` from any completion message starting `dataset_`, a prefix
+  sniff on the server's id format that M7 introduced when a render's message
+  became its output directory; `taskStarted(TaskMessage)` now records at the
+  launch reply what each task's message will carry (`DatasetId` for the four
+  dataset-producing commands: `import-static-dataset`,
+  `import-file-animation-dataset`, `load-dataset-archive`,
+  `incorporate-dataset-candidate`) and `await-task` consults that record.
+  `$lastTaskMessage` is set as before. A task the runner did not launch
+  (`await-task <id>` on an id from another session) fills only
+  `$lastTaskMessage`; no scenario does that.
 
 ### Spec conformance
 

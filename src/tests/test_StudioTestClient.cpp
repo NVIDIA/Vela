@@ -1430,6 +1430,7 @@ SCENARIO("the test client drives project ops against a fake server",
           "assert var.lastDatasetId == dataset_0001\n"
           "await-task 4\n"
           "assert var.lastDatasetId == dataset_0002\n"
+          "assert var.lastTaskMessage == dataset_0002\n"
           "await-snapshot\n"
           "assert project.datasets == 2\n"
           "assert dataset.dataset_0002.name == B\n"

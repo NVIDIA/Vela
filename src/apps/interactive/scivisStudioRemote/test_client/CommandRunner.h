@@ -228,8 +228,16 @@ struct CommandRunner
   template <typename Result>
   Describe createdResult(
       std::string Result::*id, const char *key, const char *variable);
-  // The Describe of every task-launching request: `taskId=`, $lastTaskId.
-  Describe taskStarted();
+  // What a task's completion message carries, remembered per task id at the
+  // launch reply so await-task knows which variable the message fills.
+  enum class TaskMessage
+  {
+    Other,
+    DatasetId
+  };
+  // The Describe of every task-launching request: `taskId=`, $lastTaskId,
+  // and the kind of message the task will complete with.
+  Describe taskStarted(TaskMessage message = TaskMessage::Other);
   // The value a `$name` expands to; empty when there is no such variable.
   std::optional<std::string> variable(const std::string &name) const;
   // The replica's Shot with that id (`active` names the active shot), or
@@ -281,6 +289,9 @@ struct CommandRunner
   bool m_noWait{false};
   // Ids the replies minted, by variable name (lastShotId, lastTaskId, ...).
   vsr::core::FlatMap<std::string, std::string> m_variables;
+  // What each launched task's completion message will carry, by task id; a
+  // reused id is the newer task's.
+  vsr::core::FlatMap<uint64_t, TaskMessage> m_taskMessages;
   // Requests sent under no-wait whose replies are still to be collected, in
   // send order, with the Describe each await-reply will use.
   std::deque<std::pair<uint64_t, Describe>> m_pendingReplies;

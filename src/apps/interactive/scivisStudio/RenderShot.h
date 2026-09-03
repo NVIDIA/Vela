@@ -34,8 +34,8 @@ bool makeShotDatasetsResident(ProjectContext &projectContext,
 
 // Unload the datasets that were loaded only for rendering and restore the
 // project dirty flag captured when materialization began.
-void restoreShotDatasetResidency(ProjectContext &projectContext,
-    const ShotDatasetResidencyRestore &restore);
+void restoreShotDatasetResidency(
+    ProjectContext &projectContext, const ShotDatasetResidencyRestore &restore);
 
 // How a shot render ended. `completed` when every frame was written;
 // `cancelled` when onFrame stopped it; otherwise `error` says why it never
@@ -51,11 +51,10 @@ struct RenderShotResult
   std::filesystem::path outputDirectory;
 };
 
-// Renders the active shot's frames to <project>/renders/<shotId>/. True when
-// every frame was written; `result`, when given, tells a cancel from a
-// failure and how far the render got.
-bool renderActiveShotToFrames(ProjectContext &projectContext,
-    RenderShotProgress *progress = nullptr,
-    RenderShotResult *result = nullptr);
+// Renders the active shot's frames to <project>/renders/<shotId>/. The
+// result tells a completed render from a cancel or a failure and how far it
+// got; a throw from a frame's load or encode propagates.
+RenderShotResult renderActiveShotToFrames(
+    ProjectContext &projectContext, RenderShotProgress *progress = nullptr);
 
 } // namespace vsr::scivis_studio

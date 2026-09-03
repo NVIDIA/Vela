@@ -440,8 +440,8 @@ void ProjectOpDispatcher::handle(const RenderShot &req)
                         + std::to_string(totalFrames));
                 return true;
               };
-              RenderShotResult rendered;
-              renderActiveShotToFrames(context(), &progress, &rendered);
+              const auto rendered =
+                  renderActiveShotToFrames(context(), &progress);
               if (m_host.dropLatchedInputs)
                 m_host.dropLatchedInputs();
               result.ok = rendered.completed;
