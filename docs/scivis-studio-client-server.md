@@ -148,8 +148,11 @@ outside Studio's set is **rejected with an error**, never silently ignored.
 
 ### Message inventory (v1)
 
-- **Session**: `Hello`, `Ping`/`Pong`, `Disconnect`, `Shutdown`;
-  `BootstrapBegin` / `BootstrapEnd`.
+- **Session**: `Hello`, `Ping`/`Pong`, `Disconnect{reason?}`, `Shutdown`;
+  `BootstrapBegin` / `BootstrapEnd`. `Disconnect` is the last message before
+  its sender closes the socket: a client's courtesy `Disconnect` carries no
+  reason; the server's farewell names why it ends a session it did not lose
+  (v3; "replaced by another client" when a second connection takes over).
 - **Project**: `NewProject` (sync), `OpenProject(dir)` (task),
   `SaveProject(dir?, uiState)` (task); `UIState{tree}` (server→client, in
   every bootstrap and after an `OpenProject` completes).

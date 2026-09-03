@@ -9,7 +9,8 @@
 namespace vsr::scivis_studio::protocol {
 
 // 1: milestones 1-6. 2: TaskFailed carries framesCompleted (milestone 7).
-constexpr int PROTOCOL_VERSION = 2;
+// 3: Disconnect carries a reason and is the server's farewell too.
+constexpr int PROTOCOL_VERSION = 3;
 
 /*
  * Complete v1 message set of the SciVis Studio client-server protocol. Values
@@ -117,7 +118,9 @@ constexpr bool isStudioMessageType(uint8_t value);
 
 // Types only the server emits: the bootstrap bracket, project and task
 // replies, scene pushes, FrameConfig and Frame. A client sending one is
-// confused, and a server tells it so rather than guessing.
+// confused, and a server tells it so rather than guessing. The session
+// messages (Hello, Error, Ping/Pong, Disconnect) go both ways; Shutdown is
+// client-to-server.
 constexpr bool isServerToClient(StudioMessageType type);
 
 // Enumerator name, or "Unknown" for values outside the set.

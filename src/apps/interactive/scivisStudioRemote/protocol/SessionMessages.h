@@ -39,10 +39,14 @@ struct Pong
   static constexpr StudioMessageType MESSAGE_TYPE = StudioMessageType::Pong;
 };
 
+// The last message on a connection its sender is about to close. A client's
+// courtesy Disconnect carries no reason; the server's farewell says why it
+// ends the session (an evicted client shows it in its banner).
 struct Disconnect
 {
   static constexpr StudioMessageType MESSAGE_TYPE =
       StudioMessageType::Disconnect;
+  std::string reason;
 };
 
 struct Shutdown
@@ -70,13 +74,15 @@ bool fromNode(const vsr::core::DataNode &, Hello &);
 void toNode(const Error &, vsr::core::DataNode &);
 bool fromNode(const vsr::core::DataNode &, Error &);
 
+// reason is optional (an empty reason reads back as "").
+void toNode(const Disconnect &, vsr::core::DataNode &);
+bool fromNode(const vsr::core::DataNode &, Disconnect &);
+
 // Empty payloads: toNode writes nothing, fromNode always succeeds.
 void toNode(const Ping &, vsr::core::DataNode &);
 bool fromNode(const vsr::core::DataNode &, Ping &);
 void toNode(const Pong &, vsr::core::DataNode &);
 bool fromNode(const vsr::core::DataNode &, Pong &);
-void toNode(const Disconnect &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, Disconnect &);
 void toNode(const Shutdown &, vsr::core::DataNode &);
 bool fromNode(const vsr::core::DataNode &, Shutdown &);
 void toNode(const BootstrapBegin &, vsr::core::DataNode &);

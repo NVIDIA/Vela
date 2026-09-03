@@ -232,6 +232,33 @@ SCENARIO("StudioCodec encode/decode", "[StudioProtocol]")
     }
   }
 
+  GIVEN("a Disconnect payload")
+  {
+    // The server's farewell names why it closes; a client's courtesy
+    // Disconnect carries no reason and reads back as "".
+    Disconnect farewell;
+    farewell.reason = "replaced by another client";
+    const auto out = decode<Disconnect>(encode(farewell));
+    REQUIRE(out);
+    REQUIRE(out->reason == "replaced by another client");
+
+    THEN("a bare Disconnect round-trips with an empty reason")
+    {
+      const auto bare = decode<Disconnect>(encode(Disconnect{}));
+      REQUIRE(bare);
+      REQUIRE(bare->reason.empty());
+    }
+
+    THEN("a header-only Disconnect from an older sender decodes as bare")
+    {
+      const auto msg =
+          vsr::network::makeMessage(uint8_t(StudioMessageType::Disconnect));
+      const auto bare = decode<Disconnect>(msg);
+      REQUIRE(bare);
+      REQUIRE(bare->reason.empty());
+    }
+  }
+
   GIVEN("empty payloads")
   {
     THEN("Ping encodes and decodes")
@@ -246,7 +273,6 @@ SCENARIO("StudioCodec encode/decode", "[StudioProtocol]")
     THEN("every session empty payload decodes")
     {
       REQUIRE(decode<Pong>(encode(Pong{})));
-      REQUIRE(decode<Disconnect>(encode(Disconnect{})));
       REQUIRE(decode<Shutdown>(encode(Shutdown{})));
       REQUIRE(decode<BootstrapBegin>(encode(BootstrapBegin{})));
       REQUIRE(decode<BootstrapEnd>(encode(BootstrapEnd{})));
