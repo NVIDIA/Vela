@@ -58,6 +58,13 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
 
   //// Send messages ////
 
+  // Frames the message and queues it, returning a future settled when the
+  // write completes (or fails). The queueing is dispatched, not posted: a
+  // send() made on the IO thread -- a message handler answering, a replace
+  // handler's farewell -- has queued before it returns, so it is ordered
+  // ahead of anything the current handler posts afterwards. From any other
+  // thread dispatch degrades to a post, so callers off the IO thread are
+  // unaffected.
   MessageFuture send(Message &&msg);
   MessageFuture send(uint8_t type, StructuredMessage &&msg);
 
