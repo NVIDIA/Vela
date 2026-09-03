@@ -202,6 +202,9 @@ struct ProjectOpDispatcher
   void runOneTask();
 
  private:
+  // One handler per alternative. The task-launching ones (RequestPolicy::
+  // launchesTask) are defined in ProjectOpDispatcherTasks.cpp, the rest in
+  // ProjectOpDispatcher.cpp.
   // Project
   void handle(const protocol::NewProject &);
   void handle(const protocol::OpenProject &);
@@ -273,6 +276,10 @@ struct ProjectOpDispatcher
 
   ProjectContext &context();
   Project &project();
+  // The status `id` has, or Unavailable for a dataset that is not there; the
+  // before/after pair tells whether a failed load or unload still changed it.
+  static DatasetStatus datasetStatus(
+      const Project &project, const DatasetID &id);
 
   Host m_host;
 };
