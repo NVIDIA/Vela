@@ -135,7 +135,8 @@ struct TaskLaunch
  * the prelude reads the Project, RenderShot waits for queued tasks like a
  * sync op does. While the render is queued or running every mutating
  * request is refused with "render in progress" (refuses()) and the
- * body polls its cancel flag once per frame; when the body returns, the
+ * body polls its cancel flag once per frame; however the body leaves -- the
+ * last frame, a cancel, or a throw out of a frame's load or encode -- the
  * host drops the inputs latched meanwhile (Host::dropLatchedInputs) before
  * the ending goes out. Sync ops call the context, send the ProjectOpReply, then
  * a ProjectSnapshot whenever the Project changed (including "failed" calls that
@@ -176,10 +177,10 @@ struct ProjectOpDispatcher
     protocol::SubtreePtr *uiState{nullptr};
     // The server is going down: a running render stops at its next frame.
     std::function<bool()> shutdownRequested;
-    // The render body has returned: scene edits, SetTime and Pick latched
-    // while it held the loop targeted the scene it was mutating and are
-    // dropped now, before the ending is sent, so nothing sent in reaction
-    // to the ending is lost with them.
+    // The render body has left, by return or by throw: scene edits, SetTime
+    // and Pick latched while it held the loop targeted the scene it was
+    // mutating and are dropped now, before the ending is sent, so nothing
+    // sent in reaction to the ending is lost with them.
     std::function<void()> dropLatchedInputs;
   };
 

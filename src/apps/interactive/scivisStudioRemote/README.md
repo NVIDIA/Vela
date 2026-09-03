@@ -634,8 +634,10 @@ Code-quality follow-ups to the M7 review:
   with "render in progress" and `StudioServer::dispatchPendingRequests` asks
   it so a doomed request does not wait behind the queue; the free function
   `refusedWhileRendering` is gone. The post-render latch discard has one
-  path, `Host::dropLatchedInputs`, called from inside the render body so it
-  precedes the ending message; the `RanTask::exclusive` flag and the
+  path, `Host::dropLatchedInputs`, called from a scope guard inside the
+  render body so it precedes the ending message however the body leaves --
+  the last frame, a cancel, or a throw out of a frame's load or encode, which
+  `runTaskBody` rethrows to the runner's catch; the `RanTask::exclusive` flag and the
   `std::optional<RanTask>` return of `runOneTask()` built for a follow-up
   after the body were never consumed in production and are removed
   (`runOneTask()` is `void` again; the runner's `runOne()` still returns the

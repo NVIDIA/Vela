@@ -424,6 +424,20 @@ void ProjectOpDispatcher::handle(const RenderShot &req)
                 result.error = "shot '" + shotId + "' is no longer active";
                 return result;
               }
+              // The latch must be discarded before the task's ending goes
+              // out, and a frame's load or encode can throw out of
+              // renderActiveShotToFrames: the destructor covers the throw
+              // (which runTaskBody rethrows to the runner) and the return.
+              struct LatchGuard
+              {
+                const std::function<void()> &drop;
+                ~LatchGuard()
+                {
+                  if (drop)
+                    drop();
+                }
+              } latchGuard{m_host.dropLatchedInputs};
+
               RenderShotProgress progress;
               progress.onFrame = [&](int frame, int totalFrames) {
                 if (task.cancelRequested())
@@ -442,8 +456,6 @@ void ProjectOpDispatcher::handle(const RenderShot &req)
               };
               const auto rendered =
                   renderActiveShotToFrames(context(), &progress);
-              if (m_host.dropLatchedInputs)
-                m_host.dropLatchedInputs();
               result.ok = rendered.completed;
               result.error = rendered.cancelled ? "cancelled" : rendered.error;
               result.cancelled = rendered.cancelled;
