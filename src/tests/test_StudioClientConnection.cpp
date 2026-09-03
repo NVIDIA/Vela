@@ -385,36 +385,6 @@ SCENARIO("ServerConnection watches liveness", "[StudioClient]")
     }
   }
 
-  GIVEN("a connected client whose server explains itself before closing")
-  {
-    auto timings = fastTimings();
-    timings.lossAfterSilence = 3s; // loss must come from the hook, not this
-    Fixture f(PROTOCOL_VERSION, timings);
-    f.connect();
-    REQUIRE(f.waitConnectedAndBootstrapped());
-
-    WHEN("an Error arrives and the socket closes right after")
-    {
-      Error error;
-      error.message = "server accepted another client";
-      f.server.send(encode(error));
-      // The fake's send is asynchronous; a real server closes after the
-      // write has left, so wait for the Error to land before closing.
-      REQUIRE(pollUntil(f.connection, [&] { return f.errors.size() == 1; }));
-      f.server.channel->stop();
-
-      THEN("the Error's text is the reason the status shows")
-      {
-        REQUIRE(pollUntil(f.connection,
-            [&] { return f.connection.state() == ConnectionState::Lost; }));
-        REQUIRE(f.connection.statusText().find("server accepted another client")
-            != std::string::npos);
-        REQUIRE(f.errors == std::vector<std::string>{error.message});
-        REQUIRE(f.mirrorHasGeometry()); // frozen, as for any loss
-      }
-    }
-  }
-
   GIVEN("a connected client whose server closes the socket")
   {
     auto timings = fastTimings();
@@ -442,6 +412,59 @@ SCENARIO("ServerConnection watches liveness", "[StudioClient]")
         REQUIRE(f.connection.project() == nullptr);
         pollFor(f.connection, 100ms);
         REQUIRE(f.connection.state() == ConnectionState::Disconnected);
+      }
+    }
+  }
+}
+
+SCENARIO("ServerConnection takes the loss reason from the server's farewell",
+    "[StudioClient]")
+{
+  GIVEN("a connected client whose link will not go quiet on its own")
+  {
+    auto timings = fastTimings();
+    timings.lossAfterSilence = 10s; // the loss must come from the close
+    Fixture f(PROTOCOL_VERSION, timings);
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+
+    WHEN("the server says Disconnect{reason} and closes long after")
+    {
+      Disconnect farewell;
+      farewell.reason = "replaced by another client";
+      f.server.send(encode(farewell));
+      // Well past the two seconds the old Error-then-close heuristic gave.
+      pollFor(f.connection, 2200ms);
+      REQUIRE(f.connection.state() == ConnectionState::Connected);
+      f.server.channel->restart();
+
+      THEN("the loss names the farewell's reason and no Error was involved")
+      {
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.connection.state() == ConnectionState::Lost; }));
+        REQUIRE(f.connection.statusText().find("replaced by another client")
+            != std::string::npos);
+        REQUIRE(f.errors.empty());
+        REQUIRE(f.connection.autoRetrying());
+      }
+    }
+
+    WHEN("the server sends a bare Error and then closes")
+    {
+      Error error;
+      error.message = "something else entirely";
+      f.server.send(encode(error));
+      REQUIRE(pollUntil(f.connection, [&] { return !f.errors.empty(); }));
+      f.server.channel->restart();
+
+      THEN("the Error was a toast; the loss reason is the socket's")
+      {
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.connection.state() == ConnectionState::Lost; }));
+        REQUIRE(
+            f.errors == std::vector<std::string>{"something else entirely"});
+        REQUIRE(f.connection.statusText().find("something else entirely")
+            == std::string::npos);
       }
     }
   }

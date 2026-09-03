@@ -1436,10 +1436,8 @@ SCENARIO("scivisStudioServer and the client core render shots and recover",
                   != std::string::npos);
               intruder.disconnect();
             }
-            // The farewell is the one bare Error of the session so far.
-            REQUIRE(client.errors
-                == std::vector<std::string>{"replaced by another client"});
-            client.errors.clear();
+            // The farewell is a Disconnect, not an Error: nothing to toast.
+            REQUIRE(client.errors.empty());
             // The frozen record is what the loss found.
             REQUIRE(ops.task(third));
             REQUIRE(ops.task(third)->state == TaskState::Running);

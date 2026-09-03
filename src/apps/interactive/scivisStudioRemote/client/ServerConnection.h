@@ -270,11 +270,9 @@ struct ServerConnection
   std::optional<protocol::TimeAdvanceWarning> m_timeAdvanceWarning;
   std::optional<protocol::FrameHeader> m_lastFrameHeader;
   protocol::SubtreePtr m_uiState;
-  // The last bare Error the server sent: if it closes right after, that is
-  // the reason the banner shows (a server evicting this client for another
-  // one says so before closing).
-  std::string m_lastServerError;
-  Clock::time_point m_lastServerErrorAt{};
+  // The reason of the server's farewell (a Disconnect) on this connection,
+  // if it sent one: the loss that follows is explained by it.
+  std::string m_farewellReason;
   std::vector<vsr::network::MessageFuture> m_sendFutures;
 
   // Shared with the IO thread

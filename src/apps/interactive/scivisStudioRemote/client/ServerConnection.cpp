@@ -37,12 +37,19 @@ namespace {
 // Bound on the wait for a courtesy Disconnect/Shutdown to leave the socket;
 // the UI thread never waits longer than this on the network.
 constexpr std::chrono::milliseconds COURTESY_SEND_TIMEOUT{200};
-// A bare Error this close before the socket dies is taken as the reason.
-constexpr std::chrono::milliseconds SERVER_ERROR_EXPLAINS_CLOSE_FOR{2000};
 
 std::string endpointText(const std::string &host, short port)
 {
   return host + ":" + std::to_string(static_cast<unsigned short>(port));
+}
+
+// The reason a server's farewell gives, or a stand-in when it gives none.
+std::string farewellReason(const vsr::network::Message &msg)
+{
+  const auto farewell = decode<Disconnect>(msg);
+  if (farewell && !farewell->reason.empty())
+    return farewell->reason;
+  return "server closed the connection";
 }
 
 } // namespace
@@ -240,7 +247,7 @@ void ServerConnection::dropSession(const std::string &status)
   m_timeAdvanceWarning.reset();
   m_lastFrameHeader.reset();
   m_uiState.reset();
-  m_lastServerError.clear();
+  m_farewellReason.clear();
   {
     std::lock_guard lock(m_inboundMutex);
     m_latestFrame.reset();
@@ -273,8 +280,8 @@ void ServerConnection::poll()
   const auto now = Clock::now();
 
   // 1. Inbound messages, on the UI thread only. What the server sent before
-  // closing is handled before the close is: an Error explaining the close
-  // (a client evicted for another one) must be read to become the reason.
+  // closing is handled before the close is: its farewell (a Disconnect with
+  // the reason) must be read to become the loss reason.
   std::vector<vsr::network::Message> batch;
   {
     std::lock_guard lock(m_inboundMutex);
@@ -523,11 +530,10 @@ void ServerConnection::declareLoss(const std::string &reason)
 {
   const auto now = Clock::now();
   std::string why = reason;
-  if (!m_lastServerError.empty()
-      && now - m_lastServerErrorAt < SERVER_ERROR_EXPLAINS_CLOSE_FOR) {
+  if (!m_farewellReason.empty()) {
     // The server said why before it closed.
-    why = m_lastServerError;
-    m_lastServerError.clear();
+    why = m_farewellReason;
+    m_farewellReason.clear();
   }
   vsr::core::logWarning("[ServerConnection] connection lost: %s", why.c_str());
   m_phase = Phase::Idle;
@@ -589,6 +595,8 @@ void ServerConnection::handleMessage(const vsr::network::Message &msg)
       const auto error = decode<Error>(msg);
       attemptFailed(
           "server refused: " + (error ? error->message : std::string("?")));
+    } else if (*type == StudioMessageType::Disconnect) {
+      attemptFailed(farewellReason(msg));
     } else {
       vsr::core::logError(
           "[ServerConnection] %s received before the server's Hello",
@@ -621,12 +629,16 @@ void ServerConnection::handleMessage(const vsr::network::Message &msg)
       return;
     vsr::core::logError(
         "[ServerConnection] server error: %s", error->message.c_str());
-    m_lastServerError = error->message;
-    m_lastServerErrorAt = Clock::now();
     if (onServerError)
       onServerError(error->message);
     return;
   }
+  case StudioMessageType::Disconnect:
+    // The server's farewell: the close that follows is explained by it.
+    m_farewellReason = farewellReason(msg);
+    vsr::core::logStatus("[ServerConnection] server closing the session: %s",
+        m_farewellReason.c_str());
+    return;
   case StudioMessageType::BootstrapBegin:
     m_bootstrapping = true;
     m_bootstrapped = false;

@@ -369,6 +369,9 @@ struct TestSession
   SessionState m_state{SessionState::NeverConnected};
   Phase m_phase{Phase::Idle};
   std::string m_failure; // why the last attempt failed or the link was lost
+  // The reason of the server's farewell (a Disconnect), if it sent one: the
+  // close that follows is explained by it.
+  std::string m_farewellReason;
   bool m_bootstrapping{false};
   bool m_bootstrapped{false};
 

@@ -423,11 +423,14 @@ bool StudioServer::setupNetwork(std::string *error)
   m_server->setDisconnectHandler(
       [this](const boost::system::error_code &ec) { onDisconnected(ec); });
   // Single client per server: the one being replaced hears why before its
-  // socket closes (the transport lets the queue drain, briefly, first).
+  // socket closes (the transport lets the queue drain, briefly, first). The
+  // farewell is the one server-initiated close of a session it did not
+  // lose; a refused Hello is answered with an Error, and a Shutdown or a
+  // client's own Disconnect closes at the client's request.
   m_server->setReplaceHandler([this]() {
-    Error error;
-    error.message = "replaced by another client";
-    m_server->send(encode(error));
+    Disconnect farewell;
+    farewell.reason = "replaced by another client";
+    m_server->send(encode(farewell));
   });
   // Every one of the 256 type bytes gets a handler so a message outside the
   // Studio set is answered with an Error instead of vanishing in the
