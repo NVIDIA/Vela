@@ -96,8 +96,7 @@ int main(int argc, const char **argv)
     return true;
   };
 
-  const bool completed = renderActiveShotToFrames(projectContext, &progress);
-  if (!completed) {
+  if (!renderActiveShotToFrames(projectContext, &progress).completed) {
     if (g_canceled)
       std::cerr << "Canceled\n";
     else

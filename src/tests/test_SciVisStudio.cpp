@@ -3251,8 +3251,7 @@ SCENARIO(
   {
     THEN("The render refuses with the reason and no frames")
     {
-      RenderShotResult result;
-      REQUIRE_FALSE(renderActiveShotToFrames(projectContext, nullptr, &result));
+      const auto result = renderActiveShotToFrames(projectContext);
       REQUIRE_FALSE(result.completed);
       REQUIRE_FALSE(result.cancelled);
       REQUIRE(result.error == "Cannot render an unsaved project");
@@ -3319,16 +3318,17 @@ SCENARIO("SciVis Studio shot rendering restores the scene when a frame throws",
 
     THEN("The throw propagates and the render's scene state is undone")
     {
-      RenderShotResult result;
-      REQUIRE_THROWS_WITH(
-          renderActiveShotToFrames(projectContext, &progress, &result),
+      REQUIRE_THROWS_WITH(renderActiveShotToFrames(projectContext, &progress),
           "frame 1 refused to load");
       // The render index the scene mirrored into is gone again.
       REQUIRE(appContext.vsr.scene.updateDelegate().size() == delegates);
       // The shot's time and playback state are back where they were.
       REQUIRE(shot->currentFrame == 2);
       REQUIRE(shot->playing);
-      REQUIRE(result.framesCompleted == 1);
+      // The one frame rendered before the throw is on disk, the next is not.
+      const auto frames = root / "renders" / shot->id;
+      REQUIRE(std::filesystem::exists(frames / (shot->id + "_0000.png")));
+      REQUIRE_FALSE(std::filesystem::exists(frames / (shot->id + "_0001.png")));
     }
   }
 

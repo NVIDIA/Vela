@@ -50,12 +50,13 @@ anari::Device loadFirstAvailableDevice(
   return nullptr;
 }
 
-// Logs `error` and returns it in `out`; every early exit of the render.
-bool failRender(RenderShotResult &out, std::string error)
+// Logs `error`, records it in `out` and hands `out` back as the render's
+// result; every early exit of the render.
+RenderShotResult failRender(RenderShotResult &out, std::string error)
 {
   vsr::core::logError("[SciVisStudio] %s", error.c_str());
   out.error = std::move(error);
-  return false;
+  return std::move(out);
 }
 
 } // namespace
@@ -125,13 +126,10 @@ void restoreShotDatasetResidency(
     projectContext.project().dirty = restore.projectWasDirty;
 }
 
-bool renderActiveShotToFrames(ProjectContext &projectContext,
-    RenderShotProgress *progress,
-    RenderShotResult *result)
+RenderShotResult renderActiveShotToFrames(
+    ProjectContext &projectContext, RenderShotProgress *progress)
 {
-  RenderShotResult local;
-  RenderShotResult &out = result ? *result : local;
-  out = RenderShotResult{};
+  RenderShotResult out;
 
   auto *ctx = projectContext.appContext();
   auto *shot = project::activeShot(projectContext.project());
@@ -302,7 +300,7 @@ bool renderActiveShotToFrames(ProjectContext &projectContext,
     ++out.framesCompleted;
   }
 
-  return out.completed;
+  return out;
 }
 
 } // namespace vsr::scivis_studio

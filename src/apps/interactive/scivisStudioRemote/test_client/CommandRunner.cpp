@@ -2184,7 +2184,7 @@ CommandRunner::Failure CommandRunner::executeRequest(
   }
   if (name == "load-dataset-archive") {
     return loadArchiveRequest<LoadDatasetArchive>(
-        command, deadline, taskStarted());
+        command, deadline, taskStarted(TaskMessage::DatasetId));
   }
   if (name == "discover-dataset-candidates")
     return discoverDatasetCandidates(command, deadline);
@@ -2454,7 +2454,8 @@ CommandRunner::Failure CommandRunner::importStaticDataset(
       request.importerType = *importer;
     }
   }
-  return sendRequest(std::move(request), deadline, taskStarted());
+  return sendRequest(
+      std::move(request), deadline, taskStarted(TaskMessage::DatasetId));
 }
 
 CommandRunner::Failure CommandRunner::importFileAnimationDataset(
@@ -2475,7 +2476,8 @@ CommandRunner::Failure CommandRunner::importFileAnimationDataset(
     request.sourcePaths.emplace_back(args[i]);
   if (frameCount && !parseBool(*frameCount, request.setActiveShotFrameCount))
     return "set-frame-count must be true or false, got: " + *frameCount;
-  return sendRequest(std::move(request), deadline, taskStarted());
+  return sendRequest(
+      std::move(request), deadline, taskStarted(TaskMessage::DatasetId));
 }
 
 CommandRunner::Failure CommandRunner::declareFileAnimationDataset(
@@ -2552,7 +2554,8 @@ CommandRunner::Failure CommandRunner::incorporateDatasetCandidate(
     request.proposedName = command.args[1];
   if (command.args.size() > 2)
     request.name = command.args[2];
-  return sendRequest(std::move(request), deadline, taskStarted());
+  return sendRequest(
+      std::move(request), deadline, taskStarted(TaskMessage::DatasetId));
 }
 
 // Shots and rigs //
@@ -2796,11 +2799,13 @@ CommandRunner::Failure CommandRunner::awaitTask(
     return "task " + std::to_string(taskId)
         + " completed, but was expected to fail";
   }
-  // The completion message: an import's is the new dataset's id, a render's
-  // the output directory.
+  // The completion message: a dataset-producing task's is the new dataset's
+  // id, a render's the output directory. Which it is was recorded at the
+  // launch reply; a task this runner did not launch fills only the message.
   if (!failed) {
     m_variables["lastTaskMessage"] = task.message;
-    if (task.message.rfind("dataset_", 0) == 0)
+    const auto *message = m_taskMessages.at(taskId);
+    if (message && *message == TaskMessage::DatasetId)
       m_variables["lastDatasetId"] = task.message;
   }
   return {};
@@ -2979,9 +2984,9 @@ CommandRunner::Describe CommandRunner::createdResult(
   };
 }
 
-CommandRunner::Describe CommandRunner::taskStarted()
+CommandRunner::Describe CommandRunner::taskStarted(TaskMessage message)
 {
-  return [this](const ProjectOpReply &reply,
+  return [this, message](const ProjectOpReply &reply,
              Event &event,
              std::vector<Event> &) -> Failure {
     const auto started = results<TaskStartedResult>(reply);
@@ -2989,6 +2994,7 @@ CommandRunner::Describe CommandRunner::taskStarted()
       return "the reply carries no TaskStartedResult";
     event.fields.emplace_back("taskId", std::to_string(started->taskId));
     m_variables["lastTaskId"] = std::to_string(started->taskId);
+    m_taskMessages[started->taskId] = message;
     return {};
   };
 }
