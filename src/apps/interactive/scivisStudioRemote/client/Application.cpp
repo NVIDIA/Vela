@@ -4,7 +4,6 @@
 #include "Application.h"
 // scivisStudioClient
 #include "StudioViewport.h"
-#include "UICommon.h"
 #include "modals/AddFileAnimationDatasetDialog.h"
 #include "modals/AddStaticDatasetDialog.h"
 #include "modals/ProjectLocationDialog.h"
@@ -77,9 +76,6 @@ void LockableWindow<WindowT>::buildUI()
 // ImGui docking needs a couple of frames before window sizes are final.
 constexpr int AUTO_CONNECT_DELAY_FRAMES = 3;
 
-constexpr double ERROR_TOAST_SECONDS = 8.0;
-constexpr double STATUS_TOAST_SECONDS = 4.0;
-constexpr size_t MAX_TOASTS = 5;
 constexpr const char *CONFIRMATION_POPUP = "Discard Unsaved Changes?";
 
 const char *usage()
@@ -305,7 +301,7 @@ void Application::uiFrameStart()
 
   uiModals();
   uiConfirmation();
-  uiToasts();
+  m_statusOverlay.drawToasts();
 
   const bool typing = ImGui::GetIO().WantTextInput;
   if (!typing && ImGui::IsKeyPressed(ImGuiKey_Escape))
@@ -488,36 +484,17 @@ void Application::uiTaskIndicator()
 
 void Application::uiLostBanner()
 {
-  const ImGuiViewport *mainViewport = ImGui::GetMainViewport();
-  ImGui::SetNextWindowPos(mainViewport->WorkPos);
-  ImGui::SetNextWindowSize(ImVec2(mainViewport->WorkSize.x, 0.f));
-  ImGui::SetNextWindowBgAlpha(0.95f);
-  ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.75f, 0.12f, 0.1f, 1.f));
-
-  const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDocking
-      | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize
-      | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar
-      | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize
-      | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing;
-
-  if (ImGui::Begin("##connectionLostBanner", nullptr, flags)) {
-    if (m_connection->autoRetrying()) {
-      ImGui::TextUnformatted("Server connection lost -- reconnecting...");
-    } else {
-      ImGui::TextUnformatted("Server connection lost");
-      ImGui::SameLine();
-      if (ImGui::SmallButton("Retry"))
-        m_connection->retryNow();
-      ImGui::SameLine();
-      if (ImGui::SmallButton("Disconnect"))
-        disconnect();
-    }
-    ImGui::SameLine();
-    ImGui::TextDisabled("(%s)", m_connection->statusText().c_str());
+  switch (m_statusOverlay.drawLostBanner(
+      m_connection->autoRetrying(), m_connection->statusText())) {
+  case LostBannerChoice::Retry:
+    m_connection->retryNow();
+    break;
+  case LostBannerChoice::Disconnect:
+    disconnect();
+    break;
+  case LostBannerChoice::None:
+    break;
   }
-  ImGui::End();
-
-  ImGui::PopStyleColor();
 }
 
 void Application::uiConfirmation()
@@ -552,37 +529,6 @@ void Application::uiConfirmation()
     ImGui::CloseCurrentPopup();
   }
   ImGui::EndPopup();
-}
-
-// Bottom-right, newest last; they expire on their own and take no input.
-void Application::uiToasts()
-{
-  const double now = ImGui::GetTime();
-  while (!m_toasts.empty() && m_toasts.front().expiresAt <= now)
-    m_toasts.pop_front();
-  if (m_toasts.empty())
-    return;
-
-  const ImGuiViewport *mainViewport = ImGui::GetMainViewport();
-  const ImVec2 corner(mainViewport->WorkPos.x + mainViewport->WorkSize.x - 12.f,
-      mainViewport->WorkPos.y + mainViewport->WorkSize.y - 12.f);
-  ImGui::SetNextWindowPos(corner, ImGuiCond_Always, ImVec2(1.f, 1.f));
-  ImGui::SetNextWindowBgAlpha(0.85f);
-  const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration
-      | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_AlwaysAutoResize
-      | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing
-      | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoDocking;
-  if (ImGui::Begin("##toasts", nullptr, flags)) {
-    ImGui::PushTextWrapPos(520.f);
-    for (const Toast &toast : m_toasts) {
-      if (toast.isError)
-        ImGui::TextColored(ui::ERROR_TEXT_COLOR, "%s", toast.text.c_str());
-      else
-        ImGui::TextUnformatted(toast.text.c_str());
-    }
-    ImGui::PopTextWrapPos();
-  }
-  ImGui::End();
 }
 
 // Modals are not in the window array; their owner renders them.
@@ -682,19 +628,7 @@ void Application::notify(const std::string &text, bool isError)
     vsr::core::logError("[Client] %s", text.c_str());
   else
     vsr::core::logStatus("[Client] %s", text.c_str());
-  pushToast(text, isError);
-}
-
-void Application::pushToast(const std::string &text, bool isError)
-{
-  Toast toast;
-  toast.text = text;
-  toast.isError = isError;
-  toast.expiresAt =
-      ImGui::GetTime() + (isError ? ERROR_TOAST_SECONDS : STATUS_TOAST_SECONDS);
-  m_toasts.push_back(std::move(toast));
-  while (m_toasts.size() > MAX_TOASTS)
-    m_toasts.pop_front();
+  m_statusOverlay.pushToast(text, isError);
 }
 
 // Never modal: the server kept playing. The connection already wrote the Log
@@ -704,8 +638,8 @@ void Application::onTimeAdvanceWarning(const TimeAdvanceWarning &warning)
   const Project *project = m_connection->project();
   const std::string shot =
       project ? replica::shotLabel(*project, warning.shotId) : warning.shotId;
-  pushToast("Frame " + std::to_string(warning.frame) + " of " + shot
-          + " failed to load: " + warning.message,
+  m_statusOverlay.pushToast("Frame " + std::to_string(warning.frame) + " of "
+          + shot + " failed to load: " + warning.message,
       true);
   m_connection->clearTimeAdvanceWarning();
 }
@@ -738,20 +672,8 @@ void Application::watchTasks()
     if (task.stale)
       continue;
     m_announcedTasks[task.taskId] = task.state;
-    const std::string label = task.label.empty() ? "<task>" : task.label;
-    if (task.state == TaskState::Completed) {
-      std::string text = label + " completed";
-      if (task.framesCompleted != 0)
-        text += " (" + std::to_string(task.framesCompleted) + " frames)";
-      if (!task.outcome.empty())
-        text += ": " + task.outcome;
-      notify(text, false);
-    } else if (task.state == TaskState::Failed) {
-      std::string text = label + " failed";
-      if (task.framesCompleted != 0)
-        text += " after " + std::to_string(task.framesCompleted) + " frames";
-      notify(text + ": " + task.error, true);
-    }
+    if (task.finished())
+      notify(task.describeEnding(), task.state == TaskState::Failed);
   }
 }
 

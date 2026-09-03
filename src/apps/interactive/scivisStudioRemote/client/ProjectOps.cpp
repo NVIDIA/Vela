@@ -60,6 +60,26 @@ const char *toString(TaskState state)
   return "Unknown";
 }
 
+std::string TaskRecord::describeEnding() const
+{
+  if (!finished())
+    return {};
+  std::string text = label.empty() ? "<task>" : label;
+  if (state == TaskState::Completed) {
+    text += " completed";
+    if (framesCompleted != 0)
+      text += " (" + std::to_string(framesCompleted) + " frames)";
+    if (!outcome.empty())
+      text += ": " + outcome;
+  } else {
+    text += " failed";
+    if (framesCompleted != 0)
+      text += " after " + std::to_string(framesCompleted) + " frames";
+    text += ": " + error;
+  }
+  return text;
+}
+
 // Construction ///////////////////////////////////////////////////////////////
 
 ProjectOps::ProjectOps(Sender sender) : m_sender(std::move(sender)) {}

@@ -1053,6 +1053,88 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
   }
 }
 
+SCENARIO("TaskRecord describes its ending for the toast", "[StudioClient]")
+{
+  GIVEN("a completed task")
+  {
+    TaskRecord task;
+    task.label = "Render shot 'shot_0001'";
+    task.state = TaskState::Completed;
+
+    WHEN("it wrote frames and named an outcome")
+    {
+      task.framesCompleted = 24;
+      task.outcome = "/out/shot_0001";
+
+      THEN("the frames and the outcome follow the label")
+      {
+        REQUIRE(task.describeEnding()
+            == "Render shot 'shot_0001' completed (24 frames): /out/shot_0001");
+      }
+    }
+
+    WHEN("it reports neither")
+    {
+      THEN("the label completed, and nothing more")
+      {
+        REQUIRE(task.describeEnding() == "Render shot 'shot_0001' completed");
+      }
+    }
+  }
+
+  GIVEN("a failed task")
+  {
+    TaskRecord task;
+    task.label = "Render shot 'shot_0001'";
+    task.state = TaskState::Failed;
+    task.error = "cancelled";
+
+    WHEN("it wrote frames first")
+    {
+      task.framesCompleted = 12;
+
+      THEN("the count precedes the error")
+      {
+        REQUIRE(task.describeEnding()
+            == "Render shot 'shot_0001' failed after 12 frames: cancelled");
+      }
+    }
+
+    WHEN("it wrote none")
+    {
+      THEN("the error follows the label")
+      {
+        REQUIRE(task.describeEnding()
+            == "Render shot 'shot_0001' failed: cancelled");
+      }
+    }
+  }
+
+  GIVEN("a record with no label yet")
+  {
+    TaskRecord task;
+    task.state = TaskState::Failed;
+    task.error = "connection lost";
+
+    THEN("a placeholder stands in for the label")
+    {
+      REQUIRE(task.describeEnding() == "<task> failed: connection lost");
+    }
+  }
+
+  GIVEN("a task still running")
+  {
+    TaskRecord task;
+    task.label = "Import";
+    task.state = TaskState::Running;
+
+    THEN("there is no ending to describe")
+    {
+      REQUIRE(task.describeEnding().empty());
+    }
+  }
+}
+
 SCENARIO("ProjectOps flags the render it launched", "[StudioClient]")
 {
   GIVEN("a connected client that asked for a render")

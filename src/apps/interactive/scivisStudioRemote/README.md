@@ -662,6 +662,26 @@ Code-quality follow-ups to the M7 review:
   lives only in the atomic the IO thread reads (`RunningTask` lost its
   `taskId`), and the test-only `ServerTaskRunner::cancelRequested(id)` is
   gone; the test observes the flag through `TaskControl` inside a body.
+- Both files that crossed 1000 lines in M7 are split along seams that were
+  already there. `server/ProjectOpDispatcher.cpp` (1115 lines) keeps the
+  request plumbing, the policy table, the sync-op handlers, Remote Browse
+  and `CancelTask` (686 lines); the task-launching handlers -- every
+  alternative whose `RequestPolicy::launchesTask` is set -- with
+  `startTask`, `runTaskBody` and the two helpers only they use
+  (`datasetNotFound`, `importResult`) moved unchanged to
+  `server/ProjectOpDispatcherTasks.cpp` (466 lines), a second translation
+  unit of the same class. The one helper both halves read, the dataset
+  status before/after a load or unload, became the private static
+  `ProjectOpDispatcher::datasetStatus` rather than a copy in each anonymous
+  namespace. `client/Application.cpp` (1025 lines) lost the toast text
+  `watchTasks` built to `TaskRecord::describeEnding()`, a pure function of
+  the record that the unit tests now cover, and the toast queue with the
+  connection-lost banner drawing to `client/StatusOverlay.{h,cpp}`. The
+  overlay knows nothing of the connection: `drawLostBanner(autoRetrying,
+  statusText)` returns the button pressed and the Application acts on it,
+  so Retry and Disconnect behave as before (947 lines). `applyUIState` had
+  already shrunk to the null check plus the base-class applier with the
+  UI-state item above.
 
 ### Spec conformance
 
@@ -675,8 +695,8 @@ decisions, `M7-n`).
 |-------------|--------|-------|------|
 | **Message inventory (v1)** | | | |
 | Session: `Hello`, `Ping`/`Pong`, `Disconnect`, `Shutdown`, `BootstrapBegin`/`End` | implemented | `protocol/SessionMessages.h`, `server/StudioServer.cpp` | `Error` (2) is the bare error the spec's "rejected with an error" needs |
-| Project: `NewProject`, `OpenProject`, `SaveProject(dir?, uiState)` | implemented | `server/ProjectOpDispatcher.cpp` | plus `UIState` server-to-client (107), sent in every bootstrap and by `OpenProject`'s body |
-| Dataset ops (imports, declare, reimport, rename/remove/unload/refresh, load, archive save/load, incorporate, discover) | implemented | `ProjectOpDispatcher.cpp` types 23..35 | task/sync split as listed |
+| Project: `NewProject`, `OpenProject`, `SaveProject(dir?, uiState)` | implemented | `server/ProjectOpDispatcher.cpp`, `server/ProjectOpDispatcherTasks.cpp` | plus `UIState` server-to-client (107), sent in every bootstrap and by `OpenProject`'s body |
+| Dataset ops (imports, declare, reimport, rename/remove/unload/refresh, load, archive save/load, incorporate, discover) | implemented | `ProjectOpDispatcher.cpp` (sync), `ProjectOpDispatcherTasks.cpp` (tasks), types 23..35 | task/sync split as listed |
 | Shot: `CreateShot`, `RemoveShot`, `UpdateShot`, `SetActiveShot` | implemented | types 36..39 | `UpdateShot` never honours `playing` |
 | Rig: light rig create/clone/remove/rename, add/remove light, camera rig create/remove/rename, archives | implemented | types 40..52 | |
 | Color map: `CreateColorMap` both halves atomically, `RenameColorMap`, `RemoveColorMap`; values optimistic parameter edits | **partial** | types 53..55, `ColorMapCreatedResult` | the samples are Array data, not parameters, so no optimistic edit reaches them; see "Color map objects" (deferred) |
@@ -730,7 +750,7 @@ decisions, `M7-n`).
 | **Client behavior on server loss** | | | |
 | Client declares loss: socket error, or Ping after ~5 s quiet and ~15 s silence | implemented | `client/ServerConnection.cpp` | `ConnectionTimings` defaults 5 s / 15 s |
 | Single IO-thread-safe disconnect hook, UI thread polls | implemented | `ServerConnection::onChannelClosed`/`poll` | |
-| Freeze in place under a banner | implemented | `client/Application.cpp` | mirror, replica and last frame kept; a loss during a bootstrap empties the mirror (M7-6, item 8) |
+| Freeze in place under a banner | implemented | `client/Application.cpp`, `client/StatusOverlay.cpp` | mirror, replica and last frame kept; a loss during a bootstrap empties the mirror (M7-6, item 8) |
 | Auto-retry with backoff for ~a minute, then manual | implemented | `ServerConnection::poll` | a retry greeted by another protocol version ends `Disconnected` with the mismatch text and no retry offer (M7-6, item 12) |
 | Reconnect does nothing special; a restarted server is a first connect | implemented | bootstrap | task records are failed at `BootstrapBegin` and revived by the replay (M7-4); the UI layout is not re-applied on the re-bootstrap after Lost |
 | No v1 autosave | implemented | -- | |

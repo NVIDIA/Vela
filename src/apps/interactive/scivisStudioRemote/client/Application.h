@@ -5,6 +5,7 @@
 
 // scivisStudioClient
 #include "EditorContext.h"
+#include "StatusOverlay.h"
 // vsr_scivis_studio_client_core
 #include "ServerConnection.h"
 // vsr_scivis_studio_protocol
@@ -16,7 +17,6 @@
 // vsr_core
 #include "vsr/core/FlatMap.hpp"
 // std
-#include <deque>
 #include <functional>
 #include <memory>
 #include <string>
@@ -114,7 +114,6 @@ class Application : public vsr::ui::imgui::Application
 
   // Log line plus toast.
   void notify(const std::string &text, bool isError);
-  void pushToast(const std::string &text, bool isError);
   void onTimeAdvanceWarning(const protocol::TimeAdvanceWarning &warning);
   void watchTasks();
 
@@ -125,7 +124,6 @@ class Application : public vsr::ui::imgui::Application
   void uiTaskIndicator();
   void uiLostBanner();
   void uiConfirmation();
-  void uiToasts();
   void uiModals();
 
   // Data /////////////////////////////////////////////////////////////////////
@@ -163,13 +161,7 @@ class Application : public vsr::ui::imgui::Application
     std::function<void()> onConfirm;
   } m_confirmation;
 
-  struct Toast
-  {
-    std::string text;
-    bool isError{false};
-    double expiresAt{0.0};
-  };
-  std::deque<Toast> m_toasts;
+  StatusOverlay m_statusOverlay;
   // Task states already announced, so each completion toasts once (a replay
   // included).
   vsr::core::FlatMap<uint64_t, TaskState> m_announcedTasks;
