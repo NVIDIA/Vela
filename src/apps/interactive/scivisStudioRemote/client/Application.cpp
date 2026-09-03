@@ -857,21 +857,9 @@ void Application::onUIState(const SubtreePtr &tree)
 
 void Application::applyUIState(const SubtreePtr &tree)
 {
-  if (!tree)
-    return;
-  auto &root = tree->root();
-  if (auto *windows = root.child("windows")) {
-    for (auto *window : m_windows)
-      window->loadSettings((*windows)[window->name()]);
-  }
-  if (auto *layout = root.child("layout")) {
-    const auto ini = layout->getValueOr<std::string>("");
-    // Between NewFrame and Render, as the monolith does; ImGui applies the
-    // dock settings to the windows when they next Begin, later this frame.
-    if (!ini.empty())
-      ImGui::LoadIniSettingsFromMemory(ini.c_str());
-  }
-  loadApplicationSettings(root); // settings/{fontScale, uiRounding}
+  // Between NewFrame and Render, as the monolith does.
+  if (tree)
+    applyUIStateTree(tree->root());
 }
 
 void Application::enterHomeState()

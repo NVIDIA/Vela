@@ -43,9 +43,8 @@ struct ProjectSaveRequest
   vsr::animation::AnimationManager &animationManager;
   std::filesystem::path directory;
   std::vector<std::filesystem::path> pendingAssetRemovals;
-  const vsr::core::DataNode *windows{nullptr};
-  std::string layout;
-  const vsr::core::DataNode *settings{nullptr};
+  // {windows, layout, settings}; see ProjectContext::saveProject.
+  const vsr::core::DataNode *uiState{nullptr};
 };
 
 struct ProjectSaveResult

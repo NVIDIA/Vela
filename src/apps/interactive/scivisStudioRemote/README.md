@@ -623,6 +623,26 @@ Code-quality follow-ups to the M7 review:
   after the body were never consumed in production and are removed
   (`runOneTask()` is `void` again; the runner's `runOne()` still returns the
   `RanTask` the snapshot decision reads).
+- The project's UI state crosses `ProjectContext` as one
+  `{windows, layout, settings}` tree, the shape the manifest, the wire
+  `UIState` and the appliers already shared: `saveProject`, `openProject`
+  and `openStagedProject` take a single nullable `DataNode *` in place of
+  the `windows`/`layout`/`settings` triple, `ProjectSaveRequest` carries
+  `uiState`, and the persistence code copies only those three children
+  (an empty layout is still not written), so the manifest is unchanged for
+  the same inputs. The server's `UIStateCapture` and the save handler's
+  `uiStateParts` are gone: an open writes into `makeSubtree()->root()` and
+  a save passes `&tree->root()`. Applying a tree lives once, in
+  `vsr::ui::imgui::Application::applyUIStateTree`, called by the base
+  class's session load, the monolith's `openProject` and the client's
+  `applyUIState` (still a null check, still between NewFrame and Render,
+  still behind `m_layoutLive`). The applier skips missing children where
+  the base session load and the monolith used to load every window from an
+  empty `windows` node, and skips an empty layout string where the base
+  session load used to hand it to ImGui; no saved state lacks the node and
+  `SaveIniSettingsToMemory` is never empty, so nothing observable changes. The `m_appSettingsDialog->applySettings()` call after the
+  session load stays there: neither the monolith nor the client made it
+  after an open.
 
 ### Spec conformance
 

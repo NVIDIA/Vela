@@ -939,8 +939,7 @@ SCENARIO("SciVis Studio requires valid scene pool Archives", "[SciVisStudio]")
   REQUIRE(validation.error.find("cameras.vsr") != std::string::npos);
 
   std::string error;
-  REQUIRE_FALSE(
-      projectContext.openProject(root, nullptr, nullptr, nullptr, &error));
+  REQUIRE_FALSE(projectContext.openProject(root, nullptr, &error));
   REQUIRE(error.find("cameras.vsr") != std::string::npos);
 
   REQUIRE(projectContext.saveProject(root));
@@ -952,9 +951,121 @@ SCENARIO("SciVis Studio requires valid scene pool Archives", "[SciVisStudio]")
   validation = validateProjectRoot(root);
   REQUIRE_FALSE(validation.ok);
   REQUIRE(validation.error.find("renderers.vsr") != std::string::npos);
-  REQUIRE_FALSE(
-      projectContext.openProject(root, nullptr, nullptr, nullptr, &error));
+  REQUIRE_FALSE(projectContext.openProject(root, nullptr, &error));
   REQUIRE(error.find("renderers.vsr") != std::string::npos);
+
+  std::filesystem::remove_all(root);
+}
+
+SCENARIO("SciVis Studio persists one UI-state tree with the project",
+    "[SciVisStudio]")
+{
+  const auto root =
+      std::filesystem::temp_directory_path() / "vsr_scivis_studio_ui_state";
+  std::filesystem::remove_all(root);
+
+  GIVEN("A project saved with a {windows, layout, settings} tree")
+  {
+    vsr::app::Context appContext;
+    ProjectContext projectContext(&appContext);
+    projectContext.createUnsavedProject();
+
+    vsr::core::DataTree uiState;
+    auto &ui = uiState.root();
+    ui["windows"]["Viewport"]["visible"] = std::string("yes");
+    ui["layout"] = std::string("[Window][Viewport]\nPos=0,0\n");
+    ui["settings"]["fontScale"] = 1.5f;
+    // Only the three named children are the project's UI state.
+    ui["theme"] = std::string("dark");
+
+    std::string error;
+    REQUIRE(projectContext.saveProject(root, &ui, &error));
+
+    THEN("The manifest carries the three children at its root")
+    {
+      vsr::core::DataTree manifest;
+      REQUIRE(
+          manifest.load((root / PROJECT_MANIFEST_FILENAME).string().c_str()));
+      auto &m = manifest.root();
+      REQUIRE(m.child("windows"));
+      REQUIRE(m["windows"]["Viewport"]["visible"].getValueAs<std::string>()
+          == "yes");
+      REQUIRE(m.child("layout"));
+      REQUIRE(m["layout"].getValueAs<std::string>()
+          == "[Window][Viewport]\nPos=0,0\n");
+      REQUIRE(m.child("settings"));
+      REQUIRE(m["settings"]["fontScale"].getValueAs<float>() == 1.5f);
+      REQUIRE_FALSE(m.child("theme"));
+    }
+
+    THEN("Opening the project hands the tree back, replacing what was there")
+    {
+      vsr::app::Context reopenedContext;
+      ProjectContext reopened(&reopenedContext);
+      vsr::core::DataTree out;
+      out.root()["stale"] = std::string("gone");
+      REQUIRE(reopened.openProject(root, &out.root(), &error));
+      auto &o = out.root();
+      REQUIRE_FALSE(o.child("stale"));
+      REQUIRE(o["windows"]["Viewport"]["visible"].getValueAs<std::string>()
+          == "yes");
+      REQUIRE(o["layout"].getValueAs<std::string>()
+          == "[Window][Viewport]\nPos=0,0\n");
+      REQUIRE(o["settings"]["fontScale"].getValueAs<float>() == 1.5f);
+      REQUIRE_FALSE(o.child("theme"));
+    }
+  }
+
+  GIVEN("A project saved with an empty layout and no windows or settings")
+  {
+    vsr::app::Context appContext;
+    ProjectContext projectContext(&appContext);
+    projectContext.createUnsavedProject();
+
+    vsr::core::DataTree uiState;
+    uiState.root()["layout"] = std::string();
+
+    std::string error;
+    REQUIRE(projectContext.saveProject(root, &uiState.root(), &error));
+
+    THEN("The manifest carries none of the UI-state keys")
+    {
+      vsr::core::DataTree manifest;
+      REQUIRE(
+          manifest.load((root / PROJECT_MANIFEST_FILENAME).string().c_str()));
+      auto &m = manifest.root();
+      REQUIRE_FALSE(m.child("windows"));
+      REQUIRE_FALSE(m.child("layout"));
+      REQUIRE_FALSE(m.child("settings"));
+    }
+
+    THEN("Opening the project hands back an empty tree")
+    {
+      vsr::core::DataTree out;
+      out.root()["stale"] = std::string("gone");
+      REQUIRE(projectContext.openProject(root, &out.root(), &error));
+      REQUIRE(out.root().numChildren() == 0);
+    }
+  }
+
+  GIVEN("A project saved without a tree")
+  {
+    vsr::app::Context appContext;
+    ProjectContext projectContext(&appContext);
+    projectContext.createUnsavedProject();
+    std::string error;
+    REQUIRE(projectContext.saveProject(root, nullptr, &error));
+
+    THEN("The manifest carries none of the UI-state keys")
+    {
+      vsr::core::DataTree manifest;
+      REQUIRE(
+          manifest.load((root / PROJECT_MANIFEST_FILENAME).string().c_str()));
+      REQUIRE_FALSE(manifest.root().child("windows"));
+      REQUIRE_FALSE(manifest.root().child("layout"));
+      REQUIRE_FALSE(manifest.root().child("settings"));
+    }
+  }
 
   std::filesystem::remove_all(root);
 }
@@ -2185,8 +2296,7 @@ SCENARIO("SciVis Studio Save As reports unavailable datasets", "[SciVisStudio]")
   REQUIRE(projectContext.saveProject(root));
 
   std::string error;
-  REQUIRE_FALSE(
-      projectContext.saveProject(destination, nullptr, "", nullptr, &error));
+  REQUIRE_FALSE(projectContext.saveProject(destination, nullptr, &error));
   REQUIRE(error.find("Save As requires every dataset to be available")
       != std::string::npos);
   REQUIRE(error.find("Missing Dataset") != std::string::npos);
@@ -2392,8 +2502,7 @@ SCENARIO("SciVis Studio treats the file-animation pair as one dataset asset",
     out << "frames/z.raw\n";
   }
   REQUIRE(projectContext.unloadDataset(id, &error));
-  REQUIRE(
-      projectContext.saveProject(destination, nullptr, "", nullptr, &error));
+  REQUIRE(projectContext.saveProject(destination, nullptr, &error));
   REQUIRE(validateDatasetAsset(destination / "datasets" / "Frames.vsr").ok);
   REQUIRE(fileContents(destination / "datasets" / "Frames.sources")
       == "frames/z.raw\n");
@@ -2599,8 +2708,7 @@ SCENARIO("SciVis Studio residency guards keep unloaded datasets read-only",
     THEN("An in-place asset rewrite requires loading first")
     {
       record.dirty = true;
-      REQUIRE_FALSE(
-          projectContext.saveProject(root, nullptr, "", nullptr, &error));
+      REQUIRE_FALSE(projectContext.saveProject(root, nullptr, &error));
       REQUIRE(error.find("read-only") != std::string::npos);
     }
 
@@ -2782,8 +2890,7 @@ SCENARIO(
     vsr::app::Context appContext;
     ProjectContext projectContext(&appContext);
     std::string error;
-    REQUIRE(projectContext.openProject(
-        root, nullptr, nullptr, nullptr, &error, bookkeeping));
+    REQUIRE(projectContext.openProject(root, nullptr, &error, bookkeeping));
     auto &project = projectContext.project();
 
     // No dataset runtime is built and recorded residency is untouched.
@@ -2840,10 +2947,9 @@ SCENARIO(
     vsr::app::Context appContext;
     ProjectContext projectContext(&appContext);
     std::string error;
-    REQUIRE(projectContext.openProject(
-        root, nullptr, nullptr, nullptr, &error, bookkeeping));
+    REQUIRE(projectContext.openProject(root, nullptr, &error, bookkeeping));
     REQUIRE(projectContext.renameDataset(framesId, "Renamed Frames", &error));
-    REQUIRE(projectContext.saveProject(root, nullptr, "", nullptr, &error));
+    REQUIRE(projectContext.saveProject(root, nullptr, &error));
     REQUIRE(std::filesystem::exists(root / "datasets" / "Renamed Frames.vsr"));
     REQUIRE(fileContents(root / "datasets" / "Renamed Frames.sources")
         == "frames/a.raw\nframes/b.raw\n");
@@ -2856,7 +2962,7 @@ SCENARIO(
     REQUIRE(projectContext.unloadDataset(loadedId, &error));
     REQUIRE(projectContext.loadDataset(unloadedId, &error));
     REQUIRE(appContext.vsr.scene.numberOfObjects(ANARI_GEOMETRY) > 0);
-    REQUIRE(projectContext.saveProject(root, nullptr, "", nullptr, &error));
+    REQUIRE(projectContext.saveProject(root, nullptr, &error));
   }
 
   {
@@ -2915,8 +3021,7 @@ SCENARIO("SciVis Studio Save As copies unloaded datasets", "[SciVisStudio]")
   REQUIRE(projectContext.unloadDataset(parkedId));
 
   std::string error;
-  REQUIRE(
-      projectContext.saveProject(destination, nullptr, "", nullptr, &error));
+  REQUIRE(projectContext.saveProject(destination, nullptr, &error));
   REQUIRE(readBytes(destination / "datasets/Parked.vsr") == sourceBytes);
   REQUIRE(validateDatasetAsset(destination / "datasets/Parked.vsr").ok);
   REQUIRE(validateDatasetAsset(destination / "datasets/Resident.vsr").ok);
@@ -2974,8 +3079,7 @@ SCENARIO("SciVis Studio Save As renames colliding unloaded datasets",
   projectContext.project().markDirty();
 
   std::string error;
-  REQUIRE(
-      projectContext.saveProject(destination, nullptr, "", nullptr, &error));
+  REQUIRE(projectContext.saveProject(destination, nullptr, &error));
   const auto firstArchive =
       validateDatasetAsset(destination / "datasets/Duplicate.vsr");
   REQUIRE(firstArchive.ok);
@@ -3040,8 +3144,7 @@ SCENARIO("SciVis Studio --openUnloaded overrides initial residency",
     vsr::app::Context appContext;
     ProjectContext projectContext(&appContext);
     std::string error;
-    REQUIRE(projectContext.openProject(
-        root, nullptr, nullptr, nullptr, &error, openUnloaded));
+    REQUIRE(projectContext.openProject(root, nullptr, &error, openUnloaded));
     auto &project = projectContext.project();
     auto &record = project.datasets.front();
 
@@ -3062,8 +3165,7 @@ SCENARIO("SciVis Studio --openUnloaded overrides initial residency",
     vsr::app::Context appContext;
     ProjectContext projectContext(&appContext);
     std::string error;
-    REQUIRE(projectContext.openProject(
-        root, nullptr, nullptr, nullptr, &error, openUnloaded));
+    REQUIRE(projectContext.openProject(root, nullptr, &error, openUnloaded));
 
     THEN("An override that changes nothing leaves the project clean")
     {
@@ -3125,7 +3227,7 @@ SCENARIO("SciVis Studio --openUnloaded overrides initial residency",
       ProjectContext projectContext(&appContext);
       std::string error;
       REQUIRE(projectContext.openProject(
-          legacyRoot, nullptr, nullptr, nullptr, &error, openUnloaded));
+          legacyRoot, nullptr, &error, openUnloaded));
       auto &record = projectContext.project().datasets.front();
       REQUIRE(record.residency == DatasetResidency::Loaded);
       REQUIRE(record.status == DatasetStatus::Available);
@@ -3416,7 +3518,7 @@ SCENARIO("SciVis Studio stages every dirty dataset before replacement",
   projectContext.project().datasets[1].dirty = true;
 
   std::string error;
-  REQUIRE_FALSE(projectContext.saveProject(root, nullptr, "", nullptr, &error));
+  REQUIRE_FALSE(projectContext.saveProject(root, nullptr, &error));
   REQUIRE(error.find("Second") != std::string::npos);
   REQUIRE(readBytes(firstAsset) == before);
   for (const auto &entry :
@@ -3461,7 +3563,7 @@ SCENARIO("SciVis Studio pool Archive failures preserve the previous project",
   projectContext.project().markDirty();
 
   std::string error;
-  REQUIRE_FALSE(projectContext.saveProject(root, nullptr, "", nullptr, &error));
+  REQUIRE_FALSE(projectContext.saveProject(root, nullptr, &error));
   REQUIRE(error.find("Camera pool Archive") != std::string::npos);
   REQUIRE(readBytes(manifest) == manifestBefore);
   REQUIRE(readBytes(cameras) == camerasBefore);
@@ -3520,7 +3622,7 @@ SCENARIO("SciVis Studio save collisions leave files and live names unchanged",
   dataset->dirty = true;
   projectContext.project().markDirty();
   std::string error;
-  REQUIRE_FALSE(projectContext.saveProject(root, nullptr, "", nullptr, &error));
+  REQUIRE_FALSE(projectContext.saveProject(root, nullptr, &error));
   REQUIRE(error.find("unowned target") != std::string::npos);
   REQUIRE(dataset->name == "bad/name");
   REQUIRE(dataset->dirty);
@@ -3535,8 +3637,7 @@ SCENARIO("SciVis Studio save collisions leave files and live names unchanged",
   std::filesystem::copy_file(managed, destinationCollision);
   const auto destinationBefore = readBytes(destinationCollision);
   error.clear();
-  REQUIRE_FALSE(
-      projectContext.saveProject(destination, nullptr, "", nullptr, &error));
+  REQUIRE_FALSE(projectContext.saveProject(destination, nullptr, &error));
   REQUIRE(error.find("unowned target") != std::string::npos);
   REQUIRE(projectContext.project().projectDirectory == root);
   REQUIRE(readBytes(destinationCollision) == destinationBefore);

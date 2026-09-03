@@ -81,10 +81,9 @@ class Application : public vsr::ui::imgui::Application
       const ProjectOpenOptions &options = {});
   void newProject();
   void saveDefaultLayoutFile() const;
-  void saveWindowSettings(vsr::core::DataNode &node);
-  void loadWindowSettings(vsr::core::DataNode &node);
-  std::string saveLayout() const;
-  void loadLayout(const std::string &layout);
+  // The {windows, layout, settings} tree saveProjectAs() stores; opening
+  // applies one with applyUIStateTree().
+  void saveUIStateTree(vsr::core::DataNode &root);
   void requestDirtyAction(PendingDirtyAction action);
   void requestOpenRecentProject(const std::filesystem::path &directory);
   void continueDirtyAction();

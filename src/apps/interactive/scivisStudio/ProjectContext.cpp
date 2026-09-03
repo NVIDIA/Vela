@@ -1914,9 +1914,7 @@ void ProjectContext::writeAnimationStateToShot(Shot &shot) const
 }
 
 bool ProjectContext::saveProject(const std::filesystem::path &directory,
-    vsr::core::DataNode *windows,
-    const std::string &layout,
-    vsr::core::DataNode *settings,
+    const vsr::core::DataNode *uiState,
     std::string *error)
 {
   if (!m_ctx)
@@ -1925,9 +1923,7 @@ bool ProjectContext::saveProject(const std::filesystem::path &directory,
   ProjectSaveRequest request(
       m_project, m_ctx->vsr.scene, m_ctx->vsr.animationMgr, directory);
   request.pendingAssetRemovals = m_pendingAssetRemovals;
-  request.windows = windows;
-  request.layout = layout;
-  request.settings = settings;
+  request.uiState = uiState;
 
   ProjectSaveResult save;
   if (!buildProjectSavePlan(request, save, error))
@@ -1945,9 +1941,7 @@ bool ProjectContext::saveProject(const std::filesystem::path &directory,
 }
 
 bool ProjectContext::openProject(const std::filesystem::path &directory,
-    vsr::core::DataNode *windowsOut,
-    std::string *layoutOut,
-    vsr::core::DataNode *settingsOut,
+    vsr::core::DataNode *uiStateOut,
     std::string *error,
     const ProjectOpenOptions &options)
 {
@@ -1957,7 +1951,7 @@ bool ProjectContext::openProject(const std::filesystem::path &directory,
   ProjectOpenStage stage;
   if (!stageProjectOpen(directory, stage, options, error))
     return false;
-  if (!openStagedProject(stage, windowsOut, layoutOut, settingsOut, error))
+  if (!openStagedProject(stage, uiStateOut, error))
     return false;
 
   vsr::core::logStatus(
@@ -1966,9 +1960,7 @@ bool ProjectContext::openProject(const std::filesystem::path &directory,
 }
 
 bool ProjectContext::openStagedProject(ProjectOpenStage &stage,
-    vsr::core::DataNode *windowsOut,
-    std::string *layoutOut,
-    vsr::core::DataNode *settingsOut,
+    vsr::core::DataNode *uiStateOut,
     std::string *error)
 {
   if (!m_ctx)
@@ -2001,21 +1993,10 @@ bool ProjectContext::openStagedProject(ProjectOpenStage &stage,
   }
   syncAnimationManagerToActiveShot();
 
-  if (windowsOut) {
-    windowsOut->reset();
-    if (auto *windows = stage.ui.root().child("windows"))
-      *windowsOut = *windows;
-  }
-  if (layoutOut) {
-    layoutOut->clear();
-    if (auto *layout = stage.ui.root().child("layout"))
-      *layoutOut = layout->getValueAs<std::string>();
-  }
-  if (settingsOut) {
-    settingsOut->reset();
-    if (auto *settings = stage.ui.root().child("settings"))
-      *settingsOut = *settings;
-  }
+  // The staged tree holds only {windows, layout, settings}; node assignment
+  // replaces the destination's children and keeps its name.
+  if (uiStateOut)
+    *uiStateOut = stage.ui.root();
 
   applyActiveShot();
   return true;

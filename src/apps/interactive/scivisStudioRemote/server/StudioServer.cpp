@@ -241,20 +241,17 @@ bool StudioServer::setupProject(std::string *error)
     // The same tree the dispatcher keeps after an OpenProject: the
     // bootstrap hands it to the client and a save without one writes it
     // back.
-    UIStateCapture ui;
+    auto uiState = makeSubtree();
     std::string openError;
-    if (!m_projectContext.openProject(m_options.projectDirectory,
-            ui.windows(),
-            &ui.layout,
-            ui.settings(),
-            &openError)) {
+    if (!m_projectContext.openProject(
+            m_options.projectDirectory, &uiState->root(), &openError)) {
       if (error) {
         *error = "failed to open project '"
             + m_options.projectDirectory.string() + "': " + openError;
       }
       return false;
     }
-    m_uiState = ui.tree();
+    m_uiState = uiState;
     vsr::core::logStatus("[StudioServer] opened project '%s' (%s)",
         m_projectContext.project().name.c_str(),
         m_options.projectDirectory.c_str());

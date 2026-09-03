@@ -66,15 +66,14 @@ struct BookkeepingSession
   {
     ProjectOpenOptions options;
     options.bookkeeping = true;
-    return context.openProject(
-        directory, nullptr, nullptr, nullptr, &error, options);
+    return context.openProject(directory, nullptr, &error, options);
   }
 };
 
 bool persistProject(ProjectContext &context, std::string &error)
 {
   return context.saveProject(
-      context.project().projectDirectory, nullptr, "", nullptr, &error);
+      context.project().projectDirectory, nullptr, &error);
 }
 
 bool parseImporterType(const std::string &importerString,
@@ -710,8 +709,7 @@ int runProjectInit(
     context.project().name = commandLine.name;
 
   std::string error;
-  if (!context.saveProject(
-          commandLine.projectDirectory, nullptr, "", nullptr, &error))
+  if (!context.saveProject(commandLine.projectDirectory, nullptr, &error))
     return commandFailed(error);
 
   output << formatProjectInit(
