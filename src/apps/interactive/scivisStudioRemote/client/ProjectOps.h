@@ -394,7 +394,9 @@ struct ProjectOps
   TaskRecord &recordFor(uint64_t taskId);
   // The record of `taskId` as if newly heard of (Queued "Task N", nothing
   // else kept), its generation bumped when there was one: a new task under
-  // the id.
+  // the id. The one exception is `render` on a record this client failed at
+  // BootstrapBegin (announced): the server never ended that task, so a
+  // render it named may still be running and still refusing edits.
   TaskRecord &startOver(uint64_t taskId);
   Pending *findPending(uint64_t requestId);
   const Pending *findPending(uint64_t requestId) const;

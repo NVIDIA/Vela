@@ -950,6 +950,49 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
       }
     }
 
+    WHEN("a render this client launched is still running across a reconnect")
+    {
+      const auto render = f.ops().renderShot("shot_0001", nullptr);
+      REQUIRE(f.waitForRequests(1));
+      auto started = makeOkReply(render.requestId);
+      setResults(started, TaskStartedResult{7});
+      f.server.send(encode(started));
+      REQUIRE(pollUntil(f.connection, [&] { return f.ops().renderActive(); }));
+
+      TaskProgress running;
+      running.taskId = 7;
+      running.current = 4;
+      running.total = 12;
+      running.message = "frame 4 of 12";
+      f.server.bootstrap.push_back(encode(running));
+      f.server.sendBootstrap();
+      REQUIRE(f.waitConnectedAndBootstrapped(2));
+
+      THEN("the restarted record still counts as a render")
+      {
+        const TaskRecord *task = f.ops().task(7);
+        REQUIRE(task);
+        REQUIRE(task->state == TaskState::Running);
+        REQUIRE(task->generation == 1);
+        REQUIRE(task->render);
+        // The editors go on refusing edits while the server does.
+        REQUIRE(f.ops().renderActive());
+        // The label still starts over: the replay's description wins.
+        REQUIRE(task->label == "frame 4 of 12");
+
+        AND_THEN("its ending clears the render state")
+        {
+          TaskCompleted done;
+          done.taskId = 7;
+          done.framesCompleted = 12;
+          f.server.send(encode(done));
+          REQUIRE(pollUntil(f.connection,
+              [&] { return f.ops().task(7)->state == TaskState::Completed; }));
+          REQUIRE_FALSE(f.ops().renderActive());
+        }
+      }
+    }
+
     WHEN("the next bootstrap replays progress for the task the client failed")
     {
       TaskProgress running;
