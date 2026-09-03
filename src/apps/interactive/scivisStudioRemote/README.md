@@ -650,7 +650,7 @@ Code-quality follow-ups to the M7 review:
   the `windows`/`layout`/`settings` triple, `ProjectSaveRequest` carries
   `uiState`, and the persistence code copies only those three children
   (an empty layout is still not written), so the manifest is unchanged for
-  the same inputs. The server's `UIStateCapture` and the save handler's
+  the same inputs -- with one exception, below. The server's `UIStateCapture` and the save handler's
   `uiStateParts` are gone: an open writes into `makeSubtree()->root()` and
   a save passes `&tree->root()`. Applying a tree lives once, in
   `vsr::ui::imgui::Application::applyUIStateTree`, called by the base
@@ -659,10 +659,31 @@ Code-quality follow-ups to the M7 review:
   still behind `m_layoutLive`). The applier skips missing children where
   the base session load and the monolith used to load every window from an
   empty `windows` node, and skips an empty layout string where the base
-  session load used to hand it to ImGui; no saved state lacks the node and
-  `SaveIniSettingsToMemory` is never empty, so nothing observable changes. The `m_appSettingsDialog->applySettings()` call after the
+  session load used to hand it to ImGui. Session files always carry
+  `windows` and `SaveIniSettingsToMemory` is never empty, but project
+  manifests reach the skip: every `saveProject(dir, nullptr, ...)` writes
+  none of the three keys, `StudioCLI`'s `persistProject` and `project init`
+  among them. Opening one is still a no-op, because `DataNode::getValue`
+  leaves the destination alone when the node has no value, and the two
+  side effects that would have fired are
+  `camera_setUseImplicitAspectRatio(same value)` and
+  `StudioViewport::loadSettings`'s trailing `sendViewportSettings()`, a
+  no-op until the server is ready. `child()` is also the right guard here:
+  `root["windows"]` would create the child in the snapshot being applied.
+  The `m_appSettingsDialog->applySettings()` call after the
   session load stays there: neither the monolith nor the client made it
   after an open.
+- The one manifest difference: a headless save of a project whose manifest
+  had no UI keys writes two fewer keys than before. The server's old
+  `UIStateCapture` built its tree with `operator[]`, so an open created
+  empty `windows` and `settings` children; a later `SaveProject` with no
+  client tree (the test client, any headless caller) fell back to that tree
+  and `buildProjectSavePlan` wrote both as valueless leaves. The open now
+  guards with `child()`, so the tree stays empty and neither key is
+  written. Accepted as a fix rather than reverted: the output matches what
+  a `nullptr` save writes, and nothing in-tree requires the keys (open
+  guards with `child()` too). "Manifest byte-identical" therefore held for
+  the GUI path, which always supplies real windows.
 - Cancellation is reported, not inferred. `TaskResult::cancelled` says the
   body stopped because its `TaskControl` reported a cancel request; the
   render body sets it from `RenderShotResult::cancelled` (the wire error
