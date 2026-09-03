@@ -6,6 +6,7 @@
 #include "Message.hpp"
 // std
 #include <atomic>
+#include <chrono>
 #include <deque>
 #include <future>
 #include <memory>
@@ -58,11 +59,6 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
   //// Send messages ////
 
   MessageFuture send(Message &&msg);
-  // IO thread only. Writes `msg` on the socket right now, without blocking:
-  // a farewell before a close the caller is about to make. Best effort --
-  // false when the socket is closed, when a queued write is under way
-  // (interleaving would corrupt the stream) or when the kernel would block.
-  bool sendImmediately(const Message &msg);
   MessageFuture send(uint8_t type, StructuredMessage &&msg);
 
   /* No payload */
@@ -92,6 +88,8 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
   void close_socket(const boost::system::error_code &reason);
   // Settles every queued write with `error`.
   void fail_pending_writes(const boost::system::error_code &error);
+  // True when nothing is queued or on the wire.
+  bool writes_idle();
 
   asio::io_context m_io_context;
   std::thread m_io_thread;
@@ -109,6 +107,9 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
   // replaced since, so a cut-off operation on the old socket never closes the
   // new one. IO thread only.
   uint64_t m_socketGeneration{0};
+  // False from stop_messaging() until the next start_messaging(); the
+  // completions a stop cuts off see it false and stand down.
+  std::atomic<bool> m_messagingActive{false};
 
  private:
   struct PendingWrite
@@ -134,7 +135,6 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
   std::mutex m_writeMutex;
   std::deque<std::shared_ptr<PendingWrite>> m_pendingWrites;
   bool m_writeInProgress{false};
-  std::atomic<bool> m_messagingActive{false};
 
   std::mutex m_lifecycleMutex;
   ConnectHandler m_connectHandler;
@@ -164,8 +164,11 @@ struct NetworkServer : public NetworkChannel
   unsigned short port() const;
 
   // Runs on the IO thread when a new connection is about to replace a live
-  // one, before the old socket closes; a last sendImmediately() to the
-  // client being replaced belongs here. Set before start().
+  // one, before the old socket closes; a farewell to the client being
+  // replaced belongs here, sent with the ordinary send(). What it queues,
+  // and whatever was queued before it, gets REPLACE_DRAIN_TIMEOUT to leave
+  // before the old socket closes and the new connection is announced. Set
+  // before start().
   void setReplaceHandler(ReplaceHandler handler);
 
   void start();
@@ -177,10 +180,20 @@ struct NetworkServer : public NetworkChannel
   // restart() calls do not stack accepts. A connection accepted over a live
   // one replaces it: the old connection is closed and reported lost first.
   void start_accept();
+  // The accepted socket becomes the connection: announced, read from, and
+  // the next accept armed.
+  void adopt(tcp::socket &&socket);
+  // Waits (polling on the IO thread) for the old connection's writes to
+  // drain, until `deadline`, then closes it and adopts m_replacement.
+  void replace_when_drained(std::chrono::steady_clock::time_point deadline);
 
   tcp::acceptor m_acceptor;
   std::atomic<bool> m_acceptPending{false};
   ReplaceHandler m_replaceHandler;
+  // The connection accepted over a live one, until that one's writes have
+  // drained. IO thread only, except that stop() drops it after the join.
+  std::shared_ptr<tcp::socket> m_replacement;
+  asio::steady_timer m_replaceTimer;
 };
 
 /*
