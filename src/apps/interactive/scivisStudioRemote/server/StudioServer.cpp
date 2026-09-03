@@ -675,8 +675,7 @@ void StudioServer::dispatchPendingRequests()
     // it names would always come too late.
     auto next = m_pendingRequests.begin();
     // A request the dispatcher will refuse anyway need not wait its turn.
-    const bool refusedNow =
-        m_dispatcher.renderActive() && refusedWhileRendering(*next);
+    const bool refusedNow = m_dispatcher.refuses(*next);
     if (!refusedNow && m_tasks.queued() > 0 && waitsForQueuedTasks(*next)) {
       next = std::find_if(
           std::next(next), m_pendingRequests.end(), independentOfQueuedTasks);

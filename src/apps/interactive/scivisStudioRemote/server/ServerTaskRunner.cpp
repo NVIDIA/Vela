@@ -173,7 +173,6 @@ std::optional<RanTask> ServerTaskRunner::runOne()
 
   RanTask ran;
   ran.taskId = task.id;
-  ran.exclusive = task.exclusive;
   try {
     ran.result = task.body(control);
   } catch (const std::exception &e) {

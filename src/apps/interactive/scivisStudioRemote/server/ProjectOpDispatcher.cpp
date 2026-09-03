@@ -248,11 +248,6 @@ bool independentOfQueuedTasks(const ProjectRequest &request)
       && !policy.mutates;
 }
 
-bool refusedWhileRendering(const ProjectRequest &request)
-{
-  return policyOf(request).mutates;
-}
-
 // UIStateCapture /////////////////////////////////////////////////////////////
 
 UIStateCapture::UIStateCapture() : m_tree(makeSubtree()) {}
@@ -279,7 +274,7 @@ ProjectOpDispatcher::ProjectOpDispatcher(Host host) : m_host(std::move(host)) {}
 
 void ProjectOpDispatcher::dispatch(const ProjectRequest &request)
 {
-  if (renderActive() && refusedWhileRendering(request)) {
+  if (refuses(request)) {
     // Pause-and-refuse: the render owns the Project and the Scene until it
     // ends; whoever asked can try again afterwards.
     const auto requestId =
@@ -290,12 +285,16 @@ void ProjectOpDispatcher::dispatch(const ProjectRequest &request)
   std::visit([this](const auto &r) { handle(r); }, request);
 }
 
-std::optional<RanTask> ProjectOpDispatcher::runOneTask()
+bool ProjectOpDispatcher::refuses(const ProjectRequest &request) const
 {
-  auto ran = m_host.tasks->runOne();
+  return renderActive() && policyOf(request).mutates;
+}
+
+void ProjectOpDispatcher::runOneTask()
+{
+  const auto ran = m_host.tasks->runOne();
   if (ran && ran->result.projectChanged)
     sendSnapshot();
-  return ran;
 }
 
 bool ProjectOpDispatcher::renderActive() const
