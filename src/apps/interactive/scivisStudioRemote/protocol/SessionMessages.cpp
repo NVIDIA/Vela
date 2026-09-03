@@ -31,11 +31,21 @@ bool fromNode(const vsr::core::DataNode &n, Error &e)
   return true;
 }
 
+void toNode(const Disconnect &d, vsr::core::DataNode &n)
+{
+  writeChild(n, "reason", d.reason);
+}
+
+bool fromNode(const vsr::core::DataNode &n, Disconnect &d)
+{
+  d.reason = readChildOr(n, "reason", std::string());
+  return true;
+}
+
 // Empty payloads /////////////////////////////////////////////////////////////
 
 VSR_STUDIO_EMPTY_PAYLOAD(Ping)
 VSR_STUDIO_EMPTY_PAYLOAD(Pong)
-VSR_STUDIO_EMPTY_PAYLOAD(Disconnect)
 VSR_STUDIO_EMPTY_PAYLOAD(Shutdown)
 VSR_STUDIO_EMPTY_PAYLOAD(BootstrapBegin)
 VSR_STUDIO_EMPTY_PAYLOAD(BootstrapEnd)

@@ -714,7 +714,7 @@ decisions, `M7-n`).
 | Spec bullet | Status | Where | Note |
 |-------------|--------|-------|------|
 | **Message inventory (v1)** | | | |
-| Session: `Hello`, `Ping`/`Pong`, `Disconnect`, `Shutdown`, `BootstrapBegin`/`End` | implemented | `protocol/SessionMessages.h`, `server/StudioServer.cpp` | `Error` (2) is the bare error the spec's "rejected with an error" needs |
+| Session: `Hello`, `Ping`/`Pong`, `Disconnect{reason?}`, `Shutdown`, `BootstrapBegin`/`End` | implemented | `protocol/SessionMessages.h`, `server/StudioServer.cpp` | `Error` (2) is the bare error the spec's "rejected with an error" needs; `Disconnect.reason` (v3) is the server's farewell to an evicted client |
 | Project: `NewProject`, `OpenProject`, `SaveProject(dir?, uiState)` | implemented | `server/ProjectOpDispatcher.cpp`, `server/ProjectOpDispatcherTasks.cpp` | plus `UIState` server-to-client (107), sent in every bootstrap and by `OpenProject`'s body |
 | Dataset ops (imports, declare, reimport, rename/remove/unload/refresh, load, archive save/load, incorporate, discover) | implemented | `ProjectOpDispatcher.cpp` (sync), `ProjectOpDispatcherTasks.cpp` (tasks), types 23..35 | task/sync split as listed |
 | Shot: `CreateShot`, `RemoveShot`, `UpdateShot`, `SetActiveShot` | implemented | types 36..39 | `UpdateShot` never honours `playing` |
