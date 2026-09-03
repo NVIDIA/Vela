@@ -18,14 +18,19 @@ namespace vsr::scivis_studio::server {
 
 // What a task body reports back: success or an error for the client, an
 // optional message for TaskCompleted (a created dataset's id, a render's
-// output directory), the frames a render wrote, and whether the Project
-// changed so the caller knows to send a ProjectSnapshot.
+// output directory), the frames a render wrote, whether the body stopped
+// because it was asked to, and whether the Project changed so the caller
+// knows to send a ProjectSnapshot.
 struct TaskResult
 {
   bool ok{true};
   std::string error;
   std::string message;
   uint64_t framesCompleted{0};
+  // The body stopped because its TaskControl reported a cancel request
+  // (with ok=false and error="cancelled"). Decides the CancelTask's answer;
+  // see the ServerTaskRunner comment.
+  bool cancelled{false};
   bool projectChanged{false};
 };
 
@@ -68,37 +73,24 @@ struct TaskControl
 
 using TaskBody = std::function<TaskResult(const TaskControl &)>;
 
-// A task that ran: what its body returned, for the caller's snapshot.
-struct RanTask
-{
-  uint64_t taskId{0};
-  TaskResult result;
-};
-
-// A task that ended: what its TaskCompleted/TaskFailed said, kept for the
-// task-status replay of the next bootstrap.
+// A task that ended: what its body returned (or, for a task dropped from
+// the queue, the "cancelled" failure the runner made up for it), which is
+// what its TaskCompleted/TaskFailed said; kept for the task-status replay
+// of the next bootstrap.
 struct FinishedTask
 {
   uint64_t taskId{0};
   std::string description;
-  bool ok{false};
-  std::string error;
-  std::string message;
-  uint64_t framesCompleted{0};
-  // A cancel was asked for while it ran and the body did not complete: the
-  // CancelTask dispatched after the body returns is answered "ok". A body
-  // that ignored the flag and completed leaves this false, and that cancel
-  // is refused with "task already finished".
-  bool cancelled{false};
+  TaskResult result;
   // Its ending went out in a bootstrap replay; the next one skips it.
   bool replayed{false};
 };
 
 // The task running right now: what the replay says of it, and whether it is
 // the exclusive one (the shot render) the dispatcher refuses mutations for.
+// Its id is the runner's m_runningId, shared with the IO thread.
 struct RunningTask
 {
-  uint64_t taskId{0};
   std::string description;
   uint64_t current{0};
   uint64_t total{0};
@@ -118,12 +110,16 @@ struct RunningTask
  * Cancel is cooperative: a task still in the queue is dropped and reported
  * as TaskFailed{"cancelled"}; for the running one the IO thread raises the
  * cancel flag (requestCancelRunning) that a body polls through its
- * TaskControl. The CancelTask itself, dispatched once the body has
- * returned, is answered "ok" when the body stopped short of completing (the
- * render at its next frame) and "task already finished" when it ignored the
- * flag and completed anyway (every other body today). An exclusive task
- * (the shot render) makes the dispatcher refuse mutating requests while it
- * is queued or running.
+ * TaskControl. The body reports whether it stopped for the flag
+ * (TaskResult::cancelled, with error "cancelled"; the shot render does, at
+ * its next frame). The CancelTask itself, dispatched once the body has
+ * returned, is answered "ok" when the body reported cancelled and "task
+ * already finished" otherwise: the body ignored the flag and completed
+ * (every other body today), or failed for a reason of its own. A task
+ * dropped from the queue leaves cancelled false (no body ran): the
+ * CancelTask that dropped it is answered on the spot, and a later one is
+ * told the task finished. An exclusive task (the shot render) makes the
+ * dispatcher refuse mutating requests while it is queued or running.
  *
  * The runner remembers the last HISTORY_CAP tasks that ended, so a client
  * that connects after a task finished with nobody listening still hears how
@@ -160,20 +156,19 @@ struct ServerTaskRunner
       std::string description, TaskBody body, bool exclusive = false);
 
   // Loop thread. Removes a queued task (TaskFailed{"cancelled"} is sent), or
-  // acknowledges the cancel of a task that stopped when asked to while
-  // running. False with `error` for the running task, a task that finished
+  // acknowledges the cancel of a task whose body reported it stopped when
+  // asked to. False with `error` for the running task, a task that finished
   // (completed, or failed on its own), or an unknown id.
   bool cancel(uint64_t taskId, std::string *error = nullptr);
 
   // Any thread. Raises the cancel flag when `taskId` is the running task;
   // false when it is not.
   bool requestCancelRunning(uint64_t taskId);
-  // Any thread. Whether a cancel was requested for `taskId` while it runs.
-  bool cancelRequested(uint64_t taskId) const;
 
   // Runs the oldest queued task to completion, sending its progress and its
-  // one TaskCompleted/TaskFailed; empty when the queue was empty.
-  std::optional<RanTask> runOne();
+  // one TaskCompleted/TaskFailed, and returns its ending; empty when the
+  // queue was empty.
+  std::optional<FinishedTask> runOne();
 
   // Forgets every queued task without a word: the session they were sent on
   // is gone and their ids mean nothing to the next client. An exclusive task
@@ -205,7 +200,7 @@ struct ServerTaskRunner
   const FinishedTask *findFinished(uint64_t taskId) const;
   // Sends the ending and keeps it for the replay, forgetting the oldest
   // beyond HISTORY_CAP.
-  void recordEnding(FinishedTask finished);
+  void recordEnding(const FinishedTask &finished);
 
   SendFunction m_send;
   std::deque<QueuedTask> m_queue;

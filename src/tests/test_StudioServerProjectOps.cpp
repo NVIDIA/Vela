@@ -477,13 +477,17 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
               REQUIRE(runner.requestCancelRunning(render));
           }
           result.ok = frames == 200;
-          result.error = result.ok ? "" : "cancelled";
+          result.cancelled = !result.ok;
+          result.error = result.cancelled ? "cancelled" : "";
           result.framesCompleted = frames;
           return result;
         },
         true);
-    const auto after = runner.enqueue(
-        "after", [&](const TaskControl &) { return TaskResult{}; });
+    const auto after = runner.enqueue("after", [&](const TaskControl &task) {
+      // The render's cancel request does not carry over to the next body.
+      REQUIRE_FALSE(task.cancelRequested());
+      return TaskResult{};
+    });
 
     THEN(
         "it is pending, and the flag is refused for a task that is not running")
@@ -491,7 +495,6 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
       REQUIRE(runner.exclusivePending());
       REQUIRE_FALSE(runner.requestCancelRunning(render));
       REQUIRE_FALSE(runner.requestCancelRunning(after));
-      REQUIRE_FALSE(runner.cancelRequested(render));
     }
 
     WHEN("it runs")
@@ -523,7 +526,7 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
         REQUIRE(runner.cancel(render, &error));
         REQUIRE(runner.cancel(render, &error)); // idempotent
         REQUIRE(runner.finished().size() == 1);
-        REQUIRE(runner.finished().front().cancelled);
+        REQUIRE(runner.finished().front().result.cancelled);
       }
 
       AND_WHEN("the next bootstrap replays the history")
@@ -586,9 +589,42 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
         std::string error;
         REQUIRE_FALSE(runner.cancel(import, &error));
         REQUIRE(error == "task already finished");
-        REQUIRE_FALSE(runner.finished().front().cancelled);
+        REQUIRE_FALSE(runner.finished().front().result.cancelled);
         REQUIRE(sent.size() == 1);
         REQUIRE(decode<TaskCompleted>(sent.back()));
+      }
+    }
+  }
+
+  GIVEN("a task that fails on its own after a cancel was requested")
+  {
+    uint64_t import = 0;
+    import = runner.enqueue("import", [&](const TaskControl &task) {
+      REQUIRE(runner.requestCancelRunning(import));
+      REQUIRE(task.cancelRequested());
+      // The body saw the flag but stopped for a reason of its own; it does
+      // not report cancelled.
+      TaskResult result;
+      result.ok = false;
+      result.error = "boom";
+      return result;
+    });
+
+    WHEN("it runs")
+    {
+      const auto ran = runner.runOne();
+      REQUIRE(ran);
+      REQUIRE_FALSE(ran->result.ok);
+
+      THEN("its failure stands: the cancel is not acknowledged")
+      {
+        REQUIRE_FALSE(runner.finished().back().result.cancelled);
+        std::string error;
+        REQUIRE_FALSE(runner.cancel(import, &error));
+        REQUIRE(error == "task already finished");
+        const auto failed = decode<TaskFailed>(sent.back());
+        REQUIRE(failed);
+        REQUIRE(failed->error == "boom");
       }
     }
   }

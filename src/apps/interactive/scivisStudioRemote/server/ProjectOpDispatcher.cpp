@@ -1062,6 +1062,7 @@ void ProjectOpDispatcher::handle(const RenderShot &req)
                 m_host.dropLatchedInputs();
               result.ok = rendered.completed;
               result.error = rendered.cancelled ? "cancelled" : rendered.error;
+              result.cancelled = rendered.cancelled;
               result.message = rendered.outputDirectory.string();
               result.framesCompleted = uint64_t(rendered.framesCompleted);
               // Residency and the dirty flag were restored, the frame time
