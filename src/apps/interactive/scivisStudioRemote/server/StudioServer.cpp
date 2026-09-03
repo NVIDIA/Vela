@@ -423,15 +423,11 @@ bool StudioServer::setupNetwork(std::string *error)
   m_server->setDisconnectHandler(
       [this](const boost::system::error_code &ec) { onDisconnected(ec); });
   // Single client per server: the one being replaced hears why before its
-  // socket closes (best effort; a Frame mid-write on a slow link wins).
+  // socket closes (the transport lets the queue drain, briefly, first).
   m_server->setReplaceHandler([this]() {
     Error error;
     error.message = "replaced by another client";
-    if (!m_server->sendImmediately(encode(error))) {
-      vsr::core::logWarning(
-          "[StudioServer] replaced client could not be told; it sees the"
-          " close");
-    }
+    m_server->send(encode(error));
   });
   // Every one of the 256 type bytes gets a handler so a message outside the
   // Studio set is answered with an Error instead of vanishing in the

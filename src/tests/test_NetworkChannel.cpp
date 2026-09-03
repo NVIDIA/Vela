@@ -88,16 +88,24 @@ SCENARIO(
 
     WHEN("a second client connects over the live first one")
     {
-      // The replace handler's farewell reaches the first client before the
-      // close does.
+      // The replace handler's farewell goes through the ordinary write queue
+      // and reaches the first client before the close does, even behind a
+      // large write already queued.
+      constexpr uint8_t BULK = 41;
       constexpr uint8_t FAREWELL = 42;
+      std::atomic<int> bulks{0};
       std::atomic<int> farewells{0};
+      std::atomic<int> farewellsBeforeClose{-1};
+      client->registerHandler(BULK, [&](const Message &) { bulks++; });
       client->registerHandler(FAREWELL, [&](const Message &) { farewells++; });
-      std::atomic<bool> farewellSent{false};
+      client->setDisconnectHandler([&](const boost::system::error_code &) {
+        farewellsBeforeClose = farewells.load();
+        clientCounters.disconnected++;
+      });
       server->setReplaceHandler([&] {
-        Message farewell;
-        farewell.header.type = FAREWELL;
-        farewellSent = server->sendImmediately(farewell);
+        const std::vector<uint8_t> bulk(8 << 20, 7);
+        server->send(BULK, bulk);
+        server->send(FAREWELL);
       });
 
       auto second = std::make_shared<NetworkClient>();
@@ -110,8 +118,9 @@ SCENARIO(
         REQUIRE(waitFor([&] { return serverCounters.connected == 2; }));
         REQUIRE(serverCounters.disconnected == 1);
         REQUIRE(waitFor([&] { return clientCounters.disconnected == 1; }));
-        REQUIRE(farewellSent.load());
+        REQUIRE(bulks == 1);
         REQUIRE(farewells == 1);
+        REQUIRE(farewellsBeforeClose == 1);
         REQUIRE(waitFor([&] { return secondCounters.connected == 1; }));
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
         REQUIRE(secondCounters.disconnected == 0);
