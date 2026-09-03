@@ -162,9 +162,14 @@ class Application : public vsr::ui::imgui::Application
   } m_confirmation;
 
   StatusOverlay m_statusOverlay;
-  // Task states already announced, so each completion toasts once (a replay
-  // included).
-  vsr::core::FlatMap<uint64_t, TaskState> m_announcedTasks;
+  // The task state last announced, so each ending toasts once (a replay
+  // included) and a task started over under a reused id toasts again.
+  struct AnnouncedTask
+  {
+    uint32_t generation{0};
+    TaskState state{TaskState::Queued};
+  };
+  vsr::core::FlatMap<uint64_t, AnnouncedTask> m_announcedTasks;
 };
 
 } // namespace vsr::scivis_studio::client

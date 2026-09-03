@@ -645,38 +645,34 @@ void ProjectOps::clearFinishedTasks()
       m_tasks.end());
 }
 
-TaskRecord &ProjectOps::recordFor(uint64_t taskId)
+TaskRecord *ProjectOps::findRecord(uint64_t taskId)
 {
   auto it = std::find_if(m_tasks.begin(), m_tasks.end(), [&](const auto &t) {
     return t.taskId == taskId;
   });
-  if (it != m_tasks.end()) {
-    if (it->stale) {
-      // The server speaks of this id again: the client-side failure was
-      // provisional. Keep the label, start the state over.
-      it->stale = false;
-      it->state = TaskState::Queued;
-      it->lastProgress = {};
-      it->outcome.clear();
-      it->error.clear();
-      it->framesCompleted = 0;
-    }
-    return *it;
-  }
-  TaskRecord record;
-  record.taskId = taskId;
-  record.label = "Task " + std::to_string(taskId);
-  m_tasks.push_back(std::move(record));
-  return m_tasks.back();
+  return it == m_tasks.end() ? nullptr : &*it;
 }
 
-TaskRecord &ProjectOps::freshRecordFor(uint64_t taskId)
+TaskRecord &ProjectOps::recordFor(uint64_t taskId)
 {
-  TaskRecord &record = recordFor(taskId);
-  record = TaskRecord{};
-  record.taskId = taskId;
-  record.label = "Task " + std::to_string(taskId);
-  return record;
+  if (TaskRecord *record = findRecord(taskId))
+    return *record;
+  return startOver(taskId);
+}
+
+TaskRecord &ProjectOps::startOver(uint64_t taskId)
+{
+  TaskRecord fresh;
+  fresh.taskId = taskId;
+  fresh.label = "Task " + std::to_string(taskId);
+  TaskRecord *existing = findRecord(taskId);
+  if (!existing) {
+    m_tasks.push_back(std::move(fresh));
+    return m_tasks.back();
+  }
+  fresh.generation = existing->generation + 1;
+  *existing = std::move(fresh);
+  return *existing;
 }
 
 // Driven by ServerConnection /////////////////////////////////////////////////
@@ -700,10 +696,10 @@ void ProjectOps::handleReply(const ProjectOpReply &reply)
     return;
   }
   if (auto started = results<TaskStartedResult>(reply)) {
-    // A TaskStarted names a new task whatever record its id has: a stale one
-    // the replay never revived, or a finished one of a server process since
-    // restarted (ids count from 1 again).
-    TaskRecord &record = freshRecordFor(started->taskId);
+    // A TaskStarted names a new task whatever record its id has: one of a
+    // server process since restarted (ids count from 1 again), whether the
+    // replay failed it or this client did.
+    TaskRecord &record = startOver(started->taskId);
     if (!entry.taskLabel.empty())
       record.label = entry.taskLabel;
     record.render = entry.type == StudioMessageType::RenderShot;
@@ -728,14 +724,15 @@ void ProjectOps::handlePickReply(const PickReply &reply)
 void ProjectOps::handleTaskProgress(const TaskProgress &progress)
 {
   // A task ends once and the replay repeats endings, not progress, so
-  // progress for a record that finished (and was not failed by this client)
-  // is a new task of a restarted server under a reused id: it starts over,
-  // named like one never heard of.
+  // progress for a record that finished is a new task: a restarted server
+  // reusing the id, or the replay speaking of one this client failed at
+  // BootstrapBegin. Either way the record starts over, named like one never
+  // heard of: the message is the replay's description of a running task.
   const TaskRecord *existing = task(progress.taskId);
-  const bool fresh = !existing || (existing->finished() && !existing->stale);
+  const bool starting = !existing || existing->finished();
   TaskRecord &record =
-      fresh ? freshRecordFor(progress.taskId) : recordFor(progress.taskId);
-  if (fresh && !progress.message.empty())
+      starting ? startOver(progress.taskId) : recordFor(progress.taskId);
+  if (starting && !progress.message.empty())
     record.label = progress.message; // the replay's description
   record.state = TaskState::Running;
   record.lastProgress.current = progress.current;
@@ -754,6 +751,7 @@ void ProjectOps::handleTaskCompleted(const TaskCompleted &completed)
     record.lastProgress.message = completed.message;
   record.framesCompleted = completed.framesCompleted;
   record.error.clear();
+  record.announced = false;
 }
 
 void ProjectOps::handleTaskFailed(const TaskFailed &failed)
@@ -762,6 +760,7 @@ void ProjectOps::handleTaskFailed(const TaskFailed &failed)
   record.state = TaskState::Failed;
   record.error = failed.error;
   record.framesCompleted = failed.framesCompleted; // a cancelled render's
+  record.announced = false;
 }
 
 bool ProjectOps::failOldestNamed(const std::string &message)
@@ -798,7 +797,7 @@ void ProjectOps::failUnfinishedTasks(const std::string &error)
       continue;
     record.state = TaskState::Failed;
     record.error = error;
-    record.stale = true;
+    record.announced = true; // the banner says it
   }
 }
 
