@@ -85,23 +85,40 @@ bool isProjectRequestType(protocol::StudioMessageType type);
 std::optional<ProjectRequest> decodeProjectRequest(
     const vsr::network::Message &msg);
 
-// A request that reads or mutates the Project or Scene at dispatch, and
-// therefore must wait until every task the client sent before it has run:
-// the sync ops, and RenderShot, whose sync prelude reads the Project.
-// Task-launching requests (they only queue), CancelTask and Remote Browse
-// are not.
+// What the loop must know about a request before serving it, one record per
+// ProjectRequest alternative (the table in ProjectOpDispatcher.cpp). A sync op
+// is {false, true, true}; a task op {true, false, true}, since its dispatch
+// only queues and reads the Project when the task runs; RenderShot is
+// {true, true, true}, a task whose sync prelude reads the Project; Remote
+// Browse and CancelTask are all false; RequestArrayHistogram reads without
+// mutating.
+struct RequestPolicy
+{
+  // Answered with a TaskStartedResult and queued on the ServerTaskRunner.
+  bool launchesTask{false};
+  // Reads the Project or Scene at dispatch, so it must wait until every task
+  // the client sent before it has run.
+  bool readsProjectAtDispatch{false};
+  // Mutates the Project or Scene, or launches a task that would; the render
+  // owns both while it is pending, so the request is refused meanwhile.
+  bool mutates{false};
+};
+
+RequestPolicy policyOf(const ProjectRequest &request);
+
+// The predicates the loop asks, each read off the request's RequestPolicy.
+
+// readsProjectAtDispatch: the request waits for the tasks sent before it.
 bool waitsForQueuedTasks(const ProjectRequest &request);
 
-// CancelTask and Remote Browse: they touch neither Project nor Scene, so the
-// loop may serve one from behind a sync op that is waiting for a queued task
-// -- otherwise a queued task could never be cancelled once any sync op
-// followed it.
+// No flag set: the request touches neither Project nor Scene, so the loop may
+// serve it from behind a sync op that is waiting for a queued task --
+// otherwise a queued task could never be cancelled once any sync op followed
+// it.
 bool independentOfQueuedTasks(const ProjectRequest &request);
 
-// A request that mutates the Project or Scene, or launches a task that
-// would: refused with "render in progress" while a shot render is queued or
-// running (pause-and-refuse). Remote Browse, RequestArrayHistogram and
-// CancelTask are not.
+// mutates: refused with "render in progress" while a shot render is queued or
+// running (pause-and-refuse).
 bool refusedWhileRendering(const ProjectRequest &request);
 
 /*

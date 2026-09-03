@@ -600,6 +600,19 @@ Findings of the M7 review, all *fixed* on `m7/fixups`:
   reconnect's bootstrap; a replayed real failure could go un-toasted when
   the bootstrap batch split across polls.
 
+Code-quality follow-ups to the M7 review:
+
+- The four request-classification predicates (`waitsForQueuedTasks`,
+  `independentOfQueuedTasks`, `refusedWhileRendering` and the file-local
+  `queuesWithoutReadingProject`), each an `isOneOf` chain over the 42-way
+  `ProjectRequest`, are derived from one `RequestPolicy` row per alternative
+  (`launchesTask`, `readsProjectAtDispatch`, `mutates`; the table in
+  `server/ProjectOpDispatcher.cpp`). The table was transcribed from the
+  predicates and checked equal to them for every alternative before they
+  went; `mutates` is therefore set for `DiscoverDatasetCandidates` and
+  `RefreshDatasetAvailability`, which the old lists refused during a render
+  too. A new alternative without a row fails to compile.
+
 ### Spec conformance
 
 Every bullet of the spec sections named below, against the tree at

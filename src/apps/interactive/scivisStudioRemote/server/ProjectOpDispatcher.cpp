@@ -39,12 +39,6 @@ std::optional<ProjectRequest> decodeAs(const Message &msg)
   return ProjectRequest{std::move(*payload)};
 }
 
-template <typename T>
-constexpr bool isOneOf(const ProjectRequest &request)
-{
-  return std::holds_alternative<T>(request);
-}
-
 // The failure of a task body whose dataset is gone by the time it runs.
 TaskResult datasetNotFound()
 {
@@ -155,40 +149,108 @@ std::optional<ProjectRequest> decodeProjectRequest(const Message &msg)
   return decodeProjectRequestOf(msg, *type, REQUEST_ALTERNATIVES);
 }
 
+// Request policy /////////////////////////////////////////////////////////////
+
 namespace {
 
-// The task ops whose dispatch reads nothing from the Project. RenderShot
-// also launches a task, but its prelude looks the shot up and needs the
-// project saved, so it takes its turn behind the queue like a sync op.
-bool queuesWithoutReadingProject(const ProjectRequest &request)
+// Only the rows below exist: a ProjectRequest alternative without one fails
+// to compile here, so adding an alternative means adding its row.
+template <typename Request>
+constexpr RequestPolicy policyOf()
 {
-  return isOneOf<OpenProject>(request) || isOneOf<SaveProject>(request)
-      || isOneOf<ImportStaticDataset>(request)
-      || isOneOf<ImportFileAnimationDataset>(request)
-      || isOneOf<ReimportDataset>(request) || isOneOf<LoadDataset>(request)
-      || isOneOf<SaveDatasetArchive>(request)
-      || isOneOf<LoadDatasetArchive>(request)
-      || isOneOf<IncorporateDatasetCandidate>(request);
+  static_assert(sizeof(Request) == 0,
+      "no RequestPolicy row for this ProjectRequest alternative");
+  return {};
 }
+
+#define VSR_REQUEST_POLICY(Request, launches, reads, mutates)                  \
+  template <>                                                                  \
+  constexpr RequestPolicy policyOf<Request>()                                  \
+  {                                                                            \
+    return {launches, reads, mutates};                                         \
+  }
+
+// clang-format off
+// One row per ProjectRequest alternative, in the variant's order:
+// launchesTask, readsProjectAtDispatch, mutates.
+//                                                 launches reads  mutates
+// Project
+VSR_REQUEST_POLICY(NewProject,                     false,   true,  true)
+VSR_REQUEST_POLICY(OpenProject,                    true,    false, true)
+VSR_REQUEST_POLICY(SaveProject,                    true,    false, true)
+// Datasets
+VSR_REQUEST_POLICY(ImportStaticDataset,            true,    false, true)
+VSR_REQUEST_POLICY(ImportFileAnimationDataset,     true,    false, true)
+VSR_REQUEST_POLICY(DeclareFileAnimationDataset,    false,   true,  true)
+VSR_REQUEST_POLICY(ReimportDataset,                true,    false, true)
+VSR_REQUEST_POLICY(RenameDataset,                  false,   true,  true)
+VSR_REQUEST_POLICY(RemoveDataset,                  false,   true,  true)
+VSR_REQUEST_POLICY(LoadDataset,                    true,    false, true)
+VSR_REQUEST_POLICY(UnloadDataset,                  false,   true,  true)
+VSR_REQUEST_POLICY(RefreshDatasetAvailability,     false,   true,  true)
+VSR_REQUEST_POLICY(SaveDatasetArchive,             true,    false, true)
+VSR_REQUEST_POLICY(LoadDatasetArchive,             true,    false, true)
+VSR_REQUEST_POLICY(DiscoverDatasetCandidates,      false,   true,  true)
+VSR_REQUEST_POLICY(IncorporateDatasetCandidate,    true,    false, true)
+// Shots
+VSR_REQUEST_POLICY(CreateShot,                     false,   true,  true)
+VSR_REQUEST_POLICY(RemoveShot,                     false,   true,  true)
+VSR_REQUEST_POLICY(UpdateShot,                     false,   true,  true)
+VSR_REQUEST_POLICY(SetActiveShot,                  false,   true,  true)
+VSR_REQUEST_POLICY(SetPlaying,                     false,   true,  true)
+// Light rigs
+VSR_REQUEST_POLICY(CreateLightRig,                 false,   true,  true)
+VSR_REQUEST_POLICY(CloneLightRig,                  false,   true,  true)
+VSR_REQUEST_POLICY(RemoveLightRig,                 false,   true,  true)
+VSR_REQUEST_POLICY(RenameLightRig,                 false,   true,  true)
+VSR_REQUEST_POLICY(AddLightToRig,                  false,   true,  true)
+VSR_REQUEST_POLICY(RemoveLightFromRig,             false,   true,  true)
+// Camera rigs
+VSR_REQUEST_POLICY(CreateCameraRig,                false,   true,  true)
+VSR_REQUEST_POLICY(RemoveCameraRig,                false,   true,  true)
+VSR_REQUEST_POLICY(RenameCameraRig,                false,   true,  true)
+VSR_REQUEST_POLICY(SaveCameraRigArchive,           false,   true,  true)
+VSR_REQUEST_POLICY(LoadCameraRigArchive,           false,   true,  true)
+VSR_REQUEST_POLICY(SaveLightRigArchive,            false,   true,  true)
+VSR_REQUEST_POLICY(LoadLightRigArchive,            false,   true,  true)
+// Color maps
+VSR_REQUEST_POLICY(CreateColorMap,                 false,   true,  true)
+VSR_REQUEST_POLICY(RenameColorMap,                 false,   true,  true)
+VSR_REQUEST_POLICY(RemoveColorMap,                 false,   true,  true)
+// Remote Browse, viewport and tasks
+VSR_REQUEST_POLICY(ListRoots,                      false,   false, false)
+VSR_REQUEST_POLICY(ListDirectory,                  false,   false, false)
+VSR_REQUEST_POLICY(RequestArrayHistogram,          false,   true,  false)
+VSR_REQUEST_POLICY(RenderShot,                     true,    true,  true)
+VSR_REQUEST_POLICY(CancelTask,                     false,   false, false)
+// clang-format on
+
+#undef VSR_REQUEST_POLICY
 
 } // namespace
 
+RequestPolicy policyOf(const ProjectRequest &request)
+{
+  return std::visit(
+      [](const auto &r) { return policyOf<std::decay_t<decltype(r)>>(); },
+      request);
+}
+
 bool waitsForQueuedTasks(const ProjectRequest &request)
 {
-  return !queuesWithoutReadingProject(request)
-      && !independentOfQueuedTasks(request);
+  return policyOf(request).readsProjectAtDispatch;
 }
 
 bool independentOfQueuedTasks(const ProjectRequest &request)
 {
-  return isOneOf<ListRoots>(request) || isOneOf<ListDirectory>(request)
-      || isOneOf<CancelTask>(request);
+  const auto policy = policyOf(request);
+  return !policy.launchesTask && !policy.readsProjectAtDispatch
+      && !policy.mutates;
 }
 
 bool refusedWhileRendering(const ProjectRequest &request)
 {
-  return !independentOfQueuedTasks(request)
-      && !isOneOf<RequestArrayHistogram>(request);
+  return policyOf(request).mutates;
 }
 
 // UIStateCapture /////////////////////////////////////////////////////////////
