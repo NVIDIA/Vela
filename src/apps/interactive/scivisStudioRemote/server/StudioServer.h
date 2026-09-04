@@ -4,6 +4,7 @@
 #pragma once
 
 #include "DataRoots.h"
+#include "Playback.h"
 #include "ProjectOpDispatcher.h"
 #include "ServerOptions.h"
 #include "ServerPushDelegate.h"
@@ -28,7 +29,6 @@
 #include "vsr/core/TypeMacros.hpp"
 // std
 #include <atomic>
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -85,15 +85,16 @@ const char *toString(SessionState state);
  * one. The pipeline follows the same way: activeShotRevision() moves when
  * which shot renders (or its record) changed, and the loop rebinds on it.
  *
- * Playback free-runs on the loop thread: each iteration applies the latch,
- * ticks the AnimationManager by a steady-clock delta (at most one frame, even
- * while a Frame is still in flight), then renders, so the Frame header names
- * the frame actually rendered (Time in Motion). Time at Rest reaches the
- * replica through snapshots only: SetPlaying is a Project Op (reply plus
- * snapshot), auto-stop at the end of a non-looping shot is a revision the
- * context marks itself, and a SetTime scrub while paused is committed by
- * the loop (markRevised) after 250 ms of quiet. Frames a file binding
- * cannot load go out as TimeAdvanceWarning; playback goes on.
+ * Playback (the Playback member) free-runs on the loop thread: each
+ * iteration applies the latch, ticks the AnimationManager by a steady-clock
+ * delta (at most one frame, even while a Frame is still in flight), then
+ * renders, so the Frame header names the frame actually rendered (Time in
+ * Motion). Time at Rest reaches the replica through snapshots only:
+ * SetPlaying is a Project Op (reply plus snapshot), auto-stop at the end of
+ * a non-looping shot is a revision the context marks itself, and a SetTime
+ * scrub while paused is committed (markRevised) after 250 ms of quiet.
+ * Frames a file binding cannot load go out as TimeAdvanceWarning; playback
+ * goes on.
  *
  * The Viewport Pass suite (ViewportPasses) composites the outline, AOV and
  * world-bounds passes over each frame before it is copied out; SetOutline
@@ -264,20 +265,6 @@ struct StudioServer
   void send(vsr::network::Message &&msg);
   bool sessionEstablished() const;
 
-  // Playback (loop thread)
-  // Seeks the active shot to the latched SetTime; other shots are logged and
-  // ignored. While paused it opens (or extends) the rest-commit window.
-  void applyTime(const protocol::SetTime &time);
-  // One tick per iteration; a play->stop flip of the active shot (auto-stop)
-  // is a revision the context marks, so the snapshot follows.
-  void tickPlayback();
-  // Commits Time at Rest (markRevised, so the snapshot follows) once no
-  // SetTime has arrived for SCRUB_COMMIT_QUIET and the frame differs from
-  // the one the window opened on (a scrub that returns to its start commits
-  // nothing).
-  void commitScrubIfQuiet();
-  // One TimeAdvanceWarning per load failure the manager collected.
-  void pushLoadFailures();
   // A client edit on the active shot camera: the manipulator adopts the
   // camera's pose and a keyframe-less camera rig's current view follows, so
   // the next applyActiveShot() writes the client's pose back, not a stale one.
@@ -341,11 +328,7 @@ struct StudioServer
   uint64_t m_snapshotRevision{0};
   uint64_t m_boundShotRevision{0};
   // Playback (loop thread only)
-  using Clock = std::chrono::steady_clock;
-  std::optional<Clock::time_point> m_lastTick;
-  bool m_scrubPending{false};
-  Clock::time_point m_scrubDeadline{};
-  int m_scrubFrameBefore{0}; // the frame time rested on when the window opened
+  Playback m_playback;
 
   // Shared with the IO thread
   std::mutex m_controlMutex;
