@@ -118,41 +118,35 @@ bool waitsForQueuedTasks(const ProjectRequest &request);
 // it.
 bool independentOfQueuedTasks(const ProjectRequest &request);
 
-// How a task is queued: exclusive (the shot render), and what its sync
-// prelude did before the task was queued -- a Project change the reply's
-// snapshot must show, a rebind of the pipeline.
-struct TaskLaunch
-{
-  bool exclusive{false};
-  bool projectChanged{false};
-  bool rebind{false};
-};
-
 /*
  * Runs project requests on the loop thread against the server's
- * ProjectContext. RenderShot is a Server Task with a sync prelude: the shot
- * becomes the active one, the pipeline rebinds and a snapshot goes out
- * before the task is queued, so the client sees the switch at once; because
- * the prelude reads the Project, RenderShot waits for queued tasks like a
- * sync op does. While the render is queued or running every mutating
- * request is refused with "render in progress" (refuses()) and the
- * body polls its cancel flag once per frame; however the body leaves -- the
- * last frame, a cancel, or a throw out of a frame's load or encode -- the
- * host drops the inputs latched meanwhile (Host::dropLatchedInputs) before
- * the ending goes out. Sync ops call the context, send the ProjectOpReply, then
- * a ProjectSnapshot whenever the Project changed (including "failed" calls that
- * still mutate: an import that leaves an ImportFailed record, a load that
- * marks a dataset Unavailable). Task ops reply with a TaskStartedResult and
- * enqueue their body on the ServerTaskRunner; runOneTask() runs one and
- * follows it with the snapshot. At dispatch a task op checks only what does
- * not depend on the Project (the paths it names lie inside the Data Roots);
- * whatever it reads from the Project -- a dataset id, the project's own
- * directory -- it reads when the task runs, because a task queued ahead of
- * it (an OpenProject, say) may still change the Project, and requests must
- * take effect in the order sent. Before any reply the host flushes scene
- * pushes (the TransferScene a project reset asked for), so the client's
- * mirror never lags the snapshot that names its objects, and after an op
- * that changes which shot or camera renders the host rebinds its pipeline.
+ * ProjectContext. Sync ops call the context and send the ProjectOpReply;
+ * task ops reply with a TaskStartedResult and enqueue their body on the
+ * ServerTaskRunner, which runOneTask() runs one at a time. Neither decides
+ * whether a snapshot follows: every mutation the context makes moves its
+ * revision() (a "failed" call that still left a mark too -- an import
+ * whose ImportFailed record stays, a load that marks a dataset
+ * Unavailable), and the loop sends one ProjectSnapshot per revision change
+ * after dispatching and after running a task, so the reply precedes it and
+ * a refused or no-op call has none. The same goes for the pipeline: the
+ * loop rebinds it when the context's activeShotRevision() moved. RenderShot
+ * is a Server Task with a sync prelude: the shot becomes the active one
+ * before the task is queued, so the client sees the switch (its snapshot
+ * precedes the task's progress); because the prelude reads the Project,
+ * RenderShot waits for queued tasks like a sync op does. While the render
+ * is queued or running every mutating request is refused with "render in
+ * progress" (refuses()) and the body polls its cancel flag once per frame;
+ * however the body leaves -- the last frame, a cancel, or a throw out of a
+ * frame's load or encode -- the host drops the inputs latched meanwhile
+ * (Host::dropLatchedInputs) before the ending goes out. At dispatch a task
+ * op checks only what does not depend on the Project (the paths it names
+ * lie inside the Data Roots); whatever it reads from the Project -- a
+ * dataset id, the project's own directory -- it reads when the task runs,
+ * because a task queued ahead of it (an OpenProject, say) may still change
+ * the Project, and requests must take effect in the order sent. Before any
+ * reply the host flushes scene pushes (the TransferScene a project reset
+ * asked for), so the client's mirror never lags the snapshot that names
+ * its objects.
  *
  * Example:
  *   ProjectOpDispatcher::Host host;
@@ -172,8 +166,6 @@ struct ProjectOpDispatcher
     std::function<void(vsr::network::Message &&)> send;
     // Sends the pending TransferScene, if a scene reset requested one.
     std::function<void()> flushScenePushes;
-    // The pipeline's camera and renderer follow the active shot again.
-    std::function<void()> rebindActiveShot;
     // The UI-state tree stored with the project (ui-state round trip).
     protocol::SubtreePtr *uiState{nullptr};
     // The server is going down: a running render stops at its next frame.
@@ -200,7 +192,7 @@ struct ProjectOpDispatcher
   // nothing else happens.
   void dispatch(const ProjectRequest &request);
 
-  // Runs one queued task (if any) and sends the snapshot it earned.
+  // Runs one queued task, if any.
   void runOneTask();
 
  private:
@@ -259,30 +251,21 @@ struct ProjectOpDispatcher
   // Viewport
   void handle(const protocol::RequestArrayHistogram &);
 
-  // Sends `reply` after flushing scene pushes (and rebinding the pipeline
-  // when asked), then the snapshot when the project changed.
-  void finish(
-      const protocol::ProjectOpReply &reply, bool projectChanged, bool rebind);
-  // An error reply; `projectChanged` when the refused call still mutated.
-  void fail(uint64_t requestId,
-      const std::string &error,
-      bool projectChanged = false);
-  // Queues `body` and answers with its task id.
+  // Sends `reply` after flushing scene pushes.
+  void finish(const protocol::ProjectOpReply &reply);
+  // An error reply.
+  void fail(uint64_t requestId, const std::string &error);
+  // Queues `body` (exclusive: the shot render) and answers with its task id.
   void startTask(uint64_t requestId,
       std::string description,
       TaskBody body,
-      TaskLaunch launch = {});
-  // Runs `body`, then -- however it ended -- rebinds (if asked) and flushes
-  // scene pushes so the completion report follows them.
-  TaskResult runTaskBody(const std::function<TaskResult()> &body, bool rebind);
-  void sendSnapshot();
+      bool exclusive = false);
+  // Runs `body`, then -- however it ended -- flushes scene pushes so the
+  // completion report follows them.
+  TaskResult runTaskBody(const std::function<TaskResult()> &body);
 
   ProjectContext &context();
   Project &project();
-  // The status `id` has, or Unavailable for a dataset that is not there; the
-  // before/after pair tells whether a failed load or unload still changed it.
-  static DatasetStatus datasetStatus(
-      const Project &project, const DatasetID &id);
 
   Host m_host;
 };

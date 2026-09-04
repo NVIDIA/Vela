@@ -76,15 +76,24 @@ const char *toString(SessionState state);
  * ops queue a Server Task that the loop runs to completion, one per
  * iteration, between applying the latch and rendering, so frames pause while
  * a task runs. Every path a request names must lie inside the Data Roots.
+ * One rule decides every ProjectSnapshot, in the loop and never in a
+ * handler: the ProjectContext counts its mutations (revision()), and the
+ * loop sends a snapshot whenever the count differs from the one it last
+ * sent -- after the requests are dispatched, after a task ran, and after
+ * the playback tick -- so a reply always precedes its snapshot, a refused
+ * or no-op request has none, and a failed op that still left a mark gets
+ * one. The pipeline follows the same way: activeShotRevision() moves when
+ * which shot renders (or its record) changed, and the loop rebinds on it.
  *
  * Playback free-runs on the loop thread: each iteration applies the latch,
  * ticks the AnimationManager by a steady-clock delta (at most one frame, even
  * while a Frame is still in flight), then renders, so the Frame header names
  * the frame actually rendered (Time in Motion). Time at Rest reaches the
  * replica through snapshots only: SetPlaying is a Project Op (reply plus
- * snapshot), auto-stop at the end of a non-looping shot sends one, and a
- * SetTime scrub while paused commits one after 250 ms of quiet. Frames a
- * file binding cannot load go out as TimeAdvanceWarning; playback goes on.
+ * snapshot), auto-stop at the end of a non-looping shot is a revision the
+ * context marks itself, and a SetTime scrub while paused is committed by
+ * the loop (markRevised) after 250 ms of quiet. Frames a file binding
+ * cannot load go out as TimeAdvanceWarning; playback goes on.
  *
  * The Viewport Pass suite (ViewportPasses) composites the outline, AOV and
  * world-bounds passes over each frame before it is copied out; SetOutline
@@ -203,7 +212,7 @@ struct StudioServer
   // Points the pipeline's renderer and camera at the active shot's, creating
   // the library's standard renderers when the scene has none (a fresh or
   // reopened project) and recording the pick in the shot. Used at setup and
-  // after every project op that changes which shot or camera renders.
+  // whenever the context's activeShotRevision() moved (followProjectRevision).
   bool bindActiveShotRendering(std::string *error);
   // Forgets the pipeline's renderer and camera: after a project reset the
   // objects they named are gone, so until a bind succeeds no frame renders.
@@ -236,6 +245,13 @@ struct StudioServer
   // was mutating.
   void discardStaleInputs(ControlState &control);
   void dispatchPendingRequests();
+  // The one snapshot rule (and the rebind's): rebinds the pipeline when the
+  // active shot moved since the last bind, then, with a session up, sends a
+  // ProjectSnapshot when the Project's revision moved since the last one
+  // sent. Called after the requests are dispatched, after a task ran and
+  // after the playback tick, so each of those has its snapshot before the
+  // next thing goes out.
+  void followProjectRevision();
   void applyFrameConfig(uint32_t width, uint32_t height);
   void applyEdit(const protocol::SetObjectParameter &edit);
   void applyEdit(const protocol::RemoveObjectParameter &edit);
@@ -251,11 +267,12 @@ struct StudioServer
   // ignored. While paused it opens (or extends) the rest-commit window.
   void applyTime(const protocol::SetTime &time);
   // One tick per iteration; a play->stop flip of the active shot (auto-stop)
-  // sends the snapshot that commits it.
+  // is a revision the context marks, so the snapshot follows.
   void tickPlayback();
-  // Sends the debounced Time at Rest snapshot once no SetTime has arrived for
-  // SCRUB_COMMIT_QUIET and the frame differs from the one the window opened
-  // on (a scrub that returns to its start commits nothing).
+  // Commits Time at Rest (markRevised, so the snapshot follows) once no
+  // SetTime has arrived for SCRUB_COMMIT_QUIET and the frame differs from
+  // the one the window opened on (a scrub that returns to its start commits
+  // nothing).
   void commitScrubIfQuiet();
   // One TimeAdvanceWarning per load failure the manager collected.
   void pushLoadFailures();
@@ -318,6 +335,9 @@ struct StudioServer
   bool m_renderingRequested{false};
   bool m_bootstrapPending{false};
   bool m_sceneResendPending{false};
+  // The context revisions the last snapshot sent and the last bind followed.
+  uint64_t m_snapshotRevision{0};
+  uint64_t m_boundShotRevision{0};
   // Playback (loop thread only)
   using Clock = std::chrono::steady_clock;
   std::optional<Clock::time_point> m_lastTick;

@@ -340,7 +340,6 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
       REQUIRE(runner.running());
       TaskResult result;
       result.message = "dataset_0001";
-      result.projectChanged = true;
       return result;
     });
     const auto second = runner.enqueue("second", [&](const TaskControl &) {
@@ -392,7 +391,6 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
           REQUIRE(ranFirst);
           REQUIRE(ranFirst->taskId == first);
           REQUIRE(ranFirst->result.ok);
-          REQUIRE(ranFirst->result.projectChanged);
           REQUIRE(cancelRunningError == "task already running");
           REQUIRE(ranSecond);
           REQUIRE(ranSecond->taskId == second);
@@ -693,7 +691,6 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
         REQUIRE(ranThrower);
         REQUIRE(ranThrower->taskId == thrower);
         REQUIRE_FALSE(ranThrower->result.ok);
-        REQUIRE(ranThrower->result.projectChanged);
         REQUIRE(
             ranThrower->result.error.find("stat failed") != std::string::npos);
         REQUIRE_FALSE(runner.running());

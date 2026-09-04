@@ -5,7 +5,6 @@
 #include "ArrayHistogram.h"
 #include "RemoteBrowse.h"
 // vsr_scivis_studio_protocol
-#include "ProjectSnapshot.h"
 #include "StudioCodec.h"
 // vsr_scene
 #include "vsr/scene/Scene.hpp"
@@ -205,9 +204,7 @@ bool ProjectOpDispatcher::refuses(const ProjectRequest &request) const
 
 void ProjectOpDispatcher::runOneTask()
 {
-  const auto ran = m_host.tasks->runOne();
-  if (ran && ran->result.projectChanged)
-    sendSnapshot();
+  m_host.tasks->runOne();
 }
 
 bool ProjectOpDispatcher::renderActive() const
@@ -225,36 +222,18 @@ Project &ProjectOpDispatcher::project()
   return context().project();
 }
 
-DatasetStatus ProjectOpDispatcher::datasetStatus(
-    const Project &project, const DatasetID &id)
+void ProjectOpDispatcher::finish(const ProjectOpReply &reply)
 {
-  const auto *dataset = project::findDataset(project, id);
-  return dataset ? dataset->status : DatasetStatus::Unavailable;
-}
-
-void ProjectOpDispatcher::finish(
-    const ProjectOpReply &reply, bool projectChanged, bool rebind)
-{
-  if (rebind)
-    m_host.rebindActiveShot();
   m_host.flushScenePushes();
   m_host.send(encode(reply));
-  if (projectChanged)
-    sendSnapshot();
 }
 
-void ProjectOpDispatcher::fail(
-    uint64_t requestId, const std::string &error, bool projectChanged)
+void ProjectOpDispatcher::fail(uint64_t requestId, const std::string &error)
 {
   vsr::core::logWarning("[StudioServer] request %llu refused: %s",
       static_cast<unsigned long long>(requestId),
       error.c_str());
-  finish(makeErrorReply(requestId, error), projectChanged, false);
-}
-
-void ProjectOpDispatcher::sendSnapshot()
-{
-  m_host.send(encode(ProjectSnapshot{project()}));
+  finish(makeErrorReply(requestId, error));
 }
 
 // Project ////////////////////////////////////////////////////////////////////
@@ -263,7 +242,7 @@ void ProjectOpDispatcher::handle(const NewProject &req)
 {
   context().createUnsavedProject();
   *m_host.uiState = nullptr;
-  finish(makeOkReply(req.requestId), true, true);
+  finish(makeOkReply(req.requestId));
 }
 
 // Datasets ///////////////////////////////////////////////////////////////////
@@ -284,7 +263,7 @@ void ProjectOpDispatcher::handle(const DeclareFileAnimationDataset &req)
   }
   auto reply = makeOkReply(req.requestId);
   setResults(reply, DatasetCreatedResult{dataset->id});
-  finish(reply, true, false);
+  finish(reply);
 }
 
 void ProjectOpDispatcher::handle(const RenameDataset &req)
@@ -294,7 +273,7 @@ void ProjectOpDispatcher::handle(const RenameDataset &req)
     fail(req.requestId, error);
     return;
   }
-  finish(makeOkReply(req.requestId), true, false);
+  finish(makeOkReply(req.requestId));
 }
 
 void ProjectOpDispatcher::handle(const RemoveDataset &req)
@@ -304,21 +283,17 @@ void ProjectOpDispatcher::handle(const RemoveDataset &req)
     fail(req.requestId, error);
     return;
   }
-  finish(makeOkReply(req.requestId), true, false);
+  finish(makeOkReply(req.requestId));
 }
 
 void ProjectOpDispatcher::handle(const UnloadDataset &req)
 {
-  const auto statusBefore = datasetStatus(project(), req.datasetId);
   std::string error;
   if (!context().unloadDataset(req.datasetId, &error)) {
-    // A refused unload may still have re-marked the dataset.
-    fail(req.requestId,
-        error,
-        datasetStatus(project(), req.datasetId) != statusBefore);
+    fail(req.requestId, error);
     return;
   }
-  finish(makeOkReply(req.requestId), true, false);
+  finish(makeOkReply(req.requestId));
 }
 
 void ProjectOpDispatcher::handle(const RefreshDatasetAvailability &req)
@@ -328,9 +303,8 @@ void ProjectOpDispatcher::handle(const RefreshDatasetAvailability &req)
     fail(req.requestId, "dataset not found");
     return;
   }
-  const auto before = dataset->status;
   context().refreshUnloadedDatasetAvailability(*dataset);
-  finish(makeOkReply(req.requestId), dataset->status != before, false);
+  finish(makeOkReply(req.requestId));
 }
 
 void ProjectOpDispatcher::handle(const DiscoverDatasetCandidates &req)
@@ -340,7 +314,7 @@ void ProjectOpDispatcher::handle(const DiscoverDatasetCandidates &req)
     candidates.candidates.push_back({candidate.file, candidate.proposedName});
   auto reply = makeOkReply(req.requestId);
   setResults(reply, candidates);
-  finish(reply, false, false);
+  finish(reply);
 }
 
 // Shots //////////////////////////////////////////////////////////////////////
@@ -353,18 +327,17 @@ void ProjectOpDispatcher::handle(const CreateShot &req)
   }
   auto reply = makeOkReply(req.requestId);
   setResults(reply, ShotCreatedResult{project().shots.back().id});
-  finish(reply, true, true); // the new shot is the active one
+  finish(reply);
 }
 
 void ProjectOpDispatcher::handle(const RemoveShot &req)
 {
-  const bool wasActive = project().activeShotId == req.shotId;
   std::string error;
   if (!context().removeShot(req.shotId, &error)) {
     fail(req.requestId, error);
     return;
   }
-  finish(makeOkReply(req.requestId), true, wasActive);
+  finish(makeOkReply(req.requestId));
 }
 
 void ProjectOpDispatcher::handle(const UpdateShot &req)
@@ -374,8 +347,7 @@ void ProjectOpDispatcher::handle(const UpdateShot &req)
     fail(req.requestId, error);
     return;
   }
-  const bool isActive = project().activeShotId == req.shot.id;
-  finish(makeOkReply(req.requestId), true, isActive);
+  finish(makeOkReply(req.requestId));
 }
 
 void ProjectOpDispatcher::handle(const SetActiveShot &req)
@@ -385,12 +357,12 @@ void ProjectOpDispatcher::handle(const SetActiveShot &req)
     fail(req.requestId, error);
     return;
   }
-  finish(makeOkReply(req.requestId), true, true);
+  finish(makeOkReply(req.requestId));
 }
 
 // Play/pause is a confirmed mutation: the reply says it took, the snapshot
-// carries playing plus the frame time rests on (currentFrame). The ticking
-// itself belongs to the server loop.
+// that follows carries playing plus the frame time rests on (currentFrame).
+// The ticking itself belongs to the server loop.
 void ProjectOpDispatcher::handle(const SetPlaying &req)
 {
   std::string error;
@@ -398,7 +370,7 @@ void ProjectOpDispatcher::handle(const SetPlaying &req)
     fail(req.requestId, error);
     return;
   }
-  finish(makeOkReply(req.requestId), true, false);
+  finish(makeOkReply(req.requestId));
 }
 
 // Light rigs /////////////////////////////////////////////////////////////////
@@ -414,7 +386,7 @@ void ProjectOpDispatcher::handle(const CreateLightRig &req)
   context().applyActiveShot();
   auto reply = makeOkReply(req.requestId);
   setResults(reply, LightRigCreatedResult{rig->id});
-  finish(reply, true, false);
+  finish(reply);
 }
 
 void ProjectOpDispatcher::handle(const CloneLightRig &req)
@@ -430,7 +402,7 @@ void ProjectOpDispatcher::handle(const CloneLightRig &req)
   }
   auto reply = makeOkReply(req.requestId);
   setResults(reply, LightRigCreatedResult{clone->id});
-  finish(reply, true, false);
+  finish(reply);
 }
 
 void ProjectOpDispatcher::handle(const RemoveLightRig &req)
@@ -439,7 +411,7 @@ void ProjectOpDispatcher::handle(const RemoveLightRig &req)
     fail(req.requestId, "light rig not found");
     return;
   }
-  finish(makeOkReply(req.requestId), true, false);
+  finish(makeOkReply(req.requestId));
 }
 
 void ProjectOpDispatcher::handle(const RenameLightRig &req)
@@ -449,7 +421,7 @@ void ProjectOpDispatcher::handle(const RenameLightRig &req)
     fail(req.requestId, error);
     return;
   }
-  finish(makeOkReply(req.requestId), true, false);
+  finish(makeOkReply(req.requestId));
 }
 
 void ProjectOpDispatcher::handle(const AddLightToRig &req)
@@ -470,7 +442,7 @@ void ProjectOpDispatcher::handle(const AddLightToRig &req)
   }
   auto reply = makeOkReply(req.requestId);
   setResults(reply, LightAddedResult{context().refFor("studio", node)});
-  finish(reply, true, false);
+  finish(reply);
 }
 
 void ProjectOpDispatcher::handle(const RemoveLightFromRig &req)
@@ -485,7 +457,7 @@ void ProjectOpDispatcher::handle(const RemoveLightFromRig &req)
     fail(req.requestId, "node is not a light of that rig");
     return;
   }
-  finish(makeOkReply(req.requestId), true, false);
+  finish(makeOkReply(req.requestId));
 }
 
 void ProjectOpDispatcher::handle(const SaveLightRigArchive &req)
@@ -500,7 +472,7 @@ void ProjectOpDispatcher::handle(const SaveLightRigArchive &req)
     fail(req.requestId, error);
     return;
   }
-  finish(makeOkReply(req.requestId), false, false);
+  finish(makeOkReply(req.requestId));
 }
 
 void ProjectOpDispatcher::handle(const LoadLightRigArchive &req)
@@ -518,7 +490,7 @@ void ProjectOpDispatcher::handle(const LoadLightRigArchive &req)
   }
   auto reply = makeOkReply(req.requestId);
   setResults(reply, LightRigCreatedResult{rig->id});
-  finish(reply, true, false);
+  finish(reply);
 }
 
 // Camera rigs ////////////////////////////////////////////////////////////////
@@ -532,7 +504,7 @@ void ProjectOpDispatcher::handle(const CreateCameraRig &req)
   }
   auto reply = makeOkReply(req.requestId);
   setResults(reply, CameraRigCreatedResult{rig->id});
-  finish(reply, true, false);
+  finish(reply);
 }
 
 void ProjectOpDispatcher::handle(const RemoveCameraRig &req)
@@ -541,7 +513,7 @@ void ProjectOpDispatcher::handle(const RemoveCameraRig &req)
     fail(req.requestId, "camera rig not found");
     return;
   }
-  finish(makeOkReply(req.requestId), true, false);
+  finish(makeOkReply(req.requestId));
 }
 
 void ProjectOpDispatcher::handle(const RenameCameraRig &req)
@@ -551,7 +523,7 @@ void ProjectOpDispatcher::handle(const RenameCameraRig &req)
     fail(req.requestId, error);
     return;
   }
-  finish(makeOkReply(req.requestId), true, false);
+  finish(makeOkReply(req.requestId));
 }
 
 void ProjectOpDispatcher::handle(const SaveCameraRigArchive &req)
@@ -566,7 +538,7 @@ void ProjectOpDispatcher::handle(const SaveCameraRigArchive &req)
     fail(req.requestId, error);
     return;
   }
-  finish(makeOkReply(req.requestId), false, false);
+  finish(makeOkReply(req.requestId));
 }
 
 void ProjectOpDispatcher::handle(const LoadCameraRigArchive &req)
@@ -584,7 +556,7 @@ void ProjectOpDispatcher::handle(const LoadCameraRigArchive &req)
   }
   auto reply = makeOkReply(req.requestId);
   setResults(reply, CameraRigCreatedResult{rig->id});
-  finish(reply, true, false);
+  finish(reply);
 }
 
 // Color maps /////////////////////////////////////////////////////////////////
@@ -602,7 +574,7 @@ void ProjectOpDispatcher::handle(const CreateColorMap &req)
     result.object = {array->type(), array.index()};
   auto reply = makeOkReply(req.requestId);
   setResults(reply, result);
-  finish(reply, true, false);
+  finish(reply);
 }
 
 void ProjectOpDispatcher::handle(const RenameColorMap &req)
@@ -612,7 +584,7 @@ void ProjectOpDispatcher::handle(const RenameColorMap &req)
     fail(req.requestId, error);
     return;
   }
-  finish(makeOkReply(req.requestId), true, false);
+  finish(makeOkReply(req.requestId));
 }
 
 void ProjectOpDispatcher::handle(const RemoveColorMap &req)
@@ -622,7 +594,7 @@ void ProjectOpDispatcher::handle(const RemoveColorMap &req)
     fail(req.requestId, error);
     return;
   }
-  finish(makeOkReply(req.requestId), true, false);
+  finish(makeOkReply(req.requestId));
 }
 
 // Remote Browse and tasks ////////////////////////////////////////////////////
@@ -631,7 +603,7 @@ void ProjectOpDispatcher::handle(const ListRoots &req)
 {
   auto reply = makeOkReply(req.requestId);
   setResults(reply, listRoots(*m_host.dataRoots));
-  finish(reply, false, false);
+  finish(reply);
 }
 
 void ProjectOpDispatcher::handle(const ListDirectory &req)
@@ -644,7 +616,7 @@ void ProjectOpDispatcher::handle(const ListDirectory &req)
   }
   auto reply = makeOkReply(req.requestId);
   setResults(reply, listing);
-  finish(reply, false, false);
+  finish(reply);
 }
 
 void ProjectOpDispatcher::handle(const CancelTask &req)
@@ -654,7 +626,7 @@ void ProjectOpDispatcher::handle(const CancelTask &req)
     fail(req.requestId, error);
     return;
   }
-  finish(makeOkReply(req.requestId), false, false);
+  finish(makeOkReply(req.requestId));
 }
 
 // Viewport ///////////////////////////////////////////////////////////////////
@@ -681,7 +653,7 @@ void ProjectOpDispatcher::handle(const RequestArrayHistogram &req)
   }
   auto reply = makeOkReply(req.requestId);
   setResults(reply, result);
-  finish(reply, false, false);
+  finish(reply);
 }
 
 } // namespace vsr::scivis_studio::server

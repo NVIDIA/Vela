@@ -117,16 +117,6 @@ ProjectOpDispatcher::Host StudioServer::makeDispatcherHost()
     if (m_sceneResendPending)
       sendSceneSnapshot();
   };
-  host.rebindActiveShot = [this] {
-    std::string error;
-    if (!bindActiveShotRendering(&error)) {
-      // Unbound now: frames pause until an op that gives the project an
-      // active shot (CreateShot, another open) binds again.
-      vsr::core::logError(
-          "[StudioServer] cannot render the active shot: %s; frames paused",
-          error.c_str());
-    }
-  };
   host.uiState = &m_uiState;
   host.shutdownRequested = [this] { return m_shutdownRequested.load(); };
   host.dropLatchedInputs = [this] {
@@ -367,6 +357,7 @@ bool StudioServer::setupRendering(std::string *error)
 
   if (!bindActiveShotRendering(error))
     return false;
+  m_boundShotRevision = m_projectContext.activeShotRevision();
 
   const auto &settings = shot->renderSettings;
   m_frameWidth = settings.width;
@@ -492,11 +483,15 @@ void StudioServer::run()
       bootstrap();
     if (m_sceneResendPending)
       sendSceneSnapshot();
+    // The requests just dispatched: their snapshot precedes the progress of
+    // a task queued in the same batch (a RenderShot's prelude, say).
+    followProjectRevision();
     // One Server Task per iteration; frames wait while it runs. A shot
     // render outlives its session (it runs with nobody listening and the
     // next bootstrap replays its ending).
     if (sessionEstablished() || m_dispatcher.renderActive())
       m_dispatcher.runOneTask();
+    followProjectRevision();
     // A Frame still on the wire gets a moment to finish before time moves
     // on, so a fast link never sees a header skip a frame; on a slow link
     // the tick goes ahead regardless and time keeps its pace.
@@ -506,6 +501,7 @@ void StudioServer::run()
     // Time advances before the render so the Frame carries the frame drawn.
     tickPlayback();
     commitScrubIfQuiet();
+    followProjectRevision();
 
     // A pick renders its own frame, with ids, paused or not.
     bool frameSent = false;
@@ -763,11 +759,36 @@ void StudioServer::bootstrap()
   // Task-status replay: how the tasks this client never heard about ended.
   m_tasks.replayTo([this](Message &&msg) { send(std::move(msg)); });
   send(encode(ProjectSnapshot{m_projectContext.project()}));
+  m_snapshotRevision = m_projectContext.revision();
   send(encode(BootstrapEnd{}));
 
   setState(
       m_renderingRequested ? SessionState::Rendering : SessionState::Connected);
   setPushEnabled(true);
+}
+
+void StudioServer::followProjectRevision()
+{
+  // The bind first: it records the renderer pick in the shot, which the
+  // snapshot then carries.
+  if (m_projectContext.activeShotRevision() != m_boundShotRevision) {
+    m_boundShotRevision = m_projectContext.activeShotRevision();
+    std::string error;
+    if (!bindActiveShotRendering(&error)) {
+      // Unbound now: frames pause until an op that gives the project an
+      // active shot (CreateShot, another open) binds again.
+      vsr::core::logError(
+          "[StudioServer] cannot render the active shot: %s; frames paused",
+          error.c_str());
+    }
+  }
+  // With nobody listening the revision drifts; the next bootstrap's snapshot
+  // catches the client up and records where it stands.
+  if (!sessionEstablished()
+      || m_projectContext.revision() == m_snapshotRevision)
+    return;
+  m_snapshotRevision = m_projectContext.revision();
+  send(encode(ProjectSnapshot{m_projectContext.project()}));
 }
 
 void StudioServer::sendSceneSnapshot()
@@ -948,20 +969,13 @@ void StudioServer::tickPlayback()
   if (!shot)
     return;
 
-  const bool wasPlaying = shot->playing;
   // A play commits the frame with its own snapshot; a scrub window left open
-  // before it has nothing to add.
-  if (wasPlaying)
+  // before it has nothing to add. Should the manager stop on its own during
+  // the tick, the context marks the revision and the loop's rule snapshots.
+  if (shot->playing)
     m_scrubPending = false;
   m_ctx.vsr.animationMgr.tick(elapsed);
   pushLoadFailures();
-
-  // The manager stopped on its own and ProjectContext wrote the Shot: that
-  // is a confirmed mutation, and the snapshot is its commit.
-  if (wasPlaying && !shot->playing) {
-    m_scrubPending = false;
-    send(encode(ProjectSnapshot{m_projectContext.project()}));
-  }
 }
 
 void StudioServer::commitScrubIfQuiet()
@@ -976,7 +990,8 @@ void StudioServer::commitScrubIfQuiet()
   // A play that started meanwhile committed the frame with its own snapshot.
   if (!shot || shot->playing || shot->currentFrame == m_scrubFrameBefore)
     return;
-  send(encode(ProjectSnapshot{m_projectContext.project()}));
+  // Time at Rest: the frame the scrub ended on is project state now.
+  m_projectContext.markRevised();
 }
 
 void StudioServer::pushLoadFailures()

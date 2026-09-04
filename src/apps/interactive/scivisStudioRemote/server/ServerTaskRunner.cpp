@@ -177,12 +177,11 @@ std::optional<FinishedTask> ServerTaskRunner::runOne()
   } catch (const std::exception &e) {
     // A body that throws (a std::filesystem_error for a path the Data Roots
     // admitted but the OS refuses, say) fails its task instead of taking the
-    // server down. How far it got is unknown, so the Project counts as
-    // changed and the client gets a snapshot to resync from.
+    // server down. Whatever it changed before throwing moved the
+    // ProjectContext's revision, so the client still gets its snapshot.
     finished.result = TaskResult{};
     finished.result.ok = false;
     finished.result.error = std::string("task aborted: ") + e.what();
-    finished.result.projectChanged = true;
   }
   m_runningId.store(0);
   m_running.reset();
