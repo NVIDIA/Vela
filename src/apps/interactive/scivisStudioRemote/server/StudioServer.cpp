@@ -47,8 +47,6 @@ constexpr std::chrono::milliseconds LISTENING_SLEEP{20};
 constexpr std::chrono::milliseconds PAUSED_SLEEP{1};
 // Guards the pipeline against a hostile or confused SetFrameConfig.
 constexpr uint32_t MAX_FRAME_DIMENSION = 16384;
-// A paused scrub commits Time at Rest once SetTime has been quiet this long.
-constexpr std::chrono::milliseconds SCRUB_COMMIT_QUIET{250};
 
 // Same fallback RenderShot uses: the requested library first, then the rest
 // of the device manager's list. `libName` ends up naming what was loaded.
@@ -102,6 +100,9 @@ const char *toString(SessionState state)
 StudioServer::StudioServer(const ServerOptions &options)
     : m_options(options),
       m_projectContext(&m_ctx),
+      m_playback(m_ctx,
+          m_projectContext,
+          [this](Message &&msg) { send(std::move(msg)); }),
       m_tasks([this](Message &&msg) { send(std::move(msg)); }),
       m_dispatcher(makeDispatcherHost())
 {}
@@ -496,8 +497,8 @@ void StudioServer::run()
         && !vsr::network::is_ready(m_frameInFlight))
       m_frameInFlight.wait_for(PAUSED_SLEEP);
     // Time advances before the render so the Frame carries the frame drawn.
-    tickPlayback();
-    commitScrubIfQuiet();
+    m_playback.tick(sessionEstablished());
+    m_playback.commitScrubIfQuiet();
     followProjectRevisions();
 
     // A pick renders its own frame, with ids, paused or not.
@@ -616,7 +617,7 @@ void StudioServer::applyControlState()
   }
 
   if (control.time)
-    applyTime(*control.time);
+    m_playback.applyTime(*control.time);
   applyViewportControl(control);
 
   for (auto &request : control.requests)
@@ -697,7 +698,7 @@ void StudioServer::beginSession(uint64_t serial)
   m_frameInFlight = {};
   m_pendingRequests.clear();
   m_tasks.dropQueued();
-  m_scrubPending = false;
+  m_playback.cancelScrub();
   // Viewport state belongs to the client that sent it.
   m_pendingPick.reset();
   m_viewport.apply(ViewportSettings{});
@@ -724,7 +725,7 @@ void StudioServer::endSession(const std::string &reason, bool closeSocket)
     m_pendingRequests.clear();
   }
   m_tasks.dropQueued();
-  m_scrubPending = false;
+  m_playback.cancelScrub();
   m_pendingPick.reset();
   if (closeSocket) {
     // Closes the socket and re-arms the accept; the disconnect this reports
@@ -911,7 +912,7 @@ void StudioServer::sendRenderedFrame()
   header.pixelFormat = PixelFormat::RGBA8_sRGB;
   header.encoding = m_encoding;
   header.shotId = project.activeShotId;
-  // Time in Motion: tickPlayback() ran before this render, so this is the
+  // Time in Motion: the playback tick ran before this render, so this is the
   // frame the pixels show.
   header.frame = shot ? shot->currentFrame : 0;
   m_frameInFlight = m_server->send(
@@ -928,87 +929,6 @@ bool StudioServer::sessionEstablished() const
 {
   const auto state = m_state.load();
   return state == SessionState::Connected || state == SessionState::Rendering;
-}
-
-// Playback ///////////////////////////////////////////////////////////////////
-
-void StudioServer::applyTime(const SetTime &time)
-{
-  const auto &project = m_projectContext.project();
-  const auto *shot = project::activeShot(project);
-  if (!shot)
-    return;
-  if (time.shotId != project.activeShotId) {
-    vsr::core::logWarning(
-        "[StudioServer] SetTime for shot '%s' ignored: the active shot is '%s'",
-        time.shotId.c_str(),
-        project.activeShotId.c_str());
-    return;
-  }
-
-  if (!shot->playing) {
-    if (!m_scrubPending)
-      m_scrubFrameBefore = shot->currentFrame;
-    m_scrubPending = true;
-    m_scrubDeadline = Clock::now() + SCRUB_COMMIT_QUIET;
-  }
-
-  m_projectContext.setActiveShotFrame(time.frame);
-  pushLoadFailures();
-}
-
-void StudioServer::tickPlayback()
-{
-  const auto now = Clock::now();
-  float elapsed = 0.f;
-  if (m_lastTick)
-    elapsed = std::chrono::duration<float>(now - *m_lastTick).count();
-  m_lastTick = now;
-
-  if (!sessionEstablished())
-    return;
-  auto *shot = project::activeShot(m_projectContext.project());
-  if (!shot)
-    return;
-
-  // A play commits the frame with its own snapshot; a scrub window left open
-  // before it has nothing to add. Should the manager stop on its own during
-  // the tick, the context marks the revision and the loop's rule snapshots.
-  if (shot->playing)
-    m_scrubPending = false;
-  m_ctx.vsr.animationMgr.tick(elapsed);
-  pushLoadFailures();
-}
-
-void StudioServer::commitScrubIfQuiet()
-{
-  if (!m_scrubPending || Clock::now() < m_scrubDeadline)
-    return;
-  m_scrubPending = false;
-  if (!sessionEstablished())
-    return;
-
-  const auto *shot = project::activeShot(m_projectContext.project());
-  // A play that started meanwhile committed the frame with its own snapshot.
-  if (!shot || shot->playing || shot->currentFrame == m_scrubFrameBefore)
-    return;
-  // Time at Rest: the frame the scrub ended on is project state now.
-  m_projectContext.markRevised();
-}
-
-void StudioServer::pushLoadFailures()
-{
-  auto failures = m_ctx.vsr.animationMgr.takeLoadFailures();
-  if (failures.empty() || !sessionEstablished())
-    return;
-  const auto &project = m_projectContext.project();
-  for (auto &failure : failures) {
-    TimeAdvanceWarning warning;
-    warning.shotId = project.activeShotId;
-    warning.frame = failure.frame;
-    warning.message = std::move(failure.message);
-    send(encode(warning));
-  }
 }
 
 void StudioServer::followCameraEdit(const vsr::scene::Object *object)
