@@ -170,13 +170,18 @@ bool nodeToSourceFile(const DataNode &n, DatasetSourceFile &f)
       && readOptionalChild(n, "resolvedPath", f.resolvedPath);
 }
 
-// v1-v4 manifests embedded the dataset payload metadata inline, with paths
-// under absolutePath / projectRelativePath.
+// v1-v4 manifests embedded the dataset payload metadata inline, spelling each
+// path as absolutePath with a projectRelativePath fallback.
+bool readLegacyPath(const DataNode &n, std::string &path)
+{
+  if (!readOptionalChild(n, "absolutePath", path))
+    return false;
+  return !path.empty() || readOptionalChild(n, "projectRelativePath", path);
+}
+
 bool nodeToLegacySourceFile(const DataNode &n, DatasetSourceFile &f)
 {
-  if (!readOptionalChild(n, "absolutePath", f.path))
-    return false;
-  return !f.path.empty() || readOptionalChild(n, "projectRelativePath", f.path);
+  return readLegacyPath(n, f.path);
 }
 
 bool nodeToLegacyDatasetMetadata(const DataNode &n, Dataset &d)
@@ -193,11 +198,7 @@ bool nodeToLegacyDatasetMetadata(const DataNode &n, Dataset &d)
   d.status = dataset::statusFromString(text);
 
   if (const auto *source = n.child("source")) {
-    if (!readOptionalChild(*source, "absolutePath", d.source.sourcePath))
-      return false;
-    if (d.source.sourcePath.empty()
-        && !readOptionalChild(
-            *source, "projectRelativePath", d.source.sourcePath))
+    if (!readLegacyPath(*source, d.source.sourcePath))
       return false;
   }
   if (!readNodeList(n, "sourceFiles", d.sourceFiles, nodeToLegacySourceFile))

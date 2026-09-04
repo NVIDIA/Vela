@@ -18,8 +18,8 @@ struct Context;
 bool serialize_ApplicationDump(const Context &context, core::DataNode &root);
 bool deserialize_ApplicationDump(Context &context, core::DataNode &root);
 
-// Reading keeps `pose`'s value for an absent field and fails on a field of
-// the wrong type; the pose is partially written on failure.
+// Reading keeps `pose`'s value for an absent field, fails on a field of the
+// wrong type, and assigns `pose` only on success.
 void serialize_CameraPose(
     const rendering::CameraPose &pose, core::DataNode &node);
 bool deserialize_CameraPose(
