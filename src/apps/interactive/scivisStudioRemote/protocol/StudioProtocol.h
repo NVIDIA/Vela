@@ -24,7 +24,10 @@ bool parsePort(const std::string &text, uint16_t &port);
 // 3: Disconnect carries a reason and is the server's farewell too.
 // 4: UpdateShot's bindings are the manifest's ordered list and ProjectSnapshot
 //    carries the Project's Full form inline instead of a runtime sidecar.
-constexpr int PROTOCOL_VERSION = 4;
+// 5: a SceneObjectRef is one object-reference leaf; TaskCompleted/TaskFailed
+//    carry a results subtree (RenderShotResult) instead of framesCompleted;
+//    ImportSubtreeDataset is its own request.
+constexpr int PROTOCOL_VERSION = 5;
 
 /*
  * Complete v1 message set of the SciVis Studio client-server protocol, as one
