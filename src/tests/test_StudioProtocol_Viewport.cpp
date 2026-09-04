@@ -412,7 +412,7 @@ SCENARIO("Viewport payloads", "[StudioProtocol]")
     {
       vsr::core::DataTree tree;
       toNode(reply, tree.root());
-      tree.root()["objectIdentity"]["type"] = std::string("ANARI_BOGUS");
+      tree.root()["objectIdentity"] = std::string("ANARI_BOGUS");
       PickReply out;
       REQUIRE_FALSE(fromNode(tree.root(), out));
     }

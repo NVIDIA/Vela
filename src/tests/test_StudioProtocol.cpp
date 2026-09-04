@@ -4,6 +4,7 @@
 // catch
 #include "catch.hpp"
 // vsr_scivis_studio_protocol
+#include "FrameMessages.h"
 #include "PayloadCommon.h"
 #include "SessionMessages.h"
 #include "StudioCodec.h"
@@ -454,16 +455,6 @@ SCENARIO("PayloadCommon helpers", "[StudioProtocol]")
     REQUIRE_FALSE(readEnumChild(tree.root(), "missing", mode, parse));
     REQUIRE(mode == Mode::B);
   }
-
-  GIVEN("ANARI type names")
-  {
-    REQUIRE(std::string(toString(ANARI_CAMERA)) == "ANARI_CAMERA");
-    REQUIRE(anariTypeFromString("ANARI_CAMERA") == ANARI_CAMERA);
-    REQUIRE(anariTypeFromString("ANARI_FLOAT32_MAT4") == ANARI_FLOAT32_MAT4);
-    REQUIRE(anariTypeFromString("ANARI_UNKNOWN") == ANARI_UNKNOWN);
-    REQUIRE_FALSE(anariTypeFromString("ANARI_NOT_A_TYPE"));
-    REQUIRE_FALSE(anariTypeFromString(""));
-  }
 }
 
 SCENARIO("Scene identity payloads", "[StudioProtocol]")
@@ -474,45 +465,57 @@ SCENARIO("Scene identity payloads", "[StudioProtocol]")
     ref.type = ANARI_SPATIAL_FIELD;
     ref.objectIndex = 12;
 
-    THEN("it round-trips through a serialized tree")
+    THEN("it travels as one object-reference leaf")
     {
       vsr::core::DataTree tree;
-      toNode(ref, tree.root());
-      REQUIRE(tree.root().child("type")->getValueAs<std::string>()
-          == "ANARI_SPATIAL_FIELD");
+      toNode(ref, tree.root()["object"]);
+      const auto *leaf = tree.root().child("object");
+      REQUIRE(leaf->holdsObjectIdx());
+      REQUIRE(leaf->numChildren() == 0);
 
       vsr::network::MessagePayload bytes;
       tree.write(bytes);
       vsr::core::DataTree copy;
       REQUIRE(copy.read(bytes));
       SceneObjectRef out;
-      REQUIRE(fromNode(copy.root(), out));
+      REQUIRE(readChildNode(copy.root(), "object", out));
       REQUIRE(out.type == ANARI_SPATIAL_FIELD);
       REQUIRE(out.objectIndex == 12);
     }
 
-    THEN("a default (empty) ref round-trips")
+    THEN("an unset ref is an empty leaf and reads back unset")
     {
       vsr::core::DataTree tree;
-      toNode(SceneObjectRef{}, tree.root());
+      toNode(SceneObjectRef{}, tree.root()["camera"]);
+      REQUIRE(tree.root().child("camera")->empty());
+
+      vsr::network::MessagePayload bytes;
+      tree.write(bytes);
+      vsr::core::DataTree copy;
+      REQUIRE(copy.read(bytes));
       SceneObjectRef out;
+      out.type = ANARI_CAMERA;
       out.objectIndex = 3;
-      REQUIRE(fromNode(tree.root(), out));
+      REQUIRE(readChildNode(copy.root(), "camera", out));
       REQUIRE(out.type == ANARI_UNKNOWN);
       REQUIRE(out.objectIndex == VSR_INVALID_INDEX);
     }
 
-    THEN("an unknown type name or missing index is rejected")
+    THEN("a leaf holding anything else, or a subtree, is rejected")
     {
       vsr::core::DataTree tree;
-      tree.root()["type"] = std::string("ANARI_BOGUS");
-      writeChild(tree.root(), "objectIndex", size_t(1));
+      tree.root()["object"] = std::string("ANARI_CAMERA");
       SceneObjectRef out;
-      REQUIRE_FALSE(fromNode(tree.root(), out));
+      REQUIRE_FALSE(readChildNode(tree.root(), "object", out));
 
-      vsr::core::DataTree noIndex;
-      noIndex.root()["type"] = std::string("ANARI_CAMERA");
-      REQUIRE_FALSE(fromNode(noIndex.root(), out));
+      tree.root()["object"] = uint64_t(12);
+      REQUIRE_FALSE(readChildNode(tree.root(), "object", out));
+
+      // The pre-v5 shape: a {type, objectIndex} pair of children.
+      vsr::core::DataTree pair;
+      pair.root()["object"]["type"] = std::string("ANARI_CAMERA");
+      writeChild(pair.root()["object"], "objectIndex", size_t(1));
+      REQUIRE_FALSE(readChildNode(pair.root(), "object", out));
     }
 
     THEN("writeChildNode()/readChildNode() nest it under a named child")
@@ -621,7 +624,7 @@ struct Probe
   uint64_t id{0};
   std::string label{"none"};
   std::optional<std::filesystem::path> where;
-  anari::DataType type{ANARI_UNKNOWN};
+  FrameEncoding encoding{FrameEncoding::Raw};
   SceneNodeRef target;
   std::optional<SceneObjectRef> object;
   std::vector<std::string> tags;
@@ -635,7 +638,7 @@ void fields(V &v, Probe &p)
   v.required("id", p.id);
   v.optional("label", p.label);
   v.optional("where", p.where);
-  v.requiredEnum("type", p.type, toString, anariTypeFromString);
+  v.requiredEnum("encoding", p.encoding, toString, frameEncodingFromString);
   v.child("target", p.target);
   v.optionalChild("object", p.object);
   v.list("tags", p.tags);
@@ -655,7 +658,7 @@ SceneNodeRef node(const char *layer, size_t index)
 void writeRequired(vsr::core::DataNode &root)
 {
   writeChild(root, "id", uint64_t(1));
-  writeChild(root, "type", std::string("ANARI_LIGHT"));
+  writeChild(root, "encoding", std::string("Raw"));
   toNode(node("lights", 2), root["target"]);
 }
 
@@ -669,7 +672,7 @@ SCENARIO("A fields() description derives a payload's codec", "[StudioProtocol]")
     in.id = 42;
     in.label = "probe";
     in.where = std::filesystem::path("/data/run");
-    in.type = ANARI_GEOMETRY;
+    in.encoding = FrameEncoding::TurboJpeg;
     in.target = node("geometry", 3);
     SceneObjectRef object;
     object.type = ANARI_MATERIAL;
@@ -689,13 +692,10 @@ SCENARIO("A fields() description derives a payload's codec", "[StudioProtocol]")
       REQUIRE(root.child("id")->getValueOr(uint64_t(0)) == 42);
       REQUIRE(root.child("label")->getValueOr(std::string()) == "probe");
       REQUIRE(root.child("where")->getValueOr(std::string()) == "/data/run");
-      REQUIRE(
-          root.child("type")->getValueOr(std::string()) == "ANARI_GEOMETRY");
+      REQUIRE(root.child("encoding")->getValueOr(std::string()) == "TurboJpeg");
       REQUIRE(root.child("target")->child("nodeIndex")->getValueOr(uint64_t(0))
           == 3);
-      REQUIRE(
-          root.child("object")->child("objectIndex")->getValueOr(uint64_t(0))
-          == 5);
+      REQUIRE(root.child("object")->holdsObjectIdx());
       REQUIRE(root.child("tags")->child("1")->getValueOr(std::string()) == "a");
       REQUIRE(root.child("nodes")
                   ->child("1")
@@ -712,7 +712,7 @@ SCENARIO("A fields() description derives a payload's codec", "[StudioProtocol]")
       REQUIRE(out.id == 42);
       REQUIRE(out.label == "probe");
       REQUIRE(out.where == std::filesystem::path("/data/run"));
-      REQUIRE(out.type == ANARI_GEOMETRY);
+      REQUIRE(out.encoding == FrameEncoding::TurboJpeg);
       REQUIRE(out.target.layerName == "geometry");
       REQUIRE(out.target.nodeIndex == 3);
       REQUIRE(out.object);
@@ -730,7 +730,7 @@ SCENARIO("A fields() description derives a payload's codec", "[StudioProtocol]")
   {
     Probe in;
     in.id = 1;
-    in.type = ANARI_LIGHT;
+    in.encoding = FrameEncoding::Raw;
     in.target = node("lights", 2);
     vsr::core::DataTree tree;
     toNode(in, tree.root());
@@ -782,7 +782,7 @@ SCENARIO("A fields() description derives a payload's codec", "[StudioProtocol]")
 
     THEN("a present but malformed optional nested payload is rejected")
     {
-      tree.root()["object"]["type"] = std::string("ANARI_MATERIAL");
+      tree.root()["object"] = std::string("ANARI_MATERIAL");
       Probe out;
       REQUIRE_FALSE(fromNode(tree.root(), out));
     }
@@ -830,7 +830,7 @@ SCENARIO("A fields() description derives a payload's codec", "[StudioProtocol]")
     {
       vsr::core::DataTree tree;
       writeRequired(tree.root());
-      tree.root()["type"] = std::string("ANARI_TEAPOT");
+      tree.root()["encoding"] = std::string("Teapot");
       Probe out;
       REQUIRE_FALSE(fromNode(tree.root(), out));
     }
