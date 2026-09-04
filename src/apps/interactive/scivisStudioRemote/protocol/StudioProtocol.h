@@ -4,6 +4,8 @@
 #pragma once
 
 // std
+#include <array>
+#include <cstddef>
 #include <cstdint>
 
 namespace vsr::scivis_studio::protocol {
@@ -13,114 +15,144 @@ namespace vsr::scivis_studio::protocol {
 constexpr int PROTOCOL_VERSION = 3;
 
 /*
- * Complete v1 message set of the SciVis Studio client-server protocol. Values
- * are explicit and grouped with gaps so later versions can grow a group
- * without renumbering. 0 is unused (sentinel) and 255 is never assigned: the
- * transport's MESSAGE_TYPE_INVALID is 255 (see vsr/network/Message.hpp).
+ * Complete v1 message set of the SciVis Studio client-server protocol, as one
+ * table of (enumerator, wire value, direction). The enum, toString(),
+ * isStudioMessageType() and isServerToClient() are all derived from it, so
+ * adding a message means adding one row here.
+ *
+ * Values are explicit and grouped with gaps so later versions can grow a
+ * group without renumbering. 0 is unused (sentinel) and 255 is never
+ * assigned: the transport's MESSAGE_TYPE_INVALID is 255 (see
+ * vsr/network/Message.hpp).
+ *
+ * Direction: Both for the session messages that either side may send;
+ * ClientToServer for requests, optimistic edits and rendering controls;
+ * ServerToClient for the bootstrap bracket, project and task replies, scene
+ * pushes, FrameConfig and Frame.
  *
  * Reserved, deliberately not in the enum: dataset-subtree expansion, typed
  * channel frames (depth/AOV), and an NVENC frame encoding value.
  */
 // clang-format off
+#define STUDIO_MESSAGE_TYPES(X)                                  \
+  /* Session (1..) */                                            \
+  X(Hello,                         1, Both)                      \
+  X(Error,                         2, Both)                      \
+  X(Ping,                          3, Both)                      \
+  X(Pong,                          4, Both)                      \
+  X(Disconnect,                    5, Both)                      \
+  X(Shutdown,                      6, ClientToServer)            \
+  X(BootstrapBegin,                7, ServerToClient)            \
+  X(BootstrapEnd,                  8, ServerToClient)            \
+  /* Project ops, sync or task; all carry a requestId (20..) */  \
+  X(NewProject,                   20, ClientToServer)            \
+  X(OpenProject,                  21, ClientToServer)            \
+  X(SaveProject,                  22, ClientToServer)            \
+  X(ImportStaticDataset,          23, ClientToServer)            \
+  X(ImportFileAnimationDataset,   24, ClientToServer)            \
+  X(DeclareFileAnimationDataset,  25, ClientToServer)            \
+  X(ReimportDataset,              26, ClientToServer)            \
+  X(RenameDataset,                27, ClientToServer)            \
+  X(RemoveDataset,                28, ClientToServer)            \
+  X(LoadDataset,                  29, ClientToServer)            \
+  X(UnloadDataset,                30, ClientToServer)            \
+  X(RefreshDatasetAvailability,   31, ClientToServer)            \
+  X(SaveDatasetArchive,           32, ClientToServer)            \
+  X(LoadDatasetArchive,           33, ClientToServer)            \
+  X(DiscoverDatasetCandidates,    34, ClientToServer)            \
+  X(IncorporateDatasetCandidate,  35, ClientToServer)            \
+  X(CreateShot,                   36, ClientToServer)            \
+  X(RemoveShot,                   37, ClientToServer)            \
+  X(UpdateShot,                   38, ClientToServer)            \
+  X(SetActiveShot,                39, ClientToServer)            \
+  X(CreateLightRig,               40, ClientToServer)            \
+  X(CloneLightRig,                41, ClientToServer)            \
+  X(RemoveLightRig,               42, ClientToServer)            \
+  X(RenameLightRig,               43, ClientToServer)            \
+  X(AddLightToRig,                44, ClientToServer)            \
+  X(RemoveLightFromRig,           45, ClientToServer)            \
+  X(CreateCameraRig,              46, ClientToServer)            \
+  X(RemoveCameraRig,              47, ClientToServer)            \
+  X(RenameCameraRig,              48, ClientToServer)            \
+  X(SaveCameraRigArchive,         49, ClientToServer)            \
+  X(LoadCameraRigArchive,         50, ClientToServer)            \
+  X(SaveLightRigArchive,          51, ClientToServer)            \
+  X(LoadLightRigArchive,          52, ClientToServer)            \
+  X(CreateColorMap,               53, ClientToServer)            \
+  X(RenameColorMap,               54, ClientToServer)            \
+  X(RemoveColorMap,               55, ClientToServer)            \
+  X(ListRoots,                    56, ClientToServer)            \
+  X(ListDirectory,                57, ClientToServer)            \
+  X(SetPlaying,                   58, ClientToServer)            \
+  X(RequestArrayHistogram,        59, ClientToServer)            \
+  X(RenderShot,                   60, ClientToServer)            \
+  X(CancelTask,                   61, ClientToServer)            \
+  X(Pick,                         62, ClientToServer)            \
+  /* Project/task replies (100..) */                             \
+  X(ProjectOpReply,              100, ServerToClient)            \
+  X(ProjectSnapshot,             101, ServerToClient)            \
+  X(TaskProgress,                102, ServerToClient)            \
+  X(TaskCompleted,               103, ServerToClient)            \
+  X(TaskFailed,                  104, ServerToClient)            \
+  X(TimeAdvanceWarning,          105, ServerToClient)            \
+  X(PickReply,                   106, ServerToClient)            \
+  X(UIState,                     107, ServerToClient)            \
+  /* Scene pushes (120..) */                                     \
+  X(TransferScene,               120, ServerToClient)            \
+  X(TransferLayer,               121, ServerToClient)            \
+  X(ObjectAdded,                 122, ServerToClient)            \
+  X(ObjectRemoved,               123, ServerToClient)            \
+  /* Optimistic edits, no reply (140..) */                       \
+  X(SetObjectParameter,          140, ClientToServer)            \
+  X(RemoveObjectParameter,       141, ClientToServer)            \
+  X(SetNodeTransform,            142, ClientToServer)            \
+  X(SetTime,                     143, ClientToServer)            \
+  X(SetOutline,                  144, ClientToServer)            \
+  X(ViewportSettings,            145, ClientToServer)            \
+  /* Rendering and frames (160..) */                             \
+  X(SetFrameConfig,              160, ClientToServer)            \
+  X(FrameConfig,                 161, ServerToClient)            \
+  X(SetEncodings,                162, ClientToServer)            \
+  X(StartRendering,              163, ClientToServer)            \
+  X(StopRendering,               164, ClientToServer)            \
+  X(Frame,                       165, ServerToClient)
+// clang-format on
+
 enum class StudioMessageType : uint8_t
 {
-  // Session (1..)
-  Hello = 1,
-  Error = 2,
-  Ping = 3,
-  Pong = 4,
-  Disconnect = 5,
-  Shutdown = 6,
-  BootstrapBegin = 7,
-  BootstrapEnd = 8,
+#define X(name, value, dir) name = value,
+  STUDIO_MESSAGE_TYPES(X)
+#undef X
+};
 
-  // Project ops, client->server, sync or task; all carry a requestId (20..)
-  NewProject = 20,
-  OpenProject = 21,
-  SaveProject = 22,
-  ImportStaticDataset = 23,
-  ImportFileAnimationDataset = 24,
-  DeclareFileAnimationDataset = 25,
-  ReimportDataset = 26,
-  RenameDataset = 27,
-  RemoveDataset = 28,
-  LoadDataset = 29,
-  UnloadDataset = 30,
-  RefreshDatasetAvailability = 31,
-  SaveDatasetArchive = 32,
-  LoadDatasetArchive = 33,
-  DiscoverDatasetCandidates = 34,
-  IncorporateDatasetCandidate = 35,
-  CreateShot = 36,
-  RemoveShot = 37,
-  UpdateShot = 38,
-  SetActiveShot = 39,
-  CreateLightRig = 40,
-  CloneLightRig = 41,
-  RemoveLightRig = 42,
-  RenameLightRig = 43,
-  AddLightToRig = 44,
-  RemoveLightFromRig = 45,
-  CreateCameraRig = 46,
-  RemoveCameraRig = 47,
-  RenameCameraRig = 48,
-  SaveCameraRigArchive = 49,
-  LoadCameraRigArchive = 50,
-  SaveLightRigArchive = 51,
-  LoadLightRigArchive = 52,
-  CreateColorMap = 53,
-  RenameColorMap = 54,
-  RemoveColorMap = 55,
-  ListRoots = 56,
-  ListDirectory = 57,
-  SetPlaying = 58,
-  RequestArrayHistogram = 59,
-  RenderShot = 60,
-  CancelTask = 61,
-  Pick = 62,
+enum class MessageDirection
+{
+  Both,
+  ClientToServer,
+  ServerToClient
+};
 
-  // Project/task, server->client (100..)
-  ProjectOpReply = 100,
-  ProjectSnapshot = 101,
-  TaskProgress = 102,
-  TaskCompleted = 103,
-  TaskFailed = 104,
-  TimeAdvanceWarning = 105,
-  PickReply = 106,
-  UIState = 107,
+struct MessageTypeRow
+{
+  StudioMessageType type;
+  const char *name;
+  MessageDirection direction;
+};
 
-  // Scene, server->client (120..)
-  TransferScene = 120,
-  TransferLayer = 121,
-  ObjectAdded = 122,
-  ObjectRemoved = 123,
-
-  // Optimistic, client->server, no reply (140..)
-  SetObjectParameter = 140,
-  RemoveObjectParameter = 141,
-  SetNodeTransform = 142,
-  SetTime = 143,
-  SetOutline = 144,
-  ViewportSettings = 145,
-
-  // Rendering and frames (160..)
-  SetFrameConfig = 160,
-  FrameConfig = 161,
-  SetEncodings = 162,
-  StartRendering = 163,
-  StopRendering = 164,
-  Frame = 165
+// clang-format off
+constexpr std::array MESSAGE_TYPE_TABLE = {
+#define X(name, value, dir) \
+  MessageTypeRow{StudioMessageType::name, #name, MessageDirection::dir},
+  STUDIO_MESSAGE_TYPES(X)
+#undef X
 };
 // clang-format on
 
 // True only for values the enum defines; receivers reject anything else.
 constexpr bool isStudioMessageType(uint8_t value);
 
-// Types only the server emits: the bootstrap bracket, project and task
-// replies, scene pushes, FrameConfig and Frame. A client sending one is
-// confused, and a server tells it so rather than guessing. The session
-// messages (Hello, Error, Ping/Pong, Disconnect) go both ways; Shutdown is
-// client-to-server.
+// Types only the server emits. A client sending one is confused, and a
+// server tells it so rather than guessing. False for values outside the set.
 constexpr bool isServerToClient(StudioMessageType type);
 
 // Enumerator name, or "Unknown" for values outside the set.
@@ -128,113 +160,40 @@ const char *toString(StudioMessageType type);
 
 // Inlined definitions ////////////////////////////////////////////////////////
 
+// The table row for a type, or nullptr for values outside the set.
+constexpr const MessageTypeRow *findMessageType(StudioMessageType type)
+{
+  for (const auto &row : MESSAGE_TYPE_TABLE)
+    if (row.type == type)
+      return &row;
+  return nullptr;
+}
+
 constexpr bool isStudioMessageType(uint8_t value)
 {
-  switch (StudioMessageType(value)) {
-  case StudioMessageType::Hello:
-  case StudioMessageType::Error:
-  case StudioMessageType::Ping:
-  case StudioMessageType::Pong:
-  case StudioMessageType::Disconnect:
-  case StudioMessageType::Shutdown:
-  case StudioMessageType::BootstrapBegin:
-  case StudioMessageType::BootstrapEnd:
-  case StudioMessageType::NewProject:
-  case StudioMessageType::OpenProject:
-  case StudioMessageType::SaveProject:
-  case StudioMessageType::ImportStaticDataset:
-  case StudioMessageType::ImportFileAnimationDataset:
-  case StudioMessageType::DeclareFileAnimationDataset:
-  case StudioMessageType::ReimportDataset:
-  case StudioMessageType::RenameDataset:
-  case StudioMessageType::RemoveDataset:
-  case StudioMessageType::LoadDataset:
-  case StudioMessageType::UnloadDataset:
-  case StudioMessageType::RefreshDatasetAvailability:
-  case StudioMessageType::SaveDatasetArchive:
-  case StudioMessageType::LoadDatasetArchive:
-  case StudioMessageType::DiscoverDatasetCandidates:
-  case StudioMessageType::IncorporateDatasetCandidate:
-  case StudioMessageType::CreateShot:
-  case StudioMessageType::RemoveShot:
-  case StudioMessageType::UpdateShot:
-  case StudioMessageType::SetActiveShot:
-  case StudioMessageType::CreateLightRig:
-  case StudioMessageType::CloneLightRig:
-  case StudioMessageType::RemoveLightRig:
-  case StudioMessageType::RenameLightRig:
-  case StudioMessageType::AddLightToRig:
-  case StudioMessageType::RemoveLightFromRig:
-  case StudioMessageType::CreateCameraRig:
-  case StudioMessageType::RemoveCameraRig:
-  case StudioMessageType::RenameCameraRig:
-  case StudioMessageType::SaveCameraRigArchive:
-  case StudioMessageType::LoadCameraRigArchive:
-  case StudioMessageType::SaveLightRigArchive:
-  case StudioMessageType::LoadLightRigArchive:
-  case StudioMessageType::CreateColorMap:
-  case StudioMessageType::RenameColorMap:
-  case StudioMessageType::RemoveColorMap:
-  case StudioMessageType::ListRoots:
-  case StudioMessageType::ListDirectory:
-  case StudioMessageType::SetPlaying:
-  case StudioMessageType::RequestArrayHistogram:
-  case StudioMessageType::RenderShot:
-  case StudioMessageType::CancelTask:
-  case StudioMessageType::Pick:
-  case StudioMessageType::ProjectOpReply:
-  case StudioMessageType::ProjectSnapshot:
-  case StudioMessageType::TaskProgress:
-  case StudioMessageType::TaskCompleted:
-  case StudioMessageType::TaskFailed:
-  case StudioMessageType::TimeAdvanceWarning:
-  case StudioMessageType::PickReply:
-  case StudioMessageType::UIState:
-  case StudioMessageType::TransferScene:
-  case StudioMessageType::TransferLayer:
-  case StudioMessageType::ObjectAdded:
-  case StudioMessageType::ObjectRemoved:
-  case StudioMessageType::SetObjectParameter:
-  case StudioMessageType::RemoveObjectParameter:
-  case StudioMessageType::SetNodeTransform:
-  case StudioMessageType::SetTime:
-  case StudioMessageType::SetOutline:
-  case StudioMessageType::ViewportSettings:
-  case StudioMessageType::SetFrameConfig:
-  case StudioMessageType::FrameConfig:
-  case StudioMessageType::SetEncodings:
-  case StudioMessageType::StartRendering:
-  case StudioMessageType::StopRendering:
-  case StudioMessageType::Frame:
-    return true;
-  default:
-    return false;
-  }
+  return findMessageType(StudioMessageType(value)) != nullptr;
 }
 
 constexpr bool isServerToClient(StudioMessageType type)
 {
-  switch (type) {
-  case StudioMessageType::BootstrapBegin:
-  case StudioMessageType::BootstrapEnd:
-  case StudioMessageType::ProjectOpReply:
-  case StudioMessageType::ProjectSnapshot:
-  case StudioMessageType::TaskProgress:
-  case StudioMessageType::TaskCompleted:
-  case StudioMessageType::TaskFailed:
-  case StudioMessageType::TimeAdvanceWarning:
-  case StudioMessageType::PickReply:
-  case StudioMessageType::UIState:
-  case StudioMessageType::TransferScene:
-  case StudioMessageType::TransferLayer:
-  case StudioMessageType::ObjectAdded:
-  case StudioMessageType::ObjectRemoved:
-  case StudioMessageType::FrameConfig:
-  case StudioMessageType::Frame:
-    return true;
-  default:
-    return false;
-  }
+  const auto *row = findMessageType(type);
+  return row && row->direction == MessageDirection::ServerToClient;
 }
+
+// Table integrity: no row may take the sentinel, the transport's invalid
+// value, or another row's value.
+constexpr bool messageTypeTableIsWellFormed()
+{
+  for (size_t i = 0; i < MESSAGE_TYPE_TABLE.size(); ++i) {
+    const auto v = uint8_t(MESSAGE_TYPE_TABLE[i].type);
+    if (v == 0 || v == 255)
+      return false;
+    for (size_t j = 0; j < i; ++j)
+      if (uint8_t(MESSAGE_TYPE_TABLE[j].type) == v)
+        return false;
+  }
+  return true;
+}
+static_assert(messageTypeTableIsWellFormed());
 
 } // namespace vsr::scivis_studio::protocol

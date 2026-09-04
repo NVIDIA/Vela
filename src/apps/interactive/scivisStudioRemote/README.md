@@ -807,6 +807,28 @@ Code-quality follow-ups to the M7 review:
   (`await-task <id>` on an id from another session) fills only
   `$lastTaskMessage`; no scenario does that.
 
+### PR review fix-ups
+
+Findings of the 2026-09-03 code-quality review of the whole branch against
+`main`, each *fixed* on the branch:
+
+- **One table for the message set.** `StudioMessageType`, `toString`,
+  `isStudioMessageType` and `isServerToClient` were four hand-kept lists of
+  the same 78 rows (about 400 lines) with nothing checking they agreed. An
+  X-macro `STUDIO_MESSAGE_TYPES` in `protocol/StudioProtocol.h` now holds
+  each row as (enumerator, wire value, direction) and everything else is
+  derived: the enum, a `constexpr` `MESSAGE_TYPE_TABLE`, and the three
+  public functions, whose names and results are unchanged (a dump of name,
+  validity and direction for all 256 values matched before and after; no
+  `PROTOCOL_VERSION` bump). A `static_assert` rejects a table that assigns
+  0, 255 or a duplicate value, and the `[StudioProtocol]` suite checks every
+  row's `toString` is its enumerator and that the table's size matches the
+  test's hand-written list, so a lost row fails on one side or the other.
+  `MessageDirection` is `Both` for the session messages (Hello, Error,
+  Ping/Pong, Disconnect), otherwise `ClientToServer` or `ServerToClient`;
+  the direction column is what the client and test-client dispatch switches
+  can read next.
+
 ### Spec conformance
 
 Every bullet of the spec sections named below, against the tree at
