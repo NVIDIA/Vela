@@ -79,8 +79,8 @@ const char *toString(SessionState state);
  * One rule decides every ProjectSnapshot, in the loop and never in a
  * handler: the ProjectContext counts its mutations (revision()), and the
  * loop sends a snapshot whenever the count differs from the one it last
- * sent -- after the requests are dispatched, after a task ran, and after
- * the playback tick -- so a reply always precedes its snapshot, a refused
+ * sent -- after each request dispatched, after a task ran, and after the
+ * playback tick -- so a reply always precedes its snapshot, a refused
  * or no-op request has none, and a failed op that still left a mark gets
  * one. The pipeline follows the same way: activeShotRevision() moves when
  * which shot renders (or its record) changed, and the loop rebinds on it.
@@ -212,7 +212,7 @@ struct StudioServer
   // Points the pipeline's renderer and camera at the active shot's, creating
   // the library's standard renderers when the scene has none (a fresh or
   // reopened project) and recording the pick in the shot. Used at setup and
-  // whenever the context's activeShotRevision() moved (followProjectRevision).
+  // whenever the context's activeShotRevision() moved (followProjectRevisions).
   bool bindActiveShotRendering(std::string *error);
   // Forgets the pipeline's renderer and camera: after a project reset the
   // objects they named are gone, so until a bind succeeds no frame renders.
@@ -245,13 +245,15 @@ struct StudioServer
   // was mutating.
   void discardStaleInputs(ControlState &control);
   void dispatchPendingRequests();
-  // The one snapshot rule (and the rebind's): rebinds the pipeline when the
-  // active shot moved since the last bind, then, with a session up, sends a
-  // ProjectSnapshot when the Project's revision moved since the last one
-  // sent. Called after the requests are dispatched, after a task ran and
-  // after the playback tick, so each of those has its snapshot before the
-  // next thing goes out.
-  void followProjectRevision();
+  // The one rule for the pipeline and the snapshot, on the context's two
+  // revisions: rebinds when activeShotRevision() moved since the last bind,
+  // then, with a session up, sends a ProjectSnapshot when revision() moved
+  // since the last one sent. Called after each request dispatched, after a
+  // task ran and after the playback tick, so every mutation has its own
+  // snapshot before the next thing goes out.
+  void followProjectRevisions();
+  // Sends the Project and records the revision it carried.
+  void sendProjectSnapshot();
   void applyFrameConfig(uint32_t width, uint32_t height);
   void applyEdit(const protocol::SetObjectParameter &edit);
   void applyEdit(const protocol::RemoveObjectParameter &edit);

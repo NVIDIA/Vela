@@ -1003,17 +1003,20 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   `markRevised()`: the render's shot-state guard (the snapshot after a render
   confirms the Project it left) and the loop's Time-at-Rest commit
   (`commitScrubIfQuiet`). The loop applies one rule in
-  `followProjectRevision()` -- rebind when `activeShotRevision()` moved,
+  `followProjectRevisions()` -- rebind when `activeShotRevision()` moved,
   then, with a session up, one snapshot when `revision()` moved since the
-  last sent -- after dispatching, after a task ran and after the playback
-  tick, so a reply always precedes its snapshot and the prelude of a
-  RenderShot is shown before the task's first progress; the bootstrap's
-  snapshot records the revision it carried. The flags, the compares, the
+  last sent -- after each request dispatched (so every mutation keeps its
+  own snapshot, right after its reply, and a RenderShot's prelude is shown
+  before the task's first progress), after a task ran and after the
+  playback tick; the bootstrap's snapshot records the revision it carried.
+  A failed open moves `activeShotRevision()` too: its apply resets the
+  scene before it can fail, and the pipeline must not keep handles into the
+  scene that was (the rebind the old `runTaskBody` did unconditionally). The flags, the compares, the
   `rebindActiveShot` host hook and three of the four send sites are gone;
   `runOneTask()` just runs the task. Two visible differences, both the rule
   working as intended: a request that changed nothing (SetActiveShot to the
-  active shot, RenderShot of the active shot, Unload of an unloaded dataset)
-  no longer sends a snapshot, and a task body that throws no longer forces
+  active shot, SetPlaying to the state the shot is in, RenderShot of the
+  active shot, Unload of an unloaded dataset) no longer sends a snapshot, and a task body that throws no longer forces
   one -- whatever it changed before throwing moved the revision. The render
   test's ordering check now exercises a real switch (a second shot active
   when the render is asked) and asserts the no-switch case sends nothing

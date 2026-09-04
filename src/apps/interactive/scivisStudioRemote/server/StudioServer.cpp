@@ -483,15 +483,12 @@ void StudioServer::run()
       bootstrap();
     if (m_sceneResendPending)
       sendSceneSnapshot();
-    // The requests just dispatched: their snapshot precedes the progress of
-    // a task queued in the same batch (a RenderShot's prelude, say).
-    followProjectRevision();
     // One Server Task per iteration; frames wait while it runs. A shot
     // render outlives its session (it runs with nobody listening and the
     // next bootstrap replays its ending).
     if (sessionEstablished() || m_dispatcher.renderActive())
       m_dispatcher.runOneTask();
-    followProjectRevision();
+    followProjectRevisions();
     // A Frame still on the wire gets a moment to finish before time moves
     // on, so a fast link never sees a header skip a frame; on a slow link
     // the tick goes ahead regardless and time keeps its pace.
@@ -501,7 +498,7 @@ void StudioServer::run()
     // Time advances before the render so the Frame carries the frame drawn.
     tickPlayback();
     commitScrubIfQuiet();
-    followProjectRevision();
+    followProjectRevisions();
 
     // A pick renders its own frame, with ids, paused or not.
     bool frameSent = false;
@@ -676,6 +673,9 @@ void StudioServer::dispatchPendingRequests()
     auto request = std::move(*next);
     m_pendingRequests.erase(next);
     m_dispatcher.dispatch(request);
+    // Each mutation gets its own snapshot, right after its reply; a task
+    // queued here sees its prelude's snapshot before its first progress.
+    followProjectRevisions();
   }
 }
 
@@ -758,8 +758,7 @@ void StudioServer::bootstrap()
   send(encode(UIState{m_uiState}));
   // Task-status replay: how the tasks this client never heard about ended.
   m_tasks.replayTo([this](Message &&msg) { send(std::move(msg)); });
-  send(encode(ProjectSnapshot{m_projectContext.project()}));
-  m_snapshotRevision = m_projectContext.revision();
+  sendProjectSnapshot();
   send(encode(BootstrapEnd{}));
 
   setState(
@@ -767,7 +766,7 @@ void StudioServer::bootstrap()
   setPushEnabled(true);
 }
 
-void StudioServer::followProjectRevision()
+void StudioServer::followProjectRevisions()
 {
   // The bind first: it records the renderer pick in the shot, which the
   // snapshot then carries.
@@ -784,9 +783,12 @@ void StudioServer::followProjectRevision()
   }
   // With nobody listening the revision drifts; the next bootstrap's snapshot
   // catches the client up and records where it stands.
-  if (!sessionEstablished()
-      || m_projectContext.revision() == m_snapshotRevision)
-    return;
+  if (sessionEstablished() && m_projectContext.revision() != m_snapshotRevision)
+    sendProjectSnapshot();
+}
+
+void StudioServer::sendProjectSnapshot()
+{
   m_snapshotRevision = m_projectContext.revision();
   send(encode(ProjectSnapshot{m_projectContext.project()}));
 }

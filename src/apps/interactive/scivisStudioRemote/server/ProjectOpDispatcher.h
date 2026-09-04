@@ -127,8 +127,8 @@ bool independentOfQueuedTasks(const ProjectRequest &request);
  * revision() (a "failed" call that still left a mark too -- an import
  * whose ImportFailed record stays, a load that marks a dataset
  * Unavailable), and the loop sends one ProjectSnapshot per revision change
- * after dispatching and after running a task, so the reply precedes it and
- * a refused or no-op call has none. The same goes for the pipeline: the
+ * after each dispatch and after running a task, so the reply precedes it
+ * and a refused or no-op call has none. The same goes for the pipeline: the
  * loop rebinds it when the context's activeShotRevision() moved. RenderShot
  * is a Server Task with a sync prelude: the shot becomes the active one
  * before the task is queued, so the client sees the switch (its snapshot
