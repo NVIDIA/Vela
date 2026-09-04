@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "PayloadCommon.h"
 #include "StudioProtocol.h"
 // vsr_scivis_studio_model
 #include "Dataset.h"
@@ -63,12 +64,23 @@ struct SetNodeTransform
 void toNode(const SetObjectParameter &, vsr::core::DataNode &);
 bool fromNode(const vsr::core::DataNode &, SetObjectParameter &);
 
-// object and name are required.
-void toNode(const RemoveObjectParameter &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, RemoveObjectParameter &);
+// The other two are fields() descriptions (PayloadCommon.h); every field is
+// required.
 
-// node and transform are required.
-void toNode(const SetNodeTransform &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, SetNodeTransform &);
+// Inlined definitions ////////////////////////////////////////////////////////
+
+template <typename V>
+void fields(V &v, RemoveObjectParameter &p)
+{
+  v.child("object", p.object);
+  v.required("name", p.name);
+}
+
+template <typename V>
+void fields(V &v, SetNodeTransform &t)
+{
+  v.child("node", t.node);
+  v.required("transform", t.transform);
+}
 
 } // namespace vsr::scivis_studio::protocol

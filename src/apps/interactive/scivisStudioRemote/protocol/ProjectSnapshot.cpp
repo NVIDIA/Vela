@@ -41,10 +41,8 @@ void sourceFileToNode(const DatasetSourceFile &f, DataNode &n)
 // path is required; resolvedPath defaults to "".
 bool nodeToSourceFile(const DataNode &n, DatasetSourceFile &f)
 {
-  if (!readChild(n, "path", f.path))
-    return false;
-  f.resolvedPath = readChildOr(n, "resolvedPath", std::string());
-  return true;
+  return readChild(n, "path", f.path)
+      && readOptionalChild(n, "resolvedPath", f.resolvedPath);
 }
 
 void datasetRuntimeToNode(const Dataset &d, DataNode &n)
@@ -75,13 +73,13 @@ bool nodeToDatasetRuntime(const DataNode &n, Dataset &d)
 {
   if (!readOptionalEnumChild(n, "status", d.status, statusFromString)
       || !readOptionalEnumChild(
-          n, "sourceKind", d.sourceKind, sourceKindFromString))
+          n, "sourceKind", d.sourceKind, sourceKindFromString)
+      || !readOptionalChild(n, "importerType", d.importerType))
     return false;
-  d.importerType = readChildOr(n, "importerType", d.importerType);
 
   if (const auto *source = n.child("source")) {
-    d.source.sourcePath =
-        readChildOr(*source, "sourcePath", d.source.sourcePath);
+    if (!readOptionalChild(*source, "sourcePath", d.source.sourcePath))
+      return false;
     if (const auto *settings = source->child("importerSettings")) {
       bool ok = true;
       settings->foreach_child_const([&](const DataNode &kv) {
@@ -100,16 +98,13 @@ bool nodeToDatasetRuntime(const DataNode &n, Dataset &d)
       && !readNodeList(n, "sourceFiles", d.sourceFiles, nodeToSourceFile))
     return false;
 
-  if (!readOptionalChildNode(n, "rootNode", d.rootNode))
-    return false;
-  d.dirty = readChildOr(n, "dirty", d.dirty);
-  d.declared = readChildOr(n, "declared", d.declared);
-  d.pendingExtraction =
-      readChildOr(n, "pendingExtraction", d.pendingExtraction);
-  d.pendingSourceListMigration = readChildOr(
-      n, "pendingSourceListMigration", d.pendingSourceListMigration);
-  d.persistedName = readChildOr(n, "persistedName", d.persistedName);
-  return true;
+  return readOptionalChildNode(n, "rootNode", d.rootNode)
+      && readOptionalChild(n, "dirty", d.dirty)
+      && readOptionalChild(n, "declared", d.declared)
+      && readOptionalChild(n, "pendingExtraction", d.pendingExtraction)
+      && readOptionalChild(
+          n, "pendingSourceListMigration", d.pendingSourceListMigration)
+      && readOptionalChild(n, "persistedName", d.persistedName);
 }
 
 // Whole sidecar /////////////////////////////////////////////////////////////
@@ -164,9 +159,9 @@ bool nodeToRuntime(DataNode &n, Project &p)
       const auto *rn = lightRigs->child(r.id);
       if (!rn)
         continue;
-      if (!readOptionalChildNode(*rn, "rootNode", r.rootNode))
+      if (!readOptionalChildNode(*rn, "rootNode", r.rootNode)
+          || !readOptionalChild(*rn, "persistedName", r.persistedName))
         return false;
-      r.persistedName = readChildOr(*rn, "persistedName", r.persistedName);
     }
   }
 
@@ -179,7 +174,8 @@ bool nodeToRuntime(DataNode &n, Project &p)
       // a default rig rather than a decode failure.
       if (auto *rig = rn->child("rig"))
         camera_rig::nodeToCameraRig(*rig, r);
-      r.persistedName = readChildOr(*rn, "persistedName", r.persistedName);
+      if (!readOptionalChild(*rn, "persistedName", r.persistedName))
+        return false;
     }
   }
 

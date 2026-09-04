@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "PayloadCommon.h"
 #include "StudioProtocol.h"
 // vsr_core
 #include "vsr/core/DataTree.hpp"
@@ -69,31 +70,55 @@ struct BootstrapEnd
       StudioMessageType::BootstrapEnd;
 };
 
-// version is required; buildInfo is optional.
-void toNode(const Hello &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, Hello &);
+// Serialization //////////////////////////////////////////////////////////////
 
-// message is optional (an empty message reads back as "").
-void toNode(const Error &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, Error &);
+// Every payload is a fields() description (PayloadCommon.h). version is
+// required; buildInfo, message and reason are optional and read back as ""
+// when absent. The bracket and liveness payloads carry nothing.
 
-// reason is optional (an empty reason reads back as "").
-void toNode(const Disconnect &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, Disconnect &);
 // The reason a received farewell gives (pass it decode<Disconnect>()'s
 // result), or a stand-in when it gives none or did not decode.
 std::string farewellReason(const std::optional<Disconnect> &farewell);
 
-// Empty payloads: toNode writes nothing, fromNode always succeeds.
-void toNode(const Ping &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, Ping &);
-void toNode(const Pong &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, Pong &);
-void toNode(const Shutdown &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, Shutdown &);
-void toNode(const BootstrapBegin &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, BootstrapBegin &);
-void toNode(const BootstrapEnd &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, BootstrapEnd &);
+// Inlined definitions ////////////////////////////////////////////////////////
+
+template <typename V>
+void fields(V &v, Hello &h)
+{
+  v.required("version", h.version);
+  v.optional("buildInfo", h.buildInfo);
+}
+
+template <typename V>
+void fields(V &v, Error &e)
+{
+  v.optional("message", e.message);
+}
+
+template <typename V>
+void fields(V &v, Disconnect &d)
+{
+  v.optional("reason", d.reason);
+}
+
+template <typename V>
+void fields(V &, Ping &)
+{}
+
+template <typename V>
+void fields(V &, Pong &)
+{}
+
+template <typename V>
+void fields(V &, Shutdown &)
+{}
+
+template <typename V>
+void fields(V &, BootstrapBegin &)
+{}
+
+template <typename V>
+void fields(V &, BootstrapEnd &)
+{}
 
 } // namespace vsr::scivis_studio::protocol

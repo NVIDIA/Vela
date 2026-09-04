@@ -5,23 +5,6 @@
 
 namespace vsr::scivis_studio::protocol {
 
-void toNode(const ProjectOpReply &r, vsr::core::DataNode &n)
-{
-  writeChild(n, "requestId", r.requestId);
-  writeChild(n, "ok", r.ok);
-  writeChild(n, "error", r.error);
-  writeSubtree(n, "results", r.results);
-}
-
-bool fromNode(const vsr::core::DataNode &n, ProjectOpReply &r)
-{
-  if (!readChild(n, "requestId", r.requestId) || !readChild(n, "ok", r.ok))
-    return false;
-  r.error = readChildOr(n, "error", std::string());
-  r.results = readSubtree(n, "results");
-  return true;
-}
-
 ProjectOpReply makeOkReply(uint64_t requestId)
 {
   ProjectOpReply reply;

@@ -524,15 +524,19 @@ SCENARIO("UIState payload", "[StudioProtocol]")
       REQUIRE(o.numChildren() == 3);
       const auto *viewport = o.child("windows")->child("Viewport");
       REQUIRE(viewport);
-      REQUIRE(readChildOr(*viewport, "open", false));
-      REQUIRE(readChildOr(*viewport, "size", vsr::math::int2(0, 0)).x == 1280);
-      REQUIRE_FALSE(
-          readChildOr(*o.child("windows")->child("LayerTree"), "open", true));
-      REQUIRE(readChildOr(o, "layout", std::string())
-          == "[Window][Viewport]\nPos=0,0\n");
+      REQUIRE(viewport->child("open")->getValueOr(false));
       REQUIRE(
-          readChildOr(*o.child("settings"), "theme", std::string()) == "dark");
-      REQUIRE(readChildOr(*o.child("settings"), "fontScale", 0.f) == 1.25f);
+          viewport->child("size")->getValueOr(vsr::math::int2(0, 0)).x == 1280);
+      REQUIRE_FALSE(o.child("windows")
+                        ->child("LayerTree")
+                        ->child("open")
+                        ->getValueOr(true));
+      REQUIRE(o.child("layout")->getValueOr(std::string())
+          == "[Window][Viewport]\nPos=0,0\n");
+      REQUIRE(o.child("settings")->child("theme")->getValueOr(std::string())
+          == "dark");
+      REQUIRE(
+          o.child("settings")->child("fontScale")->getValueOr(0.f) == 1.25f);
     }
 
     THEN("an absent tree decodes as null")

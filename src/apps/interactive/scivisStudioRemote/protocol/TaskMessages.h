@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "PayloadCommon.h"
 #include "StudioProtocol.h"
 // vsr_core
 #include "vsr/core/DataTree.hpp"
@@ -71,18 +72,49 @@ struct CancelTask
   uint64_t taskId{0};
 };
 
-// taskId is required in every task payload; requestId is required in
-// CancelTask. current/total/framesCompleted default to 0 and message/error to
-// "" when absent.
-void toNode(const TaskStartedResult &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, TaskStartedResult &);
-void toNode(const TaskProgress &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, TaskProgress &);
-void toNode(const TaskCompleted &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, TaskCompleted &);
-void toNode(const TaskFailed &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, TaskFailed &);
-void toNode(const CancelTask &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, CancelTask &);
+// Every payload is a fields() description (PayloadCommon.h). taskId is
+// required in every task payload and requestId in CancelTask;
+// current/total/framesCompleted default to 0 and message/error to "" when
+// absent.
+
+// Inlined definitions ////////////////////////////////////////////////////////
+
+template <typename V>
+void fields(V &v, TaskStartedResult &r)
+{
+  v.required("taskId", r.taskId);
+}
+
+template <typename V>
+void fields(V &v, TaskProgress &p)
+{
+  v.required("taskId", p.taskId);
+  v.optional("current", p.current);
+  v.optional("total", p.total);
+  v.optional("message", p.message);
+}
+
+template <typename V>
+void fields(V &v, TaskCompleted &c)
+{
+  v.required("taskId", c.taskId);
+  v.optional("message", c.message);
+  v.optional("framesCompleted", c.framesCompleted);
+}
+
+template <typename V>
+void fields(V &v, TaskFailed &f)
+{
+  v.required("taskId", f.taskId);
+  v.optional("error", f.error);
+  v.optional("framesCompleted", f.framesCompleted);
+}
+
+template <typename V>
+void fields(V &v, CancelTask &c)
+{
+  v.required("requestId", c.requestId);
+  v.required("taskId", c.taskId);
+}
 
 } // namespace vsr::scivis_studio::protocol

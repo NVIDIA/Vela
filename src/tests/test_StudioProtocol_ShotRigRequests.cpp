@@ -190,7 +190,7 @@ SCENARIO("Shot requests", "[StudioProtocol]")
       REQUIRE(bindings->child("dataset-1"));
       REQUIRE(bindings->child("dataset-4"));
       REQUIRE_FALSE(
-          readChildOr(*bindings->child("dataset-4"), "enabled", true));
+          bindings->child("dataset-4")->child("enabled")->getValueOr(true));
     }
 
     THEN("a default Shot with an id round-trips to its defaults")

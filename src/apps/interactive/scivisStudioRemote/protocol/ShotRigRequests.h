@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "PayloadCommon.h"
 #include "StudioProtocol.h"
 // vsr_scivis_studio_model
 #include "Dataset.h"
@@ -252,65 +253,187 @@ void toNode(
 bool fromNode(
     const vsr::core::DataNode &, vsr::scivis_studio::ShotRenderSettings &);
 
-// Requests ///////////////////////////////////////////////////////////////////
-
-// requestId and the id/name/path fields are required; name may be "".
-
-void toNode(const CreateShot &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, CreateShot &);
-void toNode(const RemoveShot &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, RemoveShot &);
+// UpdateShot nests the Shot above. Its codec is hand-written beside Shot's:
+// a fields() description would reach Shot's toNode()/fromNode() from
+// PayloadCommon.h, where the model namespace's overloads are not visible.
 void toNode(const UpdateShot &, vsr::core::DataNode &);
 bool fromNode(const vsr::core::DataNode &, UpdateShot &);
-void toNode(const SetActiveShot &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, SetActiveShot &);
 
-void toNode(const CreateLightRig &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, CreateLightRig &);
-void toNode(const CloneLightRig &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, CloneLightRig &);
-void toNode(const RemoveLightRig &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, RemoveLightRig &);
-void toNode(const RenameLightRig &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, RenameLightRig &);
-void toNode(const AddLightToRig &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, AddLightToRig &);
-void toNode(const RemoveLightFromRig &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, RemoveLightFromRig &);
-void toNode(const SaveLightRigArchive &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, SaveLightRigArchive &);
-void toNode(const LoadLightRigArchive &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, LoadLightRigArchive &);
+// Every other payload is a fields() description (PayloadCommon.h): requestId
+// and the id, name, path and nested-ref fields are all required; name may be
+// "".
 
-void toNode(const CreateCameraRig &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, CreateCameraRig &);
-void toNode(const RemoveCameraRig &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, RemoveCameraRig &);
-void toNode(const RenameCameraRig &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, RenameCameraRig &);
-void toNode(const SaveCameraRigArchive &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, SaveCameraRigArchive &);
-void toNode(const LoadCameraRigArchive &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, LoadCameraRigArchive &);
+// Inlined definitions ////////////////////////////////////////////////////////
 
-void toNode(const CreateColorMap &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, CreateColorMap &);
-void toNode(const RenameColorMap &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, RenameColorMap &);
-void toNode(const RemoveColorMap &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, RemoveColorMap &);
+template <typename V>
+void fields(V &v, CreateShot &p)
+{
+  v.required("requestId", p.requestId);
+  v.required("name", p.name);
+}
 
-// Results ////////////////////////////////////////////////////////////////////
+template <typename V>
+void fields(V &v, RemoveShot &p)
+{
+  v.required("requestId", p.requestId);
+  v.required("shotId", p.shotId);
+}
 
-void toNode(const ShotCreatedResult &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, ShotCreatedResult &);
-void toNode(const LightRigCreatedResult &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, LightRigCreatedResult &);
-void toNode(const LightAddedResult &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, LightAddedResult &);
-void toNode(const CameraRigCreatedResult &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, CameraRigCreatedResult &);
-void toNode(const ColorMapCreatedResult &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, ColorMapCreatedResult &);
+template <typename V>
+void fields(V &v, SetActiveShot &p)
+{
+  v.required("requestId", p.requestId);
+  v.required("shotId", p.shotId);
+}
+
+template <typename V>
+void fields(V &v, CreateLightRig &p)
+{
+  v.required("requestId", p.requestId);
+  v.required("name", p.name);
+}
+
+template <typename V>
+void fields(V &v, CloneLightRig &p)
+{
+  v.required("requestId", p.requestId);
+  v.required("lightRigId", p.lightRigId);
+}
+
+template <typename V>
+void fields(V &v, RemoveLightRig &p)
+{
+  v.required("requestId", p.requestId);
+  v.required("lightRigId", p.lightRigId);
+}
+
+template <typename V>
+void fields(V &v, RenameLightRig &p)
+{
+  v.required("requestId", p.requestId);
+  v.required("lightRigId", p.lightRigId);
+  v.required("newName", p.newName);
+}
+
+template <typename V>
+void fields(V &v, AddLightToRig &p)
+{
+  v.required("requestId", p.requestId);
+  v.required("lightRigId", p.lightRigId);
+  v.required("subtype", p.subtype);
+}
+
+template <typename V>
+void fields(V &v, RemoveLightFromRig &p)
+{
+  v.required("requestId", p.requestId);
+  v.required("lightRigId", p.lightRigId);
+  v.child("lightNode", p.lightNode);
+}
+
+template <typename V>
+void fields(V &v, SaveLightRigArchive &p)
+{
+  v.required("requestId", p.requestId);
+  v.required("lightRigId", p.lightRigId);
+  v.required("file", p.file);
+}
+
+template <typename V>
+void fields(V &v, LoadLightRigArchive &p)
+{
+  v.required("requestId", p.requestId);
+  v.required("file", p.file);
+}
+
+template <typename V>
+void fields(V &v, CreateCameraRig &p)
+{
+  v.required("requestId", p.requestId);
+  v.required("name", p.name);
+}
+
+template <typename V>
+void fields(V &v, RemoveCameraRig &p)
+{
+  v.required("requestId", p.requestId);
+  v.required("cameraRigId", p.cameraRigId);
+}
+
+template <typename V>
+void fields(V &v, RenameCameraRig &p)
+{
+  v.required("requestId", p.requestId);
+  v.required("cameraRigId", p.cameraRigId);
+  v.required("newName", p.newName);
+}
+
+template <typename V>
+void fields(V &v, SaveCameraRigArchive &p)
+{
+  v.required("requestId", p.requestId);
+  v.required("cameraRigId", p.cameraRigId);
+  v.required("file", p.file);
+}
+
+template <typename V>
+void fields(V &v, LoadCameraRigArchive &p)
+{
+  v.required("requestId", p.requestId);
+  v.required("file", p.file);
+}
+
+template <typename V>
+void fields(V &v, CreateColorMap &p)
+{
+  v.required("requestId", p.requestId);
+  v.required("name", p.name);
+}
+
+template <typename V>
+void fields(V &v, RenameColorMap &p)
+{
+  v.required("requestId", p.requestId);
+  v.required("colorMapId", p.colorMapId);
+  v.required("newName", p.newName);
+}
+
+template <typename V>
+void fields(V &v, RemoveColorMap &p)
+{
+  v.required("requestId", p.requestId);
+  v.required("colorMapId", p.colorMapId);
+}
+
+template <typename V>
+void fields(V &v, ShotCreatedResult &p)
+{
+  v.required("shotId", p.shotId);
+}
+
+template <typename V>
+void fields(V &v, LightRigCreatedResult &p)
+{
+  v.required("lightRigId", p.lightRigId);
+}
+
+template <typename V>
+void fields(V &v, LightAddedResult &p)
+{
+  v.child("lightNode", p.lightNode);
+}
+
+template <typename V>
+void fields(V &v, CameraRigCreatedResult &p)
+{
+  v.required("cameraRigId", p.cameraRigId);
+}
+
+template <typename V>
+void fields(V &v, ColorMapCreatedResult &p)
+{
+  v.required("colorMapId", p.colorMapId);
+  v.child("object", p.object);
+}
 
 } // namespace vsr::scivis_studio::protocol

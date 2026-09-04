@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "PayloadCommon.h"
 #include "StudioProtocol.h"
 // vsr_core
 #include "vsr/core/DataTree.hpp"
@@ -76,21 +77,44 @@ struct ListDirectoryResult
 const char *toString(EntryKind kind);
 std::optional<EntryKind> entryKindFromString(std::string_view name);
 
-void toNode(const ListRoots &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, ListRoots &);
+// Every payload is a fields() description (PayloadCommon.h). requestId,
+// directory, name and kind are required; size and mtimeSeconds default to 0;
+// lists keep their order and an absent list reads as empty.
 
-// directory is required.
-void toNode(const ListDirectory &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, ListDirectory &);
+// Inlined definitions ////////////////////////////////////////////////////////
 
-// name and kind are required; size and mtimeSeconds default to 0.
-void toNode(const DirectoryEntry &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, DirectoryEntry &);
+template <typename V>
+void fields(V &v, ListRoots &r)
+{
+  v.required("requestId", r.requestId);
+}
 
-// Lists keep their order; an absent list reads as empty.
-void toNode(const ListRootsResult &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, ListRootsResult &);
-void toNode(const ListDirectoryResult &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, ListDirectoryResult &);
+template <typename V>
+void fields(V &v, ListDirectory &r)
+{
+  v.required("requestId", r.requestId);
+  v.required("directory", r.directory);
+}
+
+template <typename V>
+void fields(V &v, DirectoryEntry &e)
+{
+  v.required("name", e.name);
+  v.requiredEnum("kind", e.kind, toString, entryKindFromString);
+  v.optional("size", e.size);
+  v.optional("mtimeSeconds", e.mtimeSeconds);
+}
+
+template <typename V>
+void fields(V &v, ListRootsResult &r)
+{
+  v.list("roots", r.roots);
+}
+
+template <typename V>
+void fields(V &v, ListDirectoryResult &r)
+{
+  v.list("entries", r.entries);
+}
 
 } // namespace vsr::scivis_studio::protocol

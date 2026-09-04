@@ -11,8 +11,11 @@
 #include "StudioProtocol.h"
 // std
 #include <array>
+#include <filesystem>
+#include <optional>
 #include <set>
 #include <string>
+#include <vector>
 
 using namespace vsr::scivis_studio::protocol;
 using vsr::scivis_studio::SceneNodeRef;
@@ -227,6 +230,15 @@ SCENARIO("StudioCodec encode/decode", "[StudioProtocol]")
       Hello out;
       REQUIRE_FALSE(fromNode(tree.root(), out));
     }
+
+    THEN("a mistyped optional child is rejected, not defaulted")
+    {
+      vsr::core::DataTree tree;
+      tree.root()["version"] = 7;
+      tree.root()["buildInfo"] = 7;
+      Hello out;
+      REQUIRE_FALSE(fromNode(tree.root(), out));
+    }
   }
 
   GIVEN("an Error payload")
@@ -375,13 +387,6 @@ SCENARIO("PayloadCommon helpers", "[StudioProtocol]")
       REQUIRE_FALSE(readChild(root, "count", text));
       float f = 0.f;
       REQUIRE_FALSE(readChild(root, "count", f));
-    }
-
-    THEN("readChildOr() falls back")
-    {
-      REQUIRE(readChildOr(root, "count", 9) == 3);
-      REQUIRE(readChildOr(root, "missing", 9) == 9);
-      REQUIRE(readChildOr(root, "count", std::string("x")) == "x");
     }
   }
 
@@ -584,12 +589,11 @@ SCENARIO("Opaque subtrees", "[StudioProtocol]")
       const auto &o = out->root();
       REQUIRE(o.name() == "<root>");
       REQUIRE(o.numChildren() == 2);
-      REQUIRE(readChildOr(*o.child("windows")->child("viewport"), "width", 0)
-          == 640);
-      REQUIRE(
-          readChildOr(*o.child("windows")->child("viewport"), "open", false));
-      REQUIRE(
-          readChildOr(*o.child("settings"), "theme", std::string()) == "dark");
+      const auto *viewport = o.child("windows")->child("viewport");
+      REQUIRE(viewport->child("width")->getValueOr(0) == 640);
+      REQUIRE(viewport->child("open")->getValueOr(false));
+      REQUIRE(o.child("settings")->child("theme")->getValueOr(std::string())
+          == "dark");
       REQUIRE_FALSE(readSubtree(copy.root(), "absent"));
     }
 
@@ -600,9 +604,262 @@ SCENARIO("Opaque subtrees", "[StudioProtocol]")
       r["settings"]["theme"] = std::string("light");
       auto out = readSubtree(tree.root(), "uiState");
       REQUIRE(out);
-      REQUIRE(
-          readChildOr(*out->root().child("settings"), "theme", std::string())
+      REQUIRE(out->root()
+                  .child("settings")
+                  ->child("theme")
+                  ->getValueOr(std::string())
           == "dark");
+    }
+  }
+}
+
+namespace {
+
+// A payload exercising every visitor verb once.
+struct Probe
+{
+  uint64_t id{0};
+  std::string label{"none"};
+  std::optional<std::filesystem::path> where;
+  anari::DataType type{ANARI_UNKNOWN};
+  SceneNodeRef target;
+  std::optional<SceneObjectRef> object;
+  std::vector<std::string> tags;
+  std::vector<SceneNodeRef> nodes;
+  SubtreePtr extra;
+};
+
+template <typename V>
+void fields(V &v, Probe &p)
+{
+  v.required("id", p.id);
+  v.optional("label", p.label);
+  v.optional("where", p.where);
+  v.requiredEnum("type", p.type, toString, anariTypeFromString);
+  v.child("target", p.target);
+  v.optionalChild("object", p.object);
+  v.list("tags", p.tags);
+  v.list("nodes", p.nodes);
+  v.subtree("extra", p.extra);
+}
+
+SceneNodeRef node(const char *layer, size_t index)
+{
+  SceneNodeRef ref;
+  ref.layerName = layer;
+  ref.nodeIndex = index;
+  return ref;
+}
+
+// The smallest well-formed Probe tree: every required child, nothing else.
+void writeRequired(vsr::core::DataNode &root)
+{
+  writeChild(root, "id", uint64_t(1));
+  writeChild(root, "type", std::string("ANARI_LIGHT"));
+  toNode(node("lights", 2), root["target"]);
+}
+
+} // namespace
+
+SCENARIO("A fields() description derives a payload's codec", "[StudioProtocol]")
+{
+  GIVEN("a Probe with every field set")
+  {
+    Probe in;
+    in.id = 42;
+    in.label = "probe";
+    in.where = std::filesystem::path("/data/run");
+    in.type = ANARI_GEOMETRY;
+    in.target = node("geometry", 3);
+    SceneObjectRef object;
+    object.type = ANARI_MATERIAL;
+    object.objectIndex = 5;
+    in.object = object;
+    in.tags = {"b", "a"};
+    in.nodes = {node("l", 1), node("m", 2)};
+    in.extra = makeSubtree();
+    in.extra->root()["k"] = 7;
+
+    vsr::core::DataTree tree;
+    toNode(in, tree.root());
+
+    THEN("each field travels under the name fields() spells")
+    {
+      const auto &root = tree.root();
+      REQUIRE(root.child("id")->getValueOr(uint64_t(0)) == 42);
+      REQUIRE(root.child("label")->getValueOr(std::string()) == "probe");
+      REQUIRE(root.child("where")->getValueOr(std::string()) == "/data/run");
+      REQUIRE(
+          root.child("type")->getValueOr(std::string()) == "ANARI_GEOMETRY");
+      REQUIRE(root.child("target")->child("nodeIndex")->getValueOr(uint64_t(0))
+          == 3);
+      REQUIRE(
+          root.child("object")->child("objectIndex")->getValueOr(uint64_t(0))
+          == 5);
+      REQUIRE(root.child("tags")->child("1")->getValueOr(std::string()) == "a");
+      REQUIRE(root.child("nodes")
+                  ->child("1")
+                  ->child("layerName")
+                  ->getValueOr(std::string())
+          == "m");
+      REQUIRE(root.child("extra")->child("k")->getValueOr(0) == 7);
+    }
+
+    THEN("it reads back equal")
+    {
+      Probe out;
+      REQUIRE(fromNode(tree.root(), out));
+      REQUIRE(out.id == 42);
+      REQUIRE(out.label == "probe");
+      REQUIRE(out.where == std::filesystem::path("/data/run"));
+      REQUIRE(out.type == ANARI_GEOMETRY);
+      REQUIRE(out.target.layerName == "geometry");
+      REQUIRE(out.target.nodeIndex == 3);
+      REQUIRE(out.object);
+      REQUIRE(out.object->type == ANARI_MATERIAL);
+      REQUIRE(out.object->objectIndex == 5);
+      REQUIRE(out.tags == std::vector<std::string>{"b", "a"});
+      REQUIRE(out.nodes.size() == 2);
+      REQUIRE(out.nodes[1].layerName == "m");
+      REQUIRE(out.extra);
+      REQUIRE(out.extra->root().child("k")->getValueOr(0) == 7);
+    }
+  }
+
+  GIVEN("a Probe with nothing optional set")
+  {
+    Probe in;
+    in.id = 1;
+    in.type = ANARI_LIGHT;
+    in.target = node("lights", 2);
+    vsr::core::DataTree tree;
+    toNode(in, tree.root());
+
+    THEN("disengaged optionals, empty lists and a null subtree write nothing")
+    {
+      REQUIRE(tree.root().numChildren() == 4);
+      REQUIRE_FALSE(hasChild(tree.root(), "where"));
+      REQUIRE_FALSE(hasChild(tree.root(), "object"));
+      REQUIRE_FALSE(hasChild(tree.root(), "tags"));
+      REQUIRE_FALSE(hasChild(tree.root(), "nodes"));
+      REQUIRE_FALSE(hasChild(tree.root(), "extra"));
+    }
+  }
+
+  GIVEN("a tree holding only the required children")
+  {
+    vsr::core::DataTree tree;
+    writeRequired(tree.root());
+
+    THEN("absent optional children read as the struct's defaults")
+    {
+      Probe out;
+      out.label = "stale";
+      out.tags = {"stale"};
+      REQUIRE(fromNode(tree.root(), out));
+      REQUIRE(out.id == 1);
+      REQUIRE(out.label == "none");
+      REQUIRE_FALSE(out.where);
+      REQUIRE_FALSE(out.object);
+      REQUIRE(out.tags.empty());
+      REQUIRE(out.nodes.empty());
+      REQUIRE_FALSE(out.extra);
+    }
+
+    THEN("a present but mistyped optional child is rejected")
+    {
+      tree.root()["label"] = 7;
+      Probe out;
+      REQUIRE_FALSE(fromNode(tree.root(), out));
+    }
+
+    THEN("a present but mistyped std::optional child is rejected")
+    {
+      tree.root()["where"] = 7;
+      Probe out;
+      REQUIRE_FALSE(fromNode(tree.root(), out));
+    }
+
+    THEN("a present but malformed optional nested payload is rejected")
+    {
+      tree.root()["object"]["type"] = std::string("ANARI_MATERIAL");
+      Probe out;
+      REQUIRE_FALSE(fromNode(tree.root(), out));
+    }
+
+    THEN("a mistyped list item is rejected")
+    {
+      tree.root()["tags"]["0"] = 3;
+      Probe out;
+      REQUIRE_FALSE(fromNode(tree.root(), out));
+    }
+
+    THEN("a rejected payload leaves the output untouched")
+    {
+      tree.root()["label"] = 7;
+      Probe out;
+      out.id = 99;
+      out.label = "kept";
+      REQUIRE_FALSE(fromNode(tree.root(), out));
+      REQUIRE(out.id == 99);
+      REQUIRE(out.label == "kept");
+    }
+  }
+
+  GIVEN("trees missing or mistyping a required child")
+  {
+    THEN("an absent required scalar is rejected")
+    {
+      vsr::core::DataTree tree;
+      writeRequired(tree.root());
+      tree.root().remove("id");
+      Probe out;
+      REQUIRE_FALSE(fromNode(tree.root(), out));
+    }
+
+    THEN("a mistyped required scalar is rejected")
+    {
+      vsr::core::DataTree tree;
+      writeRequired(tree.root());
+      tree.root()["id"] = std::string("one");
+      Probe out;
+      REQUIRE_FALSE(fromNode(tree.root(), out));
+    }
+
+    THEN("an unknown enum spelling is rejected")
+    {
+      vsr::core::DataTree tree;
+      writeRequired(tree.root());
+      tree.root()["type"] = std::string("ANARI_TEAPOT");
+      Probe out;
+      REQUIRE_FALSE(fromNode(tree.root(), out));
+    }
+
+    THEN("an absent required nested payload is rejected")
+    {
+      vsr::core::DataTree tree;
+      writeRequired(tree.root());
+      tree.root().remove("target");
+      Probe out;
+      REQUIRE_FALSE(fromNode(tree.root(), out));
+    }
+  }
+
+  GIVEN("a Reader that has already failed")
+  {
+    vsr::core::DataTree tree;
+    writeChild(tree.root(), "b", 2);
+    Reader reader(tree.root());
+    int a = 0;
+    int b = 0;
+    reader.required("a", a);
+    REQUIRE_FALSE(reader.ok());
+
+    THEN("later fields are skipped")
+    {
+      reader.required("b", b);
+      REQUIRE_FALSE(reader.ok());
+      REQUIRE(b == 0);
     }
   }
 }

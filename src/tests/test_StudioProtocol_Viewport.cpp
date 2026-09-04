@@ -128,7 +128,7 @@ SCENARIO("Remote Browse payloads", "[StudioProtocol]")
       toNode(result, tree.root());
       const auto *entries = tree.root().child("entries");
       REQUIRE(entries);
-      REQUIRE(readChildOr(*entries->child("2"), "kind", std::string())
+      REQUIRE(entries->child("2")->child("kind")->getValueOr(std::string())
           == "ProjectDirectory");
       REQUIRE(entryKindFromString("File") == EntryKind::File);
       REQUIRE_FALSE(entryKindFromString("Symlink"));
@@ -474,7 +474,7 @@ SCENARIO("Viewport payloads", "[StudioProtocol]")
     {
       vsr::core::DataTree tree;
       toNode(settings, tree.root());
-      REQUIRE(readChildOr(tree.root(), "visualizeAOV", std::string())
+      REQUIRE(tree.root().child("visualizeAOV")->getValueOr(std::string())
           == "OBJECT_ID");
       REQUIRE(aovTypeFromString("PRIMITIVE_ID")
           == vsr::rendering::AOVType::PRIMITIVE_ID);

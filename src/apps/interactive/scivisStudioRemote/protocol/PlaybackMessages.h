@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "PayloadCommon.h"
 #include "StudioProtocol.h"
 // vsr_scivis_studio_model
 #include "Dataset.h"
@@ -63,20 +64,39 @@ struct RenderShot
   ShotID shotId;
 };
 
-// requestId, shotId and playing are required.
-void toNode(const SetPlaying &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, SetPlaying &);
+// Every payload is a fields() description (PayloadCommon.h). requestId,
+// shotId, frame and playing are required; message is optional.
 
-// shotId and frame are required.
-void toNode(const SetTime &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, SetTime &);
+// Inlined definitions ////////////////////////////////////////////////////////
 
-// shotId and frame are required; message is optional.
-void toNode(const TimeAdvanceWarning &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, TimeAdvanceWarning &);
+template <typename V>
+void fields(V &v, SetPlaying &p)
+{
+  v.required("requestId", p.requestId);
+  v.required("shotId", p.shotId);
+  v.required("playing", p.playing);
+}
 
-// requestId and shotId are required.
-void toNode(const RenderShot &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, RenderShot &);
+template <typename V>
+void fields(V &v, SetTime &t)
+{
+  v.required("shotId", t.shotId);
+  v.required("frame", t.frame);
+}
+
+template <typename V>
+void fields(V &v, TimeAdvanceWarning &w)
+{
+  v.required("shotId", w.shotId);
+  v.required("frame", w.frame);
+  v.optional("message", w.message);
+}
+
+template <typename V>
+void fields(V &v, RenderShot &r)
+{
+  v.required("requestId", r.requestId);
+  v.required("shotId", r.shotId);
+}
 
 } // namespace vsr::scivis_studio::protocol

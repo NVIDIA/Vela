@@ -70,7 +70,12 @@ void toNode(const ProjectSnapshot &, vsr::core::DataNode &);
 bool fromNode(const vsr::core::DataNode &, ProjectSnapshot &);
 
 // The tree travels under child "tree"; absent reads back as null.
-void toNode(const UIState &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, UIState &);
+// Inlined definitions ////////////////////////////////////////////////////////
+
+template <typename V>
+void fields(V &v, UIState &u)
+{
+  v.subtree("tree", u.tree);
+}
 
 } // namespace vsr::scivis_studio::protocol
