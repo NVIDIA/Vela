@@ -321,11 +321,20 @@ void ShotEditor::buildUI()
     }
   }
 
-  if (edited) {
-    std::string error;
-    if (!m_projectContext->updateShot(shot, &error))
-      vsr::core::logWarning(
-          "[SciVisStudio] shot edit rejected: %s", error.c_str());
+  if (!edited)
+    return;
+  std::string error;
+  if (m_projectContext->updateShot(shot, &error)) {
+    m_lastRejection.clear();
+    return;
+  }
+  // The renderer selector's fix-up edits every frame until it lands, so a
+  // shot the op keeps refusing (a rig id no rig has) would log every frame;
+  // once per distinct reason is enough.
+  if (error != m_lastRejection) {
+    m_lastRejection = error;
+    vsr::core::logWarning(
+        "[SciVisStudio] shot edit rejected: %s", error.c_str());
   }
 }
 
