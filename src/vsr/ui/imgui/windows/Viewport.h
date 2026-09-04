@@ -15,9 +15,9 @@
 #include "vsr/rendering/pipeline/passes/BoxOutlineRenderPass.h"
 #include "vsr/rendering/pipeline/passes/CopyToSDLTexturePass.h"
 #include "vsr/rendering/pipeline/passes/OutlineRenderPass.h"
-#include "vsr/rendering/pipeline/passes/PrimitiveOutlineRenderPass.h"
 #include "vsr/rendering/pipeline/passes/OutputTransformPass.h"
 #include "vsr/rendering/pipeline/passes/PickPass.h"
+#include "vsr/rendering/pipeline/passes/PrimitiveOutlineRenderPass.h"
 #include "vsr/rendering/pipeline/passes/SaveToFilePass.h"
 #include "vsr/rendering/pipeline/passes/ToneMapPass.h"
 #include "vsr/rendering/pipeline/passes/VisualizeAOVPass.h"
@@ -77,6 +77,7 @@ struct Viewport : public BaseViewport
   void updateFrame();
   void updateImage();
   void updateBoundsOutlinePass();
+  void syncDepthChannelEnabled();
   void syncImagePassState();
   void updateDisplayPassState();
 
