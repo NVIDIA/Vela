@@ -28,8 +28,9 @@ namespace vsr::scivis_studio::protocol {
  * throw on untrusted input. One policy for every field: a required child
  * that is absent or mistyped is a malformed payload (false); an optional
  * child that is absent leaves the struct's default, and one that is present
- * but mistyped is malformed too. On failure the output is unspecified;
- * decode<T>() discards it.
+ * but mistyped is malformed too. A hand-written fromNode() leaves its output
+ * unspecified on failure (decode<T>() discards it); the fields()-derived one
+ * leaves it untouched.
  *
  * A payload describes its wire shape once, as a fields() template over a
  * visitor, and toNode()/fromNode() are derived from it (see Field visitors
@@ -37,8 +38,14 @@ namespace vsr::scivis_studio::protocol {
  * few hand-written codecs (Shot, ProjectSnapshot), are built from.
  *
  * Example:
- *   struct Foo { uint64_t requestId{0}; SceneNodeRef target; bool fast{false};
- * }; template <typename V> void fields(V &v, Foo &f)
+ *   struct Foo
+ *   {
+ *     uint64_t requestId{0};
+ *     SceneNodeRef target;
+ *     bool fast{false};
+ *   };
+ *   template <typename V>
+ *   void fields(V &v, Foo &f)
  *   {
  *     v.required("requestId", f.requestId);
  *     v.child("target", f.target);
@@ -177,6 +184,8 @@ class Writer
   void optional(const char *name, const T &value);
   template <typename T>
   void optional(const char *name, const std::optional<T> &value);
+  // Both visitors take toString and fromString so one fields() call serves
+  // both; Writer uses only the former, Reader only the latter.
   template <typename E, typename FromString>
   void requiredEnum(const char *name,
       const E &value,
@@ -471,7 +480,7 @@ inline bool readNodeList(const vsr::core::DataNode &parent,
   return ok;
 }
 
-// Field visitors
+// Field visitors /////////////////////////////////////////////////////////////
 
 inline Writer::Writer(vsr::core::DataNode &node) : m_node(node) {}
 
@@ -684,7 +693,7 @@ inline bool fromNode(const vsr::core::DataNode &node, T &out)
   return true;
 }
 
-// Scene identity
+// Scene identity /////////////////////////////////////////////////////////////
 
 template <typename V>
 inline void fields(V &v, vsr::scivis_studio::SceneObjectRef &ref)

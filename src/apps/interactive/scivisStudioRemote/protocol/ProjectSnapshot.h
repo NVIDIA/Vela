@@ -69,7 +69,9 @@ struct UIState
 void toNode(const ProjectSnapshot &, vsr::core::DataNode &);
 bool fromNode(const vsr::core::DataNode &, ProjectSnapshot &);
 
-// The tree travels under child "tree"; absent reads back as null.
+// UIState is a fields() description (PayloadCommon.h): the tree travels
+// under child "tree"; absent reads back as null.
+
 // Inlined definitions ////////////////////////////////////////////////////////
 
 template <typename V>
