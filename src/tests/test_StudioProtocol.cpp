@@ -105,6 +105,19 @@ SCENARIO("StudioMessageType enum", "[StudioProtocol]")
       REQUIRE(std::string(toString(StudioMessageType(255))) == "Unknown");
     }
 
+    THEN("every table row names its own enumerator and round-trips")
+    {
+      // The hand-written ALL_MESSAGE_TYPES above and the table in
+      // StudioProtocol.h must agree, or a row was lost on one side.
+      REQUIRE(MESSAGE_TYPE_TABLE.size() == ALL_MESSAGE_TYPES.size());
+#define X(name, value, dir)                                                    \
+  REQUIRE(std::string(toString(StudioMessageType::name)) == #name);            \
+  REQUIRE(uint8_t(StudioMessageType::name) == value);                          \
+  REQUIRE(isStudioMessageType(value));
+      STUDIO_MESSAGE_TYPES(X)
+#undef X
+    }
+
     THEN("isServerToClient() marks exactly the server-only types")
     {
       constexpr std::array SERVER_TO_CLIENT = {
