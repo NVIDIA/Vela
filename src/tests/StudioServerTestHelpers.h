@@ -47,7 +47,7 @@ struct TestClient
   TestClient();
   ~TestClient();
 
-  void connect(unsigned short port);
+  void connect(uint16_t port);
   template <typename T>
   void send(const T &payload);
 
@@ -109,9 +109,9 @@ inline TestClient::~TestClient()
   channel->disconnect();
 }
 
-inline void TestClient::connect(unsigned short port)
+inline void TestClient::connect(uint16_t port)
 {
-  channel->connect("127.0.0.1", short(port));
+  channel->connect("127.0.0.1", port);
 }
 
 template <typename T>

@@ -35,7 +35,7 @@ struct RunnerOptions
 {
   // Where `connect` goes when the command names no host or port.
   std::string host{"127.0.0.1"};
-  int port{protocol::DEFAULT_PORT};
+  uint16_t port{protocol::DEFAULT_PORT};
   // Deadline of every waiting command unless it carries `timeout=<ms>`.
   std::chrono::milliseconds timeout{5000};
   // Carry on after a FAIL instead of stopping the script.

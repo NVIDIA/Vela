@@ -683,7 +683,7 @@ void Application::watchTasks()
 void Application::connect()
 {
   vsr::core::logStatus("[Client] connecting to %s:%d", m_host.c_str(), m_port);
-  m_connection->connect(m_host, short(m_port));
+  m_connection->connect(m_host, uint16_t(m_port));
 }
 
 void Application::disconnect()

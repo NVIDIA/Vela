@@ -111,7 +111,7 @@ Fixture::~Fixture()
 
 void Fixture::connect()
 {
-  connection.connect("127.0.0.1", short(server.port()));
+  connection.connect("127.0.0.1", server.port());
 }
 
 bool Fixture::waitConnectedAndBootstrapped(int expectedBootstraps)

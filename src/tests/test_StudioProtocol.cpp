@@ -161,7 +161,7 @@ SCENARIO("parsePort() reads --port values", "[StudioProtocol]")
 {
   GIVEN("a port variable")
   {
-    int port = DEFAULT_PORT;
+    uint16_t port = DEFAULT_PORT;
 
     THEN("decimal integers in 1..65535 are accepted")
     {

@@ -143,7 +143,7 @@ StudioServer::~StudioServer()
 
 // Queries ////////////////////////////////////////////////////////////////////
 
-unsigned short StudioServer::port() const
+uint16_t StudioServer::port() const
 {
   return m_server ? m_server->port() : 0;
 }
@@ -409,8 +409,7 @@ bool StudioServer::setupRendering(std::string *error)
 bool StudioServer::setupNetwork(std::string *error)
 {
   try {
-    m_server =
-        std::make_shared<vsr::network::NetworkServer>(short(m_options.port));
+    m_server = std::make_shared<vsr::network::NetworkServer>(m_options.port);
   } catch (const std::exception &e) {
     if (error) {
       *error = "cannot listen on port " + std::to_string(m_options.port) + ": "

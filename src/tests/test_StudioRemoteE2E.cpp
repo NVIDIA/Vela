@@ -503,7 +503,7 @@ SCENARIO("scivisStudioServer and the client core run the project layer",
     Client client;
     int replaced = 0;
     client.connection.onProjectReplaced = [&] { replaced++; };
-    client.connection.connect("127.0.0.1", short(server->port()));
+    client.connection.connect("127.0.0.1", server->port());
     REQUIRE(client.waitConnectedAndBootstrapped(1));
     REQUIRE(replaced == 1); // the bootstrap's snapshot
     auto &ops = client.connection.projectOps();
@@ -733,7 +733,7 @@ SCENARIO("scivisStudioServer and the client core run a session end to end",
 
     WHEN("the client connects")
     {
-      client.connection.connect("127.0.0.1", short(port));
+      client.connection.connect("127.0.0.1", port);
       REQUIRE(client.waitConnectedAndBootstrapped(1));
 
       THEN("the bootstrap leaves mirror and replica equal to the server's")
@@ -888,7 +888,7 @@ SCENARIO("scivisStudioServer and the client core play the active shot",
     Client client;
     int replaced = 0;
     client.connection.onProjectReplaced = [&] { replaced++; };
-    client.connection.connect("127.0.0.1", short(server->port()));
+    client.connection.connect("127.0.0.1", server->port());
     REQUIRE(client.waitConnectedAndBootstrapped(1));
     REQUIRE(replaced == 1);
     const ShotID shotId = activeReplicaShot(client).id;
@@ -1079,7 +1079,7 @@ SCENARIO("scivisStudioServer and the client core pick, outline and bin",
         });
     REQUIRE(server->started);
     Client client;
-    client.connection.connect("127.0.0.1", short(server->port()));
+    client.connection.connect("127.0.0.1", server->port());
     REQUIRE(client.waitConnectedAndBootstrapped(1));
     importMesh(client, mesh);
     REQUIRE(pollUntil(
@@ -1226,7 +1226,7 @@ SCENARIO("scivisStudioServer and the client core render shots and recover",
     client.connection.onUIState = [&](const SubtreePtr &tree) {
       uiStates.push_back(tree);
     };
-    client.connection.connect("127.0.0.1", short(port));
+    client.connection.connect("127.0.0.1", port);
     REQUIRE(client.waitConnectedAndBootstrapped(1));
     REQUIRE(uiStates.size() == 1); // every bootstrap carries one, null here
     REQUIRE_FALSE(uiStates[0]);
@@ -1423,7 +1423,7 @@ SCENARIO("scivisStudioServer and the client core render shots and recover",
             // A second connection replaces this one; the server says why
             // before closing the socket.
             {
-              vsr::network::NetworkClient intruder("127.0.0.1", short(port));
+              vsr::network::NetworkClient intruder("127.0.0.1", port);
               REQUIRE(pollUntil(
                   client.connection,
                   [&] {

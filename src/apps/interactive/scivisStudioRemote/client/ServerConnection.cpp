@@ -38,9 +38,9 @@ namespace {
 // the UI thread never waits longer than this on the network.
 constexpr std::chrono::milliseconds COURTESY_SEND_TIMEOUT{200};
 
-std::string endpointText(const std::string &host, short port)
+std::string endpointText(const std::string &host, uint16_t port)
 {
-  return host + ":" + std::to_string(static_cast<unsigned short>(port));
+  return host + ":" + std::to_string(port);
 }
 
 } // namespace
@@ -121,7 +121,7 @@ const std::string &ServerConnection::host() const
   return m_host;
 }
 
-short ServerConnection::port() const
+uint16_t ServerConnection::port() const
 {
   return m_port;
 }
@@ -191,7 +191,7 @@ const SubtreePtr &ServerConnection::uiState() const
 
 // User intentions ////////////////////////////////////////////////////////////
 
-void ServerConnection::connect(const std::string &host, short port)
+void ServerConnection::connect(const std::string &host, uint16_t port)
 {
   if (m_state == ConnectionState::Connected) {
     vsr::core::logWarning(
