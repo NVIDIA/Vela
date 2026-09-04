@@ -4,11 +4,11 @@
 // catch
 #include "catch.hpp"
 // vsr_algorithms
-#include "vsr/algorithms/cpu/autoExposure.hpp"
 #include "vsr/algorithms/cpu/boxOutline.hpp"
 #include "vsr/algorithms/cpu/clearBuffers.hpp"
 #include "vsr/algorithms/cpu/convertColorBuffer.hpp"
 #include "vsr/algorithms/cpu/depthCompositeFrame.hpp"
+#include "vsr/algorithms/cpu/downsample.hpp"
 #include "vsr/algorithms/cpu/outline.hpp"
 #include "vsr/algorithms/cpu/outputTransform.hpp"
 #include "vsr/algorithms/cpu/toneMap.hpp"
@@ -22,6 +22,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 namespace cpu = vsr::algorithms::cpu;
@@ -96,9 +97,9 @@ SCENARIO("Host buffer helpers apply fills and float-to-byte conversion",
 }
 
 SCENARIO(
-    "Host auto exposure computes strided log luminance sums", "[Algorithms]")
+    "Host auto exposure computes the exact mean log luminance", "[Algorithms]")
 {
-  GIVEN("An HDR buffer with known luminance samples")
+  GIVEN("An HDR buffer with known luminance values")
   {
     const std::array<float, 16> hdr{1.f,
         1.f,
@@ -117,13 +118,16 @@ SCENARIO(
         16.f,
         1.f};
 
-    WHEN("Sampling every other pixel")
+    WHEN("Reducing the full 2x2 image")
     {
-      const float sum = cpu::sumLogLuminance(hdr.data(), 2u, 2u);
+      const auto mean = cpu::meanLogLuminance(hdr.data(), 2u, 2u);
 
-      THEN("Only the strided samples contribute")
+      THEN("Every pixel contributes to the exact mean")
       {
-        REQUIRE(sum == Approx(-2.f));
+        // (log2(1) + log2(9) + log2(0.25) + log2(16)) / 4
+        const float expected = (0.f + std::log2(9.f) + -2.f + 4.f) / 4.f;
+        REQUIRE(mean.has_value());
+        REQUIRE(*mean == Approx(expected));
       }
     }
   }
@@ -132,13 +136,83 @@ SCENARIO(
   {
     const std::array<float, 4> hdr{0.f, 0.f, 0.f, 1.f};
 
-    WHEN("The luminance is accumulated")
+    WHEN("The luminance is reduced")
     {
-      const float sum = cpu::sumLogLuminance(hdr.data(), 1u, 1u);
+      const auto mean = cpu::meanLogLuminance(hdr.data(), 1u, 1u);
 
       THEN("The minimum luminance clamp is respected")
       {
-        REQUIRE(sum == Approx(std::log2(1e-4f)));
+        REQUIRE(mean.has_value());
+        REQUIRE(*mean == Approx(std::log2(1e-4f)));
+      }
+    }
+  }
+
+  GIVEN("An HDR buffer containing NaN and infinite texels")
+  {
+    // A 2x2 image: NaN reads as black (the MIN_LUMINANCE floor), +Inf
+    // saturates at the MAX_LUMINANCE ceiling, and the two finite texels are
+    // untouched. Without the clamp a single non-finite texel makes the whole
+    // reduction NaN or Inf.
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+    const std::array<float, 16> hdr{nan,
+        nan,
+        nan,
+        1.f,
+        inf,
+        inf,
+        inf,
+        1.f,
+        1.f,
+        1.f,
+        1.f,
+        1.f,
+        4.f,
+        4.f,
+        4.f,
+        1.f};
+
+    WHEN("The image is reduced")
+    {
+      const auto mean = cpu::meanLogLuminance(hdr.data(), 2u, 2u);
+
+      THEN("The result is finite, with NaN at the floor and Inf at the ceiling")
+      {
+        const float expected = (std::log2(1e-4f) + std::log2(1e8f) + 0.f
+                                   + std::log2(4.f))
+            / 4.f;
+        REQUIRE(mean.has_value());
+        REQUIRE(std::isfinite(*mean));
+        REQUIRE(*mean == Approx(expected));
+      }
+    }
+  }
+
+  GIVEN("A degenerate request")
+  {
+    const std::array<float, 4> hdr{1.f, 1.f, 1.f, 1.f};
+
+    WHEN("The image is empty or the buffer is null")
+    {
+      THEN("No value is returned, rather than a fabricated mean of zero")
+      {
+        // 0.f is a *valid* mean (luminance 1.0), so absence must be
+        // distinguishable from it.
+        REQUIRE_FALSE(cpu::meanLogLuminance(hdr.data(), 0u, 4u).has_value());
+        REQUIRE_FALSE(cpu::meanLogLuminance(hdr.data(), 4u, 0u).has_value());
+        REQUIRE_FALSE(cpu::meanLogLuminance(nullptr, 2u, 2u).has_value());
+      }
+    }
+
+    WHEN("The texel count would overflow a 32-bit multiply")
+    {
+      THEN("The request is refused instead of silently wrapping to empty")
+      {
+        // 65536 * 65536 wraps to exactly 0 in uint32_t. No allocation is
+        // made: the size is rejected before the buffer is ever read.
+        REQUIRE_FALSE(
+            cpu::meanLogLuminance(hdr.data(), 65536u, 65536u).has_value());
       }
     }
   }
