@@ -20,7 +20,9 @@ AnariAxesRenderPass::AnariAxesRenderPass(
 
   m_frame = anari::newObject<anari::Frame>(d);
   anari::setParameter(d, m_frame, "channel.color", ANARI_UFIXED8_RGBA_SRGB);
-  anari::setParameter(d, m_frame, "channel.depth", ANARI_FLOAT32);
+  // NOTE: only 'channel.color' is ever mapped, so no other channel is
+  // requested -- devices like Barney warn (and waste work) over requested
+  // channels that are never mapped.
   anari::setParameter(d, m_frame, "accumulation", true);
 
   auto renderer = anari::newObject<anari::Renderer>(d, "default");
