@@ -421,7 +421,7 @@ SCENARIO(
         REQUIRE(client.count(StudioMessageType::Error) == 0);
       }
 
-      THEN("the reply, a snapshot, determinate progress and the ending arrive")
+      THEN("the reply, determinate progress, the ending and a snapshot arrive")
       {
         const auto replyIndex = indexOfReply(client, reply.requestId);
         REQUIRE(replyIndex != SIZE_MAX);
@@ -433,12 +433,16 @@ SCENARIO(
           REQUIRE(progress[i].total == 4);
           REQUIRE(progress[i].message.find("frame") != std::string::npos);
         }
-        // The prelude's snapshot precedes the first progress event.
-        const auto snapshotIndex =
-            indexOfFrom(client, StudioMessageType::ProjectSnapshot, replyIndex);
+        // The shot was the active one already, so the prelude changed
+        // nothing and no snapshot precedes the first progress event: one
+        // snapshot per revision change (the switch case is below).
         const auto firstProgress =
             indexOfFrom(client, StudioMessageType::TaskProgress, replyIndex);
-        REQUIRE(snapshotIndex < firstProgress);
+        REQUIRE(firstProgress != SIZE_MAX);
+        REQUIRE_FALSE(anyOfTypeBetween(client,
+            StudioMessageType::ProjectSnapshot,
+            replyIndex,
+            firstProgress));
         REQUIRE(firstProgress < endIndex);
 
         REQUIRE(end->completed);
@@ -464,6 +468,31 @@ SCENARIO(
           REQUIRE(snapshot);
           REQUIRE(snapshot->project.activeShotId == shotId);
         }
+      }
+    }
+
+    WHEN("another shot is active as the render is asked")
+    {
+      REQUIRE(session.request(CreateShot{0, "Two"}).ok); // becomes active
+      const auto reply = session.request(RenderShot{0, shotId});
+      const auto taskId = session.startTask(reply);
+      const auto end = waitForTaskEnd(client, taskId);
+      REQUIRE(end);
+      REQUIRE(end->completed);
+
+      THEN("the prelude's switch is snapshotted before the first progress")
+      {
+        const auto replyIndex = indexOfReply(client, reply.requestId);
+        REQUIRE(replyIndex != SIZE_MAX);
+        const auto snapshotIndex =
+            indexOfFrom(client, StudioMessageType::ProjectSnapshot, replyIndex);
+        const auto firstProgress =
+            indexOfFrom(client, StudioMessageType::TaskProgress, replyIndex);
+        REQUIRE(snapshotIndex < firstProgress);
+        const auto switched =
+            decode<ProjectSnapshot>(client.messages()[snapshotIndex]);
+        REQUIRE(switched);
+        REQUIRE(switched->project.activeShotId == shotId);
       }
     }
   }

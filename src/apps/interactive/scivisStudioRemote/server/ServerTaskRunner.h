@@ -21,9 +21,9 @@ namespace vsr::scivis_studio::server {
 // What a task body reports back: success or an error for the client, an
 // optional message for TaskCompleted (a created dataset's id, a render's
 // output directory), the task's results subtree when it has one (a render's
-// RenderShotResult, set with protocol::setResults()), whether the body
-// stopped because it was asked to, and whether the Project changed so the
-// caller knows to send a ProjectSnapshot.
+// RenderShotResult, set with protocol::setResults()), and whether the body
+// stopped because it was asked to. Whether the Project changed is not the
+// body's to say: the ProjectContext's revision moves with every mutation.
 struct TaskResult
 {
   bool ok{true};
@@ -34,7 +34,6 @@ struct TaskResult
   // (with ok=false and error="cancelled"). Decides the CancelTask's answer;
   // see the ServerTaskRunner comment.
   bool cancelled{false};
-  bool projectChanged{false};
 };
 
 /*
@@ -137,13 +136,11 @@ struct RunningTask
  *     task("importing");
  *     TaskResult result;
  *     result.ok = context.addStaticDataset(...) != nullptr;
- *     result.projectChanged = true;
  *     return result;
  *   });
  *   setResults(reply, TaskStartedResult{taskId});
  *   ...
- *   if (auto ran = runner.runOne(); ran && ran->result.projectChanged)
- *     sendSnapshot();
+ *   runner.runOne(); // once per loop iteration
  */
 struct ServerTaskRunner
 {

@@ -285,10 +285,12 @@ below).
   once when the shot does not exist, when the project is not saved ("project
   is not saved; save it before rendering") or when a render is already queued
   or running ("render in progress"). Otherwise the shot becomes the active
-  one, the pipeline rebinds (which also pins the shot's renderer settings to
-  the server's library, as every bind does) and a `ProjectSnapshot` follows
-  the `TaskStartedResult` reply, so the client sees the switch before the
-  first frame renders. The body is `renderActiveShotToFrames` -- the same
+  one; when that is a switch, the loop rebinds the pipeline (which also pins
+  the shot's renderer settings to the server's library, as every bind does)
+  and a `ProjectSnapshot` follows the `TaskStartedResult` reply, before the
+  task's first progress, so the client sees the switch before the first
+  frame renders (rendering the shot that is active already has no switch to
+  show). The body is `renderActiveShotToFrames` -- the same
   engine path as `scivisStudioRenderShot` and the monolith -- with a per-frame
   hook: `TaskProgress{current = frame, total = frames, message = "frame N of
   M"}` before each frame. `TaskCompleted{message = output directory,
@@ -983,6 +985,41 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   document's target; what remains of the growth is the three playback ops,
   the forwarders themselves, the `openStagedProject` split and the
   dataset-candidate path, none of which the document names.
+
+- **One snapshot per revision change, decided in the loop, never in a
+  handler.** The server decided "did this mutate?" by hand in about twelve
+  places: a `projectChanged` flag threaded through `finish()`, `fail()`,
+  `TaskLaunch` and `TaskResult`, three before/after status compares guessing
+  whether a failed load, unload or refresh still changed a dataset, the
+  `wasPlaying && !playing` test in `tickPlayback`, four `ProjectSnapshot`
+  send sites and six hand-set `rebind` booleans. `ProjectContext` now counts
+  its own mutations: `revision()` moves once per whole op that writes the
+  Project (every create/remove/rename/update, load/unload, the failed ones
+  that leave a mark -- an ImportFailed record, a dataset found Unavailable --
+  new/open/save project, `setActiveShot` to another shot, `setPlaying`, the
+  auto-stop), never on the per-frame playback write (ADR 0035), and
+  `activeShotRevision()` moves with it when which shot renders or its record
+  changed. Two whole ops outside the context declare themselves with
+  `markRevised()`: the render's shot-state guard (the snapshot after a render
+  confirms the Project it left) and the loop's Time-at-Rest commit
+  (`commitScrubIfQuiet`). The loop applies one rule in
+  `followProjectRevision()` -- rebind when `activeShotRevision()` moved,
+  then, with a session up, one snapshot when `revision()` moved since the
+  last sent -- after dispatching, after a task ran and after the playback
+  tick, so a reply always precedes its snapshot and the prelude of a
+  RenderShot is shown before the task's first progress; the bootstrap's
+  snapshot records the revision it carried. The flags, the compares, the
+  `rebindActiveShot` host hook and three of the four send sites are gone;
+  `runOneTask()` just runs the task. Two visible differences, both the rule
+  working as intended: a request that changed nothing (SetActiveShot to the
+  active shot, RenderShot of the active shot, Unload of an unloaded dataset)
+  no longer sends a snapshot, and a task body that throws no longer forces
+  one -- whatever it changed before throwing moved the revision. The render
+  test's ordering check now exercises a real switch (a second shot active
+  when the render is asked) and asserts the no-switch case sends nothing
+  before the progress; every other snapshot count in the suites and the
+  scenarios is unchanged. The `[SciVisStudio]` suite covers the counters
+  directly.
 
 ### Spec conformance
 

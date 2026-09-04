@@ -31,7 +31,8 @@ marker: scene messages for the same mutation precede it, and its arrival
 means the mutation is fully visible. It carries the Project's Full form
 (`ProjectForm::Full`): the manifest's fields plus, inline under each entity,
 the runtime fields the client cannot rebuild; the same serializer writes the
-manifest form `project.vsr` stores.
+manifest form `project.vsr` stores. One snapshot per change of the
+`ProjectContext` revision, decided by the server loop, never by a handler.
 _Avoid_: project delta, project patch, runtime sidecar
 
 **Server Task**:
