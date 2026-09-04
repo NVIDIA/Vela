@@ -12,7 +12,9 @@ namespace vsr::scivis_studio::protocol {
 
 // 1: milestones 1-6. 2: TaskFailed carries framesCompleted (milestone 7).
 // 3: Disconnect carries a reason and is the server's farewell too.
-constexpr int PROTOCOL_VERSION = 3;
+// 4: UpdateShot's bindings are the manifest's ordered list and ProjectSnapshot
+//    carries the Project's Full form inline instead of a runtime sidecar.
+constexpr int PROTOCOL_VERSION = 4;
 
 /*
  * Complete v1 message set of the SciVis Studio client-server protocol, as one

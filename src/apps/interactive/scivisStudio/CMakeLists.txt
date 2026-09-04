@@ -3,6 +3,7 @@
 
 add_library(vsr_scivis_studio_model OBJECT
   CameraRig.cpp
+  DataNodeFields.cpp
   Dataset.cpp
   DatasetIO.cpp
   LightRig.cpp

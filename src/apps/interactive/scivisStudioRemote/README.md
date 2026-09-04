@@ -271,7 +271,10 @@ pending request retires), and with a bare `Error{"malformed ..."}` otherwise.
 The client core covers the second case too: a bare `Error` that names the
 type of a pending request fails the oldest pending request of that type, so
 no control stays greyed until the connection is lost. `PROTOCOL_VERSION` is
-2: `TaskFailed` gained `framesCompleted` (optional on the wire).
+4: 2 when `TaskFailed` gained `framesCompleted` (optional on the wire), 3
+when `Disconnect` gained a reason, 4 when `UpdateShot` and `ProjectSnapshot`
+moved to the model's one Shot and Project serialization (PR review fix-ups
+below).
 
 ### Shot rendering
 
@@ -852,11 +855,48 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   so no `PROTOCOL_VERSION` bump. Still hand-written: `SetEncodings`,
   `SetObjectParameter` and `ArrayHistogramResult` (custom value shapes),
   `ProjectSnapshot`, and `Shot`/`ShotRenderSettings`/`UpdateShot`, which
-  document 03 replaces. A nested type outside `namespace protocol` must
+  the next fix-up replaces. A nested type outside `namespace protocol` must
   either carry a `fields()` description or have its codec declared where
-  `PayloadCommon.h`'s templates can see it (the model namespace's overloads
-  are not found by ADL); `Shot` is the one such case today and its codec
-  reads its nested children by hand.
+  `PayloadCommon.h`'s templates can see it: the type's own namespace, which
+  ADL reaches, not a `shot::`-style sub-namespace, which it does not.
+
+- **One serializer for Shot, one for Project.** `Shot` had two wire schemas
+  in one protocol: `UpdateShot` wrote bindings keyed by dataset id and
+  included `camera`; the manifest writer (`projectToNode`, which
+  `ProjectSnapshot` reused) wrote bindings as an ordered list and dropped
+  `camera`, so a client received a shot in one shape and sent it back in the
+  other. `ProjectSnapshot` was itself a second Project serializer: about 190
+  lines re-serializing Dataset, LightRig and CameraRig runtime fields into a
+  `runtime/` sidecar keyed by id, decoding through the manifest reader and
+  then patching the result, on a scratch copy of the whole tree because the
+  readers took non-const nodes. Now the model library owns both:
+  `toNode(const Shot &, DataNode &, ProjectForm)` / `fromNode` in `Shot.h`
+  and `projectToNode` / `nodeToProject` taking `ProjectForm{Manifest, Full}`
+  in `ProjectSerialization.h`. `Manifest` is what `project.vsr` stores and is
+  unchanged (a golden canonical dump of a fully populated project, taken
+  before the change, is a `[SciVisStudio]` scenario); `Full` writes every
+  runtime field inline under its entity in one pass. `UpdateShot` became a
+  `fields()` description nesting the Shot in `Full` form, so its bindings
+  moved to the manifest's ordered list (`PROTOCOL_VERSION` 4), and
+  `ProjectSnapshot.cpp` is the two-line `Full` encoding. The typed-field
+  primitives the codecs share (`writeChild`/`readChild`, the enum and
+  nested-node helpers, the lists, the ANARI type names and the
+  `SceneObjectRef`/`SceneNodeRef` codecs) moved down from `PayloadCommon.h`
+  to the model's `DataNodeFields.h`, where both layers reach them and ADL
+  finds the model's overloads; `PayloadCommon.h` re-exports them. Every
+  model reader now takes `const DataNode &`, returns `bool` and assigns its
+  output only on success, with the protocol's policy throughout: an entity
+  without an id, a mistyped child, an unknown enum spelling
+  (`interpolationFromString` is strict and returns `std::optional`) or a
+  malformed camera pose is rejected rather than read as a default. That
+  reaches the manifest too: a malformed `scivisStudio` section fails the
+  open with an error instead of loading defaults, and a malformed Camera Rig
+  Archive is skipped like a missing one. The v1-v4 compatibility paths
+  (inline dataset metadata with its legacy enum aliases, inline shot camera
+  rigs) run only for `Manifest` reads, whose field names they share; `Full`
+  reads the runtime fields and skips them. A snapshot with a corrupt camera
+  rig (mistyped keyframe frame, unknown easing, mistyped pose) is now
+  rejected, covered in `[StudioProtocol]`.
 
 ### Spec conformance
 

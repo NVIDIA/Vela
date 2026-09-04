@@ -140,7 +140,12 @@ outside Studio's set is **rejected with an error**, never silently ignored.
   (`results` carries op-specific payloads such as newly allocated ids).
   Separately, **every confirmed mutation, from any source** — client request,
   task completion, server-side effect — fires one whole-`Project`
-  `ProjectSnapshot`. Failed ops produce no snapshot.
+  `ProjectSnapshot`. Failed ops produce no snapshot. The snapshot carries the
+  Project in the model's *Full* serialization form (`projectToNode(...,
+  ProjectForm::Full)`: the manifest's fields plus every runtime field inline
+  under its entity), and `UpdateShot` nests a `Shot` the same way, so the
+  on-disk manifest, the Project Replica and the shot edits share one
+  serializer and cannot drift (`PROTOCOL_VERSION` 4).
 - **The snapshot is the commit marker.** For one logical mutation the server
   may push scene messages first (object creations, layer snapshots); the
   trailing `ProjectSnapshot` means "this mutation is now fully visible" — one

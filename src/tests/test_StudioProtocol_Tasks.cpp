@@ -20,7 +20,7 @@ using namespace vsr::scivis_studio;
 namespace {
 
 // A project exercising every field the snapshot must carry, including the
-// runtime-only ones projectToNode() drops.
+// runtime-only ones the manifest form drops.
 Project makeSnapshotProject()
 {
   Project p;
@@ -410,26 +410,28 @@ SCENARIO("ProjectSnapshot payload", "[StudioProtocol]")
       }
     }
 
-    THEN("the wire tree keeps the manifest form and a keyed runtime sidecar")
+    THEN("the wire tree is the Full form: runtime fields inline, no sidecar")
     {
       vsr::core::DataTree tree;
       toNode(snap, tree.root());
+      REQUIRE_FALSE(hasChild(tree.root(), "runtime"));
       const auto *project = tree.root().child("project");
       REQUIRE(project);
-      REQUIRE(project->child("datasets")->child(0)->child("status") == nullptr);
-      REQUIRE(project->child("shots")->child(0)->child("camera") == nullptr);
-      const auto *runtime = tree.root().child("runtime");
-      REQUIRE(runtime);
-      REQUIRE(runtime->child("datasets")->child("dataset_0001"));
-      REQUIRE(runtime->child("shots")->child("shot_0002")->child("camera"));
-      REQUIRE(runtime->child("lightRigs")->child("lightRig_0001"));
-      REQUIRE(runtime->child("cameraRigs")->child("cameraRig_0001"));
+      REQUIRE(project->child("datasets")->child(0)->child("status"));
+      REQUIRE(project->child("shots")->child(0)->child("camera"));
+      REQUIRE(project->child("lightRigs")->child(0)->child("rootNode"));
+      REQUIRE(project->child("cameraRigs")->child(0)->child("rig"));
 
-      // The "project" child is byte-for-byte what projectToNode() writes.
+      // The manifest form drops exactly those.
       vsr::core::DataTree manifest;
-      projectToNode(snap.project, manifest.root());
+      projectToNode(snap.project, manifest.root(), ProjectForm::Manifest);
+      const auto &m = manifest.root();
+      REQUIRE_FALSE(m.child("datasets")->child(0)->child("status"));
+      REQUIRE_FALSE(m.child("shots")->child(0)->child("camera"));
+      REQUIRE_FALSE(m.child("lightRigs")->child(0)->child("rootNode"));
+      REQUIRE_FALSE(m.child("cameraRigs")->child(0)->child("rig"));
       Project fromManifest;
-      REQUIRE(nodeToProject(manifest.root(), fromManifest));
+      REQUIRE(nodeToProject(m, fromManifest, ProjectForm::Manifest));
       REQUIRE(fromManifest.datasets[0].status == DatasetStatus::Unavailable);
     }
   }
@@ -444,10 +446,11 @@ SCENARIO("ProjectSnapshot payload", "[StudioProtocol]")
     REQUIRE_FALSE(out->project.dirty);
   }
 
-  GIVEN("a snapshot without a runtime sidecar")
+  GIVEN("a snapshot whose project carries only the manifest fields")
   {
     vsr::core::DataTree tree;
-    projectToNode(makeSnapshotProject(), tree.root()["project"]);
+    projectToNode(
+        makeSnapshotProject(), tree.root()["project"], ProjectForm::Manifest);
     ProjectSnapshot out;
 
     THEN("it decodes with the manifest defaults")
@@ -457,12 +460,16 @@ SCENARIO("ProjectSnapshot payload", "[StudioProtocol]")
       REQUIRE(out.project.datasets[0].status == DatasetStatus::Unavailable);
       REQUIRE(out.project.shots[0].currentFrame == 17);
       REQUIRE(out.project.shots[0].playing);
+      REQUIRE(out.project.shots[0].camera.type == ANARI_UNKNOWN);
     }
 
     THEN("the source tree is not modified by decoding")
     {
+      const size_t before = tree.root()["project"].numChildren();
       REQUIRE(fromNode(tree.root(), out));
-      REQUIRE_FALSE(hasChild(tree.root(), "runtime"));
+      REQUIRE(tree.root()["project"].numChildren() == before);
+      REQUIRE_FALSE(
+          tree.root()["project"].child("datasets")->child(0)->child("status"));
     }
   }
 
@@ -480,21 +487,44 @@ SCENARIO("ProjectSnapshot payload", "[StudioProtocol]")
     {
       vsr::core::DataTree tree;
       toNode(ProjectSnapshot{makeSnapshotProject()}, tree.root());
-      tree.root()["runtime"]["datasets"]["dataset_0001"]["status"] =
+      (*tree.root()["project"]["datasets"].child(0))["status"] =
           std::string("Sideways");
       ProjectSnapshot out;
       REQUIRE_FALSE(fromNode(tree.root(), out));
     }
 
-    THEN("a runtime entry for an unknown entity is ignored")
+    THEN("a corrupt camera rig is rejected")
+    {
+      vsr::core::DataTree mistyped;
+      toNode(ProjectSnapshot{makeSnapshotProject()}, mistyped.root());
+      auto &rig = (*mistyped.root()["project"]["cameraRigs"].child(0))["rig"];
+      (*rig["keyframes"].child(0))["frame"] = std::string("twelve");
+      ProjectSnapshot out;
+      REQUIRE_FALSE(fromNode(mistyped.root(), out));
+
+      vsr::core::DataTree unknownEasing;
+      toNode(ProjectSnapshot{makeSnapshotProject()}, unknownEasing.root());
+      auto &rig2 =
+          (*unknownEasing.root()["project"]["cameraRigs"].child(0))["rig"];
+      (*rig2["keyframes"].child(1))["interpolationToNext"] =
+          std::string("Bounce");
+      REQUIRE_FALSE(fromNode(unknownEasing.root(), out));
+
+      vsr::core::DataTree badPose;
+      toNode(ProjectSnapshot{makeSnapshotProject()}, badPose.root());
+      auto &rig3 = (*badPose.root()["project"]["cameraRigs"].child(0))["rig"];
+      rig3["current"]["orbit"]["lookat"] = std::string("origin");
+      REQUIRE_FALSE(fromNode(badPose.root(), out));
+    }
+
+    THEN("a mistyped shot camera is rejected")
     {
       vsr::core::DataTree tree;
       toNode(ProjectSnapshot{makeSnapshotProject()}, tree.root());
-      tree.root()["runtime"]["shots"]["shot_9999"]["camera"]["type"] =
+      (*tree.root()["project"]["shots"].child(1))["camera"]["type"] =
           std::string("ANARI_BOGUS");
       ProjectSnapshot out;
-      REQUIRE(fromNode(tree.root(), out));
-      REQUIRE(out.project.shots.size() == 2);
+      REQUIRE_FALSE(fromNode(tree.root(), out));
     }
   }
 }

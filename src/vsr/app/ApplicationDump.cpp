@@ -69,14 +69,19 @@ void serialize_CameraPose(
   node["mode"] = pose.mode;
 }
 
-void deserialize_CameraPose(core::DataNode &node, rendering::CameraPose &pose)
+bool deserialize_CameraPose(
+    const core::DataNode &node, rendering::CameraPose &pose)
 {
-  node["name"].getValue(ANARI_STRING, &pose.name);
-  node["lookat"].getValue(ANARI_FLOAT32_VEC3, &pose.lookat);
-  node["azeldist"].getValue(ANARI_FLOAT32_VEC3, &pose.azeldist);
-  node["fixedDist"].getValue(ANARI_FLOAT32, &pose.fixedDist);
-  node["upAxis"].getValue(ANARI_INT32, &pose.upAxis);
-  node["mode"].getValue(ANARI_INT32, &pose.mode);
+  auto read = [&](const char *name, anari::DataType type, void *out) {
+    const auto *field = node.child(name);
+    return !field || field->getValue(type, out);
+  };
+  return read("name", ANARI_STRING, &pose.name)
+      && read("lookat", ANARI_FLOAT32_VEC3, &pose.lookat)
+      && read("azeldist", ANARI_FLOAT32_VEC3, &pose.azeldist)
+      && read("fixedDist", ANARI_FLOAT32, &pose.fixedDist)
+      && read("upAxis", ANARI_INT32, &pose.upAxis)
+      && read("mode", ANARI_INT32, &pose.mode);
 }
 
 bool serialize_ApplicationDump(const Context &context, core::DataNode &root)

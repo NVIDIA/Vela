@@ -362,8 +362,10 @@ bool buildProjectSavePlan(const ProjectSaveRequest &request,
       } else {
         copyManagedAsset = true;
       }
-    } else if (auto datasetRoot = resolveProjectAssetRoot(
-                   request.scene, "datasets", liveDataset.id, liveDataset.rootNode)) {
+    } else if (auto datasetRoot = resolveProjectAssetRoot(request.scene,
+                   "datasets",
+                   liveDataset.id,
+                   liveDataset.rootNode)) {
       const auto dataset = savedDataset;
       auto *animationManager = &request.animationManager;
       write.writer = [dataset, datasetRoot, animationManager](
@@ -385,8 +387,8 @@ bool buildProjectSavePlan(const ProjectSaveRequest &request,
     if (copyManagedAsset) {
       if (request.project.projectDirectory.empty()
           || liveDataset.persistedName.empty()) {
-        return fail("dataset '" + savedDataset.name
-                + "' has no managed asset to copy",
+        return fail(
+            "dataset '" + savedDataset.name + "' has no managed asset to copy",
             error);
       }
       const auto source = request.project.projectDirectory / "datasets"
@@ -565,7 +567,7 @@ bool buildProjectSavePlan(const ProjectSaveRequest &request,
           PROJECT_FILE_TYPE,
           PROJECT_SCHEMA,
           SCHEMA_VERSION});
-  projectToNode(result.project, root["scivisStudio"]);
+  projectToNode(result.project, root["scivisStudio"], ProjectForm::Manifest);
   if (request.uiState) {
     if (auto *windows = request.uiState->child("windows"))
       root["windows"] = *windows;
