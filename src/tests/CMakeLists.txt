@@ -14,11 +14,13 @@ project_add_executable(
   test_ArchiveCompatibility.cpp
   test_CameraRendererArchive.cpp
   test_Algorithms.cpp
+  test_AutoExposure.cpp
   test_AnyArray.cpp
   test_Array.cpp
   test_ComponentSerialization.cpp
   test_DataPath.cpp
   test_DataTree.cpp
+  test_Downsample.cpp
   test_FlatMap.cpp
   test_Forest.cpp
   test_Geometry.cpp
@@ -126,6 +128,7 @@ if (TARGET vsr_scivis_studio_test_client_core)
 endif()
 
 add_test(NAME vsr::AnimationManager COMMAND ${PROJECT_NAME} "[AnimationManager]")
+add_test(NAME vsr::AutoExposure   COMMAND ${PROJECT_NAME} "[AutoExposure]" )
 add_test(NAME vsr::App COMMAND ${PROJECT_NAME} "[App]")
 add_test(NAME vsr::AnimationArchive COMMAND ${PROJECT_NAME} "[AnimationArchive]")
 add_test(NAME vsr::AnimationManagerArchive
@@ -155,6 +158,7 @@ add_test(NAME vsr::Math          COMMAND ${PROJECT_NAME} "[Math]"         )
 add_test(NAME vsr::Object        COMMAND ${PROJECT_NAME} "[Object]"       )
 add_test(NAME vsr::ObjectArchive COMMAND ${PROJECT_NAME} "[ObjectArchive]")
 add_test(NAME vsr::ObjectUsePtr  COMMAND ${PROJECT_NAME} "[ObjectUsePtr]" )
+add_test(NAME vsr::Downsample    COMMAND ${PROJECT_NAME} "[Downsample]"   )
 add_test(NAME vsr::Parameter     COMMAND ${PROJECT_NAME} "[Parameter]"    )
 add_test(NAME vsr::RenderIndex   COMMAND ${PROJECT_NAME} "[RenderIndex]"  )
 add_test(NAME vsr::Scene         COMMAND ${PROJECT_NAME} "[Scene]"        )

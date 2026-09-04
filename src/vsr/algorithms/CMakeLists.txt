@@ -8,7 +8,7 @@ project_add_library(STATIC)
 # CPU backend (always present)
 project_sources(PRIVATE
   cpu/toneMap.cpp
-  cpu/autoExposure.cpp
+  cpu/downsample.cpp
   cpu/outputTransform.cpp
   cpu/visualizeAOV.cpp
   cpu/boxOutline.cpp
@@ -40,7 +40,7 @@ if (VSR_USE_CUDA)
 
   set(VSR_ALGORITHMS_CUDA_SOURCES
     cuda/toneMap.cu
-    cuda/autoExposure.cu
+    cuda/downsample.cu
     cuda/outputTransform.cu
     cuda/visualizeAOV.cu
     cuda/boxOutline.cu

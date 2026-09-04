@@ -4,6 +4,8 @@
 #pragma once
 
 #include "ImagePass.h"
+// std
+#include <memory>
 
 namespace vsr::rendering {
 
@@ -18,6 +20,11 @@ struct AutoExposurePass : public ImagePass
 
  private:
   void render(ImageBuffers &b, int stageId) override;
+
+  // Opaque persistent device scratch for the CUDA luminance reduction
+  // (created lazily on first use; empty when built without CUDA).
+  struct Scratch;
+  std::unique_ptr<Scratch> m_scratch;
 
   bool m_hdrEnabled{false};
   bool m_hasExposure{false};
