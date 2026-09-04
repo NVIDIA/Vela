@@ -259,6 +259,9 @@ RenderShotResult renderActiveShotToFrames(
     {
       shot->currentFrame = frame;
       shot->playing = playing;
+      // The render wrote the shot's playback state and puts it back itself:
+      // one revision for the run, so a mirror confirms the Project it left.
+      projectContext.markRevised();
       try {
         projectContext.syncAnimationManagerToActiveShot();
         projectContext.applyActiveShot();

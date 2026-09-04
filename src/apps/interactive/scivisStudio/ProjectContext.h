@@ -10,6 +10,7 @@
 #include "vsr/io/importers.hpp"
 #include "vsr/scene/objects/Array.hpp"
 
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -41,6 +42,27 @@ struct ProjectContext
   Project &project();
   const Project &project() const;
 
+  // The Project's revision: a count of the whole-op mutations below that
+  // changed it. Every op of this class that writes the Project moves it by
+  // one -- a failed one that still left a mark too (an ImportFailed record,
+  // a dataset found Unavailable), and a save, which only clears the dirty
+  // flag -- while the per-frame playback write does not: the frame position
+  // is transient while time moves (ADR 0035). A mirror of the Project (the
+  // remote server's snapshot) updates once per change, however many ops made
+  // it, and never for a refused or no-op call.
+  uint64_t revision() const;
+  // Moves (with the revision) when which shot renders, or its record,
+  // changed: a new or opened project, addShot, setActiveShot to another
+  // shot, removeShot of the active one, updateShot of the active one.
+  // Whatever renders the active shot (its camera, its renderer pick)
+  // rebinds on it.
+  uint64_t activeShotRevision() const;
+  // A whole op outside this class wrote the Project -- the shot render
+  // putting the shot's playback state back, the server committing the frame
+  // a paused shot rests on (Time at Rest) -- and moves the revision as an op
+  // here would.
+  void markRevised();
+
   void createUnsavedProject();
   bool addShot(const std::string &name = "");
   // Shot edits are whole operations, the only path that mutates a stored
@@ -65,7 +87,9 @@ struct ProjectContext
   // non-looping shot plays off its end, the manager's stopped callback
   // writes playing=false and currentFrame=last. None of these dirty the
   // project: the playback position is transient state, as when a tick
-  // writes it.
+  // writes it. setPlaying and the auto-stop move the revision (time came to
+  // rest, or left it); a seek does not, since the frame is in motion until
+  // its caller commits it (markRevised).
   bool setPlaying(const ShotID &id, bool playing, std::string *error = nullptr);
   void setActiveShotFrame(int frame);
   Dataset *addStaticDataset(const std::string &name,
@@ -104,7 +128,7 @@ struct ProjectContext
   // Cheap on-demand availability hint for an Unloaded dataset: a missing
   // asset file is definitively Unavailable. The check never upgrades status —
   // the authoritative assessment is the load attempt itself.
-  void refreshUnloadedDatasetAvailability(Dataset &dataset) const;
+  void refreshUnloadedDatasetAvailability(Dataset &dataset);
   bool saveDatasetArchive(const DatasetID &id,
       const std::filesystem::path &file,
       std::string *error = nullptr);
@@ -198,6 +222,12 @@ struct ProjectContext
       const FileAnimationDatasetOptions &options);
   void installDatasetDirtyDelegate();
   void markDatasetDirtyForObject(const vsr::scene::Object *object);
+  // An op changed the Project: dirty for the save, revised for the mirror.
+  void markProjectDirty();
+  void markActiveShotRevised();
+  // The dataset's asset is missing or unreadable: Unavailable, and a
+  // revision when it was not known to be already.
+  void markDatasetUnavailable(Dataset &dataset);
   Dataset *loadDatasetArchiveImpl(const std::filesystem::path &file,
       const std::string &name,
       bool alreadyManaged,
@@ -226,6 +256,8 @@ struct ProjectContext
   // per-object dirty tracking is meaningless (and O(n^2)) while they run.
   bool m_mutatingDatasetRuntime{false};
   vsr::scene::BaseUpdateDelegate *m_datasetDirtyDelegate{nullptr};
+  uint64_t m_revision{0};
+  uint64_t m_activeShotRevision{0};
 };
 
 const char *toString(vsr::io::ImporterType importerType);

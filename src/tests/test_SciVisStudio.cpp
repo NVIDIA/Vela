@@ -4202,6 +4202,144 @@ SCENARIO("SciVis Studio shot time is driven by the animation manager",
   REQUIRE(shot.currentFrame == 9);
 }
 
+SCENARIO("SciVis Studio ProjectContext counts the Project's revisions",
+    "[SciVisStudio]")
+{
+  vsr::app::Context appContext;
+  ProjectContext projectContext(&appContext);
+  projectContext.createUnsavedProject();
+
+  GIVEN("a fresh project")
+  {
+    const auto revision = projectContext.revision();
+    const auto shotRevision = projectContext.activeShotRevision();
+    REQUIRE(revision > 0); // the creation itself was a mutation
+
+    WHEN("a shot is added")
+    {
+      REQUIRE(projectContext.addShot("Two"));
+
+      THEN("both the revision and the active-shot revision move")
+      {
+        REQUIRE(projectContext.revision() > revision);
+        REQUIRE(projectContext.activeShotRevision() > shotRevision);
+      }
+    }
+
+    WHEN("the active shot is selected again")
+    {
+      REQUIRE(projectContext.setActiveShot(
+          projectContext.project().activeShotId));
+
+      THEN("nothing changed, so neither revision moves")
+      {
+        REQUIRE(projectContext.revision() == revision);
+        REQUIRE(projectContext.activeShotRevision() == shotRevision);
+      }
+    }
+
+    WHEN("a light rig is created")
+    {
+      REQUIRE(projectContext.createLightRig("Fill"));
+
+      THEN("the revision moves; the active shot is as it was")
+      {
+        REQUIRE(projectContext.revision() > revision);
+        REQUIRE(projectContext.activeShotRevision() == shotRevision);
+      }
+    }
+
+    WHEN("a shot other than the active one is updated")
+    {
+      REQUIRE(projectContext.addShot("Two"));
+      const auto afterAdd = projectContext.revision();
+      const auto shotAfterAdd = projectContext.activeShotRevision();
+      Shot first = projectContext.project().shots.front();
+      first.name = "Renamed";
+      REQUIRE(projectContext.updateShot(first));
+
+      THEN("the revision moves and the active-shot revision does not")
+      {
+        REQUIRE(projectContext.revision() > afterAdd);
+        REQUIRE(projectContext.activeShotRevision() == shotAfterAdd);
+      }
+
+      AND_WHEN("the active shot is updated")
+      {
+        const auto beforeActive = projectContext.activeShotRevision();
+        Shot active = *project::activeShot(projectContext.project());
+        active.name = "Active renamed";
+        REQUIRE(projectContext.updateShot(active));
+
+        THEN("the active-shot revision moves too")
+        {
+          REQUIRE(projectContext.activeShotRevision() > beforeActive);
+        }
+      }
+    }
+
+    WHEN("a paused shot is sought to another frame")
+    {
+      auto &shot = *project::activeShot(projectContext.project());
+      shot.frameCount = 24;
+      projectContext.syncAnimationManagerToActiveShot();
+      const auto synced = projectContext.revision();
+      projectContext.setActiveShotFrame(9);
+
+      THEN("the frame moved without moving the revision (Time in Motion)")
+      {
+        REQUIRE(shot.currentFrame == 9);
+        REQUIRE(projectContext.revision() == synced);
+
+        AND_WHEN("the resting frame is committed")
+        {
+          projectContext.markRevised();
+
+          THEN("the revision moves once")
+          {
+            REQUIRE(projectContext.revision() == synced + 1);
+          }
+        }
+      }
+    }
+
+    WHEN("a non-looping shot plays off its end")
+    {
+      auto &shot = *project::activeShot(projectContext.project());
+      shot.frameCount = 4;
+      shot.fps = 10.f;
+      shot.loop = false;
+      projectContext.syncAnimationManagerToActiveShot();
+      const auto synced = projectContext.revision();
+      REQUIRE(projectContext.setPlaying(shot.id, true));
+      const auto playing = projectContext.revision();
+      REQUIRE(playing > synced);
+
+      // One frame's worth of time: the shot advances but keeps playing.
+      appContext.vsr.animationMgr.tick(0.1f);
+      REQUIRE(shot.playing);
+      REQUIRE(shot.currentFrame == 1);
+
+      THEN("the per-frame tick does not move the revision")
+      {
+        REQUIRE(projectContext.revision() == playing);
+      }
+
+      AND_WHEN("the ticks carry it past the last frame")
+      {
+        for (int i = 0; i < 8 && shot.playing; ++i)
+          appContext.vsr.animationMgr.tick(0.1f);
+        REQUIRE_FALSE(shot.playing);
+
+        THEN("the auto-stop is one mutation")
+        {
+          REQUIRE(projectContext.revision() == playing + 1);
+        }
+      }
+    }
+  }
+}
+
 SCENARIO("SciVis Studio CLI parses noun-verb command lines", "[SciVisStudio]")
 {
   StudioCommandLine commandLine;
