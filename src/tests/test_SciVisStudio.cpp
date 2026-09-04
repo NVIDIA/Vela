@@ -16,6 +16,7 @@
 #include "vsr/app/ApplicationDump.h"
 #include "vsr/app/Context.h"
 #include "vsr/app/LegacyApplicationContext.h"
+#include "vsr/core/DataPath.hpp"
 #include "vsr/core/DataTree.hpp"
 #include "vsr/core/DataTreeMetadata.hpp"
 #include "vsr/io/animation/SpatialFieldFileBinding.hpp"
@@ -36,6 +37,7 @@
 // std
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -613,6 +615,236 @@ SCENARIO("SciVis Studio project model serialization", "[SciVisStudio]")
       REQUIRE(loaded.shots.front().renderSettings.rendererObjectIndex == 7);
       REQUIRE(loaded.shots.front().renderSettings.rendererSubtype
           == "dummy_test_renderer");
+    }
+  }
+}
+
+namespace {
+
+// One line per node, indented by depth: name, then the value's ANARI type and
+// text when it has one. append()ed children carry a '<n>' name minted by a
+// process-wide counter, so they are spelled by ordinal instead; everything
+// else in the manifest is deterministic.
+void appendCanonicalDump(const vsr::core::DataNode &node,
+    size_t ordinal,
+    int depth,
+    std::string &out)
+{
+  out.append(size_t(depth) * 2, ' ');
+  if (vsr::core::isDelimitedNumber(node.name(),
+          vsr::core::ANONYMOUS_NAME_OPEN,
+          vsr::core::ANONYMOUS_NAME_CLOSE))
+    out += "[" + std::to_string(ordinal) + "]";
+  else
+    out += node.name();
+
+  const auto &v = node.getValue();
+  if (v.valid()) {
+    out += ": ";
+    out += anari::toString(v.type());
+    out += " ";
+    if (v.is<std::string>())
+      out += "\"" + v.getString() + "\"";
+    else if (v.is<bool>())
+      out += v.get<bool>() ? "true" : "false";
+    else if (v.is<int>())
+      out += std::to_string(v.get<int>());
+    else if (v.is<uint32_t>())
+      out += std::to_string(v.get<uint32_t>());
+    else if (v.is<uint64_t>())
+      out += std::to_string(v.get<uint64_t>());
+    else if (v.is<float>()) {
+      char buf[32];
+      std::snprintf(buf, sizeof(buf), "%g", double(v.get<float>()));
+      out += buf;
+    } else
+      out += "?";
+  }
+  out += "\n";
+  size_t childOrdinal = 0;
+  node.foreach_child_const([&](const vsr::core::DataNode &child) {
+    appendCanonicalDump(child, childOrdinal++, depth + 1, out);
+  });
+}
+
+std::string canonicalDump(const vsr::core::DataNode &node)
+{
+  std::string out;
+  appendCanonicalDump(node, 0, 0, out);
+  return out;
+}
+
+// Every manifest field populated away from its default, plus runtime-only
+// state the manifest must drop.
+Project makeManifestGoldenProject()
+{
+  Project project;
+  project.name = "Golden";
+  project.projectDirectory = "/data/projects/golden";
+  project.nextDatasetOrdinal = 7;
+  project.dirty = true;
+
+  Dataset wind;
+  wind.id = "dataset_0001";
+  wind.name = "Wind";
+  wind.sourceKind = DatasetSourceKind::FileAnimation;
+  wind.importerType = "VTK";
+  wind.source.sourcePath = "/data/wind/frames.sources";
+  wind.source.importerSettings.set("scalar", "velocity");
+  wind.status = DatasetStatus::Available;
+  wind.rootNode = {"datasets", 4};
+  wind.sourceFiles.push_back({"frame_000.vtk", "/data/wind/frame_000.vtk"});
+  wind.persistedName = "Wind";
+  project.datasets.push_back(std::move(wind));
+
+  Dataset parked;
+  parked.id = "dataset_0005";
+  parked.name = "Parked";
+  parked.residency = DatasetResidency::Unloaded;
+  project.datasets.push_back(std::move(parked));
+
+  Shot intro;
+  intro.id = "shot_0001";
+  intro.name = "Intro";
+  intro.frameCount = 240;
+  intro.fps = 30.f;
+  intro.currentFrame = 17;
+  intro.playing = true;
+  intro.loop = false;
+  intro.datasetBindings.push_back({"dataset_0001", true});
+  intro.datasetBindings.push_back({"dataset_0005", false});
+  intro.lightRigId = "lightRig_0001";
+  intro.cameraRigId = "cameraRig_0001";
+  intro.camera = {ANARI_CAMERA, 2};
+  intro.renderSettings.width = 1920;
+  intro.renderSettings.height = 1080;
+  intro.renderSettings.samples = 64;
+  intro.renderSettings.rendererLibrary = "visrtx";
+  intro.renderSettings.rendererObjectIndex = 9;
+  intro.renderSettings.rendererSubtype = "scivis";
+  intro.renderSettings.outputFilePrefix = "intro_";
+  project.shots.push_back(intro);
+
+  Shot outro;
+  outro.id = "shot_0002";
+  outro.name = "Outro";
+  project.shots.push_back(outro);
+  project.activeShotId = intro.id;
+
+  LightRig lights;
+  lights.id = "lightRig_0001";
+  lights.name = "Studio Lights";
+  lights.rootNode = {"lights", 11};
+  lights.persistedName = "Studio Lights";
+  project.lightRigs.push_back(lights);
+
+  CameraRig rig;
+  rig.id = "cameraRig_0001";
+  rig.name = "Fly-through";
+  rig.current.orbit.lookat = {1.f, 2.f, 3.f};
+  CameraKeyframe keyframe;
+  keyframe.frame = 12;
+  keyframe.name = "mid";
+  keyframe.interpolationToNext = CameraInterpolation::EaseOutIn;
+  rig.keyframes.push_back(keyframe);
+  rig.persistedName = "Fly-through";
+  project.cameraRigs.push_back(rig);
+
+  project.colorMaps.push_back({"colorMap_0001", "Viridis"});
+  return project;
+}
+
+// What projectToNode() wrote for makeManifestGoldenProject() before the Shot
+// and Project serializers were unified; the manifest form must not drift
+// from it, since this is what project.vsr stores under "scivisStudio".
+constexpr const char *MANIFEST_GOLDEN = R"(scivisStudio
+  name: ANARI_STRING "Golden"
+  projectDirectory: ANARI_STRING "/data/projects/golden"
+  activeShot: ANARI_STRING "shot_0001"
+  nextDatasetOrdinal: ANARI_UINT64 7
+  dirty: ANARI_BOOL true
+  datasets
+    [0]
+      id: ANARI_STRING "dataset_0001"
+      name: ANARI_STRING "Wind"
+      residency: ANARI_STRING "Loaded"
+    [1]
+      id: ANARI_STRING "dataset_0005"
+      name: ANARI_STRING "Parked"
+      residency: ANARI_STRING "Unloaded"
+  shots
+    [0]
+      id: ANARI_STRING "shot_0001"
+      name: ANARI_STRING "Intro"
+      frameCount: ANARI_INT32 240
+      fps: ANARI_FLOAT32 30
+      currentFrame: ANARI_INT32 17
+      playing: ANARI_BOOL true
+      loop: ANARI_BOOL false
+      lightRigId: ANARI_STRING "lightRig_0001"
+      cameraRigId: ANARI_STRING "cameraRig_0001"
+      renderSettings
+        width: ANARI_UINT32 1920
+        height: ANARI_UINT32 1080
+        samples: ANARI_UINT32 64
+        rendererLibrary: ANARI_STRING "visrtx"
+        rendererObjectIndex: ANARI_UINT64 9
+        rendererSubtype: ANARI_STRING "scivis"
+        outputFilePrefix: ANARI_STRING "intro_"
+      datasetBindings
+        [0]
+          datasetId: ANARI_STRING "dataset_0001"
+          enabled: ANARI_BOOL true
+        [1]
+          datasetId: ANARI_STRING "dataset_0005"
+          enabled: ANARI_BOOL false
+    [1]
+      id: ANARI_STRING "shot_0002"
+      name: ANARI_STRING "Outro"
+      frameCount: ANARI_INT32 120
+      fps: ANARI_FLOAT32 24
+      currentFrame: ANARI_INT32 0
+      playing: ANARI_BOOL false
+      loop: ANARI_BOOL true
+      lightRigId: ANARI_STRING ""
+      cameraRigId: ANARI_STRING ""
+      renderSettings
+        width: ANARI_UINT32 1024
+        height: ANARI_UINT32 768
+        samples: ANARI_UINT32 128
+        rendererLibrary: ANARI_STRING ""
+        rendererObjectIndex: ANARI_UINT64 18446744073709551615
+        rendererSubtype: ANARI_STRING "default"
+        outputFilePrefix: ANARI_STRING ""
+      datasetBindings
+  lightRigs
+    [0]
+      id: ANARI_STRING "lightRig_0001"
+      name: ANARI_STRING "Studio Lights"
+  cameraRigs
+    [0]
+      id: ANARI_STRING "cameraRig_0001"
+      name: ANARI_STRING "Fly-through"
+  colorMaps
+    [0]
+      id: ANARI_STRING "colorMap_0001"
+      name: ANARI_STRING "Viridis"
+)";
+
+} // namespace
+
+SCENARIO(
+    "SciVis Studio manifest form matches its golden dump", "[SciVisStudio]")
+{
+  GIVEN("A project populated away from every default")
+  {
+    vsr::core::DataTree tree;
+    projectToNode(makeManifestGoldenProject(), tree.root()["scivisStudio"]);
+
+    THEN("The manifest form is unchanged")
+    {
+      const auto dump = canonicalDump(tree.root()["scivisStudio"]);
+      REQUIRE(dump == MANIFEST_GOLDEN);
     }
   }
 }
