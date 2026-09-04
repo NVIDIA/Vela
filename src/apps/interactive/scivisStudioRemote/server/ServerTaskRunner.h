@@ -3,6 +3,8 @@
 
 #pragma once
 
+// vsr_scivis_studio_protocol
+#include "PayloadCommon.h"
 // vsr_network
 #include "vsr/network/Message.hpp"
 // std
@@ -18,15 +20,16 @@ namespace vsr::scivis_studio::server {
 
 // What a task body reports back: success or an error for the client, an
 // optional message for TaskCompleted (a created dataset's id, a render's
-// output directory), the frames a render wrote, whether the body stopped
-// because it was asked to, and whether the Project changed so the caller
-// knows to send a ProjectSnapshot.
+// output directory), the task's results subtree when it has one (a render's
+// RenderShotResult, set with protocol::setResults()), whether the body
+// stopped because it was asked to, and whether the Project changed so the
+// caller knows to send a ProjectSnapshot.
 struct TaskResult
 {
   bool ok{true};
   std::string error;
   std::string message;
-  uint64_t framesCompleted{0};
+  protocol::SubtreePtr results;
   // The body stopped because its TaskControl reported a cancel request
   // (with ok=false and error="cancelled"). Decides the CancelTask's answer;
   // see the ServerTaskRunner comment.

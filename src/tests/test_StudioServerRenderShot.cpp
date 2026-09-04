@@ -144,6 +144,14 @@ uint64_t RenderSession::startTask(const ProjectOpReply &reply)
   return started->taskId;
 }
 
+// A render's frame count from its ending, 0 for an ending without one.
+template <typename Ending>
+uint64_t framesCompletedOf(const Ending &ending)
+{
+  const auto rendered = results<RenderShotResult>(ending);
+  return rendered ? rendered->framesCompleted : 0;
+}
+
 // How a task ended, waiting for it.
 struct TaskEnd
 {
@@ -160,12 +168,13 @@ std::optional<TaskEnd> waitForTaskEnd(TestClient &client, uint64_t taskId)
         for (const auto &msg : client.messages()) {
           if (auto completed = decode<TaskCompleted>(msg);
               completed && completed->taskId == taskId) {
-            end = TaskEnd{true, completed->message, completed->framesCompleted};
+            end = TaskEnd{
+                true, completed->message, framesCompletedOf(*completed)};
             return true;
           }
           if (auto failed = decode<TaskFailed>(msg);
               failed && failed->taskId == taskId) {
-            end = TaskEnd{false, failed->error, failed->framesCompleted};
+            end = TaskEnd{false, failed->error, framesCompletedOf(*failed)};
             return true;
           }
         }
@@ -581,7 +590,7 @@ SCENARIO(
         REQUIRE(completed < snapshot);
         const auto ending = decode<TaskCompleted>(other.messages()[completed]);
         REQUIRE(ending);
-        REQUIRE(ending->framesCompleted == 200);
+        REQUIRE(framesCompletedOf(*ending) == 200);
         REQUIRE(countPNGs(data.projectDir / "renders" / shotId) == 200);
       }
     }
@@ -617,7 +626,7 @@ SCENARIO(
         REQUIRE(completed < snapshot);
         const auto ending = decode<TaskCompleted>(other.messages()[completed]);
         REQUIRE(ending);
-        REQUIRE(ending->framesCompleted == 4);
+        REQUIRE(framesCompletedOf(*ending) == 4);
         REQUIRE(countPNGs(data.projectDir / "renders" / shotId) == 4);
 
         AND_THEN("a later bootstrap does not repeat it")

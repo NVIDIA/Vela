@@ -112,6 +112,22 @@ void writeSubtree(
 // Deep-copies child(name) into a fresh tree's root; null when absent.
 SubtreePtr readSubtree(const vsr::core::DataNode &parent, const char *name);
 
+// Result subtrees ////////////////////////////////////////////////////////////
+
+// A payload with a `SubtreePtr results` member (ProjectOpReply, TaskCompleted,
+// TaskFailed) carries an op- or task-specific *Result payload opaquely: the
+// sender fills the subtree with toNode(result), the receiver decodes it with
+// results<R>(). Null means the op or task has nothing to return.
+
+// Replaces carrier.results with a fresh subtree holding toNode(result).
+template <typename R, typename Carrier>
+void setResults(Carrier &carrier, const R &result);
+
+// Decodes carrier.results as an R; empty when there are no results or
+// fromNode() rejects them.
+template <typename R, typename Carrier>
+std::optional<R> results(const Carrier &carrier);
+
 // Field visitors /////////////////////////////////////////////////////////////
 
 /*
@@ -432,6 +448,24 @@ inline bool Reader::read(const char *name, T &out)
 inline bool Reader::read(const char *name, std::filesystem::path &out)
 {
   return readPath(m_node, name, out);
+}
+
+template <typename R, typename Carrier>
+inline void setResults(Carrier &carrier, const R &result)
+{
+  carrier.results = makeSubtree();
+  toNode(result, carrier.results->root());
+}
+
+template <typename R, typename Carrier>
+inline std::optional<R> results(const Carrier &carrier)
+{
+  if (!carrier.results)
+    return {};
+  R result;
+  if (!fromNode(carrier.results->root(), result))
+    return {};
+  return result;
 }
 
 template <typename T, typename>

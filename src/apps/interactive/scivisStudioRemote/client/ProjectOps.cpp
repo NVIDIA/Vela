@@ -43,6 +43,15 @@ bool containsWord(const std::string &text, const std::string &word)
   return false;
 }
 
+// A render's frame count from its ending's RenderShotResult; 0 for a task
+// without one.
+template <typename Ending>
+uint64_t framesCompletedOf(const Ending &ending)
+{
+  const auto rendered = results<RenderShotResult>(ending);
+  return rendered ? rendered->framesCompleted : 0;
+}
+
 } // namespace
 
 const char *toString(TaskState state)
@@ -755,7 +764,7 @@ void ProjectOps::handleTaskCompleted(const TaskCompleted &completed)
   record.outcome = completed.message;
   if (!completed.message.empty())
     record.lastProgress.message = completed.message;
-  record.framesCompleted = completed.framesCompleted;
+  record.framesCompleted = framesCompletedOf(completed);
   record.error.clear();
   record.announced = false;
 }
@@ -765,7 +774,7 @@ void ProjectOps::handleTaskFailed(const TaskFailed &failed)
   TaskRecord &record = recordFor(failed.taskId);
   record.state = TaskState::Failed;
   record.error = failed.error;
-  record.framesCompleted = failed.framesCompleted; // a cancelled render's
+  record.framesCompleted = framesCompletedOf(failed); // a cancelled render's
   record.announced = false;
 }
 

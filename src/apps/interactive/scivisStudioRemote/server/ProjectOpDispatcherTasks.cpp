@@ -460,7 +460,9 @@ void ProjectOpDispatcher::handle(const RenderShot &req)
               result.error = rendered.cancelled ? "cancelled" : rendered.error;
               result.cancelled = rendered.cancelled;
               result.message = rendered.outputDirectory.string();
-              result.framesCompleted = uint64_t(rendered.framesCompleted);
+              setResults(result,
+                  protocol::RenderShotResult{
+                      uint64_t(rendered.framesCompleted)});
               // Residency and the dirty flag were restored, the frame time
               // put back: the snapshot confirms the Project the render left.
               result.projectChanged = true;

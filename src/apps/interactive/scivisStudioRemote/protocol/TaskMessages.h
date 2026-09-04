@@ -20,6 +20,11 @@ namespace vsr::scivis_studio::protocol {
  * TaskFailed, all carrying the server-allocated taskId. CancelTask is the
  * client's cooperative cancel request.
  *
+ * An ending carries what the task produced the same way a ProjectOpReply
+ * does: an opaque `results` subtree holding a task-specific *Result payload,
+ * decoded with results<R>() (PayloadCommon.h) and null for a task with
+ * nothing to report. RenderShot is the one task with a result today.
+ *
  * Example:
  *   TaskProgress p;
  *   p.taskId = id;
@@ -32,6 +37,13 @@ namespace vsr::scivis_studio::protocol {
 struct TaskStartedResult
 {
   uint64_t taskId{0};
+};
+
+// Results of a RenderShot task's TaskCompleted or TaskFailed: the frames
+// written before it ended. A cancelled or failed render leaves them on disk.
+struct RenderShotResult
+{
+  uint64_t framesCompleted{0};
 };
 
 struct TaskProgress
@@ -50,7 +62,7 @@ struct TaskCompleted
       StudioMessageType::TaskCompleted;
   uint64_t taskId{0};
   std::string message;
-  uint64_t framesCompleted{0}; // RenderShot only; 0 otherwise
+  SubtreePtr results;
 };
 
 struct TaskFailed
@@ -59,9 +71,7 @@ struct TaskFailed
       StudioMessageType::TaskFailed;
   uint64_t taskId{0};
   std::string error;
-  // RenderShot only: the frames written before the cancel or failure; they
-  // stay on disk. 0 otherwise.
-  uint64_t framesCompleted{0};
+  SubtreePtr results;
 };
 
 struct CancelTask
@@ -73,9 +83,8 @@ struct CancelTask
 };
 
 // Every payload is a fields() description (PayloadCommon.h). taskId is
-// required in every task payload and requestId in CancelTask;
-// current/total/framesCompleted default to 0 and message/error to "" when
-// absent.
+// required in every task payload and requestId in CancelTask; current/total
+// default to 0, message/error to "" and results to null when absent.
 
 // Inlined definitions ////////////////////////////////////////////////////////
 
@@ -83,6 +92,12 @@ template <typename V>
 void fields(V &v, TaskStartedResult &r)
 {
   v.required("taskId", r.taskId);
+}
+
+template <typename V>
+void fields(V &v, RenderShotResult &r)
+{
+  v.required("framesCompleted", r.framesCompleted);
 }
 
 template <typename V>
@@ -99,7 +114,7 @@ void fields(V &v, TaskCompleted &c)
 {
   v.required("taskId", c.taskId);
   v.optional("message", c.message);
-  v.optional("framesCompleted", c.framesCompleted);
+  v.subtree("results", c.results);
 }
 
 template <typename V>
@@ -107,7 +122,7 @@ void fields(V &v, TaskFailed &f)
 {
   v.required("taskId", f.taskId);
   v.optional("error", f.error);
-  v.optional("framesCompleted", f.framesCompleted);
+  v.subtree("results", f.results);
 }
 
 template <typename V>

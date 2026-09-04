@@ -229,31 +229,53 @@ SCENARIO("Server Task payloads", "[StudioProtocol]")
     }
   }
 
-  GIVEN("a TaskCompleted")
+  GIVEN("a TaskCompleted carrying a RenderShotResult")
   {
     TaskCompleted c;
     c.taskId = 8;
     c.message = "rendered";
-    c.framesCompleted = 240;
+    setResults(c, RenderShotResult{240});
     const auto out = decode<TaskCompleted>(encode(c));
     REQUIRE(out);
     REQUIRE(out->taskId == 8);
     REQUIRE(out->message == "rendered");
-    REQUIRE(out->framesCompleted == 240);
+    const auto rendered = results<RenderShotResult>(*out);
+    REQUIRE(rendered);
+    REQUIRE(rendered->framesCompleted == 240);
     REQUIRE_FALSE(decode<TaskFailed>(encode(c)));
+
+    THEN("an ending without results has none to decode")
+    {
+      TaskCompleted plain;
+      plain.taskId = 8;
+      const auto o = decode<TaskCompleted>(encode(plain));
+      REQUIRE(o);
+      REQUIRE_FALSE(o->results);
+      REQUIRE_FALSE(results<RenderShotResult>(*o));
+    }
+
+    THEN("results<T>() rejects a subtree of another shape")
+    {
+      TaskCompleted other;
+      other.taskId = 8;
+      setResults(other, TaskStartedResult{3});
+      REQUIRE_FALSE(results<RenderShotResult>(other));
+    }
   }
 
-  GIVEN("a TaskFailed")
+  GIVEN("a TaskFailed carrying a RenderShotResult")
   {
     TaskFailed f;
     f.taskId = 9;
     f.error = "disk full";
-    f.framesCompleted = 17;
+    setResults(f, RenderShotResult{17});
     const auto out = decode<TaskFailed>(encode(f));
     REQUIRE(out);
     REQUIRE(out->taskId == 9);
     REQUIRE(out->error == "disk full");
-    REQUIRE(out->framesCompleted == 17);
+    const auto rendered = results<RenderShotResult>(*out);
+    REQUIRE(rendered);
+    REQUIRE(rendered->framesCompleted == 17);
   }
 
   GIVEN("a CancelTask")

@@ -100,7 +100,7 @@ struct TaskRecord
   size_t progressReports{0};
   uint64_t current{0};
   uint64_t total{0};
-  // Frames written, as the end message reported it (a RenderShot; 0 else).
+  // Frames written, from the ending's RenderShotResult (a RenderShot; 0 else).
   uint64_t framesCompleted{0};
   // Snapshots applied when the end message arrived; the server sends a
   // task's snapshot after its TaskCompleted, so one past this count is it.

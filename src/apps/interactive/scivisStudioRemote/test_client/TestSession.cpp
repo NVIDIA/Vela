@@ -1033,14 +1033,15 @@ void TestSession::handleMessage(const Message &msg)
     }
     event.fields.emplace_back("taskId", std::to_string(completed->taskId));
     event.fields.emplace_back("message", quotedText(completed->message));
-    if (completed->framesCompleted) {
+    const auto rendered = results<RenderShotResult>(*completed);
+    if (rendered) {
       event.fields.emplace_back(
-          "framesCompleted", std::to_string(completed->framesCompleted));
+          "framesCompleted", std::to_string(rendered->framesCompleted));
     }
     handleTaskEnd(completed->taskId,
         TaskRecord::Status::Completed,
         std::move(completed->message),
-        completed->framesCompleted);
+        rendered ? rendered->framesCompleted : 0);
     break;
   }
   case StudioMessageType::TaskFailed: {
@@ -1052,14 +1053,15 @@ void TestSession::handleMessage(const Message &msg)
     }
     event.fields.emplace_back("taskId", std::to_string(failed->taskId));
     event.fields.emplace_back("error", quotedText(failed->error));
-    if (failed->framesCompleted) {
+    const auto rendered = results<RenderShotResult>(*failed);
+    if (rendered) {
       event.fields.emplace_back(
-          "framesCompleted", std::to_string(failed->framesCompleted));
+          "framesCompleted", std::to_string(rendered->framesCompleted));
     }
     handleTaskEnd(failed->taskId,
         TaskRecord::Status::Failed,
         std::move(failed->error),
-        failed->framesCompleted);
+        rendered ? rendered->framesCompleted : 0);
     break;
   }
   case StudioMessageType::UIState: {

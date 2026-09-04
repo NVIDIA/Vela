@@ -479,7 +479,7 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
           result.ok = frames == 200;
           result.cancelled = !result.ok;
           result.error = result.cancelled ? "cancelled" : "";
-          result.framesCompleted = frames;
+          setResults(result, RenderShotResult{frames});
           return result;
         },
         true);
@@ -649,7 +649,7 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
       task(4, 4, "frame");
       TaskResult result;
       result.message = "/renders/shot_0001";
-      result.framesCompleted = 4;
+      setResults(result, RenderShotResult{4});
       return result;
     });
     runner.runOne();
@@ -658,7 +658,7 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
     {
       const auto completed = decode<TaskCompleted>(sent.back());
       REQUIRE(completed);
-      REQUIRE(completed->framesCompleted == 4);
+      REQUIRE(results<RenderShotResult>(*completed)->framesCompleted == 4);
       REQUIRE(completed->message == "/renders/shot_0001");
       std::string error;
       REQUIRE_FALSE(runner.cancel(id, &error));
@@ -668,7 +668,7 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
       REQUIRE(replayed.size() == 1);
       const auto again = decode<TaskCompleted>(replayed[0]);
       REQUIRE(again);
-      REQUIRE(again->framesCompleted == 4);
+      REQUIRE(results<RenderShotResult>(*again)->framesCompleted == 4);
     }
   }
 

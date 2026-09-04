@@ -9,7 +9,6 @@
 #include "vsr/core/DataTree.hpp"
 // std
 #include <cstdint>
-#include <optional>
 #include <string>
 
 namespace vsr::scivis_studio::protocol {
@@ -20,7 +19,8 @@ namespace vsr::scivis_studio::protocol {
  * failed op carries `ok == false` and a user-facing `error`. `results` is an
  * opaque subtree the sender fills with an op-specific *Result payload (newly
  * allocated ids, a started task id, ...) and the receiver decodes with
- * results<R>(); it is null when the op has nothing to return.
+ * results<R>() (PayloadCommon.h); it is null when the op has nothing to
+ * return.
  *
  * Example:
  *   auto reply = makeOkReply(request.requestId);
@@ -44,15 +44,6 @@ struct ProjectOpReply
 // The reply is a fields() description (PayloadCommon.h): requestId and ok
 // are required; error and results are optional.
 
-// Replaces reply.results with a fresh subtree holding toNode(result).
-template <typename R>
-void setResults(ProjectOpReply &reply, const R &result);
-
-// Decodes reply.results as an R; empty when there are no results or
-// fromNode() rejects them.
-template <typename R>
-std::optional<R> results(const ProjectOpReply &reply);
-
 ProjectOpReply makeOkReply(uint64_t requestId);
 ProjectOpReply makeErrorReply(uint64_t requestId, std::string error);
 
@@ -65,24 +56,6 @@ void fields(V &v, ProjectOpReply &r)
   v.required("ok", r.ok);
   v.optional("error", r.error);
   v.subtree("results", r.results);
-}
-
-template <typename R>
-inline void setResults(ProjectOpReply &reply, const R &result)
-{
-  reply.results = makeSubtree();
-  toNode(result, reply.results->root());
-}
-
-template <typename R>
-inline std::optional<R> results(const ProjectOpReply &reply)
-{
-  if (!reply.results)
-    return {};
-  R result;
-  if (!fromNode(reply.results->root(), result))
-    return {};
-  return result;
 }
 
 } // namespace vsr::scivis_studio::protocol

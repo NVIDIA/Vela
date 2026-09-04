@@ -80,8 +80,8 @@ struct TaskRecord
   TaskProgressInfo lastProgress; // keeps the last phase text once finished
   std::string outcome; // TaskCompleted::message (an output directory, a name)
   std::string error; // TaskFailed::error
-  // Frames a render wrote, from TaskCompleted or TaskFailed (a cancelled or
-  // failed render leaves its partial frames on disk).
+  // Frames a render wrote, from the ending's RenderShotResult (a cancelled
+  // or failed render leaves its partial frames on disk); 0 for other tasks.
   uint64_t framesCompleted{0};
   // Launched by this client's RenderShot: the editors show a note while it
   // is active, since the server refuses edits until the render ends.
