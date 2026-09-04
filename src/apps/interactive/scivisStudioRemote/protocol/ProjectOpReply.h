@@ -41,9 +41,8 @@ struct ProjectOpReply
   SubtreePtr results;
 };
 
-// requestId and ok are required; error and results are optional.
-void toNode(const ProjectOpReply &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, ProjectOpReply &);
+// The reply is a fields() description (PayloadCommon.h): requestId and ok
+// are required; error and results are optional.
 
 // Replaces reply.results with a fresh subtree holding toNode(result).
 template <typename R>
@@ -58,6 +57,15 @@ ProjectOpReply makeOkReply(uint64_t requestId);
 ProjectOpReply makeErrorReply(uint64_t requestId, std::string error);
 
 // Inlined definitions ////////////////////////////////////////////////////////
+
+template <typename V>
+void fields(V &v, ProjectOpReply &r)
+{
+  v.required("requestId", r.requestId);
+  v.required("ok", r.ok);
+  v.optional("error", r.error);
+  v.subtree("results", r.results);
+}
 
 template <typename R>
 inline void setResults(ProjectOpReply &reply, const R &result)

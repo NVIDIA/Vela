@@ -829,6 +829,35 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   the direction column is what the client and test-client dispatch switches
   can read next.
 
+- **One description per payload.** Every payload under `protocol/` was
+  written twice, a `toNode()` and a `fromNode()` each repeating every wire
+  name (87 pairs, 46 by hand and 41 through seven shape macros in
+  `PayloadMacros.h`), and two optional-field policies coexisted:
+  `readChildOr()` silently defaulted a *mistyped* child while
+  `readOptionalChild()` rejected it. A payload now describes its wire shape
+  once as a `fields(V &, T &)` template over a visitor (`required`,
+  `optional`, `requiredEnum`/`optionalEnum`, `child`/`optionalChild`,
+  `list`, `subtree`); `PayloadCommon.h`'s `Writer` and `Reader` walk it and
+  generic `toNode()`/`fromNode()` templates, enabled only for types with a
+  `fields()`, replace the hand-written pairs and the macros. `fromNode()`
+  reads into a fresh `T` and assigns on success, so absent optionals read as
+  the struct's defaults and a rejected payload leaves the output untouched.
+  The strict policy is the only one now: absent optional means default,
+  present but mistyped means reject, absent required means reject;
+  `readChildOr()` is gone and the lenient reads (`Hello.buildInfo`,
+  `TaskProgress.current/total`, `ProjectOpReply.error`,
+  `DirectoryEntry.size/mtimeSeconds`, the `ProjectSnapshot` runtime sidecar,
+  ...) now reject a mistyped child. The wire format is unchanged: a hex dump
+  of 101 populated fixtures covering every payload matched before and after,
+  so no `PROTOCOL_VERSION` bump. Still hand-written: `SetEncodings`,
+  `SetObjectParameter` and `ArrayHistogramResult` (custom value shapes),
+  `ProjectSnapshot`, and `Shot`/`ShotRenderSettings`/`UpdateShot`, which
+  document 03 replaces. A nested type outside `namespace protocol` must
+  either carry a `fields()` description or have its codec declared where
+  `PayloadCommon.h`'s templates can see it (the model namespace's overloads
+  are not found by ADL); `Shot` is the one such case today and its codec
+  reads its nested children by hand.
+
 ### Spec conformance
 
 Every bullet of the spec sections named below, against the tree at

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "BrowseMessages.h"
-#include "PayloadMacros.h"
 
 namespace vsr::scivis_studio::protocol {
 
@@ -23,62 +22,6 @@ std::optional<EntryKind> entryKindFromString(std::string_view name)
 {
   return enumFromName(
       name, EntryKind::File, EntryKind::ProjectDirectory, toString);
-}
-
-// Requests ///////////////////////////////////////////////////////////////////
-
-VSR_STUDIO_BARE_REQUEST(ListRoots)
-
-void toNode(const ListDirectory &r, vsr::core::DataNode &n)
-{
-  writeChild(n, "requestId", r.requestId);
-  writePath(n, "directory", r.directory);
-}
-
-bool fromNode(const vsr::core::DataNode &n, ListDirectory &r)
-{
-  return readChild(n, "requestId", r.requestId)
-      && readPath(n, "directory", r.directory);
-}
-
-// Results ////////////////////////////////////////////////////////////////////
-
-void toNode(const DirectoryEntry &e, vsr::core::DataNode &n)
-{
-  writeChild(n, "name", e.name);
-  writeChild(n, "kind", std::string(toString(e.kind)));
-  writeChild(n, "size", e.size);
-  writeChild(n, "mtimeSeconds", e.mtimeSeconds);
-}
-
-bool fromNode(const vsr::core::DataNode &n, DirectoryEntry &e)
-{
-  if (!readChild(n, "name", e.name)
-      || !readEnumChild(n, "kind", e.kind, entryKindFromString))
-    return false;
-  e.size = readChildOr(n, "size", uint64_t(0));
-  e.mtimeSeconds = readChildOr(n, "mtimeSeconds", int64_t(0));
-  return true;
-}
-
-void toNode(const ListRootsResult &r, vsr::core::DataNode &n)
-{
-  writePathList(n, "roots", r.roots);
-}
-
-bool fromNode(const vsr::core::DataNode &n, ListRootsResult &r)
-{
-  return readPathList(n, "roots", r.roots);
-}
-
-void toNode(const ListDirectoryResult &r, vsr::core::DataNode &n)
-{
-  writeNodeList(n, "entries", r.entries);
-}
-
-bool fromNode(const vsr::core::DataNode &n, ListDirectoryResult &r)
-{
-  return readNodeList(n, "entries", r.entries);
 }
 
 } // namespace vsr::scivis_studio::protocol

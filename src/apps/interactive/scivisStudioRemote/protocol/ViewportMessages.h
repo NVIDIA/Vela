@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "PayloadCommon.h"
 #include "StudioProtocol.h"
 // vsr_scivis_studio_model
 #include "Dataset.h"
@@ -118,33 +119,67 @@ struct ArrayHistogramResult
 const char *toString(vsr::rendering::AOVType type);
 std::optional<vsr::rendering::AOVType> aovTypeFromString(std::string_view name);
 
-// requestId, x and y are required.
-void toNode(const Pick &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, Pick &);
-
-// requestId and hit are required; worldPosition defaults to the origin; a
-// present but malformed objectIdentity is rejected.
-void toNode(const PickReply &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, PickReply &);
-
-// An absent objectIdentity reads as "clear"; a present but malformed one is
-// rejected.
-void toNode(const SetOutline &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, SetOutline &);
-
-// Every field is optional and keeps its default when absent, so a newer
-// client can add toggles without breaking an older server; a present but
-// mistyped field is rejected.
-void toNode(const ViewportSettings &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, ViewportSettings &);
-
-// requestId, array and binCount are required.
-void toNode(const RequestArrayHistogram &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, RequestArrayHistogram &);
+// All but the histogram result are fields() descriptions (PayloadCommon.h):
+//  - Pick: requestId, x and y are required.
+//  - PickReply: requestId and hit are required; worldPosition defaults to
+//    the origin; a present but malformed objectIdentity is rejected.
+//  - SetOutline: an absent objectIdentity reads as "clear"; a present but
+//    malformed one is rejected.
+//  - ViewportSettings: every field is optional and keeps its default when
+//    absent, so a newer client can add toggles without breaking an older
+//    server; a present but mistyped field is rejected.
+//  - RequestArrayHistogram: requestId, array and binCount are required.
 
 // bins travel as one UINT64 array leaf (absent when empty); minValue and
 // maxValue are required, nonFinite defaults to 0 when absent.
 void toNode(const ArrayHistogramResult &, vsr::core::DataNode &);
 bool fromNode(const vsr::core::DataNode &, ArrayHistogramResult &);
+
+// Inlined definitions ////////////////////////////////////////////////////////
+
+template <typename V>
+void fields(V &v, Pick &p)
+{
+  v.required("requestId", p.requestId);
+  v.required("x", p.x);
+  v.required("y", p.y);
+}
+
+template <typename V>
+void fields(V &v, PickReply &r)
+{
+  v.required("requestId", r.requestId);
+  v.required("hit", r.hit);
+  v.optional("worldPosition", r.worldPosition);
+  v.optionalChild("objectIdentity", r.objectIdentity);
+}
+
+template <typename V>
+void fields(V &v, SetOutline &o)
+{
+  v.optionalChild("objectIdentity", o.objectIdentity);
+}
+
+template <typename V>
+void fields(V &v, ViewportSettings &s)
+{
+  v.optional("highlightSelection", s.highlightSelection);
+  v.optional("outlinePrimitives", s.outlinePrimitives);
+  v.optional("showWorldBounds", s.showWorldBounds);
+  v.optional("worldBoundsColor", s.worldBoundsColor);
+  v.optional("worldBoundsWidth", s.worldBoundsWidth);
+  v.optionalEnum("visualizeAOV", s.visualizeAOV, toString, aovTypeFromString);
+  v.optional("depthVisualMinimum", s.depthVisualMinimum);
+  v.optional("depthVisualMaximum", s.depthVisualMaximum);
+  v.optional("edgeInvert", s.edgeInvert);
+}
+
+template <typename V>
+void fields(V &v, RequestArrayHistogram &r)
+{
+  v.required("requestId", r.requestId);
+  v.child("array", r.array);
+  v.required("binCount", r.binCount);
+}
 
 } // namespace vsr::scivis_studio::protocol

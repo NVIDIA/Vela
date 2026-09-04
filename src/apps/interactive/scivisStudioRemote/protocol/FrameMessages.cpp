@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "FrameMessages.h"
-#include "PayloadMacros.h"
 
 namespace vsr::scivis_studio::protocol {
 
@@ -106,29 +105,7 @@ std::optional<FrameView> decodeFrame(const vsr::network::Message &msg)
   return view;
 }
 
-// Configuration payloads /////////////////////////////////////////////////////
-
-void toNode(const SetFrameConfig &c, vsr::core::DataNode &n)
-{
-  writeChild(n, "width", c.width);
-  writeChild(n, "height", c.height);
-}
-
-bool fromNode(const vsr::core::DataNode &n, SetFrameConfig &c)
-{
-  return readChild(n, "width", c.width) && readChild(n, "height", c.height);
-}
-
-void toNode(const FrameConfig &c, vsr::core::DataNode &n)
-{
-  writeChild(n, "width", c.width);
-  writeChild(n, "height", c.height);
-}
-
-bool fromNode(const vsr::core::DataNode &n, FrameConfig &c)
-{
-  return readChild(n, "width", c.width) && readChild(n, "height", c.height);
-}
+// SetEncodings ///////////////////////////////////////////////////////////////
 
 void toNode(const SetEncodings &e, vsr::core::DataNode &n)
 {
@@ -155,10 +132,5 @@ bool fromNode(const vsr::core::DataNode &n, SetEncodings &e)
   e.supported = std::move(supported);
   return true;
 }
-
-// Empty payloads /////////////////////////////////////////////////////////////
-
-VSR_STUDIO_EMPTY_PAYLOAD(StartRendering)
-VSR_STUDIO_EMPTY_PAYLOAD(StopRendering)
 
 } // namespace vsr::scivis_studio::protocol

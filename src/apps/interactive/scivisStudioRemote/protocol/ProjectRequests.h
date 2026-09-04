@@ -247,65 +247,157 @@ std::optional<vsr::io::ImporterType> importerTypeFromString(
 
 // Serialization //////////////////////////////////////////////////////////////
 
-// requestId is required on every request. Ids, names, paths and enum fields
-// are required unless noted; collections and optionals may be absent.
+// Every payload is a fields() description (PayloadCommon.h). requestId is
+// required on every request; ids, names, paths and enum fields are required
+// unless a description says optional; lists and subtrees may be absent.
 
-void toNode(const NewProject &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, NewProject &);
+// Inlined definitions ////////////////////////////////////////////////////////
 
-void toNode(const OpenProject &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, OpenProject &);
+template <typename V>
+void fields(V &v, NewProject &r)
+{
+  v.required("requestId", r.requestId);
+}
 
-// directory and uiState are optional.
-void toNode(const SaveProject &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, SaveProject &);
+template <typename V>
+void fields(V &v, OpenProject &r)
+{
+  v.required("requestId", r.requestId);
+  v.required("directory", r.directory);
+}
 
-// fromSubtreeArchive is optional (defaults false).
-void toNode(const ImportStaticDataset &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, ImportStaticDataset &);
+template <typename V>
+void fields(V &v, SaveProject &r)
+{
+  v.required("requestId", r.requestId);
+  v.optional("directory", r.directory);
+  v.subtree("uiState", r.uiState);
+}
 
-// setActiveShotFrameCount is optional (defaults true).
-void toNode(const ImportFileAnimationDataset &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, ImportFileAnimationDataset &);
-void toNode(const DeclareFileAnimationDataset &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, DeclareFileAnimationDataset &);
+template <typename V>
+void fields(V &v, ImportStaticDataset &r)
+{
+  v.required("requestId", r.requestId);
+  v.required("name", r.name);
+  v.required("sourcePath", r.sourcePath);
+  v.requiredEnum(
+      "importerType", r.importerType, toString, importerTypeFromString);
+  v.optional("fromSubtreeArchive", r.fromSubtreeArchive);
+}
 
-void toNode(const ReimportDataset &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, ReimportDataset &);
-void toNode(const RenameDataset &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, RenameDataset &);
+template <typename V>
+void fields(V &v, ImportFileAnimationDataset &r)
+{
+  v.required("requestId", r.requestId);
+  v.required("name", r.name);
+  v.list("sourcePaths", r.sourcePaths);
+  v.requiredEnum(
+      "importerType", r.importerType, toString, importerTypeFromString);
+  v.optional("setActiveShotFrameCount", r.setActiveShotFrameCount);
+}
 
-// keepAssetFile is optional (defaults false).
-void toNode(const RemoveDataset &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, RemoveDataset &);
+template <typename V>
+void fields(V &v, DeclareFileAnimationDataset &r)
+{
+  v.required("requestId", r.requestId);
+  v.required("name", r.name);
+  v.list("sourceList", r.sourceList);
+  v.requiredEnum(
+      "importerType", r.importerType, toString, importerTypeFromString);
+  v.optional("setActiveShotFrameCount", r.setActiveShotFrameCount);
+}
 
-void toNode(const LoadDataset &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, LoadDataset &);
-void toNode(const UnloadDataset &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, UnloadDataset &);
-void toNode(const RefreshDatasetAvailability &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, RefreshDatasetAvailability &);
+template <typename V>
+void fields(V &v, ReimportDataset &r)
+{
+  v.required("requestId", r.requestId);
+  v.required("datasetId", r.datasetId);
+}
 
-void toNode(const SaveDatasetArchive &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, SaveDatasetArchive &);
-void toNode(const LoadDatasetArchive &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, LoadDatasetArchive &);
-void toNode(const DiscoverDatasetCandidates &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, DiscoverDatasetCandidates &);
+template <typename V>
+void fields(V &v, RenameDataset &r)
+{
+  v.required("requestId", r.requestId);
+  v.required("datasetId", r.datasetId);
+  v.required("newName", r.newName);
+}
 
-// proposedName is optional (defaults "").
-void toNode(const IncorporateDatasetCandidate &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, IncorporateDatasetCandidate &);
+template <typename V>
+void fields(V &v, RemoveDataset &r)
+{
+  v.required("requestId", r.requestId);
+  v.required("datasetId", r.datasetId);
+  v.optional("keepAssetFile", r.keepAssetFile);
+}
 
-void toNode(const DatasetCreatedResult &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, DatasetCreatedResult &);
+template <typename V>
+void fields(V &v, LoadDataset &r)
+{
+  v.required("requestId", r.requestId);
+  v.required("datasetId", r.datasetId);
+}
 
-// file is required; proposedName is optional.
-void toNode(const DatasetCandidateEntry &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, DatasetCandidateEntry &);
+template <typename V>
+void fields(V &v, UnloadDataset &r)
+{
+  v.required("requestId", r.requestId);
+  v.required("datasetId", r.datasetId);
+}
 
-// Candidates live under children "0", "1", ...; an absent list reads as empty.
-void toNode(const DiscoverDatasetCandidatesResult &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, DiscoverDatasetCandidatesResult &);
+template <typename V>
+void fields(V &v, RefreshDatasetAvailability &r)
+{
+  v.required("requestId", r.requestId);
+  v.required("datasetId", r.datasetId);
+}
+
+template <typename V>
+void fields(V &v, SaveDatasetArchive &r)
+{
+  v.required("requestId", r.requestId);
+  v.required("datasetId", r.datasetId);
+  v.required("file", r.file);
+}
+
+template <typename V>
+void fields(V &v, LoadDatasetArchive &r)
+{
+  v.required("requestId", r.requestId);
+  v.required("file", r.file);
+}
+
+template <typename V>
+void fields(V &v, DiscoverDatasetCandidates &r)
+{
+  v.required("requestId", r.requestId);
+}
+
+template <typename V>
+void fields(V &v, IncorporateDatasetCandidate &r)
+{
+  v.required("requestId", r.requestId);
+  v.required("file", r.file);
+  v.optional("proposedName", r.proposedName);
+  v.required("name", r.name);
+}
+
+template <typename V>
+void fields(V &v, DatasetCreatedResult &r)
+{
+  v.required("datasetId", r.datasetId);
+}
+
+template <typename V>
+void fields(V &v, DatasetCandidateEntry &e)
+{
+  v.required("file", e.file);
+  v.optional("proposedName", e.proposedName);
+}
+
+template <typename V>
+void fields(V &v, DiscoverDatasetCandidatesResult &r)
+{
+  v.list("candidates", r.candidates);
+}
 
 } // namespace vsr::scivis_studio::protocol

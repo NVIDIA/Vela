@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "PayloadCommon.h"
 #include "StudioProtocol.h"
 // vsr_network
 #include "vsr/network/Message.hpp"
@@ -147,22 +148,13 @@ struct StopRendering
       StudioMessageType::StopRendering;
 };
 
-// width and height are required.
-void toNode(const SetFrameConfig &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, SetFrameConfig &);
-void toNode(const FrameConfig &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, FrameConfig &);
+// SetFrameConfig, FrameConfig and the two empty payloads are fields()
+// descriptions (PayloadCommon.h); width and height are required.
 
 // supported travels as a string list; an absent list reads as empty and an
 // unknown encoding name is rejected.
 void toNode(const SetEncodings &, vsr::core::DataNode &);
 bool fromNode(const vsr::core::DataNode &, SetEncodings &);
-
-// Empty payloads: toNode writes nothing, fromNode always succeeds.
-void toNode(const StartRendering &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, StartRendering &);
-void toNode(const StopRendering &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, StopRendering &);
 
 // Inlined definitions ////////////////////////////////////////////////////////
 
@@ -187,5 +179,27 @@ constexpr bool isPixelFormat(uint8_t value)
     return false;
   }
 }
+
+template <typename V>
+void fields(V &v, SetFrameConfig &c)
+{
+  v.required("width", c.width);
+  v.required("height", c.height);
+}
+
+template <typename V>
+void fields(V &v, FrameConfig &c)
+{
+  v.required("width", c.width);
+  v.required("height", c.height);
+}
+
+template <typename V>
+void fields(V &, StartRendering &)
+{}
+
+template <typename V>
+void fields(V &, StopRendering &)
+{}
 
 } // namespace vsr::scivis_studio::protocol

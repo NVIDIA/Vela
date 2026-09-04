@@ -102,11 +102,14 @@ SCENARIO("Project request payloads", "[StudioProtocol]")
       REQUIRE(*out.directory == std::filesystem::path("/projects/demo"));
       REQUIRE(out.uiState);
       const auto &ui = out.uiState->root();
-      REQUIRE(
-          readChildOr(*ui.child("windows")->child("viewport"), "open", false));
-      REQUIRE(readChildOr(ui, "layout", std::string()) == "[Window][Viewport]");
-      REQUIRE(
-          readChildOr(*ui.child("settings"), "theme", std::string()) == "dark");
+      REQUIRE(ui.child("windows")
+                  ->child("viewport")
+                  ->child("open")
+                  ->getValueOr(false));
+      REQUIRE(ui.child("layout")->getValueOr(std::string())
+          == "[Window][Viewport]");
+      REQUIRE(ui.child("settings")->child("theme")->getValueOr(std::string())
+          == "dark");
     }
   }
 
@@ -183,7 +186,8 @@ SCENARIO("Dataset creation request payloads", "[StudioProtocol]")
       const auto msg = encode(req);
       vsr::core::DataTree tree;
       REQUIRE(tree.read(msg.payload));
-      REQUIRE(readChildOr(tree.root(), "importerType", std::string()) == "OBJ");
+      REQUIRE(tree.root().child("importerType")->getValueOr(std::string())
+          == "OBJ");
 
       const auto out = roundTrip(req);
       REQUIRE(out.requestId == 50);

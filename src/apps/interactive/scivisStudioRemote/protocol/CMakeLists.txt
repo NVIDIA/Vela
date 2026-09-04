@@ -6,7 +6,6 @@ add_library(vsr_scivis_studio_protocol OBJECT
   FrameCodec.cpp
   FrameMessages.cpp
   PayloadCommon.cpp
-  PlaybackMessages.cpp
   ProjectOpReply.cpp
   ProjectRequests.cpp
   ProjectSnapshot.cpp
@@ -16,7 +15,6 @@ add_library(vsr_scivis_studio_protocol OBJECT
   ShotRigRequests.cpp
   StudioEndpoint.cpp
   StudioProtocol.cpp
-  TaskMessages.cpp
   ViewportMessages.cpp
 )
 

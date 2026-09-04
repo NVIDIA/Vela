@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "ShotRigRequests.h"
-#include "PayloadMacros.h"
+#include "PayloadCommon.h"
 
 namespace vsr::scivis_studio::protocol {
 
@@ -42,6 +42,22 @@ bool readDatasetBindings(
     out.push_back(std::move(binding));
   });
   return ok;
+}
+
+// ShotRenderSettings and Shot are model types with hand-written codecs, so
+// PayloadCommon.h's nested-child templates cannot see them (they are found
+// by ADL only for protocol types); these two read them by hand.
+bool readOptionalRenderSettings(
+    const vsr::core::DataNode &parent, ShotRenderSettings &out)
+{
+  const auto *c = parent.child("renderSettings");
+  return !c || fromNode(*c, out);
+}
+
+bool readShot(const vsr::core::DataNode &parent, Shot &out)
+{
+  const auto *c = parent.child("shot");
+  return c && fromNode(*c, out);
 }
 
 } // namespace
@@ -87,7 +103,7 @@ void toNode(const Shot &s, vsr::core::DataNode &n)
   writeChild(n, "lightRigId", s.lightRigId);
   writeChild(n, "cameraRigId", s.cameraRigId);
   writeChildNode(n, "camera", s.camera);
-  writeChildNode(n, "renderSettings", s.renderSettings);
+  toNode(s.renderSettings, n["renderSettings"]);
 }
 
 bool fromNode(const vsr::core::DataNode &n, Shot &s)
@@ -105,111 +121,23 @@ bool fromNode(const vsr::core::DataNode &n, Shot &s)
       || !readOptionalChild(n, "lightRigId", out.lightRigId)
       || !readOptionalChild(n, "cameraRigId", out.cameraRigId)
       || !readOptionalChildNode(n, "camera", out.camera)
-      || !readOptionalChildNode(n, "renderSettings", out.renderSettings))
+      || !readOptionalRenderSettings(n, out.renderSettings))
     return false;
   s = std::move(out);
   return true;
 }
 
-// Requests ///////////////////////////////////////////////////////////////////
-
-// Most requests are {requestId, one id or name}; see PayloadMacros.h.
-
-// Shot
-
-VSR_STUDIO_ID_REQUEST(CreateShot, name)
-VSR_STUDIO_ID_REQUEST(RemoveShot, shotId)
-VSR_STUDIO_ID_REQUEST(SetActiveShot, shotId)
+// UpdateShot //////////////////////////////////////////////////////////////////
 
 void toNode(const UpdateShot &p, vsr::core::DataNode &n)
 {
   writeChild(n, "requestId", p.requestId);
-  writeChildNode(n, "shot", p.shot);
+  toNode(p.shot, n["shot"]);
 }
 
 bool fromNode(const vsr::core::DataNode &n, UpdateShot &p)
 {
-  return readChild(n, "requestId", p.requestId)
-      && readChildNode(n, "shot", p.shot);
-}
-
-// Light rig
-
-VSR_STUDIO_ID_REQUEST(CreateLightRig, name)
-VSR_STUDIO_ID_REQUEST(CloneLightRig, lightRigId)
-VSR_STUDIO_ID_REQUEST(RemoveLightRig, lightRigId)
-VSR_STUDIO_RENAME_REQUEST(RenameLightRig, lightRigId)
-VSR_STUDIO_ARCHIVE_SAVE_REQUEST(SaveLightRigArchive, lightRigId)
-VSR_STUDIO_ARCHIVE_LOAD_REQUEST(LoadLightRigArchive)
-
-void toNode(const AddLightToRig &p, vsr::core::DataNode &n)
-{
-  writeChild(n, "requestId", p.requestId);
-  writeChild(n, "lightRigId", p.lightRigId);
-  writeChild(n, "subtype", p.subtype);
-}
-
-bool fromNode(const vsr::core::DataNode &n, AddLightToRig &p)
-{
-  return readChild(n, "requestId", p.requestId)
-      && readChild(n, "lightRigId", p.lightRigId)
-      && readChild(n, "subtype", p.subtype);
-}
-
-void toNode(const RemoveLightFromRig &p, vsr::core::DataNode &n)
-{
-  writeChild(n, "requestId", p.requestId);
-  writeChild(n, "lightRigId", p.lightRigId);
-  writeChildNode(n, "lightNode", p.lightNode);
-}
-
-bool fromNode(const vsr::core::DataNode &n, RemoveLightFromRig &p)
-{
-  return readChild(n, "requestId", p.requestId)
-      && readChild(n, "lightRigId", p.lightRigId)
-      && readChildNode(n, "lightNode", p.lightNode);
-}
-
-// Camera rig
-
-VSR_STUDIO_ID_REQUEST(CreateCameraRig, name)
-VSR_STUDIO_ID_REQUEST(RemoveCameraRig, cameraRigId)
-VSR_STUDIO_RENAME_REQUEST(RenameCameraRig, cameraRigId)
-VSR_STUDIO_ARCHIVE_SAVE_REQUEST(SaveCameraRigArchive, cameraRigId)
-VSR_STUDIO_ARCHIVE_LOAD_REQUEST(LoadCameraRigArchive)
-
-// Color map
-
-VSR_STUDIO_ID_REQUEST(CreateColorMap, name)
-VSR_STUDIO_RENAME_REQUEST(RenameColorMap, colorMapId)
-VSR_STUDIO_ID_REQUEST(RemoveColorMap, colorMapId)
-
-// Results ////////////////////////////////////////////////////////////////////
-
-VSR_STUDIO_ID_RESULT(ShotCreatedResult, shotId)
-VSR_STUDIO_ID_RESULT(LightRigCreatedResult, lightRigId)
-VSR_STUDIO_ID_RESULT(CameraRigCreatedResult, cameraRigId)
-
-void toNode(const LightAddedResult &p, vsr::core::DataNode &n)
-{
-  writeChildNode(n, "lightNode", p.lightNode);
-}
-
-bool fromNode(const vsr::core::DataNode &n, LightAddedResult &p)
-{
-  return readChildNode(n, "lightNode", p.lightNode);
-}
-
-void toNode(const ColorMapCreatedResult &p, vsr::core::DataNode &n)
-{
-  writeChild(n, "colorMapId", p.colorMapId);
-  writeChildNode(n, "object", p.object);
-}
-
-bool fromNode(const vsr::core::DataNode &n, ColorMapCreatedResult &p)
-{
-  return readChild(n, "colorMapId", p.colorMapId)
-      && readChildNode(n, "object", p.object);
+  return readChild(n, "requestId", p.requestId) && readShot(n, p.shot);
 }
 
 } // namespace vsr::scivis_studio::protocol
