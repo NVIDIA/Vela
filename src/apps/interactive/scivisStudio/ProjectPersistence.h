@@ -7,6 +7,7 @@
 #include "ProjectAssetTransaction.h"
 
 #include "vsr/core/DataTree.hpp"
+#include "vsr/scene/Layer.hpp"
 
 #include <filesystem>
 #include <memory>
@@ -96,5 +97,10 @@ bool applyProjectOpen(ProjectOpenStage &stage,
     vsr::scene::Scene &scene,
     vsr::animation::AnimationManager &animationManager,
     std::string *error = nullptr);
+
+// The child of `parent` named `name`, or null (also for a null parent): the
+// lookup behind the studio layer's "<collection>/<id>" node convention.
+vsr::scene::LayerNodeRef findDirectChild(
+    vsr::scene::LayerNodeRef parent, const std::string &name);
 
 } // namespace vsr::scivis_studio

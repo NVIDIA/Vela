@@ -72,20 +72,6 @@ StagedArchive stageArchive(const std::filesystem::path &file)
   return staged;
 }
 
-vsr::scene::LayerNodeRef findDirectChild(
-    vsr::scene::LayerNodeRef parent, const std::string &name)
-{
-  if (!parent)
-    return {};
-  auto child = parent->next();
-  while (child && child != parent) {
-    if ((*child)->name() == name)
-      return child;
-    child = child->sibling();
-  }
-  return {};
-}
-
 vsr::scene::LayerNodeRef ensureChild(
     vsr::scene::Scene &scene, vsr::scene::LayerNodeRef parent, const char *name)
 {

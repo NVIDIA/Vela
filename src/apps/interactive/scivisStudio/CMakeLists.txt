@@ -18,6 +18,7 @@ add_library(vsr_scivis_studio_model OBJECT
   RenderShot.cpp
   RenderShotCLI.cpp
   Shot.cpp
+  ShotOps.cpp
   StudioCLI.cpp
 )
 

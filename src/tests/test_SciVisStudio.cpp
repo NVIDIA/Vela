@@ -12,6 +12,7 @@
 #include "ProjectSerialization.h"
 #include "RenderShot.h"
 #include "RenderShotCLI.h"
+#include "ShotOps.h"
 #include "StudioCLI.h"
 
 #include "vsr/app/ApplicationDump.h"
@@ -61,18 +62,6 @@ struct CountingLayerUpdateDelegate : public vsr::scene::EmptyUpdateDelegate
   const vsr::scene::Layer *lastLayer{nullptr};
   int layerStructureUpdates{0};
 };
-
-vsr::scene::LayerNodeRef findDirectChild(
-    vsr::scene::LayerNodeRef parent, const std::string &name)
-{
-  auto child = parent->next();
-  while (child && child != parent) {
-    if ((*child)->name() == name)
-      return child;
-    child = child->sibling();
-  }
-  return {};
-}
 
 // Build the minimal file-animation dataset runtime — a volume with an initial
 // spatial field plus one runtime file animation over the given paths — and
@@ -5066,6 +5055,106 @@ SCENARIO(
         const auto *shot = project::findShot(project, secondId);
         REQUIRE(shot->lightRigId == project.lightRigs.front().id);
         REQUIRE(shot->renderSettings.rendererObjectIndex == VSR_INVALID_INDEX);
+      }
+    }
+  }
+}
+
+SCENARIO("SciVis Studio shot ops validate and replace the record on their own",
+    "[SciVisStudio]")
+{
+  Project project;
+  Shot first;
+  first.id = "shot_0001";
+  first.name = "first";
+  Shot second;
+  second.id = "shot_0002";
+  second.name = "second";
+  project.shots = {first, second};
+  project.activeShotId = second.id;
+  std::string error;
+  bool activeChanged = true;
+
+  GIVEN("an edit of the active shot with out-of-range fields, and no scene")
+  {
+    Shot edit = second;
+    edit.frameCount = 0;
+    edit.currentFrame = 9;
+    edit.playing = true;
+    edit.datasetBindings.push_back({"dataset_9999", true});
+    edit.renderSettings.rendererObjectIndex = 7; // unchecked without a scene
+
+    WHEN("it is applied")
+    {
+      REQUIRE(shot::updateShot(project, nullptr, edit, &error));
+
+      THEN("the record is the normalized copy and nothing is marked dirty")
+      {
+        const auto *shot = project::findShot(project, second.id);
+        REQUIRE(shot->frameCount == 1);
+        REQUIRE(shot->currentFrame == 0);
+        REQUIRE_FALSE(shot->playing);
+        REQUIRE(shot->datasetBindings.empty());
+        REQUIRE(shot->renderSettings.rendererObjectIndex == 7);
+        REQUIRE_FALSE(project.dirty);
+      }
+    }
+
+    WHEN("it names a rig the project does not have")
+    {
+      edit.lightRigId = "lightRig_9999";
+      REQUIRE_FALSE(shot::updateShot(project, nullptr, edit, &error));
+
+      THEN("it is rejected and the record is untouched")
+      {
+        REQUIRE(error == "light rig not found");
+        REQUIRE(project::findShot(project, second.id)->frameCount
+            == second.frameCount);
+      }
+    }
+  }
+
+  GIVEN("two shots, the second active")
+  {
+    WHEN("the inactive one is removed")
+    {
+      REQUIRE(
+          shot::removeShot(project, nullptr, first.id, activeChanged, &error));
+
+      THEN("the active shot stands and the last one cannot go")
+      {
+        REQUIRE_FALSE(activeChanged);
+        REQUIRE(project.activeShotId == second.id);
+        REQUIRE(project.shots.size() == 1);
+        REQUIRE_FALSE(shot::removeShot(
+            project, nullptr, second.id, activeChanged, &error));
+        REQUIRE(error == "cannot remove the last shot");
+        REQUIRE_FALSE(project.dirty);
+      }
+    }
+
+    WHEN("the active one is removed")
+    {
+      REQUIRE(
+          shot::removeShot(project, nullptr, second.id, activeChanged, &error));
+
+      THEN("the first remaining shot is reported as the new active one")
+      {
+        REQUIRE(activeChanged);
+        REQUIRE(project.activeShotId == first.id);
+      }
+    }
+
+    WHEN("an unknown id is removed")
+    {
+      REQUIRE_FALSE(
+          shot::removeShot(project, nullptr, "nope", activeChanged, &error));
+
+      THEN("it is reported and nothing changed")
+      {
+        REQUIRE(error == "shot not found");
+        REQUIRE_FALSE(activeChanged);
+        REQUIRE(project.shots.size() == 2);
       }
     }
   }

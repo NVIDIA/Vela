@@ -45,8 +45,9 @@ struct ProjectContext
   bool addShot(const std::string &name = "");
   // Shot edits are whole operations, the only path that mutates a stored
   // Shot: the monolith's editors, the remote server and the CLI all come
-  // through here. removeShot refuses the last shot and, when the active shot
-  // goes, makes the first remaining one active. updateShot replaces the
+  // through here (ShotOps.h holds the record side; these add the dirty mark
+  // and the re-sync). removeShot refuses the last shot and, when the active
+  // shot goes, makes the first remaining one active. updateShot replaces the
   // stored Shot with a validated copy of `shot`: unknown rig ids and
   // renderers of another library are rejected, bindings to unknown datasets
   // are dropped, frame fields are clamped (shot::clampToValidRanges), the
