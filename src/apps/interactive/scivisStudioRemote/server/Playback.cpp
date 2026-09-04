@@ -25,7 +25,7 @@ Playback::Playback(
     : m_ctx(ctx), m_projectContext(projectContext), m_send(std::move(send))
 {}
 
-void Playback::applyTime(const SetTime &time)
+void Playback::applyTime(const SetTime &time, bool sessionUp)
 {
   const auto &project = m_projectContext.project();
   const auto *shot = project::activeShot(project);
@@ -47,7 +47,7 @@ void Playback::applyTime(const SetTime &time)
   }
 
   m_projectContext.setActiveShotFrame(time.frame);
-  pushLoadFailures();
+  pushLoadFailures(sessionUp);
 }
 
 void Playback::tick(bool sessionUp)
@@ -70,7 +70,7 @@ void Playback::tick(bool sessionUp)
   if (shot->playing)
     m_scrubPending = false;
   m_ctx.vsr.animationMgr.tick(elapsed);
-  pushLoadFailures();
+  pushLoadFailures(true);
 }
 
 void Playback::commitScrubIfQuiet()
@@ -92,10 +92,10 @@ void Playback::cancelScrub()
   m_scrubPending = false;
 }
 
-void Playback::pushLoadFailures()
+void Playback::pushLoadFailures(bool sessionUp)
 {
   auto failures = m_ctx.vsr.animationMgr.takeLoadFailures();
-  if (failures.empty())
+  if (failures.empty() || !sessionUp)
     return;
   const auto &project = m_projectContext.project();
   for (auto &failure : failures) {

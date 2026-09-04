@@ -156,14 +156,12 @@ struct StudioServer
   bool streaming() const;
   // The ANARI library actually rendering, after any fallback.
   const std::string &libraryName() const;
-  // Whether the scene pass renders the objectId channel right now (mirrored
-  // from the loop thread for tests).
-  bool idChannelEnabled() const;
 
   // The loop thread's state; other threads may only read it while the server
   // is not rendering (tests).
   vsr::app::Context &appContext();
   ProjectContext &projectContext();
+  const ViewportPasses &viewport() const;
 
  private:
   using SceneEdit = std::variant<protocol::SetObjectParameter,
@@ -175,7 +173,7 @@ struct StudioServer
   // loss of the old client from a loss of the one accepted since.
   struct SessionEvent
   {
-    enum Kind
+    enum class Kind
     {
       Accepted, // a connection was accepted and sent its Hello
       Hello, // its Hello matched ours
@@ -189,7 +187,7 @@ struct StudioServer
   };
 
   // What the IO thread hands the loop, written under m_controlMutex and
-  // swapped out whole once per iteration. Three things live here side by
+  // swapped out whole once per iteration. Four things live here side by
   // side:
   //
   // - The session event queue: in arrival order, none dropped, so the loop
@@ -201,9 +199,9 @@ struct StudioServer
   //   because coalescing them would leave the mirror and the scene
   //   disagreeing. It is a queue, not a latch, and is drained in one go.
   // - The project request queue: decoded project requests in arrival order.
-  //   Also a queue; the loop moves it onto m_pendingRequests and dispatches
-  //   from there, holding a sync op back while a task the client sent
-  //   earlier is still queued so requests take effect in the order sent.
+  //   Also a queue; the loop moves it onto the session's pendingRequests and
+  //   dispatches from there, holding a sync op back while a task the client
+  //   sent earlier is still queued so requests take effect in the order sent.
   struct ControlState
   {
     std::vector<SessionEvent> events;
@@ -218,6 +216,23 @@ struct StudioServer
     std::optional<protocol::Pick> pick;
     std::optional<protocol::SetOutline> outline;
     std::optional<protocol::ViewportSettings> viewportSettings;
+  };
+
+  // What belongs to the one client session and goes with it: reset whole
+  // (m_session = {}) when a session begins or ends. Loop thread only; the
+  // two facts other threads query, the state and the streaming flag, are the
+  // atomics beside it.
+  struct Session
+  {
+    uint64_t serial{0}; // the connection the session runs on
+    protocol::FrameEncoding encoding{protocol::FrameEncoding::Raw};
+    // The push delegate asked for the structural scene to be resent
+    // (an update it cannot express as a push); the loop does so next.
+    bool sceneResendPending{false};
+    // The Frame on the wire: latest-frame-wins, one in flight.
+    vsr::network::MessageFuture frameInFlight;
+    std::deque<ProjectRequest> pendingRequests;
+    std::optional<protocol::Pick> pendingPick; // one in flight, latest-wins
   };
 
   // Startup and teardown (caller's thread)
@@ -254,15 +269,24 @@ struct StudioServer
   void applyControlState();
   // One session event, in order: a loss of or a close request for the session
   // in progress ends it, an accept opens the next one, a Hello on it starts
-  // the Bootstrap; an event for any other connection is stale and dropped, as
-  // is a close request for a connection older than `newestConnection` (the
-  // last one this batch accepted), whose socket the transport closed already.
-  void applySessionEvent(SessionEvent &event, uint64_t newestConnection);
+  // the Bootstrap; an event for any other connection is stale and dropped.
+  // socketGone: the close request's socket is closed already (see
+  // socketClosedInBatch), so the loss or accept that follows ends the
+  // session and the close is dropped too.
+  void applySessionEvent(SessionEvent &event, bool socketGone);
+  // Whether a batch closes the socket a close request names before the loop
+  // could: the transport holds one socket, so a later accept replaced it, and
+  // a loss of the same connection means the peer closed it.
+  static bool socketClosedInBatch(
+      const SessionEvent &close, const std::vector<SessionEvent> &events);
   void beginSession(uint64_t serial);
   // closeSocket: the socket is still open (a close the server decided on) and
   // must be shut; false when the peer already closed it, in which case the
   // transport is left alone so a connection accepted since survives.
   void endSession(const std::string &reason, bool closeSocket);
+  // What a session's start and end share: the Session value and everything
+  // that follows the client (streaming, pushes, queued tasks, scrub window).
+  void resetSession();
   void bootstrap();
   void sendSceneSnapshot();
   // Drops the edits and SetTime a shot render's body accumulated in the
@@ -324,32 +348,29 @@ struct StudioServer
   std::vector<std::byte> m_encodedPixels;
   ServerPushDelegate *m_push{nullptr};
 
-  // Viewport (loop thread; the flag is mirrored for queries)
+  // Viewport (loop thread)
   ViewportPasses m_viewport;
-  std::optional<protocol::Pick> m_pendingPick;
-  std::atomic<bool> m_idChannelEnabled{false};
 
   // Project Ops (loop thread)
   DataRoots m_dataRoots;
   ServerTaskRunner m_tasks;
   ProjectOpDispatcher m_dispatcher;
-  std::deque<ProjectRequest> m_pendingRequests;
   protocol::SubtreePtr m_uiState; // null until a project with UI state opens
 
   std::shared_ptr<vsr::network::NetworkServer> m_server;
-  vsr::network::MessageFuture m_frameInFlight;
   bool m_started{false};
 
   // Session state, written on the loop thread only; the state and the
   // streaming flag are the two facts other threads query, so they are atomic.
   std::atomic<SessionState> m_state{SessionState::Listening};
   std::atomic<bool> m_streaming{false};
-  uint64_t m_sessionSerial{0}; // the connection the session runs on
+  Session m_session;
+  // The frame size outlives a session: the next bootstrap announces it.
   uint32_t m_frameWidth{0};
   uint32_t m_frameHeight{0};
-  protocol::FrameEncoding m_encoding{protocol::FrameEncoding::Raw};
-  bool m_sceneResendPending{false};
   // The context revisions the last snapshot sent and the last bind followed.
+  // Server state, not session state: the bind is the pipeline's, and the
+  // bootstrap's snapshot records where a new client stands regardless.
   uint64_t m_snapshotRevision{0};
   uint64_t m_boundShotRevision{0};
   // Playback (loop thread only)

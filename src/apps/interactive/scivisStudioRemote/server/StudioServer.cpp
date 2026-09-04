@@ -115,7 +115,7 @@ ProjectOpDispatcher::Host StudioServer::makeDispatcherHost()
   host.tasks = &m_tasks;
   host.send = [this](Message &&msg) { send(std::move(msg)); };
   host.flushScenePushes = [this] {
-    if (m_sceneResendPending)
+    if (m_session.sceneResendPending)
       sendSceneSnapshot();
   };
   host.uiState = &m_uiState;
@@ -154,11 +154,6 @@ const std::string &StudioServer::libraryName() const
   return m_libraryName;
 }
 
-bool StudioServer::idChannelEnabled() const
-{
-  return m_idChannelEnabled.load();
-}
-
 vsr::app::Context &StudioServer::appContext()
 {
   return m_ctx;
@@ -167,6 +162,11 @@ vsr::app::Context &StudioServer::appContext()
 ProjectContext &StudioServer::projectContext()
 {
   return m_projectContext;
+}
+
+const ViewportPasses &StudioServer::viewport() const
+{
+  return m_viewport;
 }
 
 // Startup ////////////////////////////////////////////////////////////////////
@@ -383,7 +383,6 @@ bool StudioServer::setupRendering(std::string *error)
   // The id-driven passes composite over the LDR color before it is copied
   // out; the server has no tonemap stage in between.
   m_viewport.setup(m_pipeline, m_scenePass, m_device);
-  m_idChannelEnabled = m_viewport.idChannelEnabled();
 
   auto *copy =
       m_pipeline.emplace_back<vsr::rendering::CopyFromColorBufferPass>();
@@ -392,7 +391,7 @@ bool StudioServer::setupRendering(std::string *error)
   m_push = scene.updateDelegate().emplace<ServerPushDelegate>(
       &scene,
       [this](Message &&msg) { send(std::move(msg)); },
-      [this]() { m_sceneResendPending = true; });
+      [this]() { m_session.sceneResendPending = true; });
 
   vsr::core::logStatus(
       "[StudioServer] rendering shot '%s' with renderer '%s' at %ux%u",
@@ -454,7 +453,7 @@ void StudioServer::teardown()
   }
   // Passes hold ANARI handles: release them before the device goes.
   m_viewport.teardown();
-  m_pendingPick.reset();
+  m_session.pendingPick.reset();
   m_pipeline.clear();
   m_scenePass = nullptr;
   m_renderer = {};
@@ -487,7 +486,7 @@ void StudioServer::run()
     applyControlState();
     if (m_state == SessionState::Bootstrapping)
       bootstrap();
-    if (m_sceneResendPending)
+    if (m_session.sceneResendPending)
       sendSceneSnapshot();
     // One Server Task per iteration; frames wait while it runs. A shot
     // render outlives its session (it runs with nobody listening and the
@@ -498,8 +497,8 @@ void StudioServer::run()
     // A Frame still on the wire gets a moment to finish before time moves
     // on, so a fast link never sees a header skip a frame; on a slow link
     // the tick goes ahead regardless and time keeps its pace.
-    if (m_streaming && !vsr::network::is_ready(m_frameInFlight))
-      m_frameInFlight.wait_for(PAUSED_SLEEP);
+    if (m_streaming && !vsr::network::is_ready(m_session.frameInFlight))
+      m_session.frameInFlight.wait_for(PAUSED_SLEEP);
     // Time advances before the render so the Frame carries the frame drawn.
     m_playback.tick(sessionEstablished());
     m_playback.commitScrubIfQuiet();
@@ -507,7 +506,7 @@ void StudioServer::run()
 
     // A pick renders its own frame, with ids, paused or not.
     bool frameSent = false;
-    if (m_pendingPick && sessionEstablished())
+    if (m_session.pendingPick && sessionEstablished())
       frameSent = servicePendingPick();
 
     if (m_streaming) {
@@ -540,18 +539,13 @@ void StudioServer::applyControlState()
   }
 
   // Session events first, in the order they happened (a loss, an accept and
-  // the new client's Hello may share one batch). The transport holds one
-  // socket, so a close the server asked for is stale once a later connection
-  // was accepted: the transport closed that socket when it adopted the next
-  // one, and restarting it now would cut the new client off. Serials climb,
-  // so the last accept in the batch names the newest connection.
-  uint64_t newestConnection = m_sessionSerial;
-  for (const auto &event : control.events) {
-    if (event.kind == SessionEvent::Accepted)
-      newestConnection = event.serial;
+  // the new client's Hello may share one batch). A close the server asked
+  // for acts on the socket only while it still has one to act on.
+  for (auto &event : control.events) {
+    const bool socketGone = event.kind == SessionEvent::Kind::CloseRequested
+        && socketClosedInBatch(event, control.events);
+    applySessionEvent(event, socketGone);
   }
-  for (auto &event : control.events)
-    applySessionEvent(event, newestConnection);
 
   const bool bootstrapping = m_state == SessionState::Bootstrapping;
   if (!bootstrapping && !sessionEstablished()) {
@@ -567,10 +561,10 @@ void StudioServer::applyControlState()
     return;
   }
 
-  if (control.encoding && *control.encoding != m_encoding) {
-    m_encoding = *control.encoding;
+  if (control.encoding && *control.encoding != m_session.encoding) {
+    m_session.encoding = *control.encoding;
     vsr::core::logStatus(
-        "[StudioServer] frame encoding: %s", toString(m_encoding));
+        "[StudioServer] frame encoding: %s", toString(m_session.encoding));
   }
 
   if (control.frameConfig) {
@@ -596,11 +590,11 @@ void StudioServer::applyControlState()
   }
 
   if (control.time)
-    m_playback.applyTime(*control.time);
+    m_playback.applyTime(*control.time, !bootstrapping);
   applyViewportControl(control);
 
   for (auto &request : control.requests)
-    m_pendingRequests.push_back(std::move(request));
+    m_session.pendingRequests.push_back(std::move(request));
   // Replies must not run ahead of the bootstrap bracket.
   if (!bootstrapping)
     dispatchPendingRequests();
@@ -609,16 +603,30 @@ void StudioServer::applyControlState()
     setStreaming(*control.rendering);
 }
 
-void StudioServer::applySessionEvent(
-    SessionEvent &event, uint64_t newestConnection)
+bool StudioServer::socketClosedInBatch(
+    const SessionEvent &close, const std::vector<SessionEvent> &events)
+{
+  // The transport holds one socket: a connection accepted since replaced it
+  // (serials climb), and a loss of the same connection means the peer closed
+  // it. Restarting the transport for either would only cut off whoever holds
+  // the socket now.
+  return std::any_of(events.begin(), events.end(), [&](const auto &other) {
+    return (other.kind == SessionEvent::Kind::Accepted
+               && other.serial > close.serial)
+        || (other.kind == SessionEvent::Kind::Lost
+            && other.serial == close.serial);
+  });
+}
+
+void StudioServer::applySessionEvent(SessionEvent &event, bool socketGone)
 {
   const bool onSession =
-      m_state != SessionState::Listening && event.serial == m_sessionSerial;
+      m_state != SessionState::Listening && event.serial == m_session.serial;
   switch (event.kind) {
-  case SessionEvent::Accepted:
+  case SessionEvent::Kind::Accepted:
     beginSession(event.serial);
     break;
-  case SessionEvent::Hello:
+  case SessionEvent::Kind::Hello:
     if (!onSession) {
       vsr::core::logWarning(
           "[StudioServer] Hello from a connection that is gone; ignored");
@@ -629,13 +637,13 @@ void StudioServer::applySessionEvent(
           "[StudioServer] duplicate Hello ignored (%s)", toString(m_state));
     }
     break;
-  case SessionEvent::Lost:
+  case SessionEvent::Kind::Lost:
     if (onSession)
       endSession(event.reason, false);
     break;
-  case SessionEvent::CloseRequested:
-    // Superseded: the accept that follows ends the session.
-    if (!onSession || event.serial < newestConnection)
+  case SessionEvent::Kind::CloseRequested:
+    // Nothing left to close: the loss or accept that follows ends the session.
+    if (!onSession || socketGone)
       break;
     if (event.farewell.valid())
       event.farewell.wait_for(FAREWELL_TIMEOUT);
@@ -665,24 +673,25 @@ void StudioServer::discardStaleInputs(ControlState &control)
 
 void StudioServer::dispatchPendingRequests()
 {
-  while (!m_pendingRequests.empty()) {
+  while (!m_session.pendingRequests.empty()) {
     // A sync op the client sent after a task waits for that task to run, so
     // the project sees requests in the order they were sent; task ops only
     // queue (their TaskStarted goes out now). While the front waits, a
     // cancel or browse behind it is served out of turn: it touches nothing
     // the task or the sync op could, and a cancel that waited for the task
     // it names would always come too late.
-    auto next = m_pendingRequests.begin();
+    auto next = m_session.pendingRequests.begin();
     // A request the dispatcher will refuse anyway need not wait its turn.
     const bool refusedNow = m_dispatcher.refuses(*next);
     if (!refusedNow && m_tasks.queued() > 0 && waitsForQueuedTasks(*next)) {
-      next = std::find_if(
-          std::next(next), m_pendingRequests.end(), independentOfQueuedTasks);
-      if (next == m_pendingRequests.end())
+      next = std::find_if(std::next(next),
+          m_session.pendingRequests.end(),
+          independentOfQueuedTasks);
+      if (next == m_session.pendingRequests.end())
         break;
     }
     auto request = std::move(*next);
-    m_pendingRequests.erase(next);
+    m_session.pendingRequests.erase(next);
     m_dispatcher.dispatch(request);
     // Each mutation gets its own snapshot, right after its reply; a task
     // queued here sees its prelude's snapshot before its first progress.
@@ -699,20 +708,11 @@ void StudioServer::beginSession(uint64_t serial)
         "[StudioServer] new connection replaces the current session (%s)",
         toString(m_state));
   }
-  m_sessionSerial = serial;
-  setPushEnabled(false);
-  setStreaming(false);
-  m_encoding = FrameEncoding::Raw;
-  m_sceneResendPending = false;
-  m_frameInFlight = {};
-  m_pendingRequests.clear();
-  m_tasks.dropQueued();
-  m_playback.cancelScrub();
+  resetSession();
+  m_session.serial = serial;
   // Viewport state belongs to the client that sent it.
-  m_pendingPick.reset();
   m_viewport.apply(ViewportSettings{});
   m_viewport.setOutline({}, m_ctx.vsr.scene);
-  m_idChannelEnabled = m_viewport.idChannelEnabled();
   setState(SessionState::AwaitingHello);
   vsr::core::logStatus("[StudioServer] client connected, awaiting Hello");
 }
@@ -720,21 +720,13 @@ void StudioServer::beginSession(uint64_t serial)
 void StudioServer::endSession(const std::string &reason, bool closeSocket)
 {
   vsr::core::logStatus("[StudioServer] session ended: %s", reason.c_str());
-  setPushEnabled(false);
-  setStreaming(false);
-  m_encoding = FrameEncoding::Raw;
-  m_sceneResendPending = false;
-  m_frameInFlight = {};
-  if (!m_pendingRequests.empty()) {
+  if (!m_session.pendingRequests.empty()) {
     vsr::core::logWarning(
         "[StudioServer] %zu pending project request(s) dropped with the"
         " session",
-        m_pendingRequests.size());
-    m_pendingRequests.clear();
+        m_session.pendingRequests.size());
   }
-  m_tasks.dropQueued();
-  m_playback.cancelScrub();
-  m_pendingPick.reset();
+  resetSession();
   if (closeSocket) {
     // Closes the socket and re-arms the accept; the disconnect this reports
     // lands in the latch and is dropped as stale. A peer-closed socket needs
@@ -743,6 +735,15 @@ void StudioServer::endSession(const std::string &reason, bool closeSocket)
   }
   setState(SessionState::Listening);
   vsr::core::logStatus("[StudioServer] Listening on port %u", port());
+}
+
+void StudioServer::resetSession()
+{
+  m_session = {};
+  setPushEnabled(false);
+  setStreaming(false);
+  m_tasks.dropQueued();
+  m_playback.cancelScrub();
 }
 
 void StudioServer::bootstrap()
@@ -802,7 +803,7 @@ void StudioServer::sendProjectSnapshot()
 
 void StudioServer::sendSceneSnapshot()
 {
-  m_sceneResendPending = false;
+  m_session.sceneResendPending = false;
   if (!sessionEstablished())
     return;
   messages::TransferScene transfer(&m_ctx.vsr.scene, false);
@@ -879,7 +880,7 @@ void StudioServer::renderAndSendFrame()
   // Latest-frame-wins: the previous Frame is still on the wire (the loop
   // already waited a moment for it), so this iteration's picture would be
   // dropped anyway; do not render it.
-  if (!vsr::network::is_ready(m_frameInFlight))
+  if (!vsr::network::is_ready(m_session.frameInFlight))
     return;
 
   prepareViewportPasses();
@@ -899,14 +900,14 @@ void StudioServer::sendRenderedFrame()
     return;
   }
 
-  if (!encodeFramePixels(m_encoding,
+  if (!encodeFramePixels(m_session.encoding,
           m_frameWidth,
           m_frameHeight,
           m_colorBytes.data(),
           m_encodedPixels)) {
     vsr::core::logError(
         "[StudioServer] %s frame encoding failed; frame dropped",
-        toString(m_encoding));
+        toString(m_session.encoding));
     return;
   }
 
@@ -916,12 +917,12 @@ void StudioServer::sendRenderedFrame()
   header.width = m_frameWidth;
   header.height = m_frameHeight;
   header.pixelFormat = PixelFormat::RGBA8_sRGB;
-  header.encoding = m_encoding;
+  header.encoding = m_session.encoding;
   header.shotId = project.activeShotId;
   // Time in Motion: the playback tick ran before this render, so this is the
   // frame the pixels show.
   header.frame = shot ? shot->currentFrame : 0;
-  m_frameInFlight = m_server->send(
+  m_session.frameInFlight = m_server->send(
       encodeFrame(header, m_encodedPixels.data(), m_encodedPixels.size()));
 }
 
@@ -987,14 +988,13 @@ void StudioServer::applyViewportControl(const ControlState &control)
   if (control.outline)
     m_viewport.setOutline(control.outline->objectIdentity, m_ctx.vsr.scene);
   if (control.pick) {
-    if (m_pendingPick) {
+    if (m_session.pendingPick) {
       vsr::core::logStatus(
           "[StudioServer] Pick %llu superseded before it was serviced",
-          static_cast<unsigned long long>(m_pendingPick->requestId));
+          static_cast<unsigned long long>(m_session.pendingPick->requestId));
     }
-    m_pendingPick = *control.pick;
+    m_session.pendingPick = *control.pick;
   }
-  m_idChannelEnabled = m_viewport.idChannelEnabled();
 }
 
 const vsr::scene::Object *StudioServer::shotCameraObject() const
@@ -1010,8 +1010,8 @@ void StudioServer::prepareViewportPasses()
 
 bool StudioServer::servicePendingPick()
 {
-  const Pick pick = *m_pendingPick;
-  m_pendingPick.reset();
+  const Pick pick = *m_session.pendingPick;
+  m_session.pendingPick.reset();
 
   // Nothing to render with (a project without an active shot), like
   // renderAndSendFrame(): refused rather than answered as a miss, so the
@@ -1029,7 +1029,6 @@ bool StudioServer::servicePendingPick()
   prepareViewportPasses();
   m_pipeline.render();
   const auto sample = m_viewport.takePick();
-  m_idChannelEnabled = m_viewport.idChannelEnabled();
 
   PickReply reply;
   reply.requestId = pick.requestId;
@@ -1062,7 +1061,7 @@ bool StudioServer::servicePendingPick()
 
   // The frame that carried the ids is as good as any: send it when the
   // client is streaming and the previous one is off the wire.
-  if (m_streaming && vsr::network::is_ready(m_frameInFlight)) {
+  if (m_streaming && vsr::network::is_ready(m_session.frameInFlight)) {
     sendRenderedFrame();
     return true;
   }
@@ -1079,12 +1078,12 @@ void StudioServer::onConnected()
   hello.version = PROTOCOL_VERSION;
   hello.buildInfo = "scivisStudioServer/" + m_libraryName;
   m_server->send(encode(hello));
-  latchSessionEvent({SessionEvent::Accepted, m_connectionSerial});
+  latchSessionEvent({SessionEvent::Kind::Accepted, m_connectionSerial});
 }
 
 void StudioServer::onDisconnected(const boost::system::error_code &error)
 {
-  latchSessionEvent({SessionEvent::Lost,
+  latchSessionEvent({SessionEvent::Kind::Lost,
       m_connectionSerial,
       error ? error.message() : std::string("connection closed")});
 }
@@ -1285,7 +1284,7 @@ void StudioServer::onHello(const Message &msg)
   }
 
   m_helloAccepted = true;
-  latchSessionEvent({SessionEvent::Hello, m_connectionSerial});
+  latchSessionEvent({SessionEvent::Kind::Hello, m_connectionSerial});
 }
 
 void StudioServer::latchSessionEvent(SessionEvent event)
@@ -1297,7 +1296,7 @@ void StudioServer::latchSessionEvent(SessionEvent event)
 void StudioServer::requestClose(
     const std::string &reason, vsr::network::MessageFuture farewell)
 {
-  latchSessionEvent({SessionEvent::CloseRequested,
+  latchSessionEvent({SessionEvent::Kind::CloseRequested,
       m_connectionSerial,
       reason,
       std::move(farewell)});
