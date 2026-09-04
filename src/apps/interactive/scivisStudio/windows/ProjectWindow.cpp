@@ -36,9 +36,8 @@ void ProjectWindow::buildUI()
       ImGui::PushStyleColor(
           ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
     }
-    ImGui::BulletText("%s  [%s]",
-        dataset.name.c_str(),
-        dataset::displayStatus(dataset));
+    ImGui::BulletText(
+        "%s  [%s]", dataset.name.c_str(), dataset::displayStatus(dataset));
     if (unloaded)
       ImGui::PopStyleColor();
   }
@@ -46,11 +45,8 @@ void ProjectWindow::buildUI()
   ImGui::SeparatorText("Shots");
   for (auto &shot : project.shots) {
     const bool selected = shot.id == project.activeShotId;
-    if (ImGui::Selectable(shot.name.c_str(), selected)) {
-      project.activeShotId = shot.id;
-      m_projectContext->syncAnimationManagerToActiveShot();
-      m_projectContext->applyActiveShot();
-    }
+    if (ImGui::Selectable(shot.name.c_str(), selected))
+      m_projectContext->setActiveShot(shot.id);
   }
 }
 

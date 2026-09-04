@@ -43,29 +43,28 @@ struct ProjectContext
 
   void createUnsavedProject();
   bool addShot(const std::string &name = "");
-  // Shot edits as whole operations (the monolith's editors mutate Shot fields
-  // inline; the remote server needs them as validated calls). removeShot
-  // refuses the last shot and, when the active shot goes, makes the first
-  // remaining one active. updateShot replaces the stored Shot with a
-  // validated copy of `shot`: unknown rig ids and renderers of another
-  // library are rejected, bindings to unknown datasets are dropped, frame
-  // fields are clamped, the runtime camera ref is kept and `playing` is
-  // ignored (playback is driven through the AnimationManager, not this
-  // call). setActiveShot switches shots and re-syncs the animation manager.
+  // Shot edits are whole operations, the only path that mutates a stored
+  // Shot: the monolith's editors, the remote server and the CLI all come
+  // through here. removeShot refuses the last shot and, when the active shot
+  // goes, makes the first remaining one active. updateShot replaces the
+  // stored Shot with a validated copy of `shot`: unknown rig ids and
+  // renderers of another library are rejected, bindings to unknown datasets
+  // are dropped, frame fields are clamped (shot::clampToValidRanges), the
+  // runtime camera ref is kept and `playing` is ignored (playback is driven
+  // through the AnimationManager, not this call); while the shot plays, the
+  // frame it is on is kept too. setActiveShot switches shots and re-syncs
+  // the animation manager. Each marks the project dirty when it changes it.
   bool removeShot(const ShotID &id, std::string *error = nullptr);
-  // Replaces the shot wholesale after validation, never honouring `playing`
-  // and, while the shot plays, keeping the frame it is on.
   bool updateShot(const Shot &shot, std::string *error = nullptr);
   bool setActiveShot(const ShotID &id, std::string *error = nullptr);
-  // Playback as whole operations (the monolith's transport pokes the
-  // AnimationManager and the Shot inline). setPlaying accepts the active shot
-  // only, starts or stops the manager and writes shot.playing.
-  // setActiveShotFrame seeks the active shot to `frame` (clamped); the
-  // manager's time-changed callback lands it in shot.currentFrame and applies
-  // the shot. When a non-looping shot plays off its end, the manager's
-  // stopped callback writes playing=false and currentFrame=last. None of
-  // these dirty the project: the playback position is transient state, as
-  // when the monolith's tick writes it.
+  // Playback as whole operations. setPlaying accepts the active shot only,
+  // starts or stops the manager and writes shot.playing. setActiveShotFrame
+  // seeks the active shot to `frame` (clamped); the manager's time-changed
+  // callback lands it in shot.currentFrame and applies the shot. When a
+  // non-looping shot plays off its end, the manager's stopped callback
+  // writes playing=false and currentFrame=last. None of these dirty the
+  // project: the playback position is transient state, as when a tick
+  // writes it.
   bool setPlaying(const ShotID &id, bool playing, std::string *error = nullptr);
   void setActiveShotFrame(int frame);
   Dataset *addStaticDataset(const std::string &name,

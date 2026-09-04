@@ -376,9 +376,9 @@ void LightRigEditor::buildUI()
   const bool activeShotUsesRig = shot && shot->lightRigId == rig.id;
   ImGui::BeginDisabled(!shot || activeShotUsesRig);
   if (ImGui::Button("Use for Active Shot") && shot) {
-    shot->lightRigId = rig.id;
-    project.markDirty();
-    m_projectContext->applyActiveShot();
+    Shot edit = *shot;
+    edit.lightRigId = rig.id;
+    m_projectContext->updateShot(edit);
   }
   ImGui::EndDisabled();
 

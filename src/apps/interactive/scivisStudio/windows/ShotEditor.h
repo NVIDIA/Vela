@@ -6,6 +6,7 @@
 #include "ProjectContext.h"
 #include "vsr/ui/imgui/windows/Window.h"
 
+#include <cstdint>
 #include <functional>
 #include <string>
 
@@ -22,10 +23,12 @@ struct ShotEditor : public vsr::ui::imgui::Window
 
  private:
   bool inputText(const char *label, std::string &value, size_t capacity = 512);
-  void buildUI_deviceSelector(Shot &shot);
-  void buildUI_rendererSelector(Shot &shot);
-  void buildUI_lightRigSelector(Shot &shot);
-  void buildUI_cameraRigSelector(Shot &shot);
+  bool inputSize(const char *label, uint32_t &value);
+  // Each edits `shot` (the frame's draft) and reports whether it did.
+  bool buildUI_deviceSelector(Shot &shot);
+  bool buildUI_rendererSelector(Shot &shot);
+  bool buildUI_lightRigSelector(Shot &shot);
+  bool buildUI_cameraRigSelector(Shot &shot);
 
   ProjectContext *m_projectContext{nullptr};
   std::function<void()> m_onRender;
