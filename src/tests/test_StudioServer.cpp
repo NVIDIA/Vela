@@ -262,8 +262,9 @@ SCENARIO("StudioServer runs a viewer-parity session", "[StudioServer]")
         REQUIRE(camera);
         REQUIRE(camera->name() == shotId + "_camera");
         REQUIRE(mirror.layer("studio") != nullptr);
-        REQUIRE(waitFor(
-            [&] { return server.sessionState() == SessionState::Connected; }));
+        REQUIRE(waitFor([&] {
+          return server.sessionState() == SessionState::Established;
+        }));
 
         AND_THEN("StartRendering streams frames at the requested config")
         {
@@ -278,7 +279,7 @@ SCENARIO("StudioServer runs a viewer-parity session", "[StudioServer]")
           client.send(StartRendering{});
 
           REQUIRE(client.waitForCount(StudioMessageType::Frame, 1));
-          REQUIRE(server.sessionState() == SessionState::Rendering);
+          REQUIRE(server.streaming());
           const auto frame = decodeFrame(client.last(StudioMessageType::Frame));
           REQUIRE(frame);
           REQUIRE(frame->header.width == 64);
@@ -372,7 +373,7 @@ SCENARIO("StudioServer runs a viewer-parity session", "[StudioServer]")
           {
             client.send(StopRendering{});
             REQUIRE(waitFor([&] {
-              return server.sessionState() == SessionState::Connected;
+              return server.sessionState() == SessionState::Established;
             }));
 
             SetObjectParameter edit;
@@ -509,7 +510,7 @@ SCENARIO(
           REQUIRE(second.waitForCount(StudioMessageType::BootstrapEnd, 1));
           REQUIRE(second.count(StudioMessageType::Error) == 0);
           REQUIRE(waitFor([&] {
-            return server.sessionState() == SessionState::Connected;
+            return server.sessionState() == SessionState::Established;
           }));
         }
       }
@@ -610,7 +611,7 @@ SCENARIO("StudioServer applies SetNodeTransform to the addressed node",
     client.send(Hello{});
     REQUIRE(client.waitForCount(StudioMessageType::BootstrapEnd, 1));
     REQUIRE(waitFor(
-        [&] { return server.sessionState() == SessionState::Connected; }));
+        [&] { return server.sessionState() == SessionState::Established; }));
 
     WHEN("the bootstrap is applied to a mirror")
     {

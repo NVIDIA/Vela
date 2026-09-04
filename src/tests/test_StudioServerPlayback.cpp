@@ -138,8 +138,7 @@ PlaybackSession::PlaybackSession(
   client.send(frameConfig);
   client.send(StartRendering{});
   REQUIRE(client.waitForCount(StudioMessageType::Frame, 1));
-  REQUIRE(waitFor(
-      [&] { return server->sessionState() == SessionState::Rendering; }));
+  REQUIRE(waitFor([&] { return server->streaming(); }));
   client.clear();
 }
 

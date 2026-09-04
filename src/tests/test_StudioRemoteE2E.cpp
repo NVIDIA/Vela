@@ -236,7 +236,9 @@ void pauseServer(Client &client, RunningServer &server)
   client.connection.stopRendering();
   REQUIRE(pollUntil(
       client.connection,
-      [&] { return server.server->sessionState() == SessionState::Connected; },
+      [&] {
+        return server.server->sessionState() == SessionState::Established;
+      },
       E2E_TIMEOUT));
 }
 
@@ -796,7 +798,7 @@ SCENARIO("scivisStudioServer and the client core run a session end to end",
                 client.connection,
                 [&] {
                   return server->server->sessionState()
-                      == SessionState::Connected;
+                      == SessionState::Established;
                 },
                 E2E_TIMEOUT));
 

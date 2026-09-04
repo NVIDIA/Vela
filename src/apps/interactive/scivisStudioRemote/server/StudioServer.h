@@ -42,15 +42,16 @@
 namespace vsr::scivis_studio::server {
 
 // Where the single client session stands. Listening -> AwaitingHello on
-// accept; Connected once the Hellos match and the Bootstrap is out;
-// Connected <-> Rendering on StartRendering/StopRendering; any loss returns
-// to Listening. Shutdown is terminal.
+// accept; Bootstrapping once the Hellos match, for the one loop iteration
+// that sends the Bootstrap; Established from BootstrapEnd on, whether or not
+// the client asked for frames (streaming() says); any loss returns to
+// Listening. Shutdown is terminal.
 enum class SessionState
 {
   Listening,
   AwaitingHello,
-  Connected,
-  Rendering,
+  Bootstrapping,
+  Established,
   Shutdown
 };
 
@@ -150,6 +151,9 @@ struct StudioServer
   // The port actually bound; meaningful after start().
   uint16_t port() const;
   SessionState sessionState() const;
+  // Whether the Established session asked for frames (StartRendering); false
+  // without a session.
+  bool streaming() const;
   // The ANARI library actually rendering, after any fallback.
   const std::string &libraryName() const;
   // Whether the scene pass renders the objectId channel right now (mirrored
@@ -166,14 +170,33 @@ struct StudioServer
       protocol::RemoveObjectParameter,
       protocol::SetNodeTransform>;
 
+  // Something that happened to a connection on the IO thread, tagged with
+  // that connection's serial (see m_connectionSerial) so the loop can tell a
+  // loss of the old client from a loss of the one accepted since.
+  struct SessionEvent
+  {
+    enum Kind
+    {
+      Accepted, // a connection was accepted and sent its Hello
+      Hello, // its Hello matched ours
+      Lost, // the peer closed it
+      CloseRequested // the server decided to close it
+    };
+    Kind kind;
+    uint64_t serial;
+    std::string reason; // Lost, CloseRequested
+    vsr::network::MessageFuture farewell; // CloseRequested: flushed first
+  };
+
   // What the IO thread hands the loop, written under m_controlMutex and
-  // swapped out whole once per iteration. Two things live here side by side:
+  // swapped out whole once per iteration. Three things live here side by
+  // side:
   //
-  // - The Control-State Latch proper: one value per input, latest-wins.
-  //   Session events name the connection they happened on (its serial, see
-  //   m_connectionSerial) so the loop can tell a loss of the old client from
-  //   a loss of the one accepted since; frame config, encoding and the
-  //   rendering flag simply keep the newest value.
+  // - The session event queue: in arrival order, none dropped, so the loop
+  //   replays what happened to the connections in the order it happened.
+  // - The Control-State Latch proper: one value per input, latest-wins;
+  //   frame config, encoding and the rendering flag simply keep the newest
+  //   value.
   // - The edit drain queue: scene edits in arrival order, none dropped,
   //   because coalescing them would leave the mirror and the scene
   //   disagreeing. It is a queue, not a latch, and is drained in one go.
@@ -183,13 +206,7 @@ struct StudioServer
   //   earlier is still queued so requests take effect in the order sent.
   struct ControlState
   {
-    std::optional<uint64_t> accepted;
-    std::optional<uint64_t> helloReceived;
-    std::optional<uint64_t> disconnected;
-    std::string disconnectReason;
-    std::optional<uint64_t> closeRequested;
-    std::string closeReason;
-    vsr::network::MessageFuture farewell; // flushed before the close
+    std::vector<SessionEvent> events;
     std::optional<protocol::SetFrameConfig> frameConfig;
     std::optional<protocol::FrameEncoding> encoding;
     std::optional<bool> rendering;
@@ -224,6 +241,7 @@ struct StudioServer
   void onDisconnected(const boost::system::error_code &error);
   void onMessage(const vsr::network::Message &msg);
   void onHello(const vsr::network::Message &msg);
+  void latchSessionEvent(SessionEvent event);
   void requestClose(
       const std::string &reason, vsr::network::MessageFuture farewell = {});
   void replyError(const std::string &text);
@@ -234,6 +252,12 @@ struct StudioServer
 
   // Loop thread
   void applyControlState();
+  // One session event, in order: a loss of or a close request for the session
+  // in progress ends it, an accept opens the next one, a Hello on it starts
+  // the Bootstrap; an event for any other connection is stale and dropped, as
+  // is a close request for a connection older than `newestConnection` (the
+  // last one this batch accepted), whose socket the transport closed already.
+  void applySessionEvent(SessionEvent &event, uint64_t newestConnection);
   void beginSession(uint64_t serial);
   // closeSocket: the socket is still open (a close the server decided on) and
   // must be shut; false when the peer already closed it, in which case the
@@ -270,6 +294,7 @@ struct StudioServer
   // the next applyActiveShot() writes the client's pose back, not a stale one.
   void followCameraEdit(const vsr::scene::Object *object);
   void setState(SessionState state);
+  void setStreaming(bool streaming);
   void setPushEnabled(bool enabled);
 
   // Viewport (loop thread)
@@ -315,14 +340,14 @@ struct StudioServer
   vsr::network::MessageFuture m_frameInFlight;
   bool m_started{false};
 
-  // Session state, loop thread only (m_state is mirrored for queries)
+  // Session state, written on the loop thread only; the state and the
+  // streaming flag are the two facts other threads query, so they are atomic.
   std::atomic<SessionState> m_state{SessionState::Listening};
+  std::atomic<bool> m_streaming{false};
   uint64_t m_sessionSerial{0}; // the connection the session runs on
   uint32_t m_frameWidth{0};
   uint32_t m_frameHeight{0};
   protocol::FrameEncoding m_encoding{protocol::FrameEncoding::Raw};
-  bool m_renderingRequested{false};
-  bool m_bootstrapPending{false};
   bool m_sceneResendPending{false};
   // The context revisions the last snapshot sent and the last bind followed.
   uint64_t m_snapshotRevision{0};

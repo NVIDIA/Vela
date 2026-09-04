@@ -122,7 +122,7 @@ RenderSession::RenderSession(const std::filesystem::path &dataRoot,
   loop = std::make_unique<ServerLoop>(server.get());
   bootstrapClient(client, server->port());
   REQUIRE(waitFor(
-      [&] { return server->sessionState() == SessionState::Connected; }));
+      [&] { return server->sessionState() == SessionState::Established; }));
 }
 
 template <typename R>
