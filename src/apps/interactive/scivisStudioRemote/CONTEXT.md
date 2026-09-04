@@ -139,7 +139,11 @@ iteration. The latch is simultaneously the latest-wins coalescer and the
 thread-safety seam. Inputs that must not coalesce — scene edits, and Project
 Ops when they arrive — do not go through the latch: they ride an **edit drain
 queue** alongside it, kept in arrival order and drained by the same loop
-iteration, so nothing is lost and nothing runs off the IO thread.
+iteration, so nothing is lost and nothing runs off the IO thread. Session
+events (a connection accepted, its Hello, its loss, a close the server asked
+for) ride a third lane the same way, each tagged with its connection's
+serial, because the loop must replay what happened to the connections in
+the order it happened.
 _Avoid_: message queue for the latch itself (it holds one value, not a
 history); latch for the drain queue (it keeps every edit, in order)
 

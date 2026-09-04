@@ -50,9 +50,10 @@ struct Playback
   Playback(vsr::app::Context &ctx, ProjectContext &projectContext, SendFn send);
 
   // Seeks the active shot to the latched SetTime; other shots are logged and
-  // ignored. While paused it opens (or extends) the rest-commit window.
-  // Requires a session up: the warnings it sends have a recipient.
-  void applyTime(const protocol::SetTime &time);
+  // ignored. While paused it opens (or extends) the rest-commit window. The
+  // warnings go out only with a session up: a SetTime that shares a batch
+  // with the client's Hello seeks silently (its Bootstrap carries the frame).
+  void applyTime(const protocol::SetTime &time, bool sessionUp);
   // One tick per iteration. The clock advances regardless (so the first tick
   // of a new session sees a small delta), but time moves and warnings go
   // out only with a session up.
@@ -64,8 +65,9 @@ struct Playback
   void cancelScrub();
 
  private:
-  // One TimeAdvanceWarning per load failure the manager collected.
-  void pushLoadFailures();
+  // One TimeAdvanceWarning per load failure the manager collected; without a
+  // session up the failures are dropped (they were the seek's, not a tick's).
+  void pushLoadFailures(bool sessionUp);
 
   using Clock = std::chrono::steady_clock;
 

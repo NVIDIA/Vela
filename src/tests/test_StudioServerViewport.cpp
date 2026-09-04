@@ -287,7 +287,8 @@ SCENARIO("StudioServer picks against its frames", "[StudioServer]")
       REQUIRE(reply.worldPosition.z == Approx(0.f).margin(0.05));
       // No Frame while paused, and the id channel is off again after.
       REQUIRE(client.count(StudioMessageType::Frame) == 0);
-      REQUIRE(waitFor([&] { return !session.server->idChannelEnabled(); }));
+      REQUIRE(waitFor(
+          [&] { return !session.server->viewport().idChannelEnabled(); }));
 
       AND_THEN("the identity names the surface the scene holds")
       {
@@ -373,7 +374,7 @@ SCENARIO("StudioServer composites the viewport passes into its frames",
   session.startRendering();
   const auto beauty = session.framePixelsAfterChange();
   REQUIRE(beauty.size() == FRAME_WIDTH * FRAME_HEIGHT * 4);
-  REQUIRE_FALSE(session.server->idChannelEnabled());
+  REQUIRE_FALSE(session.server->viewport().idChannelEnabled());
 
   GIVEN("the picked surface's identity")
   {
@@ -388,7 +389,8 @@ SCENARIO("StudioServer composites the viewport passes into its frames",
 
       THEN("the id channel turns on and the frame changes")
       {
-        REQUIRE(waitFor([&] { return session.server->idChannelEnabled(); }));
+        REQUIRE(waitFor(
+            [&] { return session.server->viewport().idChannelEnabled(); }));
         const auto outlined = session.framePixelsAfterChange();
         REQUIRE(outlined.size() == beauty.size());
         REQUIRE(outlined != beauty);
@@ -399,8 +401,9 @@ SCENARIO("StudioServer composites the viewport passes into its frames",
 
           THEN("the id channel turns off again")
           {
-            REQUIRE(
-                waitFor([&] { return !session.server->idChannelEnabled(); }));
+            REQUIRE(waitFor([&] {
+              return !session.server->viewport().idChannelEnabled();
+            }));
             REQUIRE(client.count(StudioMessageType::Error) == 0);
           }
         }
@@ -413,8 +416,9 @@ SCENARIO("StudioServer composites the viewport passes into its frames",
 
           THEN("the outline no longer needs ids")
           {
-            REQUIRE(
-                waitFor([&] { return !session.server->idChannelEnabled(); }));
+            REQUIRE(waitFor([&] {
+              return !session.server->viewport().idChannelEnabled();
+            }));
           }
         }
       }
@@ -429,7 +433,7 @@ SCENARIO("StudioServer composites the viewport passes into its frames",
       THEN("it is treated as clear and frames keep coming")
       {
         session.framePixelsAfterChange();
-        REQUIRE_FALSE(session.server->idChannelEnabled());
+        REQUIRE_FALSE(session.server->viewport().idChannelEnabled());
         REQUIRE(client.count(StudioMessageType::Error) == 0);
       }
     }
@@ -450,7 +454,7 @@ SCENARIO("StudioServer composites the viewport passes into its frames",
         const auto depth = session.framePixelsAfterChange();
         REQUIRE(depth.size() == beauty.size());
         REQUIRE(depth != beauty);
-        REQUIRE_FALSE(session.server->idChannelEnabled());
+        REQUIRE_FALSE(session.server->viewport().idChannelEnabled());
       }
     }
 
@@ -462,7 +466,8 @@ SCENARIO("StudioServer composites the viewport passes into its frames",
 
       THEN("the id channel is on without any outline")
       {
-        REQUIRE(waitFor([&] { return session.server->idChannelEnabled(); }));
+        REQUIRE(waitFor(
+            [&] { return session.server->viewport().idChannelEnabled(); }));
         const auto ids = session.framePixelsAfterChange();
         REQUIRE(ids != beauty);
 
@@ -472,8 +477,9 @@ SCENARIO("StudioServer composites the viewport passes into its frames",
 
           THEN("the id channel is off")
           {
-            REQUIRE(
-                waitFor([&] { return !session.server->idChannelEnabled(); }));
+            REQUIRE(waitFor([&] {
+              return !session.server->viewport().idChannelEnabled();
+            }));
           }
         }
       }

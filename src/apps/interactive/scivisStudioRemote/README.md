@@ -1024,6 +1024,41 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   scenarios is unchanged. The `[SciVisStudio]` suite covers the counters
   directly.
 
+- **An explicit session state; the playback clock in its own file.**
+  `StudioServer` was three objects in one: the server proper (device,
+  pipeline, frame render), a session whose ten fields `beginSession` and
+  `endSession` reset in two hand-kept copies, and a playback clock. The
+  clock is `server/Playback.{h,cpp}` now (the tick, the scrub's rest-commit
+  window and the load-failure warnings; the loop still follows the revisions
+  after the tick, so the snapshot a commit's `markRevised()` asks for is
+  sent by the server as before). The per-session fields are one `Session`
+  value (serial, encoding, scene-resend flag, the Frame in flight, the
+  pending requests, the pending pick), reset whole where a session begins
+  or ends, and where a session stands is the enum alone: `Listening`,
+  `AwaitingHello`, `Bootstrapping` (the one iteration that sends the
+  Bootstrap; it replaces the `m_bootstrapPending` flag that had escaped the
+  enum), `Established`, `Shutdown`. Whether the client asked for frames is
+  `streaming()`, which used to be `Rendering`, an enum value re-derived from
+  a bool at two sites per iteration; it is the second atomic beside the
+  state because tests read both from another thread. The latch's five
+  session slots (accept, Hello, loss and close request, each tagged with a
+  connection serial, plus a reason and a farewell) were a queue flattened
+  into latest-wins optionals whose causal order `applyControlState`
+  rebuilt with two `lossOfCurrent()` calls; they are one ordered
+  `SessionEvent` queue applied by a switch. One rule the fixed order
+  carried implicitly is stated now: the transport holds one socket, so a
+  close the server asked for is stale once a later connection was accepted
+  (the transport closed that socket when it adopted the next one; the
+  `task_replay` scenario caught the restart cutting the new client off),
+  and the accept that follows ends the session. The test-only
+  `idChannelEnabled` atomic mirror, synced at four sites, is gone; tests
+  read `viewport().idChannelEnabled()` under the same rule as
+  `appContext()`. The client-visible handshake is unchanged and every suite
+  and scenario passes, with `Connected`/`Rendering` read as
+  `Established`/`streaming()`. `StudioServer.cpp` 1393 -> 1327 lines; the
+  document's ~800 target waits on 08 (`onMessage`) and 09 (the renderer
+  binding).
+
 ### Spec conformance
 
 Every bullet of the spec sections named below, against the tree at
