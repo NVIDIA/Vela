@@ -180,12 +180,14 @@ struct ProjectOps
       protocol::SubtreePtr uiState,
       ResultCallback<protocol::TaskStartedResult> callback);
 
-  // Datasets (23..35) ////////////////////////////////////////////////////////
+  // Datasets (23..35, 63) ////////////////////////////////////////////////////
 
   RequestHandle importStaticDataset(const std::string &name,
       const std::filesystem::path &sourcePath,
       vsr::io::ImporterType importerType,
-      bool fromSubtreeArchive,
+      ResultCallback<protocol::TaskStartedResult> callback);
+  RequestHandle importSubtreeDataset(const std::string &name,
+      const std::filesystem::path &sourcePath,
       ResultCallback<protocol::TaskStartedResult> callback);
   RequestHandle importFileAnimationDataset(const std::string &name,
       const std::vector<std::filesystem::path> &sourcePaths,

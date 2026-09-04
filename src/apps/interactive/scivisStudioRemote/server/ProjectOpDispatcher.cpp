@@ -112,6 +112,7 @@ VSR_REQUEST_POLICY(OpenProject,                    true,    false, true)
 VSR_REQUEST_POLICY(SaveProject,                    true,    false, true)
 // Datasets
 VSR_REQUEST_POLICY(ImportStaticDataset,            true,    false, true)
+VSR_REQUEST_POLICY(ImportSubtreeDataset,           true,    false, true)
 VSR_REQUEST_POLICY(ImportFileAnimationDataset,     true,    false, true)
 VSR_REQUEST_POLICY(DeclareFileAnimationDataset,    false,   true,  true)
 VSR_REQUEST_POLICY(ReimportDataset,                true,    false, true)

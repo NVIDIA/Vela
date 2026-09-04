@@ -90,6 +90,7 @@ constexpr int PROTOCOL_VERSION = 4;
   X(RenderShot,                   60, ClientToServer)            \
   X(CancelTask,                   61, ClientToServer)            \
   X(Pick,                         62, ClientToServer)            \
+  X(ImportSubtreeDataset,         63, ClientToServer)            \
   /* Project/task replies (100..) */                             \
   X(ProjectOpReply,              100, ServerToClient)            \
   X(ProjectSnapshot,             101, ServerToClient)            \

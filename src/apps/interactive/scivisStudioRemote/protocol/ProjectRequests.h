@@ -71,8 +71,7 @@ struct SaveProject
 
 // Dataset creation ///////////////////////////////////////////////////////////
 
-// Task: addStaticDataset(), or addStaticDatasetFromSubtree() when
-// `fromSubtreeArchive` is set (then `importerType` is ignored).
+// Task: addStaticDataset().
 struct ImportStaticDataset
 {
   static constexpr StudioMessageType MESSAGE_TYPE =
@@ -81,7 +80,18 @@ struct ImportStaticDataset
   std::string name;
   std::filesystem::path sourcePath;
   vsr::io::ImporterType importerType{vsr::io::ImporterType::NONE};
-  bool fromSubtreeArchive{false};
+};
+
+// Task: addStaticDatasetFromSubtree(): a VSR Layer Subtree Archive (as
+// vsrViewer's LayerTree saves one) becomes a Static Dataset. Not a Dataset
+// Archive, which LoadDatasetArchive reads.
+struct ImportSubtreeDataset
+{
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::ImportSubtreeDataset;
+  uint64_t requestId{0};
+  std::string name;
+  std::filesystem::path sourcePath;
 };
 
 // Task: addFileAnimationDataset().
@@ -282,7 +292,14 @@ void fields(V &v, ImportStaticDataset &r)
   v.required("sourcePath", r.sourcePath);
   v.requiredEnum(
       "importerType", r.importerType, toString, importerTypeFromString);
-  v.optional("fromSubtreeArchive", r.fromSubtreeArchive);
+}
+
+template <typename V>
+void fields(V &v, ImportSubtreeDataset &r)
+{
+  v.required("requestId", r.requestId);
+  v.required("name", r.name);
+  v.required("sourcePath", r.sourcePath);
 }
 
 template <typename V>

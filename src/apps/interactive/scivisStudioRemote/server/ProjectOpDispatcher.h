@@ -29,12 +29,13 @@ namespace vsr::scivis_studio::server {
 
 // Every client->server project request the dispatcher serves: Project Ops
 // (SetPlaying and RequestArrayHistogram among them), Remote Browse,
-// RenderShot and CancelTask (types 20..61), decoded on the IO thread and
+// RenderShot and CancelTask (types 20..61, 63), decoded on the IO thread and
 // queued for the loop thread in arrival order.
 using ProjectRequest = std::variant<protocol::NewProject,
     protocol::OpenProject,
     protocol::SaveProject,
     protocol::ImportStaticDataset,
+    protocol::ImportSubtreeDataset,
     protocol::ImportFileAnimationDataset,
     protocol::DeclareFileAnimationDataset,
     protocol::ReimportDataset,
@@ -212,6 +213,7 @@ struct ProjectOpDispatcher
   void handle(const protocol::SaveProject &);
   // Datasets
   void handle(const protocol::ImportStaticDataset &);
+  void handle(const protocol::ImportSubtreeDataset &);
   void handle(const protocol::ImportFileAnimationDataset &);
   void handle(const protocol::DeclareFileAnimationDataset &);
   void handle(const protocol::ReimportDataset &);
