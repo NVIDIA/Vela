@@ -37,7 +37,7 @@ void ServerPushDelegate::signalObjectAdded(const vsr::scene::Object *obj)
   if (!m_enabled || !obj)
     return;
   messages::NewObject message(obj);
-  m_send(encodeSceneMessage(message, StudioMessageType::ObjectAdded));
+  m_send(encodeSceneMessage<StudioMessageType::ObjectAdded>(message));
 }
 
 void ServerPushDelegate::signalObjectRemoved(const vsr::scene::Object *obj)
@@ -45,7 +45,7 @@ void ServerPushDelegate::signalObjectRemoved(const vsr::scene::Object *obj)
   if (!m_enabled || !obj)
     return;
   messages::RemoveObject message(obj);
-  m_send(encodeSceneMessage(message, StudioMessageType::ObjectRemoved));
+  m_send(encodeSceneMessage<StudioMessageType::ObjectRemoved>(message));
 }
 
 void ServerPushDelegate::signalRemoveAllObjects()
@@ -77,7 +77,7 @@ void ServerPushDelegate::sendLayer(const vsr::scene::Layer *layer)
   if (!m_enabled || !m_scene || !layer)
     return;
   messages::TransferLayer message(m_scene, layer);
-  m_send(encodeSceneMessage(message, StudioMessageType::TransferLayer));
+  m_send(encodeSceneMessage<StudioMessageType::TransferLayer>(message));
 }
 
 } // namespace vsr::scivis_studio::server

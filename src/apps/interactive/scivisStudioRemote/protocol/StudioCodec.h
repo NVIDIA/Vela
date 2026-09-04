@@ -33,8 +33,10 @@ namespace vsr::scivis_studio::protocol {
 template <typename T>
 vsr::network::Message encode(const T &payload);
 
-// Empty when the type byte is not T::MESSAGE_TYPE, the tree fails to parse, or
-// fromNode() rejects the contents. Never throws on malformed input.
+// Empty when the type byte is not T::MESSAGE_TYPE, the tree fails to parse
+// (a header-only message with no bytes included: every Studio payload, even
+// an empty one, is a serialized tree), or fromNode() rejects the contents.
+// Never throws on malformed input.
 template <typename T>
 std::optional<T> decode(const vsr::network::Message &msg);
 
@@ -53,11 +55,7 @@ inline vsr::network::Message encode(const T &payload)
       "MESSAGE_TYPE`");
   vsr::core::DataTree tree;
   toNode(payload, tree.root());
-  vsr::network::Message msg;
-  msg.header.type = uint8_t(T::MESSAGE_TYPE);
-  tree.write(msg.payload);
-  msg.header.payload_length = uint32_t(msg.payload.size());
-  return msg;
+  return vsr::network::makeMessage(uint8_t(T::MESSAGE_TYPE), tree);
 }
 
 template <typename T>
@@ -70,9 +68,7 @@ inline std::optional<T> decode(const vsr::network::Message &msg)
   if (msg.header.type != uint8_t(T::MESSAGE_TYPE))
     return {};
   vsr::core::DataTree tree;
-  // A bare message with no bytes at all is accepted as an empty tree so that
-  // header-only sends (makeMessage(type)) still decode for empty payloads.
-  if (!msg.payload.empty() && !tree.read(msg.payload))
+  if (!tree.read(msg.payload))
     return {};
   T payload;
   if (!fromNode(tree.root(), payload))

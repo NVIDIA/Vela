@@ -50,7 +50,7 @@ SCENARIO("Scene messages re-tag vsr::network messages", "[StudioProtocol]")
     {
       messages::TransferScene sender(&source, false);
       const auto msg =
-          encodeSceneMessage(sender, StudioMessageType::TransferScene);
+          encodeSceneMessage<StudioMessageType::TransferScene>(sender);
 
       THEN("the message carries the Studio type")
       {
@@ -86,7 +86,7 @@ SCENARIO("Scene messages re-tag vsr::network messages", "[StudioProtocol]")
     {
       messages::TransferLayer sender(&source, source.layer(LAYER_NAME));
       const auto msg =
-          encodeSceneMessage(sender, StudioMessageType::TransferLayer);
+          encodeSceneMessage<StudioMessageType::TransferLayer>(sender);
       REQUIRE(messageType(msg) == StudioMessageType::TransferLayer);
 
       THEN("a receiver holding the same objects rebuilds the layer")
@@ -116,25 +116,12 @@ SCENARIO("Scene messages re-tag vsr::network messages", "[StudioProtocol]")
       THEN("each carries its Studio type")
       {
         REQUIRE(messageType(
-                    encodeSceneMessage(added, StudioMessageType::ObjectAdded))
+                    encodeSceneMessage<StudioMessageType::ObjectAdded>(added))
             == StudioMessageType::ObjectAdded);
-        REQUIRE(messageType(encodeSceneMessage(
-                    removed, StudioMessageType::ObjectRemoved))
+        REQUIRE(
+            messageType(
+                encodeSceneMessage<StudioMessageType::ObjectRemoved>(removed))
             == StudioMessageType::ObjectRemoved);
-      }
-    }
-
-    WHEN("a non-scene type is requested")
-    {
-      messages::TransferScene sender(&source, false);
-      const auto msg = encodeSceneMessage(sender, StudioMessageType::Hello);
-
-      THEN("the message is invalid and empty")
-      {
-        REQUIRE(msg.header.type == vsr::network::MESSAGE_TYPE_INVALID);
-        REQUIRE(msg.header.payload_length == 0);
-        REQUIRE(msg.payload.empty());
-        REQUIRE_FALSE(messageType(msg));
       }
     }
   }
@@ -204,7 +191,7 @@ SCENARIO("Scene transfers preserve the server's layer node indices",
     {
       messages::TransferLayer sender(&server, serverLayer);
       const auto msg =
-          encodeSceneMessage(sender, StudioMessageType::TransferLayer);
+          encodeSceneMessage<StudioMessageType::TransferLayer>(sender);
       vsr::scene::Scene mirror;
       messages::TransferLayer(msg, &mirror).execute();
 
@@ -225,7 +212,7 @@ SCENARIO("Scene transfers preserve the server's layer node indices",
     {
       messages::TransferScene sender(&server, false);
       const auto msg =
-          encodeSceneMessage(sender, StudioMessageType::TransferScene);
+          encodeSceneMessage<StudioMessageType::TransferScene>(sender);
       vsr::scene::Scene mirror;
       messages::TransferScene(msg, &mirror).execute();
 
@@ -243,7 +230,7 @@ SCENARIO("Scene transfers preserve the server's layer node indices",
       for (int i = 0; i < 2; ++i) {
         messages::TransferLayer sender(&server, serverLayer);
         const auto msg =
-            encodeSceneMessage(sender, StudioMessageType::TransferLayer);
+            encodeSceneMessage<StudioMessageType::TransferLayer>(sender);
         messages::TransferLayer(msg, &mirror).execute();
       }
 

@@ -10,9 +10,7 @@ add_library(vsr_scivis_studio_protocol OBJECT
   ProjectRequests.cpp
   ProjectSnapshot.cpp
   SceneEditMessages.cpp
-  SceneMessages.cpp
   SessionMessages.cpp
-  StudioEndpoint.cpp
   StudioProtocol.cpp
   ViewportMessages.cpp
 )
