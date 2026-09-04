@@ -9,6 +9,7 @@
 #include "ProjectAssetTransaction.h"
 #include "ProjectPersistence.h"
 #include "ProjectSerialization.h"
+#include "ShotOps.h"
 
 #include "vsr/core/DataTree.hpp"
 #include "vsr/core/Logging.hpp"
@@ -31,22 +32,6 @@ namespace vsr::scivis_studio {
 // Subtree Archive rather than a foreign-format importer. It is recorded as the
 // dataset's provenance and routes reimport back through the subtree loader.
 static constexpr const char *SUBTREE_IMPORTER_TYPE = "VSR_SUBTREE";
-
-static vsr::scene::LayerNodeRef findDirectChild(
-    vsr::scene::LayerNodeRef parent, const std::string &name)
-{
-  if (!parent)
-    return {};
-
-  auto child = parent->next();
-  while (child && child != parent) {
-    if ((*child)->name() == name)
-      return child;
-    child = child->sibling();
-  }
-
-  return {};
-}
 
 static bool hasChildNodes(vsr::scene::LayerNodeRef parent)
 {
@@ -376,17 +361,7 @@ vsr::scene::LayerNodeRef ProjectContext::resolveLightRigRoot(LightRig &rig)
 
 vsr::scene::Object *ProjectContext::resolveShotCamera(Shot &shot)
 {
-  if (!m_ctx)
-    return nullptr;
-
-  const auto cameraName = shot.id + "_camera";
-  const auto &cameras = m_ctx->vsr.scene.objectDB().camera;
-  vsr::core::foreach_item_const(cameras, [&](const vsr::scene::Camera *camera) {
-    if (camera && camera->name() == cameraName)
-      shot.camera = {ANARI_CAMERA, camera->index()};
-  });
-
-  return resolve(shot.camera);
+  return m_ctx ? shot::resolveShotCamera(m_ctx->vsr.scene, shot) : nullptr;
 }
 
 void ProjectContext::ensureRendererDefaults(Shot &shot)
@@ -870,31 +845,15 @@ bool ProjectContext::addShot(const std::string &name)
 
 bool ProjectContext::removeShot(const ShotID &id, std::string *error)
 {
-  auto itr = std::find_if(m_project.shots.begin(),
-      m_project.shots.end(),
-      [&](const Shot &shot) { return shot.id == id; });
-  if (itr == m_project.shots.end())
-    return fail("shot not found", error);
-  if (m_project.shots.size() == 1)
-    return fail("cannot remove the last shot", error);
-
-  if (m_ctx) {
-    auto &scene = m_ctx->vsr.scene;
-    if (auto *camera = resolveShotCamera(*itr))
-      scene.removeObject(camera);
-    if (auto *layer = scene.layer("studio")) {
-      auto shotsRoot = findDirectChild(layer->root(), "shots");
-      if (auto shotNode = findDirectChild(shotsRoot, id))
-        scene.removeNode(shotNode, true);
-    }
-  }
-
-  const bool wasActive = m_project.activeShotId == id;
-  m_project.shots.erase(itr);
-  if (wasActive)
-    m_project.activeShotId = m_project.shots.front().id;
+  bool activeChanged = false;
+  if (!shot::removeShot(m_project,
+          m_ctx ? &m_ctx->vsr.scene : nullptr,
+          id,
+          activeChanged,
+          error))
+    return false;
   m_project.markDirty();
-  if (wasActive) {
+  if (activeChanged) {
     syncAnimationManagerToActiveShot();
     applyActiveShot();
   }
@@ -903,47 +862,11 @@ bool ProjectContext::removeShot(const ShotID &id, std::string *error)
 
 bool ProjectContext::updateShot(const Shot &incoming, std::string *error)
 {
-  auto *existing = project::findShot(m_project, incoming.id);
-  if (!existing)
-    return fail("shot not found", error);
-  if (!incoming.lightRigId.empty()
-      && !light_rig::findLightRig(m_project, incoming.lightRigId))
-    return fail("light rig not found", error);
-  if (!incoming.cameraRigId.empty()
-      && !camera_rig::findCameraRig(m_project, incoming.cameraRigId))
-    return fail("camera rig not found", error);
-
-  const auto &settings = incoming.renderSettings;
-  if (m_ctx && settings.rendererObjectIndex != VSR_INVALID_INDEX) {
-    auto renderer = m_ctx->vsr.scene.getObject<vsr::scene::Renderer>(
-        settings.rendererObjectIndex);
-    if (!renderer || renderer->rendererDeviceName() != settings.rendererLibrary)
-      return fail("renderer " + std::to_string(settings.rendererObjectIndex)
-              + " does not belong to ANARI library '" + settings.rendererLibrary
-              + "'",
-          error);
-  }
-
-  Shot shot = incoming;
-  shot.camera = existing->camera;
-  shot.playing = existing->playing;
-  // Time in Motion is the manager's: an edit landing while the shot plays
-  // (a loop or fps change from a transport) must not seek it back to the
-  // frame the editor last saw.
-  if (existing->playing)
-    shot.currentFrame = existing->currentFrame;
-  shot::clampToValidRanges(shot);
-  shot.datasetBindings.erase(std::remove_if(shot.datasetBindings.begin(),
-                                 shot.datasetBindings.end(),
-                                 [&](const DatasetBinding &binding) {
-                                   return !project::findDataset(
-                                       m_project, binding.datasetId);
-                                 }),
-      shot.datasetBindings.end());
-
-  *existing = std::move(shot);
+  if (!shot::updateShot(
+          m_project, m_ctx ? &m_ctx->vsr.scene : nullptr, incoming, error))
+    return false;
   m_project.markDirty();
-  if (existing->id == m_project.activeShotId) {
+  if (incoming.id == m_project.activeShotId) {
     syncAnimationManagerToActiveShot();
     applyActiveShot();
   }

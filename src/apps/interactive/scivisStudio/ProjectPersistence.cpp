@@ -113,20 +113,6 @@ bool copyDatasetArchiveFile(const std::filesystem::path &source,
   return true;
 }
 
-vsr::scene::LayerNodeRef findDirectChild(
-    vsr::scene::LayerNodeRef parent, const std::string &name)
-{
-  if (!parent)
-    return {};
-  auto child = parent->next();
-  while (child && child != parent) {
-    if ((*child)->name() == name)
-      return child;
-    child = child->sibling();
-  }
-  return {};
-}
-
 vsr::scene::LayerNodeRef resolveNode(
     const vsr::scene::Scene &scene, const SceneNodeRef &ref)
 {
@@ -238,6 +224,20 @@ void addRemoval(ProjectSavePlan &plan, const std::filesystem::path &path)
 }
 
 } // namespace
+
+vsr::scene::LayerNodeRef findDirectChild(
+    vsr::scene::LayerNodeRef parent, const std::string &name)
+{
+  if (!parent)
+    return {};
+  auto child = parent->next();
+  while (child && child != parent) {
+    if ((*child)->name() == name)
+      return child;
+    child = child->sibling();
+  }
+  return {};
+}
 
 ProjectSaveRequest::ProjectSaveRequest(const Project &project,
     const vsr::scene::Scene &scene,

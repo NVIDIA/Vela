@@ -948,6 +948,42 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
     (the render server, MPI server and remote viewer keep their `short` and
     convert implicitly).
 
+- **The monolith goes through the Shot ops; color maps and the shot record
+  leave ProjectContext.** `ProjectContext` had gained `removeShot`,
+  `updateShot`, `setActiveShot`, `setPlaying` and `setActiveShotFrame` as
+  validated whole operations for the server while the monolith's editors kept
+  mutating the stored `Shot` inline with their own clamps (seven
+  `std::max`/`std::clamp` sites in `ShotEditor`, inline writes in
+  `Application`, `CameraRigEditor`, `LightRigEditor` and `ProjectWindow`, and
+  `syncAnimationManagerToActiveShot` spelling the clamps a third time). The
+  monolith now calls the ops: `ShotEditor` edits a per-frame copy of the
+  active shot and lands it with one `updateShot()`, Play/Stop is
+  `setPlaying()`, the frame input and the keyframe jumps are
+  `setActiveShotFrame()`, shot selection is `setActiveShot()`, the rig
+  editors' "Use for Active Shot" is `updateShot()`, and the per-tick
+  `shot->playing = animMgr.isPlaying()` is gone because the manager's
+  callbacks (and `setPlaying` for `stop()`, which fires none) already write
+  it. Visible differences, all intended: scrubbing the frame no longer
+  dirties the project (transient state, as the ops document), selecting a
+  shot does (`activeShot` is persisted), and an edit to a shot naming a rig
+  the project lacks is refused until the selector picks an existing one.
+  `ProjectContext.cpp` then shed two blocks into the model library in the
+  `project::`/`shot::` free-function style: `ColorMaps.{h,cpp}`
+  (`color_map::createColorMap`, `removeColorMap`, `resolveColorMapArray`,
+  `ensureColorMapArrays`: the record-array pairing and the `"<id>_colormap"`
+  name) and `ShotOps.{h,cpp}` (`shot::removeShot`, `updateShot`,
+  `resolveShotCamera`: the validation and the record). `ProjectContext`
+  keeps forwarders that add the dirty mark, the null-context guard and the
+  animation re-sync; the dispatcher and the tests call the forwarders as
+  before. The three identical `findDirectChild` copies (ProjectContext,
+  ProjectPersistence, ProjectOpenPersistence, plus a fourth in
+  `test_SciVisStudio.cpp`) became one, declared in `ProjectPersistence.h`.
+  Two `[SciVisStudio]` scenarios cover the free functions directly.
+  `ProjectContext.cpp`: 2088 -> 1963 lines, still above `main`'s 1855, the
+  document's target; what remains of the growth is the three playback ops,
+  the forwarders themselves, the `openStagedProject` split and the
+  dataset-candidate path, none of which the document names.
+
 ### Spec conformance
 
 Every bullet of the spec sections named below, against the tree at
