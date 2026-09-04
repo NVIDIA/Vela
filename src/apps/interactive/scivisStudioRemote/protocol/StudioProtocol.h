@@ -14,11 +14,11 @@ namespace vsr::scivis_studio::protocol {
 // Where a Studio server listens: the port both executables assume when
 // --port is not given, and the one parser both use to read it, so the client
 // and the server accept exactly the same spellings.
-constexpr int DEFAULT_PORT = 12345;
+constexpr uint16_t DEFAULT_PORT = 12345;
 
 // Accepts a decimal integer in 1..65535 and nothing else (no sign, no
 // whitespace, no trailing characters). False leaves `port` untouched.
-bool parsePort(const std::string &text, int &port);
+bool parsePort(const std::string &text, uint16_t &port);
 
 // 1: milestones 1-6. 2: TaskFailed carries framesCompleted (milestone 7).
 // 3: Disconnect carries a reason and is the server's farewell too.

@@ -17,6 +17,7 @@
 // vsr_core
 #include "vsr/core/FlatMap.hpp"
 // std
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -36,7 +37,7 @@ struct AddFileAnimationDatasetDialog;
 struct ClientCommandLine
 {
   std::string host{"127.0.0.1"};
-  int port{protocol::DEFAULT_PORT}; // 1..65535, as parsePort() accepts
+  uint16_t port{protocol::DEFAULT_PORT}; // 1..65535, as parsePort() accepts
   bool connectAtStartup{false};
 };
 
@@ -141,7 +142,7 @@ class Application : public vsr::ui::imgui::Application
   // Menu state //
 
   std::string m_host;
-  int m_port{0};
+  int m_port{0}; // the connect menu's InputInt edits it; 0..65535
   protocol::FrameEncoding m_preferredEncoding{protocol::FrameEncoding::Raw};
 
   // True while Lost: the panels show the frozen mirror but must not edit it.

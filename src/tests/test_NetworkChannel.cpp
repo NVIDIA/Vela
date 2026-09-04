@@ -182,7 +182,7 @@ SCENARIO(
   GIVEN("a client and no server listening")
   {
     // Bind and drop an ephemeral port so nothing is listening on it.
-    unsigned short port = 0;
+    uint16_t port = 0;
     {
       NetworkServer probe(0);
       port = probe.port();

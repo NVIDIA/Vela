@@ -36,7 +36,7 @@
  *   FakeStudioServer server;
  *   server.bootstrap = makeFakeBootstrap(source);
  *   server.onRequest = [&](const Message &msg) { ... server.send(reply); };
- *   connection.connect("127.0.0.1", short(server.port()));
+ *   connection.connect("127.0.0.1", server.port());
  */
 
 inline constexpr const char *FAKE_LAYER_NAME = "extra";
@@ -86,10 +86,10 @@ struct FakeStudioServer
   // away binds that server's port so the client's retry finds it.
   FakeStudioServer(
       int helloVersion = vsr::scivis_studio::protocol::PROTOCOL_VERSION,
-      int port = 0);
+      uint16_t port = 0);
   ~FakeStudioServer();
 
-  unsigned short port() const;
+  uint16_t port() const;
   size_t count(StudioMessageType type);
   std::vector<Message> messagesOf(StudioMessageType type);
 
@@ -116,7 +116,7 @@ struct FakeStudioServer
 
 // Inlined definitions ////////////////////////////////////////////////////////
 
-inline FakeStudioServer::FakeStudioServer(int helloVersion, int port)
+inline FakeStudioServer::FakeStudioServer(int helloVersion, uint16_t port)
     : helloVersion(helloVersion)
 {
   using namespace vsr::scivis_studio::protocol;
@@ -143,7 +143,7 @@ inline FakeStudioServer::~FakeStudioServer()
   channel->stop();
 }
 
-inline unsigned short FakeStudioServer::port() const
+inline uint16_t FakeStudioServer::port() const
 {
   return channel->port();
 }

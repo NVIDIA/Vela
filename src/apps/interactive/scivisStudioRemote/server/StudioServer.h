@@ -138,7 +138,7 @@ struct StudioServer
   // Queries (any thread) //
 
   // The port actually bound; meaningful after start().
-  unsigned short port() const;
+  uint16_t port() const;
   SessionState sessionState() const;
   // The ANARI library actually rendering, after any fallback.
   const std::string &libraryName() const;

@@ -6,6 +6,7 @@
 // vsr_scivis_studio_protocol
 #include "StudioProtocol.h"
 // std
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -33,7 +34,7 @@ namespace vsr::scivis_studio::server {
 struct ServerOptions
 {
   // 0 asks the OS for a free port (tests); the parser only accepts 1..65535.
-  int port{protocol::DEFAULT_PORT};
+  uint16_t port{protocol::DEFAULT_PORT};
   // ANARI library to render with; empty means the first entry of the
   // ANARIDeviceManager library list, exactly what the monolith's viewport
   // starts with.

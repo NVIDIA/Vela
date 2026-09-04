@@ -7,7 +7,7 @@
 
 namespace vsr::scivis_studio::protocol {
 
-bool parsePort(const std::string &text, int &port)
+bool parsePort(const std::string &text, uint16_t &port)
 {
   int value = 0;
   const auto *begin = text.data();
@@ -17,7 +17,7 @@ bool parsePort(const std::string &text, int &port)
     return false;
   if (value < 1 || value > 65535)
     return false;
-  port = value;
+  port = uint16_t(value);
   return true;
 }
 

@@ -1027,7 +1027,7 @@ CommandRunner::Failure CommandRunner::connect(
     return "already connected to " + m_session->host() + ":"
         + std::to_string(m_session->port());
   std::string host = m_options.host;
-  int port = m_options.port;
+  uint16_t port = m_options.port;
   if (!command.args.empty())
     host = command.args[0];
   if (command.args.size() > 1 && !parsePort(command.args[1], port))

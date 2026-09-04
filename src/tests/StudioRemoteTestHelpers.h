@@ -81,12 +81,12 @@ inline vsr::scivis_studio::client::ConnectionTimings fastTimings(
 // touch it, so a test can seed objects the bootstrap will then mirror.
 struct RunningServer
 {
-  explicit RunningServer(
-      int port, const std::function<void(vsr::scene::Scene &)> &beforeRun = {});
+  explicit RunningServer(uint16_t port,
+      const std::function<void(vsr::scene::Scene &)> &beforeRun = {});
   ~RunningServer();
 
   void stop();
-  unsigned short port() const;
+  uint16_t port() const;
   vsr::scene::Scene &scene();
   const vsr::scivis_studio::Project &project();
 
@@ -99,7 +99,7 @@ struct RunningServer
 };
 
 inline RunningServer::RunningServer(
-    int port, const std::function<void(vsr::scene::Scene &)> &beforeRun)
+    uint16_t port, const std::function<void(vsr::scene::Scene &)> &beforeRun)
 {
   vsr::scivis_studio::server::ServerOptions options;
   options.port = port;
@@ -138,7 +138,7 @@ inline void RunningServer::stop()
   thread.join();
 }
 
-inline unsigned short RunningServer::port() const
+inline uint16_t RunningServer::port() const
 {
   return server->port();
 }

@@ -110,7 +110,7 @@ struct ServerConnection
   // One line for the banner: "reconnecting...", the last error, and so on.
   const std::string &statusText() const;
   const std::string &host() const;
-  short port() const;
+  uint16_t port() const;
   bool bootstrapping() const;
   // BootstrapEnd seen on the current connection: mirror and replica are the
   // server's. False between a reconnect's Hello and its BootstrapBegin, when
@@ -149,7 +149,7 @@ struct ServerConnection
   // means Connected once the server's Hello is answered; the bootstrap then
   // follows. A failed first attempt leaves the state alone and reports in
   // statusText(); only Lost auto-retries.
-  void connect(const std::string &host, short port);
+  void connect(const std::string &host, uint16_t port);
   // Sends Disconnect, closes, clears mirror and replica -> Disconnected.
   void disconnect();
   // Manual retry while Lost, also after auto-retry gave up.
@@ -248,7 +248,7 @@ struct ServerConnection
   std::shared_ptr<vsr::network::NetworkClient> m_channel;
 
   std::string m_host;
-  short m_port{0};
+  uint16_t m_port{0};
   ConnectionState m_state{ConnectionState::NeverConnected};
   Phase m_phase{Phase::Idle};
   std::string m_status;

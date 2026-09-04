@@ -44,7 +44,7 @@ constexpr const char *BUILD_INFO = "scivisStudioTestClient";
 // What a BootstrapBegin says of the tasks the previous session left running.
 constexpr const char *CONNECTION_LOST = "connection lost";
 
-std::string endpointText(const std::string &host, int port)
+std::string endpointText(const std::string &host, uint16_t port)
 {
   return host + ":" + std::to_string(port);
 }
@@ -187,7 +187,7 @@ const std::string &TestSession::host() const
   return m_host;
 }
 
-int TestSession::port() const
+uint16_t TestSession::port() const
 {
   return m_port;
 }
@@ -329,7 +329,7 @@ const SubtreePtr &TestSession::uiState() const
 // Session ////////////////////////////////////////////////////////////////////
 
 bool TestSession::connect(const std::string &host,
-    int port,
+    uint16_t port,
     std::chrono::milliseconds deadline,
     std::string *error)
 {
@@ -678,7 +678,7 @@ void TestSession::beginAttempt()
   // Armed before the socket exists: resolution and connect run on the IO
   // thread and report through the disconnect handler either way.
   m_ioDisconnected.store(false);
-  m_channel->connect(m_host, short(m_port));
+  m_channel->connect(m_host, m_port);
 }
 
 void TestSession::closeChannel()

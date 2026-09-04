@@ -140,7 +140,7 @@ struct ScriptedServer
   explicit ScriptedServer(Behaviour behaviour);
   ~ScriptedServer();
 
-  unsigned short port() const;
+  uint16_t port() const;
 
   std::shared_ptr<vsr::network::NetworkServer> channel;
   std::atomic<size_t> pingsReceived{0};
@@ -211,7 +211,7 @@ ScriptedServer::~ScriptedServer()
   channel->stop();
 }
 
-unsigned short ScriptedServer::port() const
+uint16_t ScriptedServer::port() const
 {
   return channel->port();
 }
@@ -253,7 +253,7 @@ struct ProjectOpsServer
   ProjectOpsServer();
   ~ProjectOpsServer();
 
-  unsigned short port() const;
+  uint16_t port() const;
   // Every request of type T received so far, decoded, in arrival order.
   template <typename T>
   std::vector<T> requests();
@@ -342,7 +342,7 @@ ProjectOpsServer::~ProjectOpsServer()
   channel->stop();
 }
 
-unsigned short ProjectOpsServer::port() const
+uint16_t ProjectOpsServer::port() const
 {
   return channel->port();
 }
@@ -2356,7 +2356,7 @@ SCENARIO(
           // The server comes back while reconnect is already being refused.
           std::thread restarter([&] {
             std::this_thread::sleep_for(500ms);
-            server = std::make_unique<RunningServer>(int(port));
+            server = std::make_unique<RunningServer>(port);
           });
           const auto back = runScript(session,
               "reconnect timeout=20000\n"

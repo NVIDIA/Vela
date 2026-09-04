@@ -183,7 +183,7 @@ struct TestSession
 
   SessionState state() const;
   const std::string &host() const;
-  int port() const;
+  uint16_t port() const;
   // The Structural Mirror; edits made through setParameter() and friends
   // land here as well as on the wire.
   vsr::scene::Scene &mirror();
@@ -255,7 +255,7 @@ struct TestSession
   // the state is then left as it was, and another connect() may follow at
   // once. Called on an open link it disconnect()s first.
   bool connect(const std::string &host,
-      int port,
+      uint16_t port,
       std::chrono::milliseconds deadline,
       std::string *error = nullptr);
   // connect() again to the last host and port, retrying refused attempts
@@ -365,7 +365,7 @@ struct TestSession
   std::unique_ptr<Project> m_project;
 
   std::string m_host;
-  int m_port{0};
+  uint16_t m_port{0};
   SessionState m_state{SessionState::NeverConnected};
   Phase m_phase{Phase::Idle};
   std::string m_failure; // why the last attempt failed or the link was lost

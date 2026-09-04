@@ -7,6 +7,7 @@
 // std
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <deque>
 #include <future>
 #include <memory>
@@ -164,11 +165,11 @@ struct NetworkServer : public NetworkChannel
 {
   using ReplaceHandler = std::function<void()>;
 
-  NetworkServer(short port);
+  NetworkServer(uint16_t port);
   ~NetworkServer() override = default;
 
   // The port actually bound; differs from the constructor argument for 0.
-  unsigned short port() const;
+  uint16_t port() const;
 
   // Runs on the IO thread when a new connection is about to replace a live
   // one, before the old socket closes; a farewell to the client being
@@ -223,10 +224,10 @@ struct NetworkServer : public NetworkChannel
 struct NetworkClient : public NetworkChannel
 {
   NetworkClient() = default;
-  NetworkClient(const std::string &host, short port);
+  NetworkClient(const std::string &host, uint16_t port);
   ~NetworkClient() override = default;
 
-  void connect(const std::string &host, short port);
+  void connect(const std::string &host, uint16_t port);
   void disconnect();
 
  private:

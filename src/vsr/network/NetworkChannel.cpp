@@ -403,14 +403,14 @@ void NetworkChannel::close_socket(const boost::system::error_code &reason)
 
 // NetworkServer definitions //////////////////////////////////////////////////
 
-NetworkServer::NetworkServer(short port)
+NetworkServer::NetworkServer(uint16_t port)
     : m_acceptor(m_io_context, tcp::endpoint(tcp::v4(), port)),
       m_replaceTimer(m_io_context)
 {
   start_accept();
 }
 
-unsigned short NetworkServer::port() const
+uint16_t NetworkServer::port() const
 {
   return m_acceptor.local_endpoint().port();
 }
@@ -511,12 +511,12 @@ void NetworkServer::replace_when_drained(
 
 // NetworkClient definitions //////////////////////////////////////////////////
 
-NetworkClient::NetworkClient(const std::string &host, short port)
+NetworkClient::NetworkClient(const std::string &host, uint16_t port)
 {
   connect(host, port);
 }
 
-void NetworkClient::connect(const std::string &host, short port)
+void NetworkClient::connect(const std::string &host, uint16_t port)
 {
   // start_messaging() tears down any previous connection first (reporting it
   // through the disconnect handler if it was still open), so a connect after
@@ -526,10 +526,7 @@ void NetworkClient::connect(const std::string &host, short port)
   const auto generation = ++m_connectGeneration;
   m_disconnectReported.store(false);
 
-  // The port travels as `short` for API symmetry with NetworkServer, whose
-  // tcp::endpoint converts it to unsigned; the resolver needs the same
-  // unsigned spelling or ports above 32767 come out negative.
-  const auto service = std::to_string(static_cast<unsigned short>(port));
+  const auto service = std::to_string(port);
 
   // Resolution can take as long as a DNS round trip, so it runs on the IO
   // thread like the connect itself; the caller never waits on the network.

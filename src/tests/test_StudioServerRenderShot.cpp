@@ -75,7 +75,7 @@ RenderFixture::~RenderFixture()
 }
 
 // Connects `client` and runs its Hello/bootstrap handshake.
-void bootstrapClient(TestClient &client, unsigned short port)
+void bootstrapClient(TestClient &client, uint16_t port)
 {
   client.connect(port);
   REQUIRE(client.waitForCount(StudioMessageType::Hello, 1));
