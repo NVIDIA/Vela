@@ -49,6 +49,12 @@ AnariSceneRenderPass::AnariSceneRenderPass(anari::Device d) : m_device(d)
   anari::setParameter(d, m_frame, "channel.color", ANARI_UFIXED8_RGBA_SRGB);
   anari::setParameter(d, m_frame, "channel.depth", ANARI_FLOAT32);
   anari::setParameter(d, m_frame, "accumulation", true);
+  // Placeholder size so every intermediate commit/flush finalizes validly
+  // (devices warn/skip on sizeless frames, e.g. helide "invalid frame
+  // dimensions"). Tiny but non-degenerate, so a warm-up render at this size
+  // still exercises the device's full render path. Overwritten by the first
+  // updateSize().
+  anari::setParameter(d, m_frame, "size", vsr::math::uint2(64, 64));
 
   m_deviceSupportsCUDAFrames = supportsCUDAFbData(d);
 
