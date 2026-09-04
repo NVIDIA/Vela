@@ -28,6 +28,7 @@ struct AnariSceneRenderPass : public ImagePass
   void setRenderer(anari::Renderer r);
   void setWorld(anari::World w);
   void setColorFormat(anari::DataType t);
+  void setEnableDepth(bool on);
   void setEnableIDs(bool on);
   void setEnablePrimitiveId(bool on);
   void setEnableInstanceId(bool on);
@@ -53,9 +54,14 @@ struct AnariSceneRenderPass : public ImagePass
   void cleanup();
 
   ImageBuffers m_buffers;
+  bool m_depthIsInf{false}; // 'b.depth' has been inf-filled (no depth produced)
 
   bool m_firstFrame{true};
+  // Channels were toggled since the last render: restart the frame once at
+  // the next render() instead of once per toggle.
+  bool m_pendingRestart{false};
   bool m_deviceSupportsCUDAFrames{false};
+  bool m_enableDepth{true};
   bool m_enableIDs{false};
   bool m_enablePrimitiveId{false};
   bool m_enableInstanceId{false};

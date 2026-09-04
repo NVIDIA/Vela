@@ -687,6 +687,8 @@ void Viewport::pick(vsr::math::int2 l, bool selectObject)
   m_pickCoord = l;
   m_pickPass->setEnabled(true);
   m_anariPass->setEnableIDs(true);
+  // The pick operation reads 'b.depth' at the pick location.
+  m_anariPass->setEnableDepth(true);
 
   // Render synchronous frame to ensure pick pass has available AOVs available
   m_anariPass->setRunAsync(false);
@@ -762,6 +764,7 @@ void Viewport::updateImage()
   m_outlinePass->setOutlineId(id);
 
   updateBoundsOutlinePass();
+  syncDepthChannelEnabled();
 
   auto start = std::chrono::steady_clock::now();
   BaseViewport::imagePipeline_render();
@@ -829,6 +832,8 @@ void Viewport::syncImagePassState()
   if (!m_anariPass)
     return;
 
+  syncDepthChannelEnabled();
+
   m_anariPass->setColorFormat(m_colorFormat);
 
   if (m_visualizeAOVPass) {
@@ -862,6 +867,24 @@ void Viewport::syncImagePassState()
     m_primitiveOutlinePass->setEnabled(doPrimitiveOutline);
 
   updateDisplayPassState();
+}
+
+void Viewport::syncDepthChannelEnabled()
+{
+  if (!m_anariPass)
+    return;
+
+  // Depth is expensive to produce and map (an extra ray channel plus a
+  // device->host copy of a full-screen float buffer per frame), so request
+  // it only while a consumer is active. pick() enables it on demand for the
+  // pick render; everything else is a viewport state that can be checked
+  // here.
+  const bool boundsOutlineActive =
+      m_boundsOutlinePass && m_boundsOutlinePass->isEnabled();
+  const bool needDepth =
+      m_visualizeAOV == vsr::rendering::AOVType::DEPTH || boundsOutlineActive;
+
+  m_anariPass->setEnableDepth(needDepth);
 }
 
 void Viewport::updateDisplayPassState()
