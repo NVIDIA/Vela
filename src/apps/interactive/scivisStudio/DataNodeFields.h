@@ -3,12 +3,13 @@
 
 #pragma once
 
+// vsr_scivis_studio_model
 #include "Dataset.h"
-
+// vsr_core
 #include "vsr/core/DataTree.hpp"
-
+// anari
 #include <anari/anari_cpp.hpp>
-
+// std
 #include <cstdint>
 #include <optional>
 #include <string>

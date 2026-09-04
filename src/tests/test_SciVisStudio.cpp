@@ -849,6 +849,18 @@ SCENARIO(
       REQUIRE(dump == MANIFEST_GOLDEN);
     }
 
+    THEN("Saving and reloading preserves the dump")
+    {
+      const auto file = std::filesystem::temp_directory_path()
+          / "vsr_scivis_studio_golden_manifest.vsr";
+      std::filesystem::remove(file);
+      REQUIRE(tree.save(file.string().c_str()));
+      vsr::core::DataTree loaded;
+      REQUIRE(loaded.load(file.string().c_str()));
+      std::filesystem::remove(file);
+      REQUIRE(canonicalDump(loaded.root()["scivisStudio"]) == MANIFEST_GOLDEN);
+    }
+
     THEN("Reading it back leaves the runtime fields at the open defaults")
     {
       Project loaded;

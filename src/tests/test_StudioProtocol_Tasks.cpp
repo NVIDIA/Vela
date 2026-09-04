@@ -495,26 +495,25 @@ SCENARIO("ProjectSnapshot payload", "[StudioProtocol]")
 
     THEN("a corrupt camera rig is rejected")
     {
-      vsr::core::DataTree mistyped;
-      toNode(ProjectSnapshot{makeSnapshotProject()}, mistyped.root());
-      auto &rig = (*mistyped.root()["project"]["cameraRigs"].child(0))["rig"];
-      (*rig["keyframes"].child(0))["frame"] = std::string("twelve");
-      ProjectSnapshot out;
-      REQUIRE_FALSE(fromNode(mistyped.root(), out));
-
-      vsr::core::DataTree unknownEasing;
-      toNode(ProjectSnapshot{makeSnapshotProject()}, unknownEasing.root());
-      auto &rig2 =
-          (*unknownEasing.root()["project"]["cameraRigs"].child(0))["rig"];
-      (*rig2["keyframes"].child(1))["interpolationToNext"] =
-          std::string("Bounce");
-      REQUIRE_FALSE(fromNode(unknownEasing.root(), out));
-
-      vsr::core::DataTree badPose;
-      toNode(ProjectSnapshot{makeSnapshotProject()}, badPose.root());
-      auto &rig3 = (*badPose.root()["project"]["cameraRigs"].child(0))["rig"];
-      rig3["current"]["orbit"]["lookat"] = std::string("origin");
-      REQUIRE_FALSE(fromNode(badPose.root(), out));
+      // Encodes the fixture, lets `corrupt` edit the first rig's value data,
+      // and reports whether the result still decodes.
+      auto decodesAfter = [](auto &&corrupt) {
+        vsr::core::DataTree tree;
+        toNode(ProjectSnapshot{makeSnapshotProject()}, tree.root());
+        corrupt((*tree.root()["project"]["cameraRigs"].child(0))["rig"]);
+        ProjectSnapshot out;
+        return fromNode(tree.root(), out);
+      };
+      REQUIRE_FALSE(decodesAfter([](vsr::core::DataNode &rig) {
+        (*rig["keyframes"].child(0))["frame"] = std::string("twelve");
+      }));
+      REQUIRE_FALSE(decodesAfter([](vsr::core::DataNode &rig) {
+        (*rig["keyframes"].child(1))["interpolationToNext"] =
+            std::string("Bounce");
+      }));
+      REQUIRE_FALSE(decodesAfter([](vsr::core::DataNode &rig) {
+        rig["current"]["orbit"]["lookat"] = std::string("origin");
+      }));
     }
 
     THEN("a mistyped shot camera is rejected")
