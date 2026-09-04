@@ -226,6 +226,40 @@ const Project &ProjectContext::project() const
   return m_project;
 }
 
+uint64_t ProjectContext::revision() const
+{
+  return m_revision;
+}
+
+uint64_t ProjectContext::activeShotRevision() const
+{
+  return m_activeShotRevision;
+}
+
+void ProjectContext::markRevised()
+{
+  ++m_revision;
+}
+
+void ProjectContext::markProjectDirty()
+{
+  m_project.markDirty();
+  markRevised();
+}
+
+void ProjectContext::markActiveShotRevised()
+{
+  ++m_activeShotRevision;
+}
+
+void ProjectContext::markDatasetUnavailable(Dataset &dataset)
+{
+  if (dataset.status == DatasetStatus::Unavailable)
+    return;
+  dataset.status = DatasetStatus::Unavailable;
+  markRevised();
+}
+
 void ProjectContext::resetScene()
 {
   if (!m_ctx)
@@ -266,7 +300,7 @@ void ProjectContext::markDatasetDirtyForObject(const vsr::scene::Object *object)
     if (!root || !datasetRuntimeContainsObject(m_ctx->vsr.scene, root, object))
       continue;
     dataset.dirty = true;
-    m_project.markDirty();
+    m_project.markDirty(); // no revision: a scene edit, not a whole op
   }
 }
 
@@ -395,7 +429,7 @@ LightRig *ProjectContext::createLightRig(const std::string &name)
   auto rigRoot = ensureChild(ensureLightRigsRoot(), rig.id.c_str());
   rig.rootNode = refFor("studio", rigRoot);
   m_project.lightRigs.push_back(std::move(rig));
-  m_project.markDirty();
+  markProjectDirty();
   return &m_project.lightRigs.back();
 }
 
@@ -429,7 +463,7 @@ LightRig *ProjectContext::cloneLightRig(const LightRigID &id)
 
   clone.rootNode = refFor("studio", cloneRoot);
   m_project.lightRigs.push_back(std::move(clone));
-  m_project.markDirty();
+  markProjectDirty();
   applyActiveShot();
   return &m_project.lightRigs.back();
 }
@@ -447,7 +481,7 @@ CameraRig *ProjectContext::createCameraRig(const std::string &name)
         camera_rig::manipulatorStateFromManipulator(m_ctx->view.manipulator);
 
   m_project.cameraRigs.push_back(std::move(rig));
-  m_project.markDirty();
+  markProjectDirty();
   return &m_project.cameraRigs.back();
 }
 
@@ -473,7 +507,7 @@ vsr::scene::LayerNodeRef ProjectContext::addLightToRig(
 
   auto node =
       m_ctx->vsr.scene.insertChildObjectNode(rigRoot, light, lightName.c_str());
-  m_project.markDirty();
+  markProjectDirty();
   applyActiveShot();
   return node;
 }
@@ -494,7 +528,7 @@ bool ProjectContext::removeLightFromRig(
     return false;
 
   m_ctx->vsr.scene.removeNode(lightNode, true);
-  m_project.markDirty();
+  markProjectDirty();
   applyActiveShot();
   return true;
 }
@@ -533,7 +567,7 @@ ColorMapRecord *ProjectContext::createColorMap(const std::string &name)
           : name);
   auto &record =
       color_map::createColorMap(m_project, m_ctx->vsr.scene, uniqueName);
-  m_project.markDirty();
+  markProjectDirty();
   return &record;
 }
 
@@ -542,7 +576,7 @@ bool ProjectContext::renameColorMap(
 {
   if (!renameAssetImpl(m_project.colorMaps, id, newName, "color map", error))
     return false;
-  m_project.markDirty();
+  markProjectDirty();
   return true;
 }
 
@@ -552,7 +586,7 @@ bool ProjectContext::removeColorMap(const ColorMapID &id, std::string *error)
     return fail("missing VSR application context", error);
   if (!color_map::removeColorMap(m_project, m_ctx->vsr.scene, id, error))
     return false;
-  m_project.markDirty();
+  markProjectDirty();
   return true;
 }
 
@@ -589,7 +623,7 @@ CameraRig *ProjectContext::loadCameraRigArchive(
   rig.name = makeValidUniqueAssetName(m_project.cameraRigs,
       loadedName.empty() ? "Loaded Camera Rig" : loadedName);
   m_project.cameraRigs.push_back(std::move(rig));
-  m_project.markDirty();
+  markProjectDirty();
   return &m_project.cameraRigs.back();
 }
 
@@ -655,7 +689,7 @@ LightRig *ProjectContext::loadLightRigArchive(
       m_project.lightRigs, name.empty() ? "Loaded Light Rig" : name);
   rig.rootNode = refFor("studio", splicedRoot);
   m_project.lightRigs.push_back(std::move(rig));
-  m_project.markDirty();
+  markProjectDirty();
   applyActiveShot(); // A loaded rig is unbound, so it starts hidden.
   return &m_project.lightRigs.back();
 }
@@ -686,7 +720,7 @@ bool ProjectContext::removeLightRig(const LightRigID &id)
   }
 
   m_project.lightRigs.erase(itr);
-  m_project.markDirty();
+  markProjectDirty();
   applyActiveShot();
   return true;
 }
@@ -710,7 +744,7 @@ bool ProjectContext::removeCameraRig(const CameraRigID &id)
   }
 
   m_project.cameraRigs.erase(itr);
-  m_project.markDirty();
+  markProjectDirty();
   applyActiveShot();
   return true;
 }
@@ -720,7 +754,7 @@ bool ProjectContext::renameLightRig(
 {
   if (!renameAssetImpl(m_project.lightRigs, id, newName, "light rig", error))
     return false;
-  m_project.markDirty();
+  markProjectDirty();
   return true;
 }
 
@@ -729,7 +763,7 @@ bool ProjectContext::renameCameraRig(
 {
   if (!renameAssetImpl(m_project.cameraRigs, id, newName, "camera rig", error))
     return false;
-  m_project.markDirty();
+  markProjectDirty();
   return true;
 }
 
@@ -801,6 +835,8 @@ void ProjectContext::createUnsavedProject()
   m_project.shots.push_back(std::move(shot));
   m_project.activeShotId = m_project.shots.front().id;
   m_project.markClean();
+  markRevised();
+  markActiveShotRevised();
   syncAnimationManagerToActiveShot();
   applyActiveShot();
 }
@@ -837,7 +873,8 @@ bool ProjectContext::addShot(const std::string &name)
 
   m_project.activeShotId = shot.id;
   m_project.shots.push_back(std::move(shot));
-  m_project.markDirty();
+  markProjectDirty();
+  markActiveShotRevised();
   syncAnimationManagerToActiveShot();
   applyActiveShot();
   return true;
@@ -852,8 +889,9 @@ bool ProjectContext::removeShot(const ShotID &id, std::string *error)
           activeChanged,
           error))
     return false;
-  m_project.markDirty();
+  markProjectDirty();
   if (activeChanged) {
+    markActiveShotRevised();
     syncAnimationManagerToActiveShot();
     applyActiveShot();
   }
@@ -865,8 +903,9 @@ bool ProjectContext::updateShot(const Shot &incoming, std::string *error)
   if (!shot::updateShot(
           m_project, m_ctx ? &m_ctx->vsr.scene : nullptr, incoming, error))
     return false;
-  m_project.markDirty();
+  markProjectDirty();
   if (incoming.id == m_project.activeShotId) {
+    markActiveShotRevised();
     syncAnimationManagerToActiveShot();
     applyActiveShot();
   }
@@ -880,7 +919,8 @@ bool ProjectContext::setActiveShot(const ShotID &id, std::string *error)
 
   if (m_project.activeShotId != id) {
     m_project.activeShotId = id;
-    m_project.markDirty();
+    markProjectDirty();
+    markActiveShotRevised();
   }
   syncAnimationManagerToActiveShot();
   applyActiveShot();
@@ -904,6 +944,7 @@ bool ProjectContext::setPlaying(
       animMgr.stop();
   }
   shot->playing = playing;
+  markRevised();
   return true;
 }
 
@@ -998,7 +1039,7 @@ Dataset *ProjectContext::addStaticDataset(const std::string &name,
   }
 
   record.dirty = record.status == DatasetStatus::Available;
-  m_project.markDirty();
+  markProjectDirty();
   applyActiveShot();
   return &record;
 }
@@ -1053,7 +1094,7 @@ Dataset *ProjectContext::addStaticDatasetFromSubtree(
   }
 
   record.dirty = record.status == DatasetStatus::Available;
-  m_project.markDirty();
+  markProjectDirty();
   applyActiveShot();
   return &record;
 }
@@ -1126,7 +1167,7 @@ Dataset *ProjectContext::addFileAnimationDataset(const std::string &name,
         record.name.c_str());
   }
 
-  m_project.markDirty();
+  markProjectDirty();
   record.dirty = record.status == DatasetStatus::Available;
   applyActiveShot();
   return &record;
@@ -1200,7 +1241,7 @@ Dataset *ProjectContext::addDeclaredFileAnimationDataset(
   // the Source List length without reading a single file.
   applyFileAnimationShotSemantics(record, record.sourceFiles.size(), options);
 
-  m_project.markDirty();
+  markProjectDirty();
   applyActiveShot();
   vsr::core::logStatus(
       "[SciVisStudio] Declared file animation dataset '%s' (%zu frames)",
@@ -1222,7 +1263,7 @@ bool ProjectContext::renameDataset(
   auto *dataset = project::findDataset(m_project, id);
   dataset->dirty = dataset->status == DatasetStatus::Available
       || dataset->name != dataset->persistedName;
-  m_project.markDirty();
+  markProjectDirty();
   return true;
 }
 
@@ -1255,7 +1296,7 @@ bool ProjectContext::loadDataset(const DatasetID &id, std::string *error)
     m_mutatingDatasetRuntime = false;
     // A failed load changes nothing: the dataset stays Unloaded and is now
     // known to be Unavailable until its asset is restored.
-    dataset->status = DatasetStatus::Unavailable;
+    markDatasetUnavailable(*dataset);
     return fail(
         "failed to load dataset '" + dataset->name + "': " + loadError, error);
   }
@@ -1263,7 +1304,7 @@ bool ProjectContext::loadDataset(const DatasetID &id, std::string *error)
   if (loaded.name != dataset->name) {
     removeDatasetRuntime(m_ctx->vsr.scene, m_ctx->vsr.animationMgr, loadedRoot);
     m_mutatingDatasetRuntime = false;
-    dataset->status = DatasetStatus::Unavailable;
+    markDatasetUnavailable(*dataset);
     return fail("dataset asset name '" + loaded.name
             + "' does not match inventory name '" + dataset->name + "'",
         error);
@@ -1278,7 +1319,7 @@ bool ProjectContext::loadDataset(const DatasetID &id, std::string *error)
   (*loadedRoot)->name() = loaded.id;
   loaded.rootNode = refFor("studio", loadedRoot);
   *dataset = std::move(loaded);
-  m_project.markDirty();
+  markProjectDirty();
   syncAnimationManagerToActiveShot();
   applyActiveShot();
   return true;
@@ -1313,7 +1354,7 @@ bool ProjectContext::unloadDataset(const DatasetID &id, std::string *error)
             ec)
         && !ec;
     if (!assetExists) {
-      dataset->status = DatasetStatus::Unavailable;
+      markDatasetUnavailable(*dataset);
       return fail("dataset asset '" + dataset->persistedName
               + ".vsr' is missing on disk; unloading would discard the only "
                 "copy of the data",
@@ -1347,12 +1388,12 @@ bool ProjectContext::unloadDataset(const DatasetID &id, std::string *error)
   }
   dataset->rootNode = {};
   dataset->residency = DatasetResidency::Unloaded;
-  m_project.markDirty();
+  markProjectDirty();
   applyActiveShot();
   return true;
 }
 
-void ProjectContext::refreshUnloadedDatasetAvailability(Dataset &dataset) const
+void ProjectContext::refreshUnloadedDatasetAvailability(Dataset &dataset)
 {
   if (dataset.residency != DatasetResidency::Unloaded
       || m_project.projectDirectory.empty() || dataset.persistedName.empty())
@@ -1363,7 +1404,7 @@ void ProjectContext::refreshUnloadedDatasetAvailability(Dataset &dataset) const
           / (dataset.persistedName + ".vsr")),
       ec);
   if (!exists || ec)
-    dataset.status = DatasetStatus::Unavailable;
+    markDatasetUnavailable(dataset);
 }
 
 bool ProjectContext::removeDataset(
@@ -1404,7 +1445,7 @@ bool ProjectContext::removeDataset(
         shot.datasetBindings.end());
   }
   m_project.datasets.erase(itr);
-  m_project.markDirty();
+  markProjectDirty();
   applyActiveShot();
   return true;
 }
@@ -1520,7 +1561,7 @@ Dataset *ProjectContext::loadDatasetArchiveImpl(
   for (auto &shot : m_project.shots)
     shot::setDatasetBinding(
         shot, record.id, &shot == project::activeShot(m_project));
-  m_project.markDirty();
+  markProjectDirty();
   applyActiveShot();
   return &record;
 }
@@ -1672,7 +1713,7 @@ bool ProjectContext::reimportStaticDataset(
   (*replacementRoot)->name() = id;
   replacement.rootNode = refFor("studio", replacementRoot);
   *dataset = std::move(replacement);
-  m_project.markDirty();
+  markProjectDirty();
   applyActiveShot();
   vsr::core::logStatus(
       "[SciVisStudio] Reimported dataset '%s'", dataset->name.c_str());
@@ -1776,8 +1817,10 @@ void ProjectContext::onAnimationPlaybackStopped()
   if (!shot)
     return;
 
-  // m_playing already flipped; the manager's frame is the last one.
+  // m_playing already flipped; the manager's frame is the last one. The
+  // stop is a whole mutation (the frame rests now), unlike the ticks.
   writeAnimationStateToShot(*shot);
+  markRevised();
 }
 
 void ProjectContext::writeAnimationStateToShot(Shot &shot) const
@@ -1810,6 +1853,7 @@ bool ProjectContext::saveProject(const std::filesystem::path &directory,
 
   m_project = std::move(save.project);
   m_pendingAssetRemovals.clear();
+  markRevised(); // the dirty flags cleared, the directory may have moved
   vsr::core::logStatus(
       "[SciVisStudio] Saved project '%s'", directory.string().c_str());
   return true;
@@ -1866,6 +1910,8 @@ bool ProjectContext::openStagedProject(ProjectOpenStage &stage,
         shot.cameraRigId = m_project.cameraRigs.front().id;
     }
   }
+  markRevised();
+  markActiveShotRevised();
   syncAnimationManagerToActiveShot();
 
   // The staged tree holds only {windows, layout, settings}; node assignment
