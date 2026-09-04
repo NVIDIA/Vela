@@ -430,7 +430,8 @@ SCENARIO("ProjectOps decodes typed results for the callback", "[StudioClient]")
       expect(StudioMessageType::NewProject, ops.newProject(ignore));
       expect(StudioMessageType::OpenProject, ops.openProject("/d/p", ignoreR));
       expect(StudioMessageType::SaveProject, ops.saveProject(std::nullopt, nullptr, ignoreR));
-      expect(StudioMessageType::ImportStaticDataset, ops.importStaticDataset("n", "/d/f.obj", vsr::io::ImporterType::OBJ, false, ignoreR));
+      expect(StudioMessageType::ImportStaticDataset, ops.importStaticDataset("n", "/d/f.obj", vsr::io::ImporterType::OBJ, ignoreR));
+      expect(StudioMessageType::ImportSubtreeDataset, ops.importSubtreeDataset("n", "/d/s.vsr", ignoreR));
       expect(StudioMessageType::ImportFileAnimationDataset, ops.importFileAnimationDataset("n", frames, vsr::io::ImporterType::VOLUME_ANIMATION, true, ignoreR));
       expect(StudioMessageType::DeclareFileAnimationDataset, ops.declareFileAnimationDataset("n", list, vsr::io::ImporterType::VOLUME_ANIMATION, true, ignoreR));
       expect(StudioMessageType::ReimportDataset, ops.reimportDataset("dataset_0001", ignoreR));
@@ -479,14 +480,17 @@ SCENARIO("ProjectOps decodes typed results for the callback", "[StudioClient]")
           REQUIRE(seen[i].requestId != 0);
         }
         // Payload fields land where the wrappers put them.
-        const auto rm = decode<RemoveDataset>(seen[8].raw);
+        const auto rm = decode<RemoveDataset>(seen[9].raw);
         REQUIRE(rm);
         REQUIRE(rm->keepAssetFile);
         const auto imp = decode<ImportStaticDataset>(seen[3].raw);
         REQUIRE(imp);
         REQUIRE(imp->importerType == vsr::io::ImporterType::OBJ);
         REQUIRE(imp->sourcePath == "/d/f.obj");
-        const auto light = decode<RemoveLightFromRig>(seen[25].raw);
+        const auto subtree = decode<ImportSubtreeDataset>(seen[4].raw);
+        REQUIRE(subtree);
+        REQUIRE(subtree->sourcePath == "/d/s.vsr");
+        const auto light = decode<RemoveLightFromRig>(seen[26].raw);
         REQUIRE(light);
         REQUIRE(light->lightNode.layerName == "studio");
         REQUIRE(light->lightNode.nodeIndex == 7);
@@ -1031,7 +1035,7 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
       REQUIRE(f.ops().task(5)->generation == 0);
 
       const auto again = f.ops().importStaticDataset(
-          "n", "/d/f.obj", vsr::io::ImporterType::OBJ, false, nullptr);
+          "n", "/d/f.obj", vsr::io::ImporterType::OBJ, nullptr);
       REQUIRE(f.waitForRequests(2));
       auto restarted = makeOkReply(again.requestId);
       setResults(restarted, TaskStartedResult{5});
@@ -1100,7 +1104,7 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
       REQUIRE(f.ops().task(5)->announced);
 
       const auto again = f.ops().importStaticDataset(
-          "n", "/d/f.obj", vsr::io::ImporterType::OBJ, false, nullptr);
+          "n", "/d/f.obj", vsr::io::ImporterType::OBJ, nullptr);
       REQUIRE(f.waitForRequests(2));
       auto restarted = makeOkReply(again.requestId);
       setResults(restarted, TaskStartedResult{5});

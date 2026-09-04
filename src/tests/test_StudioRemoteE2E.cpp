@@ -384,7 +384,6 @@ void importMesh(Client &client, const std::filesystem::path &mesh)
   client.connection.projectOps().importStaticDataset("Triangle",
       mesh,
       vsr::io::ImporterType::OBJ,
-      false,
       [&](const ProjectOpReply &r,
           const std::optional<TaskStartedResult> &started) {
         REQUIRE(r.ok);

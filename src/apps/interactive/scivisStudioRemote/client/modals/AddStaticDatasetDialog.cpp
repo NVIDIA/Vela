@@ -130,10 +130,10 @@ void AddStaticDatasetDialog::submit()
   m_error.clear();
   if (choice.importer) {
     m_pending = m_context->ops().importStaticDataset(
-        name, sourcePath, *choice.importer, false, onReply);
+        name, sourcePath, *choice.importer, onReply);
   } else if (choice.subtree) {
-    m_pending = m_context->ops().importStaticDataset(
-        name, sourcePath, vsr::io::ImporterType::NONE, true, onReply);
+    m_pending =
+        m_context->ops().importSubtreeDataset(name, sourcePath, onReply);
   } else {
     m_pending = m_context->ops().loadDatasetArchive(sourcePath, onReply);
   }

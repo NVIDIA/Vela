@@ -56,7 +56,7 @@ constexpr std::array ALL_MESSAGE_TYPES = {
   StudioMessageType::ListRoots, StudioMessageType::ListDirectory,
   StudioMessageType::SetPlaying, StudioMessageType::RequestArrayHistogram,
   StudioMessageType::RenderShot, StudioMessageType::CancelTask,
-  StudioMessageType::Pick,
+  StudioMessageType::Pick, StudioMessageType::ImportSubtreeDataset,
   StudioMessageType::ProjectOpReply, StudioMessageType::ProjectSnapshot,
   StudioMessageType::TaskProgress, StudioMessageType::TaskCompleted,
   StudioMessageType::TaskFailed, StudioMessageType::TimeAdvanceWarning,

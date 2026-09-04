@@ -212,10 +212,30 @@ void ProjectOpDispatcher::handle(const ImportStaticDataset &req)
         return runTaskBody(
             [&] {
               progress("importing");
-              return importResult(req.fromSubtreeArchive
-                      ? context().addStaticDatasetFromSubtree(req.name, source)
-                      : context().addStaticDataset(
-                            req.name, source, req.importerType));
+              return importResult(context().addStaticDataset(
+                  req.name, source, req.importerType));
+            },
+            false);
+      });
+}
+
+void ProjectOpDispatcher::handle(const ImportSubtreeDataset &req)
+{
+  std::string error;
+  const auto source = m_host.dataRoots->resolve(req.sourcePath, &error);
+  if (!source) {
+    fail(req.requestId, error);
+    return;
+  }
+
+  startTask(req.requestId,
+      "import subtree '" + source->string() + "'",
+      [this, req, source = *source](const TaskControl &progress) {
+        return runTaskBody(
+            [&] {
+              progress("importing");
+              return importResult(
+                  context().addStaticDatasetFromSubtree(req.name, source));
             },
             false);
       });

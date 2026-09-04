@@ -179,7 +179,6 @@ SCENARIO("Dataset creation request payloads", "[StudioProtocol]")
     req.name = "wing";
     req.sourcePath = NON_ASCII_PATH;
     req.importerType = ImporterType::OBJ;
-    req.fromSubtreeArchive = true;
 
     THEN("it round-trips with the importer type as a string")
     {
@@ -194,16 +193,13 @@ SCENARIO("Dataset creation request payloads", "[StudioProtocol]")
       REQUIRE(out.name == "wing");
       REQUIRE(out.sourcePath == NON_ASCII_PATH);
       REQUIRE(out.importerType == ImporterType::OBJ);
-      REQUIRE(out.fromSubtreeArchive);
     }
 
     THEN("the default importer type NONE round-trips")
     {
       req.importerType = ImporterType::NONE;
-      req.fromSubtreeArchive = false;
       const auto out = roundTrip(req);
       REQUIRE(out.importerType == ImporterType::NONE);
-      REQUIRE_FALSE(out.fromSubtreeArchive);
     }
 
     THEN("an unknown importer type name is rejected")
@@ -226,6 +222,40 @@ SCENARIO("Dataset creation request payloads", "[StudioProtocol]")
       REQUIRE_FALSE(fromNode(tree.root(), bad));
       writePath(tree.root(), "sourcePath", "/x.obj");
       REQUIRE(fromNode(tree.root(), bad));
+    }
+  }
+
+  GIVEN("ImportSubtreeDataset")
+  {
+    ImportSubtreeDataset req;
+    req.requestId = 51;
+    req.name = "layers";
+    req.sourcePath = NON_ASCII_PATH;
+
+    THEN("it round-trips with no importer type at all")
+    {
+      const auto msg = encode(req);
+      vsr::core::DataTree tree;
+      REQUIRE(tree.read(msg.payload));
+      REQUIRE_FALSE(hasChild(tree.root(), "importerType"));
+
+      const auto out = roundTrip(req);
+      REQUIRE(out.requestId == 51);
+      REQUIRE(out.name == "layers");
+      REQUIRE(out.sourcePath == NON_ASCII_PATH);
+      REQUIRE_FALSE(decode<ImportStaticDataset>(msg));
+    }
+
+    THEN("a missing name or sourcePath is rejected")
+    {
+      vsr::core::DataTree tree;
+      writeChild(tree.root(), "requestId", uint64_t(1));
+      writeChild(tree.root(), "name", std::string("layers"));
+      ImportSubtreeDataset out;
+      REQUIRE_FALSE(fromNode(tree.root(), out));
+      tree.root().remove("name");
+      writePath(tree.root(), "sourcePath", NON_ASCII_PATH);
+      REQUIRE_FALSE(fromNode(tree.root(), out));
     }
   }
 

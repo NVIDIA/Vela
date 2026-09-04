@@ -228,14 +228,23 @@ RequestHandle ProjectOps::saveProject(
 RequestHandle ProjectOps::importStaticDataset(const std::string &name,
     const std::filesystem::path &sourcePath,
     vsr::io::ImporterType importerType,
-    bool fromSubtreeArchive,
     ResultCallback<TaskStartedResult> callback)
 {
   ImportStaticDataset req;
   req.name = name;
   req.sourcePath = sourcePath;
   req.importerType = importerType;
-  req.fromSubtreeArchive = fromSubtreeArchive;
+  return sendForResult(
+      std::move(req), std::move(callback), "Import " + quoted(sourcePath));
+}
+
+RequestHandle ProjectOps::importSubtreeDataset(const std::string &name,
+    const std::filesystem::path &sourcePath,
+    ResultCallback<TaskStartedResult> callback)
+{
+  ImportSubtreeDataset req;
+  req.name = name;
+  req.sourcePath = sourcePath;
   return sendForResult(
       std::move(req), std::move(callback), "Import " + quoted(sourcePath));
 }

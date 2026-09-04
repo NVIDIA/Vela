@@ -2447,19 +2447,22 @@ CommandRunner::Failure CommandRunner::importStaticDataset(
 {
   if (command.args.empty() || command.args.size() > 3)
     return usageError(command, "<path> [name] [importer|VSR_SUBTREE]");
+  const std::string name = command.args.size() > 1 ? command.args[1] : "";
+  if (command.args.size() > 2 && upper(command.args[2]) == "VSR_SUBTREE") {
+    ImportSubtreeDataset request;
+    request.sourcePath = command.args[0];
+    request.name = name;
+    return sendRequest(
+        std::move(request), deadline, taskStarted(TaskMessage::DatasetId));
+  }
   ImportStaticDataset request;
   request.sourcePath = command.args[0];
-  if (command.args.size() > 1)
-    request.name = command.args[1];
+  request.name = name;
   if (command.args.size() > 2) {
-    if (upper(command.args[2]) == "VSR_SUBTREE") {
-      request.fromSubtreeArchive = true;
-    } else {
-      const auto importer = parseImporter(command.args[2]);
-      if (!importer)
-        return "unknown importer '" + command.args[2] + "'";
-      request.importerType = *importer;
-    }
+    const auto importer = parseImporter(command.args[2]);
+    if (!importer)
+      return "unknown importer '" + command.args[2] + "'";
+    request.importerType = *importer;
   }
   return sendRequest(
       std::move(request), deadline, taskStarted(TaskMessage::DatasetId));
