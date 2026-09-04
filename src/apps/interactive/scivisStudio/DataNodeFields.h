@@ -83,15 +83,13 @@ bool readOptionalEnumChild(const vsr::core::DataNode &parent,
     E &out,
     FromString &&fromString);
 
-// ANARI type names ("ANARI_CAMERA", ...), the serialized form of
-// anari::DataType.
-const char *toString(anari::DataType type);
-std::optional<anari::DataType> anariTypeFromString(std::string_view name);
-
 // Scene identity /////////////////////////////////////////////////////////////
 
-// SceneObjectRef: {type: ANARI type name, objectIndex: uint64}; both
-// required.
+// SceneObjectRef is one leaf holding the object reference itself, the
+// Any(type, objectIndex) a DataNode already uses for an object-valued
+// parameter, so the wire spells it the way the scene does. An unset ref
+// (ANARI_UNKNOWN) writes an empty leaf and an empty leaf reads back unset; a
+// leaf holding any other value, or a node with children, is malformed.
 void toNode(const SceneObjectRef &ref, vsr::core::DataNode &node);
 bool fromNode(const vsr::core::DataNode &node, SceneObjectRef &ref);
 

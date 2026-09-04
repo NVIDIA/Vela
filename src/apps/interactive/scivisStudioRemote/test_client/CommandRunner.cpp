@@ -96,14 +96,21 @@ std::string numberText(T value)
 
 // ANARI type names ///////////////////////////////////////////////////////////
 
-// Script spelling ("camera", "float32_vec3") or the wire spelling
-// ("ANARI_CAMERA"); case-insensitive.
+// Script spelling ("camera", "float32_vec3") or the SDK's ("ANARI_CAMERA");
+// case-insensitive. anari_cpp only offers type -> name, so this scans the
+// value range the SDK's enums occupy (object types 5xx, scalars 1xxx,
+// matrices 2xxx); a script names a type a handful of times, so no table.
 std::optional<anari::DataType> parseAnariType(const std::string &text)
 {
   std::string name = upper(text);
   if (name.rfind("ANARI_", 0) != 0)
     name = "ANARI_" + name;
-  return anariTypeFromString(name);
+  constexpr int MAX_ANARI_TYPE_VALUE = 4096;
+  for (int v = 0; v < MAX_ANARI_TYPE_VALUE; ++v) {
+    if (name == anari::toString(anari::DataType(v)))
+      return anari::DataType(v);
+  }
+  return {};
 }
 
 // "ANARI_FLOAT32_VEC3" -> "float32_vec3"

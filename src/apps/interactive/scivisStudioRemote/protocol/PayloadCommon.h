@@ -55,7 +55,6 @@ namespace vsr::scivis_studio::protocol {
 
 // The model's, re-exported so a payload codec, and a test with
 // `using namespace protocol`, spells them unqualified.
-using vsr::scivis_studio::anariTypeFromString;
 using vsr::scivis_studio::enumFromName;
 using vsr::scivis_studio::hasChild;
 using vsr::scivis_studio::readChild;
@@ -65,7 +64,6 @@ using vsr::scivis_studio::readNodeList;
 using vsr::scivis_studio::readOptionalChild;
 using vsr::scivis_studio::readOptionalChildNode;
 using vsr::scivis_studio::readOptionalEnumChild;
-using vsr::scivis_studio::toString;
 using vsr::scivis_studio::writeChild;
 using vsr::scivis_studio::writeChildNode;
 using vsr::scivis_studio::writeNodeList;

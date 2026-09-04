@@ -268,8 +268,7 @@ SCENARIO("Shot requests", "[StudioProtocol]")
 
       vsr::core::DataTree badCamera;
       writeChild(badCamera.root(), "id", std::string("shot-1"));
-      writeChild(
-          badCamera.root()["camera"], "type", std::string("ANARI_CAMERA"));
+      badCamera.root()["camera"] = std::string("ANARI_CAMERA");
       REQUIRE_FALSE(fromNode(badCamera.root(), out));
     }
   }
