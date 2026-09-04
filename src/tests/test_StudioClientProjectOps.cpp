@@ -881,7 +881,7 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
       TaskCompleted completed;
       completed.taskId = 5;
       completed.message = "/d/p/renders/shot_0001";
-      completed.framesCompleted = 3;
+      setResults(completed, RenderShotResult{3});
       f.server.bootstrap.push_back(encode(completed));
       TaskProgress running;
       running.taskId = 9;
@@ -940,7 +940,7 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
 
           TaskCompleted done;
           done.taskId = 9;
-          done.framesCompleted = 10;
+          setResults(done, RenderShotResult{10});
           f.server.send(encode(done));
           REQUIRE(pollUntil(f.connection,
               [&] { return f.ops().task(9)->state == TaskState::Completed; }));
@@ -984,7 +984,7 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
         {
           TaskCompleted done;
           done.taskId = 7;
-          done.framesCompleted = 12;
+          setResults(done, RenderShotResult{12});
           f.server.send(encode(done));
           REQUIRE(pollUntil(f.connection,
               [&] { return f.ops().task(7)->state == TaskState::Completed; }));
@@ -1247,7 +1247,7 @@ SCENARIO("ProjectOps flags the render it launched", "[StudioClient]")
         TaskFailed failed;
         failed.taskId = 7;
         failed.error = "cancelled";
-        failed.framesCompleted = 12;
+        setResults(failed, RenderShotResult{12});
         f.server.send(encode(failed));
         REQUIRE(pollUntil(f.connection,
             [&] { return f.ops().task(7)->state == TaskState::Failed; }));

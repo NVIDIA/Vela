@@ -26,13 +26,13 @@ vsr::network::Message endingOf(uint64_t taskId, const TaskResult &result)
     TaskCompleted completed;
     completed.taskId = taskId;
     completed.message = result.message;
-    completed.framesCompleted = result.framesCompleted;
+    completed.results = result.results;
     return encode(completed);
   }
   TaskFailed failed;
   failed.taskId = taskId;
   failed.error = result.error;
-  failed.framesCompleted = result.framesCompleted;
+  failed.results = result.results;
   return encode(failed);
 }
 

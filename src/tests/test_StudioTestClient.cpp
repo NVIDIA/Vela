@@ -296,7 +296,7 @@ struct ProjectOpsServer
 
   void sendFrame(const std::string &shotId, int frame);
   void endTask(Message end);
-  // A TaskFailed with the framesCompleted child a cancelled render reports.
+  // The TaskFailed a cancelled render ends with: RenderShotResult results.
   Message failedRender(uint64_t taskId, uint64_t framesCompleted);
 };
 
@@ -429,14 +429,8 @@ vsr::network::Message ProjectOpsServer::failedRender(
   TaskFailed failed;
   failed.taskId = taskId;
   failed.error = "cancelled";
-  vsr::core::DataTree tree;
-  toNode(failed, tree.root());
-  writeChild(tree.root(), "framesCompleted", framesCompleted);
-  Message msg;
-  msg.header.type = uint8_t(TaskFailed::MESSAGE_TYPE);
-  tree.write(msg.payload);
-  msg.header.payload_length = uint32_t(msg.payload.size());
-  return msg;
+  setResults(failed, RenderShotResult{framesCompleted});
+  return encode(failed);
 }
 
 void ProjectOpsServer::onMessage(const Message &msg)
@@ -611,7 +605,7 @@ void ProjectOpsServer::onMessage(const Message &msg)
     completed.taskId = taskId;
     completed.message =
         (project.projectDirectory / "renders" / shot->id).generic_string();
-    completed.framesCompleted = frames;
+    setResults(completed, RenderShotResult{frames});
     endTask(encode(completed));
     sendSnapshot();
     return;
