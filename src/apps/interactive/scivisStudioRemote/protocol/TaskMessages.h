@@ -46,6 +46,11 @@ struct RenderShotResult
   uint64_t framesCompleted{0};
 };
 
+// The frames a TaskCompleted or TaskFailed reports through its
+// RenderShotResult; 0 for an ending without one (every other task).
+template <typename Ending>
+uint64_t framesCompletedOf(const Ending &ending);
+
 struct TaskProgress
 {
   static constexpr StudioMessageType MESSAGE_TYPE =
@@ -98,6 +103,13 @@ template <typename V>
 void fields(V &v, RenderShotResult &r)
 {
   v.required("framesCompleted", r.framesCompleted);
+}
+
+template <typename Ending>
+inline uint64_t framesCompletedOf(const Ending &ending)
+{
+  const auto rendered = results<RenderShotResult>(ending);
+  return rendered ? rendered->framesCompleted : 0;
 }
 
 template <typename V>

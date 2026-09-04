@@ -43,15 +43,6 @@ bool containsWord(const std::string &text, const std::string &word)
   return false;
 }
 
-// A render's frame count from its ending's RenderShotResult; 0 for a task
-// without one.
-template <typename Ending>
-uint64_t framesCompletedOf(const Ending &ending)
-{
-  const auto rendered = results<RenderShotResult>(ending);
-  return rendered ? rendered->framesCompleted : 0;
-}
-
 } // namespace
 
 const char *toString(TaskState state)

@@ -144,14 +144,6 @@ uint64_t RenderSession::startTask(const ProjectOpReply &reply)
   return started->taskId;
 }
 
-// A render's frame count from its ending, 0 for an ending without one.
-template <typename Ending>
-uint64_t framesCompletedOf(const Ending &ending)
-{
-  const auto rendered = results<RenderShotResult>(ending);
-  return rendered ? rendered->framesCompleted : 0;
-}
-
 // How a task ended, waiting for it.
 struct TaskEnd
 {
