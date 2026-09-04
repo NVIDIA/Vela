@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "ProjectSerialization.h"
+#include "DataNodeFields.h"
 
 #include "vsr/core/DataTreeMetadata.hpp"
 #include "vsr/io/archives/CameraArchive.hpp"
@@ -11,6 +12,7 @@
 
 #include <cctype>
 #include <exception>
+#include <optional>
 
 namespace vsr::scivis_studio {
 
@@ -116,7 +118,11 @@ std::string sanitizeRigName(const std::string &name)
   return out;
 }
 
-static std::string cameraRigNameForShot(const Shot &shot)
+namespace {
+
+using vsr::core::DataNode;
+
+std::string cameraRigNameForShot(const Shot &shot)
 {
   if (!shot.name.empty())
     return shot.name + " Camera";
@@ -125,135 +131,313 @@ static std::string cameraRigNameForShot(const Shot &shot)
   return "Camera Rig";
 }
 
-void projectToNode(const Project &project, vsr::core::DataNode &node)
+// Strict parsers for the fields written from toString(). The lenient
+// dataset::*FromString() stay on the v1-v4 path, whose files spell the legacy
+// aliases ("TimeSeries", "Missing").
+std::optional<DatasetStatus> statusFromName(const std::string &s)
 {
-  node.reset();
-  node["name"] = project.name;
-  node["projectDirectory"] = project.projectDirectory.string();
-  node["activeShot"] = project.activeShotId;
-  node["nextDatasetOrdinal"] = project.nextDatasetOrdinal;
-  node["dirty"] = project.dirty;
+  return enumFromName(s,
+      DatasetStatus::Available,
+      DatasetStatus::ImportFailed,
+      dataset::toString);
+}
 
-  auto &datasets = node["datasets"];
-  for (const auto &dataset : project.datasets) {
-    auto &d = datasets.append();
-    d["id"] = dataset.id;
-    d["name"] = dataset.name;
-    d["residency"] = std::string(dataset::toString(dataset.residency));
+std::optional<DatasetSourceKind> sourceKindFromName(const std::string &s)
+{
+  return enumFromName(
+      s, DatasetSourceKind::Static, DatasetSourceKind::Live, dataset::toString);
+}
+
+std::optional<DatasetResidency> residencyFromName(const std::string &s)
+{
+  return enumFromName(s,
+      DatasetResidency::Loaded,
+      DatasetResidency::Unloaded,
+      dataset::toString);
+}
+
+// Datasets ///////////////////////////////////////////////////////////////////
+
+void sourceFileToNode(const DatasetSourceFile &f, DataNode &n)
+{
+  writeChild(n, "path", f.path);
+  writeChild(n, "resolvedPath", f.resolvedPath);
+}
+
+bool nodeToSourceFile(const DataNode &n, DatasetSourceFile &f)
+{
+  return readChild(n, "path", f.path)
+      && readOptionalChild(n, "resolvedPath", f.resolvedPath);
+}
+
+// v1-v4 manifests embedded the dataset payload metadata inline, with paths
+// under absolutePath / projectRelativePath.
+bool nodeToLegacySourceFile(const DataNode &n, DatasetSourceFile &f)
+{
+  if (!readOptionalChild(n, "absolutePath", f.path))
+    return false;
+  return !f.path.empty() || readOptionalChild(n, "projectRelativePath", f.path);
+}
+
+bool nodeToLegacyDatasetMetadata(const DataNode &n, Dataset &d)
+{
+  std::string text;
+  if (!readChild(n, "sourceKind", text))
+    return false;
+  d.sourceKind = dataset::sourceKindFromString(text);
+  if (!readOptionalChild(n, "importerType", d.importerType))
+    return false;
+  text = "Missing";
+  if (!readOptionalChild(n, "status", text))
+    return false;
+  d.status = dataset::statusFromString(text);
+
+  if (const auto *source = n.child("source")) {
+    if (!readOptionalChild(*source, "absolutePath", d.source.sourcePath))
+      return false;
+    if (d.source.sourcePath.empty()
+        && !readOptionalChild(
+            *source, "projectRelativePath", d.source.sourcePath))
+      return false;
   }
+  if (!readNodeList(n, "sourceFiles", d.sourceFiles, nodeToLegacySourceFile))
+    return false;
 
-  auto &shots = node["shots"];
-  for (const auto &shot : project.shots) {
-    auto &s = shots.append();
-    s["id"] = shot.id;
-    s["name"] = shot.name;
-    s["frameCount"] = shot.frameCount;
-    s["fps"] = shot.fps;
-    s["currentFrame"] = shot.currentFrame;
-    s["playing"] = shot.playing;
-    s["loop"] = shot.loop;
-    s["lightRigId"] = shot.lightRigId;
-    s["cameraRigId"] = shot.cameraRigId;
+  // Preserve the authoritative fields in memory and mark the dataset for
+  // extraction into its own asset on the next explicit save.
+  d.pendingExtraction = true;
+  d.dirty = true;
+  d.persistedName.clear();
+  return true;
+}
 
-    auto &render = s["renderSettings"];
-    render["width"] = shot.renderSettings.width;
-    render["height"] = shot.renderSettings.height;
-    render["samples"] = shot.renderSettings.samples;
-    render["rendererLibrary"] = shot.renderSettings.rendererLibrary;
-    render["rendererObjectIndex"] =
-        static_cast<uint64_t>(shot.renderSettings.rendererObjectIndex);
-    render["rendererSubtype"] = shot.renderSettings.rendererSubtype;
-    render["outputFilePrefix"] = shot.renderSettings.outputFilePrefix;
+void datasetToNode(const Dataset &d, DataNode &n, ProjectForm form)
+{
+  writeChild(n, "id", d.id);
+  writeChild(n, "name", d.name);
+  writeChild(n, "residency", std::string(dataset::toString(d.residency)));
+  if (form == ProjectForm::Manifest)
+    return;
 
-    auto &bindings = s["datasetBindings"];
-    for (const auto &binding : shot.datasetBindings) {
-      auto &b = bindings.append();
-      b["datasetId"] = binding.datasetId;
-      b["enabled"] = binding.enabled;
+  writeChild(n, "status", std::string(dataset::toString(d.status)));
+  writeChild(n, "sourceKind", std::string(dataset::toString(d.sourceKind)));
+  writeChild(n, "importerType", d.importerType);
+  auto &source = n["source"];
+  writeChild(source, "sourcePath", d.source.sourcePath);
+  if (d.source.importerSettings.size() > 0) {
+    auto &settings = source["importerSettings"];
+    for (const auto &kv : d.source.importerSettings)
+      writeChild(settings, kv.first.c_str(), kv.second);
+  }
+  writeNodeList(n, "sourceFiles", d.sourceFiles, sourceFileToNode);
+  writeChildNode(n, "rootNode", d.rootNode);
+  writeChild(n, "dirty", d.dirty);
+  writeChild(n, "declared", d.declared);
+  writeChild(n, "pendingExtraction", d.pendingExtraction);
+  writeChild(n, "pendingSourceListMigration", d.pendingSourceListMigration);
+  writeChild(n, "persistedName", d.persistedName);
+}
+
+bool nodeToDatasetRuntime(const DataNode &n, Dataset &d)
+{
+  if (!readOptionalEnumChild(n, "status", d.status, statusFromName)
+      || !readOptionalEnumChild(
+          n, "sourceKind", d.sourceKind, sourceKindFromName)
+      || !readOptionalChild(n, "importerType", d.importerType))
+    return false;
+
+  if (const auto *source = n.child("source")) {
+    if (!readOptionalChild(*source, "sourcePath", d.source.sourcePath))
+      return false;
+    if (const auto *settings = source->child("importerSettings")) {
+      bool ok = true;
+      settings->foreach_child_const([&](const DataNode &kv) {
+        if (!kv.getValue().is<std::string>()) {
+          ok = false;
+          return;
+        }
+        d.source.importerSettings.set(kv.name(), kv.getValueAs<std::string>());
+      });
+      if (!ok)
+        return false;
     }
   }
 
-  auto &lightRigs = node["lightRigs"];
-  for (const auto &rig : project.lightRigs) {
-    auto &r = lightRigs.append();
-    r["id"] = rig.id;
-    r["name"] = rig.name;
-  }
-
-  // Camera-rig value data is stored per-rig in cameras/<name>.vsr, so only the
-  // id and name are recorded in the manifest (mirroring light rigs).
-  auto &cameraRigs = node["cameraRigs"];
-  for (const auto &rig : project.cameraRigs) {
-    auto &r = cameraRigs.append();
-    r["id"] = rig.id;
-    r["name"] = rig.name;
-  }
-
-  auto &colorMaps = node["colorMaps"];
-  for (const auto &colorMap : project.colorMaps) {
-    auto &c = colorMaps.append();
-    c["id"] = colorMap.id;
-    c["name"] = colorMap.name;
-  }
+  return readNodeList(n, "sourceFiles", d.sourceFiles, nodeToSourceFile)
+      && readOptionalChildNode(n, "rootNode", d.rootNode)
+      && readOptionalChild(n, "dirty", d.dirty)
+      && readOptionalChild(n, "declared", d.declared)
+      && readOptionalChild(n, "pendingExtraction", d.pendingExtraction)
+      && readOptionalChild(
+          n, "pendingSourceListMigration", d.pendingSourceListMigration)
+      && readOptionalChild(n, "persistedName", d.persistedName);
 }
 
-bool nodeToProject(vsr::core::DataNode &node, Project &project)
+bool nodeToDataset(const DataNode &n, Dataset &d, ProjectForm form)
+{
+  Dataset out;
+  if (!readChild(n, "id", out.id))
+    return false;
+  out.name = out.id;
+  if (!readOptionalChild(n, "name", out.name))
+    return false;
+  // Manifests that predate residency (schema < 7) mean Loaded.
+  if (!readOptionalEnumChild(n, "residency", out.residency, residencyFromName))
+    return false;
+  // The manifest defaults: the open path rebuilds status and clears dirty
+  // once the dataset asset is read.
+  out.status = DatasetStatus::Unavailable;
+  out.dirty = false;
+  out.persistedName = out.name;
+
+  if (form == ProjectForm::Manifest) {
+    if (hasChild(n, "sourceKind") && !nodeToLegacyDatasetMetadata(n, out))
+      return false;
+  } else if (!nodeToDatasetRuntime(n, out)) {
+    return false;
+  }
+  d = std::move(out);
+  return true;
+}
+
+// Rigs and color maps ////////////////////////////////////////////////////////
+
+void lightRigToNode(const LightRig &r, DataNode &n, ProjectForm form)
+{
+  writeChild(n, "id", r.id);
+  writeChild(n, "name", r.name);
+  if (form == ProjectForm::Manifest)
+    return;
+  writeChildNode(n, "rootNode", r.rootNode);
+  writeChild(n, "persistedName", r.persistedName);
+}
+
+bool nodeToLightRig(const DataNode &n, LightRig &r, ProjectForm form)
+{
+  LightRig out;
+  if (!readChild(n, "id", out.id) || !readOptionalChild(n, "name", out.name))
+    return false;
+  if (form == ProjectForm::Full
+      && (!readOptionalChildNode(n, "rootNode", out.rootNode)
+          || !readOptionalChild(n, "persistedName", out.persistedName)))
+    return false;
+  r = std::move(out);
+  return true;
+}
+
+// The manifest records only id and name: camera-rig value data lives in
+// cameras/<name>.vsr (mirroring light rigs). The Full form carries it under
+// "rig", the same child the pre-v4 manifest embedded it in, so one read
+// serves both.
+void cameraRigToNode(const CameraRig &r, DataNode &n, ProjectForm form)
+{
+  writeChild(n, "id", r.id);
+  writeChild(n, "name", r.name);
+  if (form == ProjectForm::Manifest)
+    return;
+  camera_rig::cameraRigToNode(r, n["rig"]);
+  writeChild(n, "persistedName", r.persistedName);
+}
+
+bool nodeToCameraRig(const DataNode &n, CameraRig &r, ProjectForm form)
+{
+  CameraRig out;
+  if (!readChild(n, "id", out.id) || !readOptionalChild(n, "name", out.name))
+    return false;
+  if (const auto *rig = n.child("rig")) {
+    if (!camera_rig::nodeToCameraRig(*rig, out))
+      return false;
+  }
+  if (form == ProjectForm::Full
+      && !readOptionalChild(n, "persistedName", out.persistedName))
+    return false;
+  r = std::move(out);
+  return true;
+}
+
+void colorMapToNode(const ColorMapRecord &c, DataNode &n)
+{
+  writeChild(n, "id", c.id);
+  writeChild(n, "name", c.name);
+}
+
+bool nodeToColorMap(const DataNode &n, ColorMapRecord &c)
+{
+  ColorMapRecord out;
+  if (!readChild(n, "id", out.id) || !readOptionalChild(n, "name", out.name))
+    return false;
+  c = std::move(out);
+  return true;
+}
+
+// Shots //////////////////////////////////////////////////////////////////////
+
+// v2 manifests embedded a shot's camera rig under "cameraRig"; it becomes a
+// project-level rig the shot refers to.
+bool migrateInlineCameraRig(const DataNode &s, Shot &shot, Project &project)
+{
+  const auto *rigNode = s.child("cameraRig");
+  if (!rigNode || !shot.cameraRigId.empty())
+    return true;
+  CameraRig rig;
+  rig.id = camera_rig::nextCameraRigId(project);
+  rig.name = cameraRigNameForShot(shot);
+  if (!camera_rig::nodeToCameraRig(*rigNode, rig))
+    return false;
+  shot.cameraRigId = rig.id;
+  project.cameraRigs.push_back(std::move(rig));
+  return true;
+}
+
+} // namespace
+
+void projectToNode(const Project &project, DataNode &node, ProjectForm form)
+{
+  node.reset();
+  writeChild(node, "name", project.name);
+  writeChild(node, "projectDirectory", project.projectDirectory.string());
+  writeChild(node, "activeShot", project.activeShotId);
+  writeChild(node, "nextDatasetOrdinal", project.nextDatasetOrdinal);
+  writeChild(node, "dirty", project.dirty);
+
+  writeAppendedList(
+      node, "datasets", project.datasets, [&](const Dataset &d, DataNode &n) {
+        datasetToNode(d, n, form);
+      });
+  writeAppendedList(
+      node, "shots", project.shots, [&](const Shot &s, DataNode &n) {
+        toNode(s, n, form);
+      });
+  writeAppendedList(node,
+      "lightRigs",
+      project.lightRigs,
+      [&](const LightRig &r, DataNode &n) { lightRigToNode(r, n, form); });
+  writeAppendedList(node,
+      "cameraRigs",
+      project.cameraRigs,
+      [&](const CameraRig &r, DataNode &n) { cameraRigToNode(r, n, form); });
+  writeAppendedList(node, "colorMaps", project.colorMaps, colorMapToNode);
+}
+
+bool nodeToProject(const DataNode &node, Project &project, ProjectForm form)
 {
   Project out;
-  out.name = node["name"].getValueOr<std::string>("Untitled");
-  out.projectDirectory = node["projectDirectory"].getValueOr<std::string>("");
-  out.activeShotId = node["activeShot"].getValueOr<std::string>("");
-  out.nextDatasetOrdinal = node["nextDatasetOrdinal"].getValueOr<uint64_t>(1);
-  out.dirty = node["dirty"].getValueOr<bool>(false);
+  std::string projectDirectory;
+  if (!readOptionalChild(node, "name", out.name)
+      || !readOptionalChild(node, "projectDirectory", projectDirectory)
+      || !readOptionalChild(node, "activeShot", out.activeShotId)
+      || !readOptionalChild(node, "nextDatasetOrdinal", out.nextDatasetOrdinal)
+      || !readOptionalChild(node, "dirty", out.dirty))
+    return false;
+  out.projectDirectory = projectDirectory;
 
-  if (auto *datasets = node.child("datasets")) {
-    datasets->foreach_child([&](vsr::core::DataNode &d) {
-      Dataset dataset;
-      dataset.id = d["id"].getValueOr<std::string>("");
-      dataset.name = d["name"].getValueOr<std::string>(dataset.id);
-      dataset.status = DatasetStatus::Unavailable;
-      // Manifests that predate residency (schema < 7) mean Loaded.
-      dataset.residency = dataset::residencyFromString(
-          d["residency"].getValueOr<std::string>("Loaded"));
-      dataset.dirty = false;
-      dataset.persistedName = dataset.name;
-
-      // v1-v4 compatibility: dataset payload metadata lived inline in the
-      // manifest. Preserve its authoritative fields in memory and mark it for
-      // extraction on the next explicit save.
-      if (d.child("sourceKind")) {
-        dataset.sourceKind = dataset::sourceKindFromString(
-            d["sourceKind"].getValueOr<std::string>("Static"));
-        dataset.importerType =
-            d["importerType"].getValueOr<std::string>("NONE");
-        dataset.status = dataset::statusFromString(
-            d["status"].getValueOr<std::string>("Missing"));
-
-        if (auto *source = d.child("source")) {
-          dataset.source.sourcePath =
-              (*source)["absolutePath"].getValueOr<std::string>("");
-          if (dataset.source.sourcePath.empty()) {
-            dataset.source.sourcePath =
-                (*source)["projectRelativePath"].getValueOr<std::string>("");
-          }
-        }
-
-        dataset.sourceFiles.clear();
-        if (auto *sourceFiles = d.child("sourceFiles")) {
-          sourceFiles->foreach_child([&](vsr::core::DataNode &f) {
-            auto path = f["absolutePath"].getValueOr<std::string>("");
-            if (path.empty())
-              path = f["projectRelativePath"].getValueOr<std::string>("");
-            dataset.sourceFiles.push_back({std::move(path)});
-          });
-        }
-        dataset.pendingExtraction = true;
-        dataset.dirty = true;
-        dataset.persistedName.clear();
-      }
-      out.datasets.push_back(std::move(dataset));
-    });
-  }
+  if (!readNodeList(node,
+          "datasets",
+          out.datasets,
+          [&](const DataNode &d, Dataset &dataset) {
+            return nodeToDataset(d, dataset, form);
+          }))
+    return false;
 
   // Legacy manifests did not persist the allocator. Start beyond every
   // generated ID still present so a later removal cannot collide with one.
@@ -268,83 +452,33 @@ bool nodeToProject(vsr::core::DataNode &node, Project &project)
     }
   }
 
-  if (auto *cameraRigs = node.child("cameraRigs")) {
-    cameraRigs->foreach_child([&](vsr::core::DataNode &r) {
-      CameraRig rig;
-      rig.id = r["id"].getValueOr<std::string>("");
-      rig.name = r["name"].getValueOr<std::string>("");
-      if (auto *rigNode = r.child("rig"))
-        camera_rig::nodeToCameraRig(*rigNode, rig);
-      out.cameraRigs.push_back(std::move(rig));
-    });
-  }
+  // Camera rigs before shots: a migrated inline rig takes the next free id.
+  if (!readNodeList(node,
+          "cameraRigs",
+          out.cameraRigs,
+          [&](const DataNode &r, CameraRig &rig) {
+            return nodeToCameraRig(r, rig, form);
+          }))
+    return false;
 
-  if (auto *shots = node.child("shots")) {
-    shots->foreach_child([&](vsr::core::DataNode &s) {
-      Shot shot;
-      shot.id = s["id"].getValueOr<std::string>("");
-      shot.name = s["name"].getValueOr<std::string>(shot.id);
-      shot.frameCount = s["frameCount"].getValueOr<int>(120);
-      shot.fps = s["fps"].getValueOr<float>(24.f);
-      shot.currentFrame = s["currentFrame"].getValueOr<int>(0);
-      shot.playing = s["playing"].getValueOr<bool>(false);
-      shot.loop = s["loop"].getValueOr<bool>(true);
-      shot.lightRigId = s["lightRigId"].getValueOr<std::string>("");
-      shot.cameraRigId = s["cameraRigId"].getValueOr<std::string>("");
-      if (shot.cameraRigId.empty()) {
-        if (auto *cameraRigNode = s.child("cameraRig")) {
-          CameraRig rig;
-          rig.id = camera_rig::nextCameraRigId(out);
-          rig.name = cameraRigNameForShot(shot);
-          camera_rig::nodeToCameraRig(*cameraRigNode, rig);
-          shot.cameraRigId = rig.id;
-          out.cameraRigs.push_back(std::move(rig));
-        }
-      }
+  if (!readNodeList(
+          node, "shots", out.shots, [&](const DataNode &s, Shot &shot) {
+            return fromNode(s, shot)
+                && (form == ProjectForm::Full
+                    || migrateInlineCameraRig(s, shot, out));
+          }))
+    return false;
 
-      if (auto *render = s.child("renderSettings")) {
-        shot.renderSettings.width =
-            (*render)["width"].getValueOr<uint32_t>(1024);
-        shot.renderSettings.height =
-            (*render)["height"].getValueOr<uint32_t>(768);
-        shot.renderSettings.samples =
-            (*render)["samples"].getValueOr<uint32_t>(128);
-        shot.renderSettings.rendererLibrary =
-            (*render)["rendererLibrary"].getValueOr<std::string>("");
-        shot.renderSettings.rendererObjectIndex =
-            (*render)["rendererObjectIndex"].getValueOr<uint64_t>(
-                VSR_INVALID_INDEX);
-        shot.renderSettings.rendererSubtype =
-            (*render)["rendererSubtype"].getValueOr<std::string>("default");
-        shot.renderSettings.outputFilePrefix =
-            (*render)["outputFilePrefix"].getValueOr<std::string>("");
-      }
+  if (!readNodeList(node,
+          "lightRigs",
+          out.lightRigs,
+          [&](const DataNode &r, LightRig &rig) {
+            return nodeToLightRig(r, rig, form);
+          }))
+    return false;
 
-      if (auto *bindings = s.child("datasetBindings")) {
-        bindings->foreach_child([&](vsr::core::DataNode &b) {
-          DatasetBinding binding;
-          binding.datasetId = b["datasetId"].getValueOr<std::string>("");
-          binding.enabled = b["enabled"].getValueOr<bool>(true);
-          shot.datasetBindings.push_back(std::move(binding));
-        });
-      }
-      out.shots.push_back(std::move(shot));
-    });
-  }
-
-  if (auto *lightRigs = node.child("lightRigs")) {
-    lightRigs->foreach_child([&](vsr::core::DataNode &r) {
-      out.lightRigs.push_back({r["id"].getValueOr<std::string>(""),
-          r["name"].getValueOr<std::string>("")});
-    });
-  }
-
-  if (auto *colorMaps = node.child("colorMaps")) {
-    colorMaps->foreach_child([&](vsr::core::DataNode &c) {
-      out.colorMaps.push_back({c["id"].getValueOr<std::string>(""),
-          c["name"].getValueOr<std::string>("")});
-    });
-  }
+  if (!readNodeList(node, "colorMaps", out.colorMaps, nodeToColorMap))
+    return false;
 
   if (out.activeShotId.empty() && !out.shots.empty())
     out.activeShotId = out.shots.front().id;

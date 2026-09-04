@@ -200,3 +200,12 @@ _Avoid_: Transfer function (the editing widget, not the asset), palette
 A project-owned composition of datasets, a camera rig, and a light rig. A shot,
 rather than any of its constituent assets, owns the associations among them and
 the playback timeline that drives their animations.
+
+**Project Form**:
+Which fields a serialized Project (or Shot) carries: the *Manifest* form is
+what `project.vsr` stores, the persisted fields only, since the runtime-only
+ones (a dataset's status and source metadata, a shot's camera, a rig's scene
+root and value data) are rebuilt when the project opens; the *Full* form is
+every field inline under its entity, for a receiver that cannot rebuild them
+(the client-server Project Snapshot). One serializer writes and reads both.
+_Avoid_: runtime sidecar, wire schema

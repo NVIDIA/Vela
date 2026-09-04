@@ -180,17 +180,40 @@ SCENARIO("Shot requests", "[StudioProtocol]")
       REQUIRE(s.renderSettings.outputFilePrefix == "out/frame_");
     }
 
-    THEN("dataset bindings are keyed by datasetId, not appended anonymously")
+    THEN("dataset bindings travel as the manifest's ordered list")
     {
       vsr::core::DataTree tree;
       toNode(update.shot, tree.root());
       const auto *bindings = tree.root().child("datasetBindings");
       REQUIRE(bindings);
       REQUIRE(bindings->numChildren() == 2);
-      REQUIRE(bindings->child("dataset-1"));
-      REQUIRE(bindings->child("dataset-4"));
-      REQUIRE_FALSE(
-          bindings->child("dataset-4")->child("enabled")->getValueOr(true));
+      const auto *second = bindings->child(1);
+      REQUIRE(second);
+      REQUIRE(second->child("datasetId")->getValueOr<std::string>("")
+          == "dataset-4");
+      REQUIRE_FALSE(second->child("enabled")->getValueOr(true));
+    }
+
+    THEN("the wire form is the manifest form plus the camera ref")
+    {
+      vsr::core::DataTree wire;
+      toNode(update.shot, wire.root());
+      vsr::core::DataTree manifest;
+      toNode(update.shot,
+          manifest.root(),
+          vsr::scivis_studio::ProjectForm::Manifest);
+      REQUIRE(wire.root().child("camera"));
+      REQUIRE_FALSE(manifest.root().child("camera"));
+      REQUIRE(wire.root().numChildren() == manifest.root().numChildren() + 1);
+    }
+
+    THEN("a binding without a datasetId is rejected")
+    {
+      vsr::core::DataTree tree;
+      writeChild(tree.root(), "id", std::string("shot-1"));
+      writeChild(tree.root()["datasetBindings"].append(), "enabled", false);
+      Shot out;
+      REQUIRE_FALSE(fromNode(tree.root(), out));
     }
 
     THEN("a default Shot with an id round-trips to its defaults")

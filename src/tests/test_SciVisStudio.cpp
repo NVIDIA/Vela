@@ -574,7 +574,7 @@ SCENARIO("SciVis Studio project model serialization", "[SciVisStudio]")
     project.cameraRigs.push_back(std::move(cameraRig));
 
     vsr::core::DataTree tree;
-    projectToNode(project, tree.root()["scivisStudio"]);
+    projectToNode(project, tree.root()["scivisStudio"], ProjectForm::Manifest);
     auto &serialized = tree.root()["scivisStudio"];
 
     REQUIRE(serialized["datasets"].child(0)->child("rootNode") == nullptr);
@@ -592,7 +592,7 @@ SCENARIO("SciVis Studio project model serialization", "[SciVisStudio]")
     REQUIRE(serialized["cameraRigs"].child(0)->child("name") != nullptr);
 
     Project loaded;
-    REQUIRE(nodeToProject(serialized, loaded));
+    REQUIRE(nodeToProject(serialized, loaded, ProjectForm::Manifest));
 
     THEN("IDs and bindings survive the manifest round trip")
     {
@@ -839,12 +839,68 @@ SCENARIO(
   GIVEN("A project populated away from every default")
   {
     vsr::core::DataTree tree;
-    projectToNode(makeManifestGoldenProject(), tree.root()["scivisStudio"]);
+    projectToNode(makeManifestGoldenProject(),
+        tree.root()["scivisStudio"],
+        ProjectForm::Manifest);
 
     THEN("The manifest form is unchanged")
     {
       const auto dump = canonicalDump(tree.root()["scivisStudio"]);
       REQUIRE(dump == MANIFEST_GOLDEN);
+    }
+
+    THEN("Reading it back leaves the runtime fields at the open defaults")
+    {
+      Project loaded;
+      REQUIRE(nodeToProject(
+          tree.root()["scivisStudio"], loaded, ProjectForm::Manifest));
+      REQUIRE(loaded.datasets.size() == 2);
+      REQUIRE(loaded.datasets[0].status == DatasetStatus::Unavailable);
+      REQUIRE_FALSE(loaded.datasets[0].dirty);
+      REQUIRE(loaded.datasets[0].persistedName == "Wind");
+      REQUIRE(loaded.datasets[0].rootNode.layerName.empty());
+      REQUIRE(loaded.shots[0].camera.type == ANARI_UNKNOWN);
+      REQUIRE(loaded.shots[0].datasetBindings.size() == 2);
+      REQUIRE_FALSE(loaded.shots[0].datasetBindings[1].enabled);
+      REQUIRE(loaded.cameraRigs[0].keyframes.empty());
+    }
+  }
+}
+
+SCENARIO("SciVis Studio rejects a malformed manifest", "[SciVisStudio]")
+{
+  GIVEN("A manifest written from a project")
+  {
+    vsr::core::DataTree tree;
+    projectToNode(
+        makeManifestGoldenProject(), tree.root(), ProjectForm::Manifest);
+    Project loaded;
+
+    THEN("A mistyped shot field is rejected")
+    {
+      (*tree.root()["shots"].child(0))["fps"] = std::string("fast");
+      REQUIRE_FALSE(nodeToProject(tree.root(), loaded, ProjectForm::Manifest));
+    }
+
+    THEN("A dataset without an id is rejected")
+    {
+      auto &dataset = tree.root()["datasets"].append();
+      dataset["name"] = std::string("nameless");
+      REQUIRE_FALSE(nodeToProject(tree.root(), loaded, ProjectForm::Manifest));
+    }
+
+    THEN("An unknown residency spelling is rejected")
+    {
+      (*tree.root()["datasets"].child(1))["residency"] = std::string("Parked");
+      REQUIRE_FALSE(nodeToProject(tree.root(), loaded, ProjectForm::Manifest));
+    }
+
+    THEN("A rejected read leaves the output untouched")
+    {
+      loaded.name = "Before";
+      (*tree.root()["shots"].child(0))["fps"] = std::string("fast");
+      REQUIRE_FALSE(nodeToProject(tree.root(), loaded, ProjectForm::Manifest));
+      REQUIRE(loaded.name == "Before");
     }
   }
 }
@@ -866,12 +922,12 @@ SCENARIO("SciVis Studio dataset residency round-trips through the manifest",
     project.datasets.push_back(std::move(parked));
 
     vsr::core::DataTree tree;
-    projectToNode(project, tree.root());
+    projectToNode(project, tree.root(), ProjectForm::Manifest);
 
     THEN("Residency survives the manifest round trip")
     {
       Project loaded;
-      REQUIRE(nodeToProject(tree.root(), loaded));
+      REQUIRE(nodeToProject(tree.root(), loaded, ProjectForm::Manifest));
       REQUIRE(loaded.datasets.size() == 2);
       REQUIRE(loaded.datasets[0].residency == DatasetResidency::Loaded);
       REQUIRE(loaded.datasets[1].residency == DatasetResidency::Unloaded);
@@ -888,7 +944,7 @@ SCENARIO("SciVis Studio dataset residency round-trips through the manifest",
     THEN("An absent residency field means Loaded")
     {
       Project loaded;
-      REQUIRE(nodeToProject(legacy.root(), loaded));
+      REQUIRE(nodeToProject(legacy.root(), loaded, ProjectForm::Manifest));
       REQUIRE(loaded.datasets.size() == 1);
       REQUIRE(loaded.datasets.front().residency == DatasetResidency::Loaded);
     }
@@ -913,9 +969,9 @@ SCENARIO(
   REQUIRE(next != removedId);
 
   vsr::core::DataTree tree;
-  projectToNode(project, tree.root());
+  projectToNode(project, tree.root(), ProjectForm::Manifest);
   Project loaded;
-  REQUIRE(nodeToProject(tree.root(), loaded));
+  REQUIRE(nodeToProject(tree.root(), loaded, ProjectForm::Manifest));
   REQUIRE(project::nextDatasetId(loaded) == "dataset_0004");
 }
 
@@ -965,8 +1021,7 @@ SCENARIO("SciVis Studio camera interpolation modes", "[SciVisStudio]")
         REQUIRE(camera_rig::interpolationFromString(camera_rig::toString(mode))
             == mode);
 
-      REQUIRE(camera_rig::interpolationFromString("Unknown")
-          == CameraInterpolation::Linear);
+      REQUIRE_FALSE(camera_rig::interpolationFromString("Unknown").has_value());
     }
 
     THEN("Sampling applies easing to the segment interpolation factor")
@@ -2351,7 +2406,8 @@ SCENARIO("SciVis Studio opens legacy projects without rewriting them",
             PROJECT_FILE_TYPE,
             PROJECT_SCHEMA,
             version});
-    projectToNode(legacyProject, tree.root()["scivisStudio"]);
+    projectToNode(
+        legacyProject, tree.root()["scivisStudio"], ProjectForm::Manifest);
     vsr::app::detail::serializeLegacyApplicationContext(
         legacyContext, tree.root()["context"]);
     REQUIRE(tree.save((root / PROJECT_MANIFEST_FILENAME).string().c_str()));
@@ -2427,7 +2483,7 @@ SCENARIO("SciVis Studio extracts embedded v4 datasets only on save",
             PROJECT_FILE_TYPE,
             PROJECT_SCHEMA,
             4});
-    projectToNode(project, tree.root()["scivisStudio"]);
+    projectToNode(project, tree.root()["scivisStudio"], ProjectForm::Manifest);
     auto *datasetNode = tree.root()["scivisStudio"]["datasets"].child(0);
     REQUIRE(datasetNode);
     (*datasetNode)["sourceKind"] = "Static";
@@ -2511,7 +2567,7 @@ SCENARIO("SciVis Studio Save As reports unavailable datasets", "[SciVisStudio]")
           PROJECT_FILE_TYPE,
           PROJECT_SCHEMA,
           5});
-  projectToNode(project, tree.root()["scivisStudio"]);
+  projectToNode(project, tree.root()["scivisStudio"], ProjectForm::Manifest);
   vsr::scene::Scene scene;
   vsr::animation::AnimationManager animations(&scene);
   vsr::io::detail::LegacySceneSerializationOptions options;
@@ -3441,7 +3497,8 @@ SCENARIO("SciVis Studio --openUnloaded overrides initial residency",
               PROJECT_FILE_TYPE,
               PROJECT_SCHEMA,
               4});
-      projectToNode(project, tree.root()["scivisStudio"]);
+      projectToNode(
+          project, tree.root()["scivisStudio"], ProjectForm::Manifest);
       auto *datasetNode = tree.root()["scivisStudio"]["datasets"].child(0);
       REQUIRE(datasetNode);
       (*datasetNode)["sourceKind"] = "Static";
@@ -4026,7 +4083,7 @@ SCENARIO("SciVis Studio v1 shot lights migrate to light rigs", "[SciVisStudio]")
             PROJECT_FILE_TYPE,
             PROJECT_SCHEMA,
             1});
-    projectToNode(project, tree.root()["scivisStudio"]);
+    projectToNode(project, tree.root()["scivisStudio"], ProjectForm::Manifest);
     vsr::app::detail::serializeLegacyApplicationContext(
         appContext, tree.root()["context"]);
     std::filesystem::create_directories(root);
@@ -4071,7 +4128,7 @@ SCENARIO("SciVis Studio v2 shot camera rigs migrate to camera rigs",
             PROJECT_FILE_TYPE,
             PROJECT_SCHEMA,
             2});
-    projectToNode(project, tree.root()["scivisStudio"]);
+    projectToNode(project, tree.root()["scivisStudio"], ProjectForm::Manifest);
 
     auto *shotNode = tree.root()["scivisStudio"]["shots"].child(0);
     REQUIRE(shotNode != nullptr);

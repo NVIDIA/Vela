@@ -3,6 +3,7 @@
 
 #include "CameraRig.h"
 
+#include "DataNodeFields.h"
 #include "Project.h"
 #include "ProjectSerialization.h"
 
@@ -57,17 +58,10 @@ const char *toString(CameraInterpolation interpolation)
   return "Linear";
 }
 
-CameraInterpolation interpolationFromString(const std::string &s)
+std::optional<CameraInterpolation> interpolationFromString(const std::string &s)
 {
-  if (s == "Hold")
-    return CameraInterpolation::Hold;
-  if (s == "Ease Out")
-    return CameraInterpolation::EaseOut;
-  if (s == "Ease In")
-    return CameraInterpolation::EaseIn;
-  if (s == "Ease Out + In")
-    return CameraInterpolation::EaseOutIn;
-  return CameraInterpolation::Linear;
+  return enumFromName(
+      s, CameraInterpolation::Hold, CameraInterpolation::EaseOutIn, toString);
 }
 
 // Manipulator <-> stored pose ////////////////////////////////////////////////
@@ -189,11 +183,26 @@ static void manipulatorStateToNode(
   vsr::app::serialize_CameraPose(state.orbit, node["orbit"]);
 }
 
-static void nodeToManipulatorState(
-    vsr::core::DataNode &node, ManipulatorState &state)
+static bool nodeToManipulatorState(
+    const vsr::core::DataNode &node, ManipulatorState &state)
 {
-  if (auto *orbit = node.child("orbit"))
-    vsr::app::deserialize_CameraPose(*orbit, state.orbit);
+  const auto *orbit = node.child("orbit");
+  return !orbit || vsr::app::deserialize_CameraPose(*orbit, state.orbit);
+}
+
+static bool nodeToKeyframe(
+    const vsr::core::DataNode &node, CameraKeyframe &keyframe)
+{
+  if (!readOptionalChild(node, "frame", keyframe.frame)
+      || !readOptionalChild(node, "name", keyframe.name)
+      || !readOptionalEnumChild(node,
+          "interpolationToNext",
+          keyframe.interpolationToNext,
+          interpolationFromString))
+    return false;
+  const auto *manipulator = node.child("manipulator");
+  return !manipulator
+      || nodeToManipulatorState(*manipulator, keyframe.manipulator);
 }
 
 void cameraRigToNode(const CameraRig &rig, vsr::core::DataNode &node)
@@ -209,25 +218,21 @@ void cameraRigToNode(const CameraRig &rig, vsr::core::DataNode &node)
   }
 }
 
-void nodeToCameraRig(vsr::core::DataNode &node, CameraRig &rig)
+bool nodeToCameraRig(const vsr::core::DataNode &node, CameraRig &rig)
 {
-  if (auto *current = node.child("current"))
-    nodeToManipulatorState(*current, rig.current);
-
-  rig.keyframes.clear();
-  if (auto *keyframes = node.child("keyframes")) {
-    keyframes->foreach_child([&](vsr::core::DataNode &kf) {
-      CameraKeyframe keyframe;
-      keyframe.frame = kf["frame"].getValueOr<int>(0);
-      keyframe.name = kf["name"].getValueOr<std::string>("");
-      keyframe.interpolationToNext = interpolationFromString(
-          kf["interpolationToNext"].getValueOr<std::string>("Linear"));
-      if (auto *manip = kf.child("manipulator"))
-        nodeToManipulatorState(*manip, keyframe.manipulator);
-      rig.keyframes.push_back(std::move(keyframe));
-    });
+  ManipulatorState current = rig.current;
+  if (const auto *c = node.child("current")) {
+    if (!nodeToManipulatorState(*c, current))
+      return false;
   }
+  std::vector<CameraKeyframe> keyframes;
+  if (!readNodeList(node, "keyframes", keyframes, nodeToKeyframe))
+    return false;
+
+  rig.current = current;
+  rig.keyframes = std::move(keyframes);
   sortKeyframes(rig);
+  return true;
 }
 
 bool saveCameraRigArchiveFile(
@@ -291,10 +296,16 @@ bool loadCameraRigArchiveFile(
     return false;
   }
 
-  rigOut = {};
-  rigOut.name = root["name"].getValueOr<std::string>("");
-  if (auto *rigNode = root.child("rig"))
-    nodeToCameraRig(*rigNode, rigOut);
+  CameraRig rig;
+  rig.name = root["name"].getValueOr<std::string>("");
+  if (const auto *rigNode = root.child("rig")) {
+    if (!nodeToCameraRig(*rigNode, rig)) {
+      if (error)
+        *error = "Camera Rig Archive holds malformed rig data";
+      return false;
+    }
+  }
+  rigOut = std::move(rig);
   return true;
 }
 

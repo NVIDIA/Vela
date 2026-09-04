@@ -9,6 +9,10 @@
 #include <string>
 #include <vector>
 
+namespace vsr::core {
+struct DataNode;
+} // namespace vsr::core
+
 namespace vsr::scivis_studio {
 
 struct ShotRenderSettings
@@ -43,6 +47,35 @@ struct Shot
   SceneObjectRef camera;
   ShotRenderSettings renderSettings;
 };
+
+// Which fields of a model entity its DataNode carries. Manifest is what
+// project.vsr stores: the persisted fields only, since the runtime-only ones
+// (Shot::camera, Dataset::status, a rig's scene root, ...) are rebuilt when
+// the project opens. Full is every field, for a receiver that cannot rebuild
+// them: the Project Snapshot and UpdateShot on the wire. Shot's codec below
+// and projectToNode() (ProjectSerialization.h) take the same choice.
+enum class ProjectForm
+{
+  Manifest,
+  Full
+};
+
+// Shot's one serializer, for the manifest and the wire alike. Every persisted
+// field is written, datasetBindings as an ordered list of {datasetId,
+// enabled}; Full adds the runtime-only camera ref. The default form is the
+// wire form so a payload nesting a Shot reaches it as a plain
+// toNode(value, node). On read `id` is required and a binding's datasetId is
+// required; an absent optional child keeps the struct's default (name falls
+// back to id) and camera is read when present; a mistyped child or unknown
+// camera type is rejected and `shot` is left untouched.
+void toNode(const Shot &shot,
+    vsr::core::DataNode &node,
+    ProjectForm form = ProjectForm::Full);
+bool fromNode(const vsr::core::DataNode &node, Shot &shot);
+
+// Every field, all optional on read with the struct's defaults.
+void toNode(const ShotRenderSettings &settings, vsr::core::DataNode &node);
+bool fromNode(const vsr::core::DataNode &node, ShotRenderSettings &settings);
 
 namespace shot {
 

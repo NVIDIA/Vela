@@ -341,9 +341,8 @@ void hydrateDatasets(const detail::ProjectOpenState &state,
           resolveProjectFileForRead(
               state.directory / "datasets" / (inventoryEntry.name + ".vsr")),
           ec);
-      inventoryEntry.status = (assetExists && !ec)
-          ? DatasetStatus::Available
-          : DatasetStatus::Unavailable;
+      inventoryEntry.status = (assetExists && !ec) ? DatasetStatus::Available
+                                                   : DatasetStatus::Unavailable;
       if (inventoryEntry.status == DatasetStatus::Unavailable && logWarnings) {
         vsr::core::logWarning(
             "[SciVisStudio] Dataset '%s' has no asset on disk",
@@ -496,10 +495,11 @@ bool stageProjectOpen(const std::filesystem::path &directory,
     return fail("failed to load project.vsr", error);
 
   auto &root = state->manifest->root();
-  auto *model = root.child("scivisStudio");
+  const auto *model = root.child("scivisStudio");
   if (!model)
     return fail("project.vsr is missing scivisStudio section", error);
-  nodeToProject(*model, state->manifestProject);
+  if (!nodeToProject(*model, state->manifestProject, ProjectForm::Manifest))
+    return fail("project.vsr has a malformed scivisStudio section", error);
 
   const auto metadata = vsr::core::readDataTreeMetadata(root);
   state->schemaVersion = metadata.found()

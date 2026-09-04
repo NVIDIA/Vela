@@ -28,8 +28,11 @@ _Avoid_: RPC call, command
 The whole serialized Project, pushed after every confirmed mutation from any
 source. It replaces the client's Project Replica wholesale and is the commit
 marker: scene messages for the same mutation precede it, and its arrival
-means the mutation is fully visible.
-_Avoid_: project delta, project patch
+means the mutation is fully visible. It carries the Project's Full form
+(`ProjectForm::Full`): the manifest's fields plus, inline under each entity,
+the runtime fields the client cannot rebuild; the same serializer writes the
+manifest form `project.vsr` stores.
+_Avoid_: project delta, project patch, runtime sidecar
 
 **Server Task**:
 A long-running server operation identified by a server-allocated task id,

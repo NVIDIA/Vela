@@ -238,30 +238,10 @@ struct ColorMapCreatedResult
   vsr::scivis_studio::SceneObjectRef object;
 };
 
-// Shot serialization /////////////////////////////////////////////////////////
-
-// The standalone Shot form (ProjectSerialization only exposes the whole
-// Project). Every field travels, including the runtime-only camera ref;
-// datasetBindings are keyed by datasetId ("datasetBindings/<id>/enabled").
-// On read `id` is required; absent optional children keep the struct's
-// defaults, a mistyped child is rejected.
-void toNode(const vsr::scivis_studio::Shot &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, vsr::scivis_studio::Shot &);
-
-void toNode(
-    const vsr::scivis_studio::ShotRenderSettings &, vsr::core::DataNode &);
-bool fromNode(
-    const vsr::core::DataNode &, vsr::scivis_studio::ShotRenderSettings &);
-
-// UpdateShot nests the Shot above. Its codec is hand-written beside Shot's:
-// a fields() description would reach Shot's toNode()/fromNode() from
-// PayloadCommon.h, where the model namespace's overloads are not visible.
-void toNode(const UpdateShot &, vsr::core::DataNode &);
-bool fromNode(const vsr::core::DataNode &, UpdateShot &);
-
-// Every other payload is a fields() description (PayloadCommon.h): requestId
-// and the id, name, path and nested-ref fields are all required; name may be
-// "".
+// Every payload is a fields() description (PayloadCommon.h): requestId and
+// the id, name, path and nested-ref fields are all required; name may be "".
+// UpdateShot nests the model's Shot in its Full form (Shot.h): every field
+// including the runtime camera ref, bindings as the manifest's ordered list.
 
 // Inlined definitions ////////////////////////////////////////////////////////
 
@@ -277,6 +257,13 @@ void fields(V &v, RemoveShot &p)
 {
   v.required("requestId", p.requestId);
   v.required("shotId", p.shotId);
+}
+
+template <typename V>
+void fields(V &v, UpdateShot &p)
+{
+  v.required("requestId", p.requestId);
+  v.child("shot", p.shot);
 }
 
 template <typename V>
