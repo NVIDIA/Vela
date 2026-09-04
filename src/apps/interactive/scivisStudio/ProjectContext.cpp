@@ -3,13 +3,13 @@
 
 #include "ProjectContext.h"
 
+#include "ColorMaps.h"
 #include "DatasetIO.h"
 #include "LightRigIO.h"
 #include "ProjectAssetTransaction.h"
 #include "ProjectPersistence.h"
 #include "ProjectSerialization.h"
 
-#include "vsr/core/ColorMapUtil.hpp"
 #include "vsr/core/DataTree.hpp"
 #include "vsr/core/Logging.hpp"
 #include "vsr/io/archives/LayerSubtreeArchive.hpp"
@@ -31,14 +31,6 @@ namespace vsr::scivis_studio {
 // Subtree Archive rather than a foreign-format importer. It is recorded as the
 // dataset's provenance and routes reimport back through the subtree loader.
 static constexpr const char *SUBTREE_IMPORTER_TYPE = "VSR_SUBTREE";
-
-// Samples in the Array a color map record names.
-static constexpr size_t COLOR_MAP_SAMPLES = 256;
-
-static std::string colorMapArrayName(const ColorMapID &id)
-{
-  return id + "_colormap";
-}
 
 static vsr::scene::LayerNodeRef findDirectChild(
     vsr::scene::LayerNodeRef parent, const std::string &name)
@@ -560,16 +552,14 @@ ColorMapRecord *ProjectContext::createColorMap(const std::string &name)
   if (!m_ctx)
     return nullptr;
 
-  ColorMapRecord record;
-  record.id = project::nextColorMapId(m_project);
-  record.name = makeValidUniqueAssetName(m_project.colorMaps,
+  const auto uniqueName = makeValidUniqueAssetName(m_project.colorMaps,
       name.empty()
           ? ("Color Map " + std::to_string(m_project.colorMaps.size() + 1))
           : name);
-  createColorMapArray(record.id);
-  m_project.colorMaps.push_back(std::move(record));
+  auto &record =
+      color_map::createColorMap(m_project, m_ctx->vsr.scene, uniqueName);
   m_project.markDirty();
-  return &m_project.colorMaps.back();
+  return &record;
 }
 
 bool ProjectContext::renameColorMap(
@@ -583,17 +573,10 @@ bool ProjectContext::renameColorMap(
 
 bool ProjectContext::removeColorMap(const ColorMapID &id, std::string *error)
 {
-  const auto *record = project::findColorMap(m_project, id);
-  if (!record)
-    return fail("color map not found", error);
-  const auto itr =
-      m_project.colorMaps.begin() + (record - m_project.colorMaps.data());
-
-  if (m_ctx) {
-    if (auto array = resolveColorMapArray(id))
-      m_ctx->vsr.scene.removeObject(array.data());
-  }
-  m_project.colorMaps.erase(itr);
+  if (!m_ctx)
+    return fail("missing VSR application context", error);
+  if (!color_map::removeColorMap(m_project, m_ctx->vsr.scene, id, error))
+    return false;
   m_project.markDirty();
   return true;
 }
@@ -603,36 +586,7 @@ vsr::scene::ArrayRef ProjectContext::resolveColorMapArray(
 {
   if (!m_ctx)
     return {};
-
-  const auto arrayName = colorMapArrayName(id);
-  size_t index = VSR_INVALID_INDEX;
-  vsr::core::foreach_item_const(
-      m_ctx->vsr.scene.objectDB().array, [&](const vsr::scene::Array *array) {
-        if (array && array->name() == arrayName)
-          index = array->index();
-      });
-  if (index == VSR_INVALID_INDEX)
-    return {};
-  return m_ctx->vsr.scene.getObject<vsr::scene::Array>(index);
-}
-
-vsr::scene::ArrayRef ProjectContext::createColorMapArray(const ColorMapID &id)
-{
-  auto array =
-      m_ctx->vsr.scene.createArray(ANARI_FLOAT32_VEC4, COLOR_MAP_SAMPLES);
-  array->setData(vsr::core::makeDefaultColorMap(COLOR_MAP_SAMPLES));
-  array->setName(colorMapArrayName(id));
-  return array;
-}
-
-void ProjectContext::ensureColorMapArrays()
-{
-  if (!m_ctx)
-    return;
-  for (const auto &record : m_project.colorMaps) {
-    if (!resolveColorMapArray(record.id))
-      createColorMapArray(record.id);
-  }
+  return color_map::resolveColorMapArray(m_ctx->vsr.scene, id);
 }
 
 bool ProjectContext::saveCameraRigArchive(const CameraRigID &id,
@@ -1974,7 +1928,7 @@ bool ProjectContext::openStagedProject(ProjectOpenStage &stage,
 
   m_project = std::move(stage.project);
   m_pendingAssetRemovals.clear();
-  ensureColorMapArrays();
+  color_map::ensureColorMapArrays(m_project, m_ctx->vsr.scene);
   if (!m_project.shots.empty()) {
     if (m_project.cameraRigs.empty()) {
       CameraRig rig;

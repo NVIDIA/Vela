@@ -4,6 +4,7 @@
 #include "catch.hpp"
 
 #include "CameraRig.h"
+#include "ColorMaps.h"
 #include "DatasetIO.h"
 #include "LightRig.h"
 #include "ProjectContext.h"
@@ -5066,6 +5067,63 @@ SCENARIO(
         REQUIRE(shot->lightRigId == project.lightRigs.front().id);
         REQUIRE(shot->renderSettings.rendererObjectIndex == VSR_INVALID_INDEX);
       }
+    }
+  }
+}
+
+SCENARIO("SciVis Studio color map arrays are the model's to pair and find",
+    "[SciVisStudio]")
+{
+  vsr::app::Context appContext;
+  auto &scene = appContext.vsr.scene;
+  Project project;
+  std::string error;
+
+  GIVEN("records as a manifest loads them, with no arrays yet")
+  {
+    project.colorMaps.push_back({"cm_0001", "Heat"});
+    project.colorMaps.push_back({"cm_0002", "Cold"});
+    REQUIRE_FALSE(color_map::resolveColorMapArray(scene, "cm_0001"));
+
+    WHEN("the arrays are ensured twice")
+    {
+      const auto before = scene.numberOfObjects(ANARI_ARRAY1D);
+      color_map::ensureColorMapArrays(project, scene);
+      color_map::ensureColorMapArrays(project, scene);
+
+      THEN("each record has exactly one default array, named by its id")
+      {
+        REQUIRE(scene.numberOfObjects(ANARI_ARRAY1D) == before + 2);
+        auto heat = color_map::resolveColorMapArray(scene, "cm_0001");
+        REQUIRE(heat);
+        REQUIRE(heat->name() == "cm_0001_colormap");
+        REQUIRE(heat->elementType() == ANARI_FLOAT32_VEC4);
+        REQUIRE(heat->size() == 256);
+        REQUIRE(color_map::resolveColorMapArray(scene, "cm_0002"));
+        REQUIRE_FALSE(color_map::resolveColorMapArray(scene, "cm_0003"));
+      }
+    }
+  }
+
+  GIVEN("a record created together with its array")
+  {
+    auto &record = color_map::createColorMap(project, scene, "Heat");
+    REQUIRE(record.name == "Heat");
+    const auto id = record.id;
+    REQUIRE(color_map::resolveColorMapArray(scene, id));
+
+    THEN("the dirty flag is the caller's, not the pairing's")
+    {
+      REQUIRE_FALSE(project.dirty);
+    }
+
+    THEN("removing it takes the array; an unknown id is reported")
+    {
+      REQUIRE(color_map::removeColorMap(project, scene, id, &error));
+      REQUIRE(project.colorMaps.empty());
+      REQUIRE_FALSE(color_map::resolveColorMapArray(scene, id));
+      REQUIRE_FALSE(color_map::removeColorMap(project, scene, id, &error));
+      REQUIRE(error == "color map not found");
     }
   }
 }

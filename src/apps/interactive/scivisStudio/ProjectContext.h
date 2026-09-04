@@ -163,10 +163,9 @@ struct ProjectContext
   int cameraRigUseCount(const CameraRigID &id) const;
   CameraRig *activeShotCameraRig();
 
-  // Color maps: a ColorMapRecord paired with a scene Array of RGBA samples
-  // named "<colorMapId>_colormap" (the record carries no scene ref, so the
-  // name is the link, as with "<shotId>_camera"). Create makes both, remove
-  // removes both; rename touches the record only.
+  // Color maps (ColorMaps.h pairs the record with its scene Array): create
+  // de-duplicates the name and makes both, remove removes both, rename
+  // touches the record only; each marks the project dirty.
   ColorMapRecord *createColorMap(const std::string &name = "");
   bool renameColorMap(const ColorMapID &id,
       const std::string &newName,
@@ -212,9 +211,6 @@ struct ProjectContext
   void ensureRendererDefaults(Shot &shot);
   LightRig *ensureDefaultLightRig();
   CameraRig *ensureDefaultCameraRig();
-  vsr::scene::ArrayRef createColorMapArray(const ColorMapID &id);
-  // Records loaded from a manifest have no Array yet: give each a default.
-  void ensureColorMapArrays();
   void installAnimationManagerCallback();
   void updateActiveShotFromAnimationTime();
   void onAnimationPlaybackStopped();
