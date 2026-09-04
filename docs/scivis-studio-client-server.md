@@ -161,7 +161,8 @@ outside Studio's set is **rejected with an error**, never silently ignored.
 - **Project**: `NewProject` (sync), `OpenProject(dir)` (task),
   `SaveProject(dir?, uiState)` (task); `UIState{tree}` (server→client, in
   every bootstrap and after an `OpenProject` completes).
-- **Dataset**: static import, file-animation import (tasks); declared-dataset
+- **Dataset**: static import, subtree-archive import, file-animation import
+  (tasks); declared-dataset
   creation (sync — stats nothing, ADR 0023); `ReimportDataset` (task);
   `RenameDataset`, `RemoveDataset(keepAssetFile)`, `UnloadDataset`,
   `RefreshDatasetAvailability` (sync); `LoadDataset`, dataset-archive
@@ -179,7 +180,10 @@ outside Studio's set is **rejected with an error**, never silently ignored.
   `RemoveColorMap` (sync). Values are optimistic scene parameter edits.
 - **Remote Browse**: `ListRoots`, `ListDirectory` (sync).
 - **Server Task family**: task-id reply, `TaskProgress`, `TaskCompleted` /
-  `TaskFailed`, `CancelTask`.
+  `TaskFailed`, `CancelTask`. An ending carries what its task produced the
+  way a `ProjectOpReply` does, as an opaque `results` subtree holding a
+  task-specific payload (a render's `RenderShotResult{framesCompleted}`;
+  `PROTOCOL_VERSION` 5).
 - **Playback**: `SetPlaying{shotId, bool}` (sync project op),
   `SetTime{shotId, frame}` (optimistic one-way),
   `TimeAdvanceWarning{frame, message}` (server→client).
@@ -209,7 +213,9 @@ two), no bare save-state-file, no raw float update-time.
   as the node name (ADR 0025's anonymous-append trap), and every scalar lives
   under a named child (ADR 0027).
 - Wire identity for scene objects is the server-minted `(type, pool index)`,
-  carried explicitly. Single-client, the stale-slot window is essentially
+  carried explicitly as the object-reference value a `DataNode` already
+  holds for an object parameter, one leaf (`PROTOCOL_VERSION` 5).
+  Single-client, the stale-slot window is essentially
   unreachable (every lifecycle event for client-editable objects is a
   round-tripped op the client itself initiated); a generation counter on the
   index is the documented upgrade path if slot reuse ever bites.

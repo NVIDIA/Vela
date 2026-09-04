@@ -271,9 +271,12 @@ pending request retires), and with a bare `Error{"malformed ..."}` otherwise.
 The client core covers the second case too: a bare `Error` that names the
 type of a pending request fails the oldest pending request of that type, so
 no control stays greyed until the connection is lost. `PROTOCOL_VERSION` is
-4: 2 when `TaskFailed` gained `framesCompleted` (optional on the wire), 3
+5: 2 when `TaskFailed` gained `framesCompleted` (optional on the wire), 3
 when `Disconnect` gained a reason, 4 when `UpdateShot` and `ProjectSnapshot`
-moved to the model's one Shot and Project serialization (PR review fix-ups
+moved to the model's one Shot and Project serialization, 5 when a
+`SceneObjectRef` became one object-reference leaf, the task endings gained a
+`results` subtree (`RenderShotResult` replacing `framesCompleted`) and
+`ImportSubtreeDataset` split from `ImportStaticDataset` (PR review fix-ups
 below).
 
 ### Shot rendering
@@ -289,7 +292,8 @@ below).
   engine path as `scivisStudioRenderShot` and the monolith -- with a per-frame
   hook: `TaskProgress{current = frame, total = frames, message = "frame N of
   M"}` before each frame. `TaskCompleted{message = output directory,
-  framesCompleted}` ends it; the directory is `<project>/renders/<shotId>/`,
+  results = RenderShotResult{framesCompleted}}` ends it; the directory is
+  `<project>/renders/<shotId>/`,
   inside the Data Roots by construction and listable with `ListDirectory`.
   Preconditions the engine finds (a dataset that cannot be made resident, a
   missing camera) fail the task with the engine's text. A snapshot follows
@@ -300,7 +304,8 @@ below).
 - **Cancel and Shutdown.** `CancelTask` naming the running render raises the
   runner's cancel flag on the IO thread; the body stops before its next frame
   (granularity: one frame times `samples` renders), the task ends
-  `TaskFailed{"cancelled", framesCompleted}`, and the `CancelTask` reply is
+  `TaskFailed{"cancelled", RenderShotResult{framesCompleted}}`, and the
+  `CancelTask` reply is
   "ok" once dispatched after the body returns (for a task that completed
   regardless of the flag it is "task already finished"). Frames already
   written stay on disk. `Shutdown` stops a running render the same way. A
@@ -898,6 +903,51 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   rig (mistyped keyframe frame, unknown easing, mistyped pose) is now
   rejected, covered in `[StudioProtocol]`.
 
+- **Protocol boundary cleanups** (`PROTOCOL_VERSION` 5). Six small
+  findings, one of which did not hold up:
+  - *`SubtreePtr`* was to become a `DataNode` held by value. A `DataNode`'s
+    children live in its `DataTree`'s forest and a detached or copied node
+    has no forest (`operator[]` on one dereferences a null ref), so a
+    payload cannot hold a subtree by value; `SubtreePtr` stays, written up
+    in the handoff's follow-ups. The other five landed.
+  - *`SceneObjectRef`* travelled as `{type: "ANARI_CAMERA", objectIndex}`
+    with a 4096-entry table in the model to invert `anari::toString`. It is
+    now one leaf holding the object reference a `DataNode` already carries
+    for an object parameter (`Any(type, index)`); an unset ref is an empty
+    leaf both ways (a `Shot` without a camera). `toString(anari::DataType)`,
+    `anariTypeFromString` and the table are gone; the test client scans
+    `anari::toString` at script-parse time for its type names.
+  - *Task endings* carried a RenderShot-only `framesCompleted`. Both now
+    carry a `results` subtree like `ProjectOpReply`, decoded with the same
+    `results<R>()` (now in `PayloadCommon.h`, generic over any payload with
+    a `results`), and `RenderShotResult{framesCompleted}` is what a render's
+    ending holds. The client's `TaskRecord` and the test client's record
+    keep their `framesCompleted`, decoded from it, so the panel, toasts,
+    `task.*` fields and `EVT` lines are unchanged.
+    `ImportStaticDataset.fromSubtreeArchive` made `importerType` meaningless
+    when set and routed to `addStaticDatasetFromSubtree()`, a Layer Subtree
+    Archive import that `LoadDatasetArchive` (a Dataset Archive) does not
+    cover, so the bit became its own request, `ImportSubtreeDataset` (63).
+  - *`SetFrameConfig`/`FrameConfig`* are one `FrameSize<TAG>` description;
+    `FrameHeader` extends the wire prefix `FrameHeaderFixed` (typed enums,
+    16 bytes) so the frame codec copies a struct instead of six fields each
+    way; the image byte count follows as its own `uint32_t`. Bytes on the
+    wire are unchanged.
+  - *Thin wrappers*: `encodeSceneMessage<TYPE>()` static-asserts the scene
+    type instead of guarding a literal at runtime (`SceneMessages.cpp`
+    deleted); `encode<T>()` and `StructuredMessage::toMessage()` share one
+    `makeMessage(type, tree)` overload in `vsr/network/Message.hpp`;
+    `decode<T>()` no longer accepts a header-only message as an empty tree
+    (nothing sends one); `StudioEndpoint.{h,cpp}` folded into
+    `StudioProtocol.{h,cpp}`.
+  - *Port type*: `uint16_t` end to end (`DEFAULT_PORT`, `parsePort()`,
+    `NetworkServer`/`NetworkClient` signatures, `ServerOptions`, the client
+    and test client, the test helpers); the `short` sign-hazard comment in
+    `NetworkChannel.cpp` is gone with the casts. Shared vsr code touched:
+    the `makeMessage()` overload and the `NetworkChannel` port signatures
+    (the render server, MPI server and remote viewer keep their `short` and
+    convert implicitly).
+
 ### Spec conformance
 
 Every bullet of the spec sections named below, against the tree at
@@ -916,7 +966,7 @@ decisions, `M7-n`).
 | Rig: light rig create/clone/remove/rename, add/remove light, camera rig create/remove/rename, archives | implemented | types 40..52 | |
 | Color map: `CreateColorMap` both halves atomically, `RenameColorMap`, `RemoveColorMap`; values optimistic parameter edits | **partial** | types 53..55, `ColorMapCreatedResult` | the samples are Array data, not parameters, so no optimistic edit reaches them; see "Color map objects" (deferred) |
 | Remote Browse: `ListRoots`, `ListDirectory` | implemented | `server/RemoteBrowse.cpp` | |
-| Server Task family: task-id reply, `TaskProgress`, `TaskCompleted`/`TaskFailed`, `CancelTask` | implemented | `server/ServerTaskRunner.cpp`, `protocol/TaskMessages.h` | `TaskFailed.framesCompleted` added (v2); the bootstrap replays endings since the previous bootstrap, not only the running task (M7-4; spec paragraph tightened) |
+| Server Task family: task-id reply, `TaskProgress`, `TaskCompleted`/`TaskFailed`, `CancelTask` | implemented | `server/ServerTaskRunner.cpp`, `protocol/TaskMessages.h` | `TaskFailed.framesCompleted` added (v2), then both endings gained a `results` subtree carrying `RenderShotResult{framesCompleted}` (v5); the bootstrap replays endings since the previous bootstrap, not only the running task (M7-4; spec paragraph tightened) |
 | Playback: `SetPlaying`, `SetTime`, `TimeAdvanceWarning{frame, message}` | implemented | `protocol/PlaybackMessages.h` | the warning also names the `shotId` |
 | Scene client-to-server: `SetObjectParameter`, `RemoveObjectParameter`, `SetNodeTransform` | implemented | `protocol/SceneEditMessages.h` | |
 | Scene server-to-client: `TransferScene`, `TransferLayer`, object added/removed, `ProjectSnapshot` | implemented | `protocol/SceneMessages.h`, `ProjectSnapshot.h` | |
@@ -960,7 +1010,7 @@ decisions, `M7-n`).
 | Interactive frame delivery pauses and resumes | implemented | by construction: the body holds the loop | |
 | Mutating ops refused while the render runs; read-only fine | **deviates** | `ProjectOpDispatcher::dispatch`, `StudioServer::dispatchPendingRequests` | refused when they reach dispatch while a render is queued or running (M7-3); a request that *arrives* while the body holds the loop is dispatched after it returns and, the render being over, served. The spec sentence now says so. |
 | No frame preview in v1 | implemented | -- | |
-| Outputs `<project>/renders/<shotId>/<prefix>_%04d.png`; partial frames kept; frame count in the ending; preconditions as task failure | implemented | `RenderShot.cpp`, `TaskFailed.framesCompleted` | |
+| Outputs `<project>/renders/<shotId>/<prefix>_%04d.png`; partial frames kept; frame count in the ending; preconditions as task failure | implemented | `RenderShot.cpp`, `RenderShotResult` | |
 | `scivisStudioRenderShot` unchanged, shares the engine path | implemented | `scivisStudio/RenderShot.cpp` | result struct extended, CLI behaviour kept |
 | **Client behavior on server loss** | | | |
 | Client declares loss: socket error, or Ping after ~5 s quiet and ~15 s silence | implemented | `client/ServerConnection.cpp` | `ConnectionTimings` defaults 5 s / 15 s |
