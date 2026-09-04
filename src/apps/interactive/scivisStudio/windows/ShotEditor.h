@@ -33,6 +33,7 @@ struct ShotEditor : public vsr::ui::imgui::Window
   ProjectContext *m_projectContext{nullptr};
   std::function<void()> m_onRender;
   std::string m_rendererLoadAttemptedLibrary;
+  std::string m_lastRejection;
 };
 
 } // namespace vsr::scivis_studio
