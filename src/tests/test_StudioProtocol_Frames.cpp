@@ -92,8 +92,8 @@ SCENARIO("Frame encode/decode", "[StudioProtocol]")
       REQUIRE(msg.header.type == uint8_t(StudioMessageType::Frame));
       REQUIRE(msg.header.payload_length == msg.payload.size());
       REQUIRE(msg.payload.size()
-          == sizeof(FrameHeaderFixed) + header.shotId.size() + 1
-              + pixels.size());
+          == sizeof(FrameHeaderFixed) + sizeof(uint32_t) + header.shotId.size()
+              + 1 + pixels.size());
       REQUIRE(messageType(msg) == StudioMessageType::Frame);
     }
 
@@ -124,9 +124,12 @@ SCENARIO("Frame encode/decode", "[StudioProtocol]")
 
     THEN("a truncated payload decodes to empty rather than throwing")
     {
-      // Cut inside the fixed header, inside the shotId and inside the pixels.
-      for (size_t keep :
-          {size_t(3), sizeof(FrameHeaderFixed) + 2, msg.payload.size() - 1}) {
+      // Cut inside the fixed header, inside the byte count, inside the shotId
+      // and inside the pixels.
+      for (size_t keep : {size_t(3),
+               sizeof(FrameHeaderFixed) + 2,
+               sizeof(FrameHeaderFixed) + sizeof(uint32_t) + 2,
+               msg.payload.size() - 1}) {
         auto cut = msg;
         cut.payload.resize(keep);
         cut.header.payload_length = uint32_t(keep);
@@ -226,8 +229,8 @@ SCENARIO("Frame encode/decode", "[StudioProtocol]")
 
     THEN("it still decodes with the bytes intact")
     {
-      REQUIRE(
-          msg.payload.size() == sizeof(FrameHeaderFixed) + 1 + pixels.size());
+      REQUIRE(msg.payload.size()
+          == sizeof(FrameHeaderFixed) + sizeof(uint32_t) + 1 + pixels.size());
       const auto view = decodeFrame(msg);
       REQUIRE(view);
       REQUIRE(view->header.shotId.empty());

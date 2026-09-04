@@ -62,32 +62,31 @@ constexpr bool isPixelFormat(uint8_t value);
 
 // Frame header ///////////////////////////////////////////////////////////////
 
-struct FrameHeader
+// The fixed-size part of a frame's header, which is also its wire layout: a
+// Frame message is this struct written verbatim with payloadWrite(), then the
+// image byte count as a uint32_t, then shotId as a null-terminated string,
+// then exactly that many bytes of image data. The enums are uint8_t-based,
+// so a byte read off the wire lands in them as is and decodeFrame() checks
+// it against isPixelFormat()/isFrameEncoding() before use.
+struct FrameHeaderFixed
 {
   uint32_t width{0};
   uint32_t height{0};
   PixelFormat pixelFormat{PixelFormat::RGBA8_sRGB};
   FrameEncoding encoding{FrameEncoding::Raw};
-  std::string shotId;
-  int frame{0};
-};
-
-// Wire layout of the fixed part of a Frame message, written verbatim with
-// payloadWrite(). It is followed by shotId as a null-terminated string and
-// then exactly payloadBytes of image data.
-struct FrameHeaderFixed
-{
-  uint32_t width{0};
-  uint32_t height{0};
-  uint8_t pixelFormat{0};
-  uint8_t encoding{0};
   uint8_t reserved[2]{0, 0};
   int32_t frame{0};
-  uint32_t payloadBytes{0};
 };
 
-static_assert(sizeof(FrameHeaderFixed) == 20,
+static_assert(sizeof(FrameHeaderFixed) == 16,
     "FrameHeaderFixed is a wire format and must stay padding-free");
+
+// What a frame carries about itself: the fixed part plus the shot it was
+// rendered for.
+struct FrameHeader : FrameHeaderFixed
+{
+  std::string shotId;
+};
 
 // A decoded frame. `data` points into the Message it was decoded from and is
 // valid only as long as that Message is.
@@ -110,23 +109,20 @@ std::optional<FrameView> decodeFrame(const vsr::network::Message &msg);
 
 // Configuration payloads /////////////////////////////////////////////////////
 
-// Client -> server: the viewport size the client wants frames rendered at.
-struct SetFrameConfig
+// A frame size, under the tag that says which way it travels: SetFrameConfig
+// (client -> server) is the viewport size the client wants frames rendered
+// at, FrameConfig (server -> client) the effective size in force. One
+// description; the tag keeps them distinct message types.
+template <StudioMessageType TAG>
+struct FrameSize
 {
-  static constexpr StudioMessageType MESSAGE_TYPE =
-      StudioMessageType::SetFrameConfig;
+  static constexpr StudioMessageType MESSAGE_TYPE = TAG;
   uint32_t width{0};
   uint32_t height{0};
 };
 
-// Server -> client: the effective frame configuration in force.
-struct FrameConfig
-{
-  static constexpr StudioMessageType MESSAGE_TYPE =
-      StudioMessageType::FrameConfig;
-  uint32_t width{0};
-  uint32_t height{0};
-};
+using SetFrameConfig = FrameSize<StudioMessageType::SetFrameConfig>;
+using FrameConfig = FrameSize<StudioMessageType::FrameConfig>;
 
 // Client -> server: decodings the client supports, most preferred first.
 struct SetEncodings
@@ -148,8 +144,8 @@ struct StopRendering
       StudioMessageType::StopRendering;
 };
 
-// SetFrameConfig, FrameConfig and the two empty payloads are fields()
-// descriptions (PayloadCommon.h); width and height are required.
+// FrameSize and the two empty payloads are fields() descriptions
+// (PayloadCommon.h); width and height are required.
 
 // supported travels as a string list; an absent list reads as empty and an
 // unknown encoding name is rejected.
@@ -180,15 +176,8 @@ constexpr bool isPixelFormat(uint8_t value)
   }
 }
 
-template <typename V>
-void fields(V &v, SetFrameConfig &c)
-{
-  v.required("width", c.width);
-  v.required("height", c.height);
-}
-
-template <typename V>
-void fields(V &v, FrameConfig &c)
+template <typename V, StudioMessageType TAG>
+void fields(V &v, FrameSize<TAG> &c)
 {
   v.required("width", c.width);
   v.required("height", c.height);

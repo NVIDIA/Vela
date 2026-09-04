@@ -49,14 +49,10 @@ vsr::network::Message encodeFrame(
     const FrameHeader &header, const std::byte *data, size_t size)
 {
   auto msg = vsr::network::makeMessage(uint8_t(StudioMessageType::Frame));
-  FrameHeaderFixed fixed;
-  fixed.width = header.width;
-  fixed.height = header.height;
-  fixed.pixelFormat = uint8_t(header.pixelFormat);
-  fixed.encoding = uint8_t(header.encoding);
-  fixed.frame = int32_t(header.frame);
-  fixed.payloadBytes = uint32_t(size);
+  const FrameHeaderFixed &fixed = header;
+  const uint32_t payloadBytes = uint32_t(size);
   vsr::network::payloadWrite(msg, &fixed);
+  vsr::network::payloadWrite(msg, &payloadBytes);
   vsr::network::payloadWrite(msg, header.shotId);
   if (size > 0)
     vsr::network::payloadWrite(msg, data, uint32_t(size));
@@ -73,35 +69,32 @@ std::optional<FrameView> decodeFrame(const vsr::network::Message &msg)
     return {};
 
   uint32_t offset = 0;
-  FrameHeaderFixed fixed;
-  if (!vsr::network::payloadRead(msg, offset, &fixed))
+  FrameView view;
+  FrameHeaderFixed &fixed = view.header;
+  uint32_t payloadBytes = 0;
+  if (!vsr::network::payloadRead(msg, offset, &fixed)
+      || !vsr::network::payloadRead(msg, offset, &payloadBytes))
     return {};
-  if (!isPixelFormat(fixed.pixelFormat) || !isFrameEncoding(fixed.encoding))
+  if (!isPixelFormat(uint8_t(fixed.pixelFormat))
+      || !isFrameEncoding(uint8_t(fixed.encoding)))
     return {};
 
-  FrameView view;
   // An unterminated shotId runs strnlen to the end and pushes offset one past
   // payload_length; that shows up as a byte-count mismatch below.
   if (!vsr::network::payloadRead(msg, offset, view.header.shotId))
     return {};
   if (offset > msg.header.payload_length
-      || msg.header.payload_length - offset != fixed.payloadBytes)
+      || msg.header.payload_length - offset != payloadBytes)
     return {};
 
-  const auto encoding = FrameEncoding(fixed.encoding);
-  if (encoding == FrameEncoding::Raw) {
+  if (fixed.encoding == FrameEncoding::Raw) {
     const uint64_t expected = uint64_t(fixed.width) * fixed.height * 4;
-    if (expected != fixed.payloadBytes)
+    if (expected != payloadBytes)
       return {};
   }
 
-  view.header.width = fixed.width;
-  view.header.height = fixed.height;
-  view.header.pixelFormat = PixelFormat(fixed.pixelFormat);
-  view.header.encoding = encoding;
-  view.header.frame = fixed.frame;
-  view.data = fixed.payloadBytes > 0 ? msg.payload.data() + offset : nullptr;
-  view.size = fixed.payloadBytes;
+  view.data = payloadBytes > 0 ? msg.payload.data() + offset : nullptr;
+  view.size = payloadBytes;
   return view;
 }
 
