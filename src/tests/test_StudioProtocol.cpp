@@ -8,7 +8,6 @@
 #include "PayloadCommon.h"
 #include "SessionMessages.h"
 #include "StudioCodec.h"
-#include "StudioEndpoint.h"
 #include "StudioProtocol.h"
 // std
 #include <array>
@@ -158,7 +157,7 @@ SCENARIO("StudioMessageType enum", "[StudioProtocol]")
   }
 }
 
-SCENARIO("StudioEndpoint parses --port values", "[StudioProtocol]")
+SCENARIO("parsePort() reads --port values", "[StudioProtocol]")
 {
   GIVEN("a port variable")
   {
@@ -275,13 +274,11 @@ SCENARIO("StudioCodec encode/decode", "[StudioProtocol]")
       REQUIRE(bare->reason.empty());
     }
 
-    THEN("a header-only Disconnect from an older sender decodes as bare")
+    THEN("a header-only Disconnect with no payload bytes is rejected")
     {
       const auto msg =
           vsr::network::makeMessage(uint8_t(StudioMessageType::Disconnect));
-      const auto bare = decode<Disconnect>(msg);
-      REQUIRE(bare);
-      REQUIRE(bare->reason.empty());
+      REQUIRE_FALSE(decode<Disconnect>(msg));
     }
   }
 
@@ -304,11 +301,11 @@ SCENARIO("StudioCodec encode/decode", "[StudioProtocol]")
       REQUIRE(decode<BootstrapEnd>(encode(BootstrapEnd{})));
     }
 
-    THEN("a header-only message with no bytes decodes as an empty payload")
+    THEN("a header-only message with no bytes is not an empty payload")
     {
       const auto msg =
           vsr::network::makeMessage(uint8_t(StudioMessageType::Ping));
-      REQUIRE(decode<Ping>(msg));
+      REQUIRE_FALSE(decode<Ping>(msg));
     }
   }
 

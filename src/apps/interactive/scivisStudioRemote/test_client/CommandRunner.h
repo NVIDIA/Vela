@@ -10,7 +10,7 @@
 #include "PlaybackMessages.h"
 #include "ProjectOpReply.h"
 #include "ProjectRequests.h"
-#include "StudioEndpoint.h"
+#include "StudioProtocol.h"
 #include "ViewportMessages.h"
 // vsr_core
 #include "vsr/core/FlatMap.hpp"

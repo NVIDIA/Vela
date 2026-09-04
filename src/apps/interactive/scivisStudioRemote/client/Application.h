@@ -11,7 +11,7 @@
 // vsr_scivis_studio_protocol
 #include "FrameMessages.h"
 #include "PayloadCommon.h"
-#include "StudioEndpoint.h"
+#include "StudioProtocol.h"
 // vsr_ui_imgui
 #include "vsr/ui/imgui/Application.h"
 // vsr_core

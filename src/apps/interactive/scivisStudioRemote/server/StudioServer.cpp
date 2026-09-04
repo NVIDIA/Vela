@@ -750,11 +750,11 @@ void StudioServer::bootstrap()
   send(encode(BootstrapBegin{}));
   {
     messages::TransferScene transfer(&scene, false);
-    send(encodeSceneMessage(transfer, StudioMessageType::TransferScene));
+    send(encodeSceneMessage<StudioMessageType::TransferScene>(transfer));
   }
   for (size_t i = 0; i < scene.numberOfLayers(); ++i) {
     messages::TransferLayer transfer(&scene, scene.layer(i));
-    send(encodeSceneMessage(transfer, StudioMessageType::TransferLayer));
+    send(encodeSceneMessage<StudioMessageType::TransferLayer>(transfer));
   }
   FrameConfig config;
   config.width = m_frameWidth;
@@ -777,7 +777,7 @@ void StudioServer::sendSceneSnapshot()
   if (m_state != SessionState::Connected && m_state != SessionState::Rendering)
     return;
   messages::TransferScene transfer(&m_ctx.vsr.scene, false);
-  send(encodeSceneMessage(transfer, StudioMessageType::TransferScene));
+  send(encodeSceneMessage<StudioMessageType::TransferScene>(transfer));
 }
 
 void StudioServer::applyFrameConfig(uint32_t width, uint32_t height)

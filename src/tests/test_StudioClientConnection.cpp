@@ -486,7 +486,7 @@ SCENARIO("ServerConnection announces a mid-session scene replacement",
       second->setName("second geometry");
       messages::TransferScene resend(&f.source, false);
       f.server.send(
-          encodeSceneMessage(resend, StudioMessageType::TransferScene));
+          encodeSceneMessage<StudioMessageType::TransferScene>(resend));
 
       THEN(
           "the hook fires while the old mirror still stands, then it is"

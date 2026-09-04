@@ -4,7 +4,7 @@
 #include "TestClientOptions.h"
 #include "Script.h"
 // vsr_scivis_studio_protocol
-#include "StudioEndpoint.h"
+#include "StudioProtocol.h"
 // std
 #include <sstream>
 

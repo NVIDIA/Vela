@@ -26,7 +26,7 @@ namespace vsr::scivis_studio::protocol {
  *
  * Example:
  *   vsr::network::messages::TransferLayer layer(&scene, l);
- *   channel.send(encodeSceneMessage(layer, StudioMessageType::TransferLayer));
+ *   channel.send(encodeSceneMessage<StudioMessageType::TransferLayer>(layer));
  *   ...
  *   if (messageType(msg) == StudioMessageType::TransferLayer)
  *     vsr::network::messages::TransferLayer(msg, &replica).execute();
@@ -36,11 +36,11 @@ namespace vsr::scivis_studio::protocol {
 constexpr bool isSceneMessageType(StudioMessageType type);
 
 // Re-tags an existing vsr::network StructuredMessage (TransferScene,
-// TransferLayer, NewObject, RemoveObject) with the Studio type value. Any
-// other type logs an error and yields an invalid message (type
-// MESSAGE_TYPE_INVALID, empty payload).
+// TransferLayer, NewObject, RemoveObject) with one of the four Studio scene
+// type values; any other TYPE is a compile error.
+template <StudioMessageType TYPE>
 vsr::network::Message encodeSceneMessage(
-    vsr::network::StructuredMessage &message, StudioMessageType type);
+    vsr::network::StructuredMessage &message);
 
 // Inlined definitions ////////////////////////////////////////////////////////
 
@@ -55,6 +55,15 @@ constexpr bool isSceneMessageType(StudioMessageType type)
   default:
     return false;
   }
+}
+
+template <StudioMessageType TYPE>
+inline vsr::network::Message encodeSceneMessage(
+    vsr::network::StructuredMessage &message)
+{
+  static_assert(isSceneMessageType(TYPE),
+      "encodeSceneMessage() carries only the four scene message types");
+  return message.toMessage(uint8_t(TYPE));
 }
 
 } // namespace vsr::scivis_studio::protocol

@@ -83,6 +83,9 @@ struct StructuredMessage
 // Helper functions ///////////////////////////////////////////////////////////
 
 Message makeMessage(uint8_t type);
+// A Message of `type` whose payload is the tree's serialization, the form a
+// StructuredMessage travels in.
+Message makeMessage(uint8_t type, const vsr::core::DataTree &tree);
 
 // write to payload //
 
@@ -120,11 +123,7 @@ inline void StructuredMessage::fromMessage(const Message &msg)
 
 inline Message StructuredMessage::toMessage(uint8_t type)
 {
-  Message msg;
-  msg.header.type = type;
-  m_tree.write(msg.payload);
-  msg.header.payload_length = uint32_t(msg.payload.size());
-  return msg;
+  return makeMessage(type, m_tree);
 }
 
 inline const vsr::core::DataTree &StructuredMessage::tree() const
@@ -138,6 +137,14 @@ inline Message makeMessage(uint8_t type)
 {
   Message msg;
   msg.header.type = type;
+  return msg;
+}
+
+inline Message makeMessage(uint8_t type, const vsr::core::DataTree &tree)
+{
+  Message msg = makeMessage(type);
+  tree.write(msg.payload);
+  msg.header.payload_length = uint32_t(msg.payload.size());
   return msg;
 }
 

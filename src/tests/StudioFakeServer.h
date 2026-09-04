@@ -64,9 +64,9 @@ inline std::vector<vsr::network::Message> makeFakeBootstrap(
   std::vector<vsr::network::Message> out;
   out.push_back(encode(BootstrapBegin{}));
   messages::TransferScene scene(&source, false);
-  out.push_back(encodeSceneMessage(scene, StudioMessageType::TransferScene));
+  out.push_back(encodeSceneMessage<StudioMessageType::TransferScene>(scene));
   messages::TransferLayer layer(&source, source.layer(FAKE_LAYER_NAME));
-  out.push_back(encodeSceneMessage(layer, StudioMessageType::TransferLayer));
+  out.push_back(encodeSceneMessage<StudioMessageType::TransferLayer>(layer));
   FrameConfig config;
   config.width = 640;
   config.height = 480;

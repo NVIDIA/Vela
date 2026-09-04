@@ -4,7 +4,7 @@
 #pragma once
 
 // vsr_scivis_studio_protocol
-#include "StudioEndpoint.h"
+#include "StudioProtocol.h"
 // std
 #include <filesystem>
 #include <string>
