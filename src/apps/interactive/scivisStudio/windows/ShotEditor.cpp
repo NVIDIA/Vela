@@ -52,11 +52,22 @@ bool ShotEditor::inputText(
   return false;
 }
 
-void ShotEditor::buildUI_deviceSelector(Shot &shot)
+// A size or count the widget shows as int; a non-positive entry reads as 1,
+// the floor clampToValidRanges() applies, so the unsigned field never wraps.
+bool ShotEditor::inputSize(const char *label, uint32_t &value)
+{
+  int shown = static_cast<int>(value);
+  if (!ImGui::InputInt(label, &shown))
+    return false;
+  value = static_cast<uint32_t>(std::max(1, shown));
+  return true;
+}
+
+bool ShotEditor::buildUI_deviceSelector(Shot &shot)
 {
   auto *ctx = m_projectContext ? m_projectContext->appContext() : nullptr;
-  auto &project = m_projectContext->project();
   auto &settings = shot.renderSettings;
+  bool edited = false;
   const auto preview = settings.rendererLibrary.empty()
       ? std::string{"<none>"}
       : settings.rendererLibrary;
@@ -66,7 +77,7 @@ void ShotEditor::buildUI_deviceSelector(Shot &shot)
     if (ImGui::BeginCombo("Device", preview.c_str()))
       ImGui::EndCombo();
     ImGui::EndDisabled();
-    return;
+    return false;
   }
 
   if (ImGui::BeginCombo("Device", preview.c_str())) {
@@ -78,7 +89,7 @@ void ShotEditor::buildUI_deviceSelector(Shot &shot)
           settings.rendererObjectIndex = VSR_INVALID_INDEX;
           settings.rendererSubtype = "default";
           m_rendererLoadAttemptedLibrary.clear();
-          project.markDirty();
+          edited = true;
         }
       }
       if (selected)
@@ -86,13 +97,14 @@ void ShotEditor::buildUI_deviceSelector(Shot &shot)
     }
     ImGui::EndCombo();
   }
+  return edited;
 }
 
-void ShotEditor::buildUI_rendererSelector(Shot &shot)
+bool ShotEditor::buildUI_rendererSelector(Shot &shot)
 {
   auto *ctx = m_projectContext ? m_projectContext->appContext() : nullptr;
-  auto &project = m_projectContext->project();
   auto &settings = shot.renderSettings;
+  bool edited = false;
   std::vector<vsr::scene::RendererAppRef> renderers;
 
   if (ctx && ctx->anari.isLoadableLibrary(settings.rendererLibrary)) {
@@ -128,7 +140,7 @@ void ShotEditor::buildUI_rendererSelector(Shot &shot)
         || settings.rendererSubtype != currentRenderer->subtype().str()) {
       settings.rendererObjectIndex = currentRenderer->index();
       settings.rendererSubtype = currentRenderer->subtype().str();
-      project.markDirty();
+      edited = true;
     }
   }
 
@@ -146,7 +158,7 @@ void ShotEditor::buildUI_rendererSelector(Shot &shot)
             || settings.rendererSubtype != renderer->subtype().str()) {
           settings.rendererObjectIndex = renderer->index();
           settings.rendererSubtype = renderer->subtype().str();
-          project.markDirty();
+          edited = true;
         }
       }
       if (selected)
@@ -155,11 +167,13 @@ void ShotEditor::buildUI_rendererSelector(Shot &shot)
     ImGui::EndCombo();
   }
   ImGui::EndDisabled();
+  return edited;
 }
 
-void ShotEditor::buildUI_lightRigSelector(Shot &shot)
+bool ShotEditor::buildUI_lightRigSelector(Shot &shot)
 {
-  auto &project = m_projectContext->project();
+  const auto &project = m_projectContext->project();
+  bool edited = false;
   std::string preview = "None";
   if (!shot.lightRigId.empty()) {
     if (auto *rig = light_rig::findLightRig(project, shot.lightRigId))
@@ -173,8 +187,7 @@ void ShotEditor::buildUI_lightRigSelector(Shot &shot)
     if (ImGui::Selectable("None", noneSelected)) {
       if (!shot.lightRigId.empty()) {
         shot.lightRigId.clear();
-        project.markDirty();
-        m_projectContext->applyActiveShot();
+        edited = true;
       }
     }
     if (noneSelected)
@@ -185,8 +198,7 @@ void ShotEditor::buildUI_lightRigSelector(Shot &shot)
       if (ImGui::Selectable(rig.name.c_str(), selected)) {
         if (shot.lightRigId != rig.id) {
           shot.lightRigId = rig.id;
-          project.markDirty();
-          m_projectContext->applyActiveShot();
+          edited = true;
         }
       }
       if (selected)
@@ -200,11 +212,13 @@ void ShotEditor::buildUI_lightRigSelector(Shot &shot)
     }
     ImGui::EndCombo();
   }
+  return edited;
 }
 
-void ShotEditor::buildUI_cameraRigSelector(Shot &shot)
+bool ShotEditor::buildUI_cameraRigSelector(Shot &shot)
 {
-  auto &project = m_projectContext->project();
+  const auto &project = m_projectContext->project();
+  bool edited = false;
   std::string preview = "None";
   if (!shot.cameraRigId.empty()) {
     if (auto *rig = camera_rig::findCameraRig(project, shot.cameraRigId))
@@ -218,8 +232,7 @@ void ShotEditor::buildUI_cameraRigSelector(Shot &shot)
     if (ImGui::Selectable("None", noneSelected)) {
       if (!shot.cameraRigId.empty()) {
         shot.cameraRigId.clear();
-        project.markDirty();
-        m_projectContext->applyActiveShot();
+        edited = true;
       }
     }
     if (noneSelected)
@@ -230,8 +243,7 @@ void ShotEditor::buildUI_cameraRigSelector(Shot &shot)
       if (ImGui::Selectable(rig.name.c_str(), selected)) {
         if (shot.cameraRigId != rig.id) {
           shot.cameraRigId = rig.id;
-          project.markDirty();
-          m_projectContext->applyActiveShot();
+          edited = true;
         }
       }
       if (selected)
@@ -245,6 +257,7 @@ void ShotEditor::buildUI_cameraRigSelector(Shot &shot)
     }
     ImGui::EndCombo();
   }
+  return edited;
 }
 
 void ShotEditor::buildUI()
@@ -253,94 +266,66 @@ void ShotEditor::buildUI()
     return;
 
   auto &project = m_projectContext->project();
-  auto *shot = project::activeShot(project);
-  if (!shot) {
+  const auto *active = project::activeShot(project);
+  if (!active) {
     ImGui::TextDisabled("No active shot");
     return;
   }
   auto *ctx = m_projectContext->appContext();
 
-  if (inputText("Name", shot->name))
-    project.markDirty();
+  // The widgets edit a copy of the active shot; whatever changed this frame
+  // lands through one updateShot(), whose validation, clamps and dirty
+  // marking are the only ones. Playback (frame, play/stop) goes through its
+  // own ops and never through the copy.
+  Shot shot = *active;
+  bool edited = false;
 
-  int currentFrame = shot->currentFrame;
-  int frameCount = shot->frameCount;
-  float fps = shot->fps;
+  edited |= inputText("Name", shot.name);
+
+  int currentFrame = shot.currentFrame;
   if (ImGui::InputInt("Current frame", &currentFrame)) {
-    shot->currentFrame = std::clamp(currentFrame, 0, shot->frameCount - 1);
-    project.markDirty();
-    if (ctx)
-      ctx->vsr.animationMgr.setAnimationFrame(shot->currentFrame);
-    else
-      m_projectContext->applyActiveShot();
+    m_projectContext->setActiveShotFrame(currentFrame);
+    shot.currentFrame = active->currentFrame;
   }
-  bool playbackSettingsChanged = false;
-  playbackSettingsChanged |= ImGui::InputInt("Frame count", &frameCount);
-  playbackSettingsChanged |= ImGui::InputFloat("FPS", &fps);
-  if (playbackSettingsChanged) {
-    shot->frameCount = std::max(1, frameCount);
-    shot->currentFrame =
-        std::clamp(shot->currentFrame, 0, shot->frameCount - 1);
-    shot->fps = std::max(1.f, fps);
-    project.markDirty();
-    m_projectContext->syncAnimationManagerToActiveShot();
-    m_projectContext->applyActiveShot();
-  }
+  edited |= ImGui::InputInt("Frame count", &shot.frameCount);
+  edited |= ImGui::InputFloat("FPS", &shot.fps);
 
-  const bool playing = ctx ? ctx->vsr.animationMgr.isPlaying() : shot->playing;
-  if (ImGui::Button(playing ? "Stop" : "Play")) {
-    if (ctx) {
-      if (ctx->vsr.animationMgr.isPlaying())
-        ctx->vsr.animationMgr.stop();
-      else
-        ctx->vsr.animationMgr.play();
-      shot->playing = ctx->vsr.animationMgr.isPlaying();
-    } else
-      shot->playing = !shot->playing;
-  }
+  const bool playing = ctx ? ctx->vsr.animationMgr.isPlaying() : shot.playing;
+  if (ImGui::Button(playing ? "Stop" : "Play"))
+    m_projectContext->setPlaying(shot.id, !playing);
   ImGui::SameLine();
-  if (ImGui::Checkbox("Loop", &shot->loop)) {
-    project.markDirty();
-    m_projectContext->syncAnimationManagerToActiveShot();
-  }
+  edited |= ImGui::Checkbox("Loop", &shot.loop);
 
   ImGui::SeparatorText("Render");
-  int width = static_cast<int>(shot->renderSettings.width);
-  int height = static_cast<int>(shot->renderSettings.height);
-  int samples = static_cast<int>(shot->renderSettings.samples);
-  if (ImGui::InputInt("Width", &width)) {
-    shot->renderSettings.width = static_cast<uint32_t>(std::max(1, width));
-    project.markDirty();
-  }
-  if (ImGui::InputInt("Height", &height)) {
-    shot->renderSettings.height = static_cast<uint32_t>(std::max(1, height));
-    project.markDirty();
-  }
-  if (ImGui::InputInt("Samples", &samples)) {
-    shot->renderSettings.samples = static_cast<uint32_t>(std::max(1, samples));
-    project.markDirty();
-  }
-  buildUI_deviceSelector(*shot);
-  buildUI_rendererSelector(*shot);
-  if (inputText("Output prefix", shot->renderSettings.outputFilePrefix))
-    project.markDirty();
-  buildUI_lightRigSelector(*shot);
-  buildUI_cameraRigSelector(*shot);
+  edited |= inputSize("Width", shot.renderSettings.width);
+  edited |= inputSize("Height", shot.renderSettings.height);
+  edited |= inputSize("Samples", shot.renderSettings.samples);
+  edited |= buildUI_deviceSelector(shot);
+  edited |= buildUI_rendererSelector(shot);
+  edited |= inputText("Output prefix", shot.renderSettings.outputFilePrefix);
+  edited |= buildUI_lightRigSelector(shot);
+  edited |= buildUI_cameraRigSelector(shot);
 
-  ImGui::Text("Output: renders/%s/", shot->id.c_str());
+  ImGui::Text("Output: renders/%s/", shot.id.c_str());
   if (ImGui::Button("Render Active Shot") && m_onRender)
     m_onRender();
 
   ImGui::SeparatorText("Datasets");
   for (const auto &dataset : project.datasets) {
     bool enabled = true;
-    if (auto *binding = shot::findDatasetBinding(*shot, dataset.id))
+    if (auto *binding = shot::findDatasetBinding(shot, dataset.id))
       enabled = binding->enabled;
     if (ImGui::Checkbox(dataset.name.c_str(), &enabled)) {
-      shot::setDatasetBinding(*shot, dataset.id, enabled);
-      project.markDirty();
-      m_projectContext->applyActiveShot();
+      shot::setDatasetBinding(shot, dataset.id, enabled);
+      edited = true;
     }
+  }
+
+  if (edited) {
+    std::string error;
+    if (!m_projectContext->updateShot(shot, &error))
+      vsr::core::logWarning(
+          "[SciVisStudio] shot edit rejected: %s", error.c_str());
   }
 }
 

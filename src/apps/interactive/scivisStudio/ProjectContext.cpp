@@ -1860,9 +1860,7 @@ void ProjectContext::syncAnimationManagerToActiveShot()
   if (!shot)
     return;
 
-  shot->frameCount = std::max(1, shot->frameCount);
-  shot->currentFrame = std::clamp(shot->currentFrame, 0, shot->frameCount - 1);
-  shot->fps = std::max(1.f, shot->fps);
+  shot::clampToValidRanges(*shot);
 
   m_syncingAnimationManager = true;
 

@@ -32,7 +32,6 @@
 
 namespace vsr::scivis_studio {
 
-
 using VSRApplication = vsr::ui::imgui::Application;
 namespace vsr_ui = vsr::ui::imgui;
 
@@ -540,8 +539,6 @@ void Application::uiFrameStart()
   const ImGuiIO &io = ImGui::GetIO();
   auto &animMgr = appContext()->vsr.animationMgr;
   animMgr.tick(io.DeltaTime);
-  if (auto *shot = project::activeShot(m_projectContext.project()))
-    shot->playing = animMgr.isPlaying();
 
   if (ImGui::BeginMainMenuBar()) {
     uiMainMenuBar();
@@ -580,10 +577,8 @@ void Application::uiFrameStart()
   }
 
   if (!io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Space)) {
-    if (auto *shot = project::activeShot(m_projectContext.project())) {
-      animMgr.togglePlay();
-      shot->playing = animMgr.isPlaying();
-    }
+    if (auto *shot = project::activeShot(m_projectContext.project()))
+      m_projectContext.setPlaying(shot->id, !animMgr.isPlaying());
   }
 
   // Saving while a background task mutates the project (dataset load,
