@@ -43,19 +43,22 @@ struct ProjectContext
   const Project &project() const;
 
   // The Project's revision: a count of the whole-op mutations below that
-  // changed it. Every op of this class that writes the Project moves it by
-  // one -- a failed one that still left a mark too (an ImportFailed record,
-  // a dataset found Unavailable), and a save, which only clears the dirty
-  // flag -- while the per-frame playback write does not: the frame position
-  // is transient while time moves (ADR 0035). A mirror of the Project (the
-  // remote server's snapshot) updates once per change, however many ops made
-  // it, and never for a refused or no-op call.
+  // changed it. Every whole op of this class that writes the Project moves
+  // it by one -- a failed one that still left a mark too (an ImportFailed
+  // record, a dataset found Unavailable), and a save, which only clears the
+  // dirty flag -- while neither the per-frame playback write (the frame
+  // position is transient while time moves, ADR 0035) nor a scene edit's
+  // dataset dirty mark does. A mirror of the Project (the remote server's
+  // snapshot) updates once per change, however many ops made it, and never
+  // for a refused or no-op call (setActiveShot to the active shot,
+  // setPlaying to the state the shot is in).
   uint64_t revision() const;
-  // Moves (with the revision) when which shot renders, or its record,
-  // changed: a new or opened project, addShot, setActiveShot to another
-  // shot, removeShot of the active one, updateShot of the active one.
-  // Whatever renders the active shot (its camera, its renderer pick)
-  // rebinds on it.
+  // Moves when what renders the active shot must be bound again: a new or
+  // opened project (a failed open too, whose apply reset the scene before
+  // failing), addShot, setActiveShot to another shot, removeShot of the
+  // active one, updateShot of the active one. The camera and renderer the
+  // shot renders with are read off its record, so a rig edit does not move
+  // it.
   uint64_t activeShotRevision() const;
   // A whole op outside this class wrote the Project -- the shot render
   // putting the shot's playback state back, the server committing the frame

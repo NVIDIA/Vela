@@ -943,8 +943,10 @@ bool ProjectContext::setPlaying(
     else
       animMgr.stop();
   }
-  shot->playing = playing;
-  markRevised();
+  if (shot->playing != playing) {
+    shot->playing = playing;
+    markRevised(); // time came to rest, or left it
+  }
   return true;
 }
 
@@ -1890,8 +1892,13 @@ bool ProjectContext::openStagedProject(ProjectOpenStage &stage,
   const bool applied =
       applyProjectOpen(stage, m_ctx->vsr.scene, m_ctx->vsr.animationMgr, error);
   m_syncingAnimationManager = false;
-  if (!applied)
+  if (!applied) {
+    // The apply resets the scene before it can fail, so the Project's
+    // runtime refs (the shot cameras) are gone though its records stand:
+    // whatever renders the active shot must bind again.
+    markActiveShotRevised();
     return false;
+  }
 
   m_project = std::move(stage.project);
   m_pendingAssetRemovals.clear();

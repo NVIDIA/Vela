@@ -4228,8 +4228,8 @@ SCENARIO("SciVis Studio ProjectContext counts the Project's revisions",
 
     WHEN("the active shot is selected again")
     {
-      REQUIRE(projectContext.setActiveShot(
-          projectContext.project().activeShotId));
+      REQUIRE(
+          projectContext.setActiveShot(projectContext.project().activeShotId));
 
       THEN("nothing changed, so neither revision moves")
       {
@@ -4314,6 +4314,9 @@ SCENARIO("SciVis Studio ProjectContext counts the Project's revisions",
       REQUIRE(projectContext.setPlaying(shot.id, true));
       const auto playing = projectContext.revision();
       REQUIRE(playing > synced);
+      // Asking for the state the shot is in is a no-op: nothing moves.
+      REQUIRE(projectContext.setPlaying(shot.id, true));
+      REQUIRE(projectContext.revision() == playing);
 
       // One frame's worth of time: the shot advances but keeps playing.
       appContext.vsr.animationMgr.tick(0.1f);
