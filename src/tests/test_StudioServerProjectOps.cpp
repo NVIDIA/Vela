@@ -150,7 +150,7 @@ Session::Session(const std::filesystem::path &dataRoot)
   client.send(Hello{});
   REQUIRE(client.waitForCount(StudioMessageType::BootstrapEnd, 1));
   REQUIRE(waitFor(
-      [&] { return server->sessionState() == SessionState::Connected; }));
+      [&] { return server->sessionState() == SessionState::Established; }));
   client.clear();
 }
 
@@ -1333,12 +1333,10 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
       THEN("rendering pauses instead of using the old scene's handles")
       {
         client.send(StartRendering{});
-        REQUIRE(waitFor([&] {
-          return session.server->sessionState() == SessionState::Rendering;
-        }));
+        REQUIRE(waitFor([&] { return session.server->streaming(); }));
         std::this_thread::sleep_for(200ms);
         REQUIRE(client.count(StudioMessageType::Frame) == 0);
-        REQUIRE(session.server->sessionState() == SessionState::Rendering);
+        REQUIRE(session.server->streaming());
 
         AND_THEN("a Pick is refused with an Error instead of a miss")
         {

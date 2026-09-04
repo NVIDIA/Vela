@@ -142,7 +142,7 @@ ViewportSession::ViewportSession(const MeshFixture &data)
   client.send(Hello{});
   REQUIRE(client.waitForCount(StudioMessageType::BootstrapEnd, 1));
   REQUIRE(waitFor(
-      [&] { return server->sessionState() == SessionState::Connected; }));
+      [&] { return server->sessionState() == SessionState::Established; }));
 
   ImportStaticDataset import;
   import.name = "Triangle";
@@ -271,7 +271,7 @@ SCENARIO("StudioServer picks against its frames", "[StudioServer]")
 
   GIVEN("a paused session looking at the triangle")
   {
-    REQUIRE(session.server->sessionState() == SessionState::Connected);
+    REQUIRE(session.server->sessionState() == SessionState::Established);
 
     THEN("a pick at the centre renders one frame and hits the surface")
     {
@@ -507,7 +507,7 @@ SCENARIO("StudioServer composites the viewport passes into its frames",
         REQUIRE(error->message.find("malformed ViewportSettings")
             != std::string::npos);
         session.framePixelsAfterChange();
-        REQUIRE(session.server->sessionState() == SessionState::Rendering);
+        REQUIRE(session.server->streaming());
       }
     }
   }
