@@ -138,7 +138,7 @@ void AnariSceneRenderPass::setEnableDepth(bool on)
   anari::commitParameters(m_device, m_frame);
 
   if (on)
-    restartFrame();
+    m_pendingRestart = true;
 }
 
 void AnariSceneRenderPass::setEnableIDs(bool on)
@@ -162,7 +162,7 @@ void AnariSceneRenderPass::setEnableIDs(bool on)
   anari::commitParameters(m_device, m_frame);
 
   if (on)
-    restartFrame();
+    m_pendingRestart = true;
 }
 
 void AnariSceneRenderPass::setEnablePrimitiveId(bool on)
@@ -187,7 +187,7 @@ void AnariSceneRenderPass::setEnablePrimitiveId(bool on)
   anari::commitParameters(m_device, m_frame);
 
   if (on)
-    restartFrame();
+    m_pendingRestart = true;
 }
 
 void AnariSceneRenderPass::setEnableInstanceId(bool on)
@@ -212,7 +212,7 @@ void AnariSceneRenderPass::setEnableInstanceId(bool on)
   anari::commitParameters(m_device, m_frame);
 
   if (on)
-    restartFrame();
+    m_pendingRestart = true;
 }
 
 void AnariSceneRenderPass::setEnableAlbedo(bool on)
@@ -332,6 +332,10 @@ void AnariSceneRenderPass::updateCameraAspect()
 
 void AnariSceneRenderPass::restartFrame()
 {
+  // Any deferred restart request is fulfilled (or subsumed by the still
+  // pending first render) here.
+  m_pendingRestart = false;
+
   if (!m_device || m_firstFrame)
     return;
   anari::discard(m_device, m_frame);
@@ -343,6 +347,13 @@ void AnariSceneRenderPass::restartFrame()
 void AnariSceneRenderPass::render(ImageBuffers &b, int stageId)
 {
   m_buffers.stream = b.stream;
+
+  // Restart the frame at most once per render, no matter how many channel
+  // toggles happened since the last one -- each toggle only commits and
+  // defers its restart here, so no "first frame" with requested-but-
+  // unmapped channels is ever rendered twice in a row.
+  if (m_pendingRestart)
+    restartFrame();
 
   startFirstFrame(false);
 
