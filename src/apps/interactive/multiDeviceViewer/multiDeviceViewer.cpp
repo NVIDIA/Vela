@@ -56,7 +56,7 @@ class Application : public VSRApplication
     auto *dbeditor = new vsr_ui::DatabaseEditor(this);
     auto *oeditor = new vsr_ui::ObjectEditor(this);
     auto *otree = new vsr_ui::LayerTree(this);
-    otree->setEnableAddRemoveLayers(false);
+    otree->setEditMode(vsr_ui::LayerTree::EditMode::NoLayerAddRemove);
 
     windows.emplace_back(animations);
     windows.emplace_back(cameras);

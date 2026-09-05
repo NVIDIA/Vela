@@ -226,7 +226,8 @@ vsr_ui::WindowArray Application::setupWindows()
   m_viewport = new StudioViewport(
       this, &ctx->view.manipulator, m_connection.get(), "Viewport");
   auto *layers = new vsr_ui::LayerTree(this);
-  layers->setReadOnly(true); // layer structure is server-push-only
+  // Layer structure is server-push-only.
+  layers->setEditMode(vsr_ui::LayerTree::EditMode::ReadOnly);
   auto *objectEditor =
       new LockableWindow<vsr_ui::ObjectEditor>(this, &m_editorContext);
   auto *databaseEditor =
