@@ -23,6 +23,7 @@
 #include "ViewportMessages.h"
 // vsr_scene
 #include "vsr/scene/Scene.hpp"
+#include "vsr/scene/objects/Array.hpp"
 // vsr_core
 #include "vsr/core/DataTree.hpp"
 #include "vsr/core/VSRMath.hpp"
@@ -71,12 +72,10 @@ MeshFixture::MeshFixture()
 // A started server with one bootstrapped client, the triangle imported and
 // the shot camera looking straight at it, plus two arrays the histogram can
 // be asked about: 1000 float32 values evenly spread over [0, 1] and a proxy.
-struct ViewportSession
+struct ViewportSession : ServerSession
 {
   explicit ViewportSession(const MeshFixture &data);
 
-  template <typename R>
-  ProjectOpReply request(R req);
   // Starts the stream; returns once the first Frame arrived.
   void startRendering();
   // Sends a Pick and waits for its reply.
@@ -87,37 +86,47 @@ struct ViewportSession
   // was certainly rendered after whatever was sent just before.
   std::vector<std::byte> framePixelsAfterChange();
 
-  ServerOptions options;
-  std::unique_ptr<StudioServer> server;
-  std::unique_ptr<ServerLoop> loop;
-  TestClient client;
-  uint64_t nextRequestId{1};
   SceneObjectRef cameraRef;
   SceneObjectRef scalarArray;
   SceneObjectRef proxyArray;
   ShotID shotId;
 };
 
-ViewportSession::ViewportSession(const MeshFixture &data)
-{
-  options.port = 0;
-  options.library = "helide";
-  options.dataRoots = {data.root};
-  server = std::make_unique<StudioServer>(options);
-  std::string error;
-  REQUIRE(server->start(&error));
+constexpr const char *SCALAR_ARRAY_NAME = "histogram scalars";
+constexpr const char *PROXY_ARRAY_NAME = "histogram proxy";
 
-  // Before run(): the last moment this thread may touch the scene.
-  auto &scene = server->appContext().vsr.scene;
+// Before run(): the last moment the test thread may touch the scene.
+void seedHistogramArrays(StudioServer &server)
+{
+  auto &scene = server.appContext().vsr.scene;
   auto scalars = scene.createArray(ANARI_FLOAT32, SCALAR_COUNT);
+  scalars->setName(SCALAR_ARRAY_NAME);
   auto *values = scalars->mapAs<float>();
   for (size_t i = 0; i < SCALAR_COUNT; ++i)
     values[i] = float(i) / float(SCALAR_COUNT - 1);
   scalars->unmap();
-  scalarArray = {ANARI_ARRAY, scalars.index()};
-  auto proxy = scene.createArrayProxy(ANARI_FLOAT32, 16);
-  proxyArray = {ANARI_ARRAY, proxy.index()};
+  scene.createArrayProxy(ANARI_FLOAT32, 16)->setName(PROXY_ARRAY_NAME);
+}
 
+// The array `name` names, found while the server is not rendering.
+SceneObjectRef arrayNamed(vsr::scene::Scene &scene, const char *name)
+{
+  for (size_t i = 0; i < scene.numberOfObjects(ANARI_ARRAY); ++i) {
+    auto array = scene.getObject<vsr::scene::Array>(i);
+    if (array && array->name() == name)
+      return {ANARI_ARRAY, array.index()};
+  }
+  FAIL("no array named " << name);
+  return {};
+}
+
+ViewportSession::ViewportSession(const MeshFixture &data)
+    : ServerSession(testServerOptions({data.root}), seedHistogramArrays)
+{
+  // Established and not rendering: the scene and project may be read.
+  auto &scene = server->appContext().vsr.scene;
+  scalarArray = arrayNamed(scene, SCALAR_ARRAY_NAME);
+  proxyArray = arrayNamed(scene, PROXY_ARRAY_NAME);
   const auto &project = server->projectContext().project();
   shotId = project.activeShotId;
   const auto *shot = project::activeShot(project);
@@ -125,30 +134,13 @@ ViewportSession::ViewportSession(const MeshFixture &data)
   cameraRef = shot->camera;
   REQUIRE(cameraRef.objectIndex != VSR_INVALID_INDEX);
 
-  loop = std::make_unique<ServerLoop>(server.get());
-  client.connect(server->port());
-  REQUIRE(client.waitForCount(StudioMessageType::Hello, 1));
-  client.send(Hello{});
-  REQUIRE(client.waitForCount(StudioMessageType::BootstrapEnd, 1));
-  REQUIRE(waitFor(
-      [&] { return server->sessionState() == SessionState::Established; }));
-
   ImportStaticDataset import;
   import.name = "Triangle";
   import.sourcePath = data.mesh;
   import.importerType = vsr::io::ImporterType::OBJ;
-  const auto reply = request(import);
-  REQUIRE(reply.ok);
-  const auto started = results<TaskStartedResult>(reply);
-  REQUIRE(started);
-  REQUIRE(waitFor([&] {
-    for (const auto &msg : client.messages()) {
-      if (auto done = decode<TaskCompleted>(msg);
-          done && done->taskId == started->taskId)
-        return true;
-    }
-    return false;
-  }));
+  const auto imported = waitForTaskEnd(startedTaskId(request(import)));
+  REQUIRE(imported);
+  REQUIRE(imported->completed);
 
   // Frame the triangle: its centroid sits on the view axis two units away,
   // so the centre pixel hits it and the corners see past it. Edits, unlike
@@ -171,16 +163,6 @@ ViewportSession::ViewportSession(const MeshFixture &data)
   client.send(config);
   REQUIRE(client.waitForCount(StudioMessageType::FrameConfig, 2));
   client.clear();
-}
-
-template <typename R>
-ProjectOpReply ViewportSession::request(R req)
-{
-  req.requestId = nextRequestId++;
-  client.send(req);
-  const auto reply = client.waitForReply(req.requestId);
-  REQUIRE(reply);
-  return *reply;
 }
 
 void ViewportSession::startRendering()

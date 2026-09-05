@@ -35,7 +35,6 @@
 #include "vsr/core/VSRMath.hpp"
 // std
 #include <algorithm>
-#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -48,7 +47,6 @@
 #include <optional>
 #include <string>
 #include <system_error>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -503,7 +501,7 @@ SCENARIO("scivisStudioServer and the client core run the project layer",
   GIVEN("a bootstrapped client core on a fresh server")
   {
     ProjectScratch scratch;
-    auto server = std::make_unique<RunningServer>(0);
+    auto server = std::make_unique<RunningServer>(tempRootServerOptions());
     REQUIRE(server->started);
     Client client;
     int replaced = 0;
@@ -689,7 +687,7 @@ SCENARIO("scivisStudioServer and the client core run the project layer",
                   {
                     std::vector<ProjectOpReply> lostReplies;
                     server->stop();
-                    REQUIRE(server->finished.load());
+                    REQUIRE(server->finished());
                     // The client has not polled since: the request goes out
                     // on a link it still believes in.
                     const auto handle =
@@ -736,7 +734,7 @@ SCENARIO("scivisStudioServer and the client core run a session end to end",
 
   GIVEN("a server on a free port and a client on a mirror scene")
   {
-    auto server = std::make_unique<RunningServer>(0);
+    auto server = std::make_unique<RunningServer>(tempRootServerOptions());
     REQUIRE(server->started);
     const auto port = server->port();
     REQUIRE(port != 0);
@@ -837,7 +835,7 @@ SCENARIO("scivisStudioServer and the client core run a session end to end",
             {
               const auto objectsBefore = totalObjects(client.mirror);
               server->stop();
-              REQUIRE(server->finished.load());
+              REQUIRE(server->finished());
               REQUIRE(pollUntil(
                   client.connection,
                   [&] {
@@ -848,7 +846,8 @@ SCENARIO("scivisStudioServer and the client core run a session end to end",
               REQUIRE(totalObjects(client.mirror) == objectsBefore);
               REQUIRE(client.connection.project() != nullptr);
 
-              server = std::make_unique<RunningServer>(int(port));
+              server =
+                  std::make_unique<RunningServer>(tempRootServerOptions(port));
               REQUIRE(server->started);
               REQUIRE(server->port() == port);
               REQUIRE(client.waitConnectedAndBootstrapped(2));
@@ -867,11 +866,7 @@ SCENARIO("scivisStudioServer and the client core run a session end to end",
                 REQUIRE(client.connection.project() == nullptr);
                 REQUIRE(totalObjects(client.mirror) == 0);
 
-                const auto deadline = std::chrono::steady_clock::now() + 10s;
-                while (!server->finished.load()
-                    && std::chrono::steady_clock::now() < deadline)
-                  std::this_thread::sleep_for(1ms);
-                REQUIRE(server->finished.load());
+                REQUIRE(waitFor([&] { return server->finished(); }, 10s));
                 REQUIRE(
                     server->server->sessionState() == SessionState::Shutdown);
               }
@@ -893,7 +888,7 @@ SCENARIO("scivisStudioServer and the client core play the active shot",
 
   GIVEN("a client core streaming frames of a 12-frame looping shot at 30 fps")
   {
-    auto server = std::make_unique<RunningServer>(0);
+    auto server = std::make_unique<RunningServer>(tempRootServerOptions());
     REQUIRE(server->started);
     Client client;
     int replaced = 0;
@@ -1070,8 +1065,9 @@ SCENARIO("scivisStudioServer and the client core pick, outline and bin",
     // A scalar array the histogram can be asked about: 1000 float32 values
     // evenly spread over [0, 1]; the bootstrap mirrors its descriptor.
     SceneObjectRef scalarArray;
-    auto server =
-        std::make_unique<RunningServer>(0, [&](vsr::scene::Scene &scene) {
+    auto server = std::make_unique<RunningServer>(
+        tempRootServerOptions(), [&](StudioServer &s) {
+          auto &scene = s.appContext().vsr.scene;
           auto scalars = scene.createArray(ANARI_FLOAT32, SCALAR_COUNT);
           auto *values = scalars->mapAs<float>();
           for (size_t i = 0; i < SCALAR_COUNT; ++i)
@@ -1224,7 +1220,7 @@ SCENARIO("scivisStudioServer and the client core render shots and recover",
     const auto mesh = scratch.base / "triangle.obj";
     writeTriangleObj(mesh);
 
-    auto server = std::make_unique<RunningServer>(0);
+    auto server = std::make_unique<RunningServer>(tempRootServerOptions());
     REQUIRE(server->started);
     const auto port = server->port();
     Client client;
@@ -1534,7 +1530,7 @@ SCENARIO("scivisStudioServer and the client core render shots and recover",
                   "Disconnected")
               {
                 server->stop();
-                REQUIRE(server->finished.load());
+                REQUIRE(server->finished());
                 REQUIRE(pollUntil(
                     client.connection,
                     [&] {

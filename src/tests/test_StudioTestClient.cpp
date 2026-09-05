@@ -2315,9 +2315,22 @@ SCENARIO(
 
   GIVEN("a server on a fresh project and a session")
   {
-    auto server = std::make_unique<RunningServer>(0);
+    // The studio layer gets one transform node so the script has a node to
+    // address; a fresh project has none of its own.
+    size_t transformNode = VSR_INVALID_INDEX;
+    auto server = std::make_unique<RunningServer>(
+        tempRootServerOptions(), [&](StudioServer &s) {
+          auto &scene = s.appContext().vsr.scene;
+          auto *layer = scene.layer("studio");
+          REQUIRE(layer);
+          transformNode =
+              scene
+                  .insertChildTransformNode(
+                      layer->root(), vsr::math::IDENTITY_MAT4, "test transform")
+                  .index();
+        });
     REQUIRE(server->started);
-    REQUIRE(server->transformNode != VSR_INVALID_INDEX);
+    REQUIRE(transformNode != VSR_INVALID_INDEX);
     const auto port = server->port();
     const auto endpoint = "127.0.0.1 " + std::to_string(port);
 
@@ -2404,7 +2417,7 @@ SCENARIO(
           "set-param " + camera + " tiny int8 -128\n"
           "assert " + cameraParam + "tiny == -128\n"
           "remove-param " + camera + " note\n"
-          "set-node-transform studio " + std::to_string(server->transformNode)
+          "set-node-transform studio " + std::to_string(transformNode)
           + " 2 0 0 0 0 2 0 0 0 0 2 0 5 6 7 1\n"
           "send-raw 255\n"
           "expect-error \"unknown message type 255\"\n"
@@ -2495,7 +2508,7 @@ SCENARIO(
 
       THEN("the edits reached the server and the shutdown ended its run()")
       {
-        REQUIRE(waitFor([&] { return server->finished.load(); }));
+        REQUIRE(waitFor([&] { return server->finished(); }));
         auto &scene = server->scene();
         auto *cam = scene.getObject(ANARI_CAMERA, shot->camera.objectIndex);
         REQUIRE(cam);
@@ -2504,7 +2517,7 @@ SCENARIO(
         REQUIRE(cam->parameterValueAs<int>("count") == -7);
         auto *layer = scene.layer("studio");
         REQUIRE(layer);
-        auto node = layer->at(server->transformNode);
+        auto node = layer->at(transformNode);
         REQUIRE(node);
         const auto xfm = (*node)->getTransform();
         REQUIRE(xfm[0][0] == 2.f);
@@ -2553,7 +2566,7 @@ SCENARIO(
           first.records.back().find("still Connected") != std::string::npos);
 
       server->stop();
-      REQUIRE(server->finished.load());
+      REQUIRE(server->finished());
 
       const auto lost = runScript(session,
           "await-lost\n"
@@ -2577,7 +2590,8 @@ SCENARIO(
           // The server comes back while reconnect is already being refused.
           std::thread restarter([&] {
             std::this_thread::sleep_for(500ms);
-            server = std::make_unique<RunningServer>(port);
+            server =
+                std::make_unique<RunningServer>(tempRootServerOptions(port));
           });
           const auto back = runScript(session,
               "reconnect timeout=20000\n"
@@ -2600,7 +2614,7 @@ SCENARIO(
               back.records.back().rfind("FAIL reconnect timeout=300", 0) == 0);
           REQUIRE(
               back.records.back().find("connect failed") != std::string::npos);
-          REQUIRE(waitFor([&] { return server->finished.load(); }));
+          REQUIRE(waitFor([&] { return server->finished(); }));
         }
       }
     }

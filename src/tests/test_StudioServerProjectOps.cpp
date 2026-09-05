@@ -98,66 +98,21 @@ DataRootFixture::DataRootFixture()
   std::ofstream(projectDir / PROJECT_MANIFEST_FILENAME) << "";
 }
 
-// A started server on a fresh project with one bootstrapped client.
-struct Session
+// A started server on the Data Root with one bootstrapped client and a
+// clean message log.
+struct Session : ServerSession
 {
   explicit Session(const std::filesystem::path &dataRoot);
 
-  // Sends `req` with a fresh requestId and waits for its reply.
-  template <typename R>
-  ProjectOpReply request(R req);
-  // Waits until `n` snapshots have arrived since the last clear().
-  bool waitForSnapshots(size_t n);
-  ProjectSnapshot latestSnapshot();
   // The shot the newest Frame was rendered for.
   std::optional<ShotID> latestFrameShot();
   bool waitForFrameOf(const ShotID &shotId);
-
-  ServerOptions options;
-  std::unique_ptr<StudioServer> server;
-  std::unique_ptr<ServerLoop> loop;
-  TestClient client;
-  uint64_t nextRequestId{1};
 };
 
 Session::Session(const std::filesystem::path &dataRoot)
+    : ServerSession(testServerOptions({dataRoot}))
 {
-  options.port = 0;
-  options.library = "helide";
-  options.dataRoots = {dataRoot};
-  server = std::make_unique<StudioServer>(options);
-  std::string error;
-  REQUIRE(server->start(&error));
-  loop = std::make_unique<ServerLoop>(server.get());
-  client.connect(server->port());
-  REQUIRE(client.waitForCount(StudioMessageType::Hello, 1));
-  client.send(Hello{});
-  REQUIRE(client.waitForCount(StudioMessageType::BootstrapEnd, 1));
-  REQUIRE(waitFor(
-      [&] { return server->sessionState() == SessionState::Established; }));
   client.clear();
-}
-
-template <typename R>
-ProjectOpReply Session::request(R req)
-{
-  req.requestId = nextRequestId++;
-  client.send(req);
-  const auto reply = client.waitForReply(req.requestId);
-  REQUIRE(reply);
-  return *reply;
-}
-
-bool Session::waitForSnapshots(size_t n)
-{
-  return client.waitForCount(StudioMessageType::ProjectSnapshot, n);
-}
-
-ProjectSnapshot Session::latestSnapshot()
-{
-  const auto snapshot = client.lastDecoded<ProjectSnapshot>();
-  REQUIRE(snapshot);
-  return *snapshot;
 }
 
 std::optional<ShotID> Session::latestFrameShot()
@@ -174,57 +129,6 @@ std::optional<ShotID> Session::latestFrameShot()
 bool Session::waitForFrameOf(const ShotID &shotId)
 {
   return waitFor([&] { return latestFrameShot() == shotId; });
-}
-
-// How a task ended: its completion message or its error.
-struct TaskEnd
-{
-  bool completed{false};
-  std::string text;
-};
-
-std::optional<TaskEnd> waitForTaskEnd(TestClient &client, uint64_t taskId)
-{
-  std::optional<TaskEnd> end;
-  waitFor([&] {
-    for (const auto &msg : client.messages()) {
-      if (auto completed = decode<TaskCompleted>(msg);
-          completed && completed->taskId == taskId) {
-        end = TaskEnd{true, completed->message};
-        return true;
-      }
-      if (auto failed = decode<TaskFailed>(msg);
-          failed && failed->taskId == taskId) {
-        end = TaskEnd{false, failed->error};
-        return true;
-      }
-    }
-    return false;
-  });
-  return end;
-}
-
-uint64_t startedTaskId(const ProjectOpReply &reply)
-{
-  REQUIRE(reply.ok);
-  const auto started = results<TaskStartedResult>(reply);
-  REQUIRE(started);
-  REQUIRE(started->taskId != 0);
-  return started->taskId;
-}
-
-// Position of the ProjectOpReply answering `requestId`, or SIZE_MAX.
-size_t indexOfReply(TestClient &client, uint64_t requestId)
-{
-  const auto messages = client.messages();
-  for (size_t i = 0; i < messages.size(); ++i) {
-    if (messages[i].header.type != uint8_t(StudioMessageType::ProjectOpReply))
-      continue;
-    const auto reply = decode<ProjectOpReply>(messages[i]);
-    if (reply && reply->requestId == requestId)
-      return i;
-  }
-  return SIZE_MAX;
 }
 
 const DirectoryEntry *findEntry(
@@ -1222,7 +1126,7 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
     import.sourcePath = data.mesh;
     import.importerType = vsr::io::ImporterType::OBJ;
     const auto taskId = startedTaskId(session.request(import));
-    const auto end = waitForTaskEnd(client, taskId);
+    const auto end = client.waitForTaskEnd(taskId);
     REQUIRE(end);
 
     THEN("the import completes, names its dataset and snapshots after")
@@ -1245,7 +1149,7 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
       import.name = "Missing";
       import.sourcePath = data.root / "missing.obj";
       const auto failedId = startedTaskId(session.request(import));
-      const auto failedEnd = waitForTaskEnd(client, failedId);
+      const auto failedEnd = client.waitForTaskEnd(failedId);
 
       THEN("the task fails and a snapshot still carries the failed record")
       {
@@ -1275,7 +1179,7 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
       save.datasetId = end->text;
       save.file = data.root / "tri.vsr";
       const auto saveEnd =
-          waitForTaskEnd(client, startedTaskId(session.request(save)));
+          client.waitForTaskEnd(startedTaskId(session.request(save)));
       REQUIRE(saveEnd);
       REQUIRE(saveEnd->completed);
 
@@ -1283,7 +1187,7 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
       load.file = save.file;
       load.name = "Wing";
       const auto loadEnd =
-          waitForTaskEnd(client, startedTaskId(session.request(load)));
+          client.waitForTaskEnd(startedTaskId(session.request(load)));
       REQUIRE(loadEnd);
 
       THEN("the loaded dataset carries that name, not the archive's")
@@ -1304,7 +1208,7 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
         REQUIRE(session.waitForSnapshots(++snapshots)); // the Wing load's
         load.name = "Tri";
         const auto takenEnd =
-            waitForTaskEnd(client, startedTaskId(session.request(load)));
+            client.waitForTaskEnd(startedTaskId(session.request(load)));
 
         THEN("the task fails and the project gains no dataset")
         {
@@ -1325,7 +1229,7 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
       SaveProject save;
       save.directory = saved;
       const auto saveEnd =
-          waitForTaskEnd(client, startedTaskId(session.request(save)));
+          client.waitForTaskEnd(startedTaskId(session.request(save)));
       REQUIRE(saveEnd);
       REQUIRE(saveEnd->completed);
       REQUIRE(session.waitForSnapshots(++snapshots));
@@ -1377,7 +1281,7 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
 
       // Whether the project has a directory is read when the task runs.
       const auto unsavedId = startedTaskId(session.request(SaveProject{}));
-      const auto unsavedEnd = waitForTaskEnd(client, unsavedId);
+      const auto unsavedEnd = client.waitForTaskEnd(unsavedId);
       REQUIRE(unsavedEnd);
       REQUIRE_FALSE(unsavedEnd->completed);
       REQUIRE(unsavedEnd->text.find("never been saved") != std::string::npos);
@@ -1391,7 +1295,7 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
       const auto saved = data.root / "saved";
       save.directory = saved;
       const auto saveId = startedTaskId(session.request(save));
-      const auto saveEnd = waitForTaskEnd(client, saveId);
+      const auto saveEnd = client.waitForTaskEnd(saveId);
       REQUIRE(saveEnd);
 
       THEN("the save completes and the snapshot is clean")
@@ -1414,7 +1318,7 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
           snapshots = 0;
           const auto openId =
               startedTaskId(session.request(OpenProject{0, saved}));
-          const auto openEnd = waitForTaskEnd(client, openId);
+          const auto openEnd = client.waitForTaskEnd(openId);
           REQUIRE(openEnd);
           REQUIRE(openEnd->completed);
           REQUIRE(session.waitForSnapshots(++snapshots));
@@ -1441,7 +1345,7 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
           const auto before = client.count(StudioMessageType::ProjectSnapshot);
           const auto badId =
               startedTaskId(session.request(OpenProject{0, data.plainDir}));
-          const auto badEnd = waitForTaskEnd(client, badId);
+          const auto badEnd = client.waitForTaskEnd(badId);
           REQUIRE(badEnd);
           REQUIRE_FALSE(badEnd->completed);
           REQUIRE(client.count(StudioMessageType::ProjectSnapshot) == before);
@@ -1456,7 +1360,7 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
       SaveProject save;
       save.directory = noShots;
       const auto saveEnd =
-          waitForTaskEnd(client, startedTaskId(session.request(save)));
+          client.waitForTaskEnd(startedTaskId(session.request(save)));
       REQUIRE(saveEnd);
       REQUIRE(saveEnd->completed);
       REQUIRE(session.waitForSnapshots(++snapshots));
@@ -1475,7 +1379,7 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
 
       const auto openId =
           startedTaskId(session.request(OpenProject{0, noShots}));
-      const auto openEnd = waitForTaskEnd(client, openId);
+      const auto openEnd = client.waitForTaskEnd(openId);
       REQUIRE(openEnd);
       REQUIRE(openEnd->completed);
       REQUIRE(session.waitForSnapshots(++snapshots));
@@ -1523,7 +1427,7 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
       SaveProject save;
       save.directory = saved;
       const auto saveEnd =
-          waitForTaskEnd(client, startedTaskId(session.request(save)));
+          client.waitForTaskEnd(startedTaskId(session.request(save)));
       REQUIRE(saveEnd);
       REQUIRE(saveEnd->completed);
       REQUIRE(session.request(NewProject{}).ok);
@@ -1549,8 +1453,8 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
         REQUIRE(saveReply);
         const auto openId = startedTaskId(*openReply);
         const auto saveId = startedTaskId(*saveReply);
-        const auto openEnd = waitForTaskEnd(client, openId);
-        const auto saveOwnEnd = waitForTaskEnd(client, saveId);
+        const auto openEnd = client.waitForTaskEnd(openId);
+        const auto saveOwnEnd = client.waitForTaskEnd(saveId);
         REQUIRE(openEnd);
         REQUIRE(openEnd->completed);
         REQUIRE(saveOwnEnd);
@@ -1589,7 +1493,7 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
         const auto cancelReply = client.waitForReply(cancel.requestId);
         REQUIRE(cancelReply);
         REQUIRE(cancelReply->ok);
-        const auto secondEnd = waitForTaskEnd(client, taskId + 2);
+        const auto secondEnd = client.waitForTaskEnd(taskId + 2);
         REQUIRE(secondEnd);
         REQUIRE_FALSE(secondEnd->completed);
         REQUIRE(secondEnd->text == "cancelled");
@@ -1597,12 +1501,12 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
         const auto shotReply = client.waitForReply(shot.requestId);
         REQUIRE(shotReply);
         REQUIRE(shotReply->ok);
-        const auto firstEnd = waitForTaskEnd(client, taskId + 1);
+        const auto firstEnd = client.waitForTaskEnd(taskId + 1);
         REQUIRE(firstEnd);
         REQUIRE(firstEnd->completed);
         // The shot was created after the surviving import, as sent.
         REQUIRE(client.indexOf(StudioMessageType::TaskCompleted)
-            < indexOfReply(client, shot.requestId));
+            < client.indexOfReply(shot.requestId));
         REQUIRE(session.waitForSnapshots(snapshots += 2));
         const auto project = session.latestSnapshot().project;
         REQUIRE(project.datasets.size() == 2);
@@ -1642,8 +1546,8 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
         REQUIRE(startedTaskId(*secondReply) == taskId + 2);
         REQUIRE(cancelReply->ok);
 
-        const auto firstEnd = waitForTaskEnd(client, taskId + 1);
-        const auto secondEnd = waitForTaskEnd(client, taskId + 2);
+        const auto firstEnd = client.waitForTaskEnd(taskId + 1);
+        const auto secondEnd = client.waitForTaskEnd(taskId + 2);
         REQUIRE(firstEnd);
         REQUIRE(firstEnd->completed);
         REQUIRE(secondEnd);

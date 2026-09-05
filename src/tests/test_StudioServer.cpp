@@ -180,27 +180,29 @@ SCENARIO("StudioServer runs a viewer-parity session", "[StudioServer]")
 
   GIVEN("a server on a fresh project and a free port")
   {
-    ServerOptions options;
-    options.port = 0;
-    options.library = "helide";
-    options.dataRoots = {std::filesystem::temp_directory_path()};
-    StudioServer server(options);
-    std::string error;
-    REQUIRE(server.start(&error));
+    // Before run(): the last moment this thread may read the project.
+    ShotID shotId;
+    size_t cameraIndex = VSR_INVALID_INDEX;
+    ShotRenderSettings renderSettings;
+    RunningServer running(
+        testServerOptions({std::filesystem::temp_directory_path()}),
+        [&](StudioServer &server) {
+          const auto &project = server.projectContext().project();
+          shotId = project.activeShotId;
+          if (const auto *shot = project::activeShot(project)) {
+            cameraIndex = shot->camera.objectIndex;
+            renderSettings = shot->renderSettings;
+          }
+        });
+    INFO(running.startError);
+    REQUIRE(running.started);
+    auto &server = *running.server;
     REQUIRE(server.libraryName() == "helide");
     const auto port = server.port();
     REQUIRE(port != 0);
-
-    auto &project = server.projectContext().project();
-    const auto shotId = project.activeShotId;
     REQUIRE_FALSE(shotId.empty());
-    const auto *shot = project::activeShot(project);
-    REQUIRE(shot);
-    const auto cameraIndex = shot->camera.objectIndex;
     REQUIRE(cameraIndex != VSR_INVALID_INDEX);
     const SceneObjectRef cameraRef{ANARI_CAMERA, cameraIndex};
-
-    ServerLoop loop(&server);
 
     WHEN("a client connects and answers the Hello")
     {
@@ -245,8 +247,8 @@ SCENARIO("StudioServer runs a viewer-parity session", "[StudioServer]")
 
         const auto config = decode<FrameConfig>(msgs[i]);
         REQUIRE(config);
-        REQUIRE(config->width == shot->renderSettings.width);
-        REQUIRE(config->height == shot->renderSettings.height);
+        REQUIRE(config->width == renderSettings.width);
+        REQUIRE(config->height == renderSettings.height);
 
         // A fresh project carries no UI state.
         const auto uiState = decode<UIState>(msgs[i + 1]);
@@ -451,7 +453,7 @@ SCENARIO("StudioServer runs a viewer-parity session", "[StudioServer]")
                   REQUIRE(
                       last.waitForCount(StudioMessageType::BootstrapEnd, 1));
                   last.send(Shutdown{});
-                  REQUIRE(waitFor([&] { return loop.finished.load(); }));
+                  REQUIRE(waitFor([&] { return running.finished(); }));
                   REQUIRE(server.sessionState() == SessionState::Shutdown);
                 }
               }
@@ -473,20 +475,10 @@ SCENARIO(
 
   GIVEN("a server with one bootstrapped client")
   {
-    ServerOptions options;
-    options.port = 0;
-    options.library = "helide";
-    StudioServer server(options);
-    std::string error;
-    REQUIRE(server.start(&error));
-    ServerLoop loop(&server);
-    const auto port = server.port();
-
-    TestClient first;
-    first.connect(port);
-    REQUIRE(first.waitForCount(StudioMessageType::Hello, 1));
-    first.send(Hello{});
-    REQUIRE(first.waitForCount(StudioMessageType::BootstrapEnd, 1));
+    ServerSession session;
+    auto &server = *session.server;
+    const auto port = session.port();
+    auto &first = session.client;
     first.clear();
 
     WHEN("a second client connects")
@@ -579,41 +571,33 @@ SCENARIO("StudioServer applies SetNodeTransform to the addressed node",
 
   GIVEN("a started server whose studio layer is sparse")
   {
-    ServerOptions options;
-    options.port = 0;
-    options.library = "helide";
-    options.dataRoots = {std::filesystem::temp_directory_path()};
-    StudioServer server(options);
-    std::string error;
-    REQUIRE(server.start(&error));
-
     // Before run(): start() is the last thing on this thread that may touch
     // the scene. Two transform nodes bracket a removed one so the addressed
     // node's forest index is not its traversal position.
-    auto &scene = server.appContext().vsr.scene;
-    auto *layer = scene.layer("studio");
-    REQUIRE(layer != nullptr);
-    auto first = scene.insertChildTransformNode(
-        layer->root(), vsr::math::IDENTITY_MAT4, "first");
-    auto doomed = scene.insertChildTransformNode(
-        layer->root(), vsr::math::IDENTITY_MAT4, "doomed");
-    auto target = scene.insertChildTransformNode(
-        layer->root(), vsr::math::IDENTITY_MAT4, "target");
-    scene.removeNode(doomed);
-    const size_t targetIndex = target.index();
-    const size_t firstIndex = first.index();
-    REQUIRE(traversalPosition(*layer, target) != targetIndex);
-    const auto serverNames = namesByIndex(*layer);
+    vsr::scene::Layer *layer = nullptr;
+    size_t targetIndex = VSR_INVALID_INDEX;
+    size_t firstIndex = VSR_INVALID_INDEX;
+    std::vector<std::string> serverNames;
+    ServerSession session(
+        testServerOptions({std::filesystem::temp_directory_path()}),
+        [&](StudioServer &server) {
+          auto &scene = server.appContext().vsr.scene;
+          layer = scene.layer("studio");
+          REQUIRE(layer != nullptr);
+          auto first = scene.insertChildTransformNode(
+              layer->root(), vsr::math::IDENTITY_MAT4, "first");
+          auto doomed = scene.insertChildTransformNode(
+              layer->root(), vsr::math::IDENTITY_MAT4, "doomed");
+          auto target = scene.insertChildTransformNode(
+              layer->root(), vsr::math::IDENTITY_MAT4, "target");
+          scene.removeNode(doomed);
+          targetIndex = target.index();
+          firstIndex = first.index();
+          REQUIRE(traversalPosition(*layer, target) != targetIndex);
+          serverNames = namesByIndex(*layer);
+        });
+    auto &client = session.client;
     const SceneNodeRef targetRef{"studio", targetIndex};
-
-    ServerLoop loop(&server);
-    TestClient client;
-    client.connect(server.port());
-    REQUIRE(client.waitForCount(StudioMessageType::Hello, 1));
-    client.send(Hello{});
-    REQUIRE(client.waitForCount(StudioMessageType::BootstrapEnd, 1));
-    REQUIRE(waitFor(
-        [&] { return server.sessionState() == SessionState::Established; }));
 
     WHEN("the bootstrap is applied to a mirror")
     {

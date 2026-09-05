@@ -77,17 +77,13 @@ struct FailingFileBinding : public vsr::animation::FileBinding
 // A started server on a fresh project, one bootstrapped client, rendering
 // small raw frames. `beforeLoop` runs between start() and the loop thread,
 // while the server's state is still the caller's to touch.
-struct PlaybackSession
+struct PlaybackSession : ServerSession
 {
   explicit PlaybackSession(
       const std::function<void(StudioServer &)> &beforeLoop = {});
 
-  template <typename R>
-  ProjectOpReply request(R req);
   // Replaces the active shot's clock; waits for the snapshot it earns.
   void setClock(int frameCount, float fps, bool loop);
-  bool waitForSnapshots(size_t n);
-  ProjectSnapshot latestSnapshot();
   // Frame numbers of every Frame received so far, in arrival order.
   std::vector<int> frameNumbers();
   std::optional<FrameHeader> latestFrameHeader();
@@ -95,11 +91,6 @@ struct PlaybackSession
   // Waits until `n` more frames than now have arrived.
   bool waitForMoreFrames(size_t n);
 
-  ServerOptions options;
-  std::unique_ptr<StudioServer> server;
-  std::unique_ptr<ServerLoop> loop;
-  TestClient client;
-  uint64_t nextRequestId{1};
   ShotID shotId;
   SceneObjectRef cameraRef;
   Shot initialShot;
@@ -107,19 +98,8 @@ struct PlaybackSession
 
 PlaybackSession::PlaybackSession(
     const std::function<void(StudioServer &)> &beforeLoop)
+    : ServerSession(testServerOptions(), beforeLoop)
 {
-  options.port = 0;
-  options.library = "helide";
-  server = std::make_unique<StudioServer>(options);
-  std::string error;
-  REQUIRE(server->start(&error));
-  if (beforeLoop)
-    beforeLoop(*server);
-  loop = std::make_unique<ServerLoop>(server.get());
-  client.connect(server->port());
-  REQUIRE(client.waitForCount(StudioMessageType::Hello, 1));
-  client.send(Hello{});
-  REQUIRE(client.waitForCount(StudioMessageType::BootstrapEnd, 1));
   const auto bootstrap = client.lastDecoded<ProjectSnapshot>();
   REQUIRE(bootstrap);
   REQUIRE(bootstrap->project.shots.size() == 1);
@@ -142,16 +122,6 @@ PlaybackSession::PlaybackSession(
   client.clear();
 }
 
-template <typename R>
-ProjectOpReply PlaybackSession::request(R req)
-{
-  req.requestId = nextRequestId++;
-  client.send(req);
-  const auto reply = client.waitForReply(req.requestId);
-  REQUIRE(reply);
-  return *reply;
-}
-
 void PlaybackSession::setClock(int frameCount, float fps, bool loop)
 {
   UpdateShot update;
@@ -163,18 +133,6 @@ void PlaybackSession::setClock(int frameCount, float fps, bool loop)
   REQUIRE(request(update).ok);
   REQUIRE(waitForSnapshots(snapshots + 1));
   initialShot = latestSnapshot().project.shots.front();
-}
-
-bool PlaybackSession::waitForSnapshots(size_t n)
-{
-  return client.waitForCount(StudioMessageType::ProjectSnapshot, n);
-}
-
-ProjectSnapshot PlaybackSession::latestSnapshot()
-{
-  const auto snapshot = client.lastDecoded<ProjectSnapshot>();
-  REQUIRE(snapshot);
-  return *snapshot;
 }
 
 std::vector<int> PlaybackSession::frameNumbers()

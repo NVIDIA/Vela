@@ -62,26 +62,13 @@ RenderFixture::RenderFixture()
   projectDir = root / "proj";
 }
 
-// Connects `client` and runs its Hello/bootstrap handshake.
-void bootstrapClient(TestClient &client, uint16_t port)
-{
-  client.connect(port);
-  REQUIRE(client.waitForCount(StudioMessageType::Hello, 1));
-  client.send(Hello{});
-  REQUIRE(
-      client.waitForCount(StudioMessageType::BootstrapEnd, 1, RENDER_TIMEOUT));
-}
-
 // A started server (on a fresh project unless `projectDir` names one) with
-// one bootstrapped client.
-struct RenderSession
+// one bootstrapped client, every wait bounded by RENDER_TIMEOUT.
+struct RenderSession : ServerSession
 {
   RenderSession(const std::filesystem::path &dataRoot,
       const std::filesystem::path &projectDir = {});
 
-  template <typename R>
-  ProjectOpReply request(R req);
-  uint64_t startTask(const ProjectOpReply &reply);
   // Imports the mesh, sizes the active shot to `frameCount` frames of
   // `width` x `height` with one sample, saves the project to `projectDir`
   // and clears the log.
@@ -89,80 +76,20 @@ struct RenderSession
       int frameCount,
       uint32_t width = 32,
       uint32_t height = 24);
-
-  ServerOptions options;
-  std::unique_ptr<StudioServer> server;
-  std::unique_ptr<ServerLoop> loop;
-  TestClient client;
-  uint64_t nextRequestId{1};
 };
+
+ServerOptions renderOptions(const std::filesystem::path &dataRoot,
+    const std::filesystem::path &projectDir)
+{
+  auto options = testServerOptions({dataRoot});
+  options.projectDirectory = projectDir;
+  return options;
+}
 
 RenderSession::RenderSession(const std::filesystem::path &dataRoot,
     const std::filesystem::path &projectDir)
-{
-  options.port = 0;
-  options.library = "helide";
-  options.dataRoots = {dataRoot};
-  options.projectDirectory = projectDir;
-  server = std::make_unique<StudioServer>(options);
-  std::string error;
-  REQUIRE(server->start(&error));
-  loop = std::make_unique<ServerLoop>(server.get());
-  bootstrapClient(client, server->port());
-  REQUIRE(waitFor(
-      [&] { return server->sessionState() == SessionState::Established; }));
-}
-
-template <typename R>
-ProjectOpReply RenderSession::request(R req)
-{
-  req.requestId = nextRequestId++;
-  client.send(req);
-  const auto reply = client.waitForReply(req.requestId, RENDER_TIMEOUT);
-  REQUIRE(reply);
-  return *reply;
-}
-
-uint64_t RenderSession::startTask(const ProjectOpReply &reply)
-{
-  REQUIRE(reply.ok);
-  const auto started = results<TaskStartedResult>(reply);
-  REQUIRE(started);
-  REQUIRE(started->taskId != 0);
-  return started->taskId;
-}
-
-// How a task ended, waiting for it.
-struct TaskEnd
-{
-  bool completed{false};
-  std::string text;
-  uint64_t framesCompleted{0};
-};
-
-std::optional<TaskEnd> waitForTaskEnd(TestClient &client, uint64_t taskId)
-{
-  std::optional<TaskEnd> end;
-  waitFor(
-      [&] {
-        for (const auto &msg : client.messages()) {
-          if (auto completed = decode<TaskCompleted>(msg);
-              completed && completed->taskId == taskId) {
-            end = TaskEnd{
-                true, completed->message, framesCompletedOf(*completed)};
-            return true;
-          }
-          if (auto failed = decode<TaskFailed>(msg);
-              failed && failed->taskId == taskId) {
-            end = TaskEnd{false, failed->error, framesCompletedOf(*failed)};
-            return true;
-          }
-        }
-        return false;
-      },
-      RENDER_TIMEOUT);
-  return end;
-}
+    : ServerSession(renderOptions(dataRoot, projectDir), {}, RENDER_TIMEOUT)
+{}
 
 std::vector<TaskProgress> progressOf(TestClient &client, uint64_t taskId)
 {
@@ -175,19 +102,6 @@ std::vector<TaskProgress> progressOf(TestClient &client, uint64_t taskId)
   return events;
 }
 
-// Position of the TaskCompleted for `taskId` at or after `from`, or SIZE_MAX.
-size_t indexOfCompletedFrom(TestClient &client, uint64_t taskId, size_t from)
-{
-  const auto messages = client.messages();
-  for (size_t i = from; i < messages.size(); ++i) {
-    if (auto completed = decode<TaskCompleted>(messages[i]);
-        completed && completed->taskId == taskId)
-      return i;
-  }
-  return SIZE_MAX;
-}
-
-// Position of the first message of `type` at or after `from`, or SIZE_MAX.
 size_t indexOfFrom(TestClient &client, StudioMessageType type, size_t from)
 {
   const auto messages = client.messages();
@@ -264,7 +178,7 @@ ShotID RenderSession::prepareSavedShot(const std::filesystem::path &projectDir,
   import.name = "Mesh";
   import.sourcePath = options.dataRoots.front() / "mesh.obj";
   import.importerType = vsr::io::ImporterType::OBJ;
-  const auto imported = waitForTaskEnd(client, startTask(request(import)));
+  const auto imported = waitForTaskEnd(startedTaskId(request(import)));
   REQUIRE(imported);
   REQUIRE(imported->completed);
 
@@ -283,7 +197,7 @@ ShotID RenderSession::prepareSavedShot(const std::filesystem::path &projectDir,
 
   SaveProject save;
   save.directory = projectDir;
-  const auto saved = waitForTaskEnd(client, startTask(request(save)));
+  const auto saved = waitForTaskEnd(startedTaskId(request(save)));
   REQUIRE(saved);
   REQUIRE(saved->completed);
   client.clear();
@@ -370,12 +284,11 @@ SCENARIO(
             client.waitForReply(render.requestId, RENDER_TIMEOUT);
         REQUIRE(saveReply);
         REQUIRE(renderReply);
-        const auto saved =
-            waitForTaskEnd(client, session.startTask(*saveReply));
+        const auto saved = session.waitForTaskEnd(startedTaskId(*saveReply));
         REQUIRE(saved);
         REQUIRE(saved->completed);
         const auto rendered =
-            waitForTaskEnd(client, session.startTask(*renderReply));
+            session.waitForTaskEnd(startedTaskId(*renderReply));
         REQUIRE(rendered);
         REQUIRE(rendered->completed);
         REQUIRE(rendered->framesCompleted == 2);
@@ -395,8 +308,8 @@ SCENARIO(
       RenderShot render;
       render.shotId = shotId;
       const auto reply = session.request(render);
-      const auto taskId = session.startTask(reply);
-      const auto end = waitForTaskEnd(client, taskId);
+      const auto taskId = startedTaskId(reply);
+      const auto end = session.waitForTaskEnd(taskId);
       REQUIRE(end);
 
       THEN("a scrub sent on hearing the ending is served, not dropped")
@@ -411,7 +324,7 @@ SCENARIO(
 
       THEN("the reply, determinate progress, the ending and a snapshot arrive")
       {
-        const auto replyIndex = indexOfReply(client, reply.requestId);
+        const auto replyIndex = client.indexOfReply(reply.requestId);
         REQUIRE(replyIndex != SIZE_MAX);
         const auto endIndex = indexOfTaskEnd(client, taskId);
         const auto progress = progressOf(client, taskId);
@@ -463,14 +376,14 @@ SCENARIO(
     {
       REQUIRE(session.request(CreateShot{0, "Two"}).ok); // becomes active
       const auto reply = session.request(RenderShot{0, shotId});
-      const auto taskId = session.startTask(reply);
-      const auto end = waitForTaskEnd(client, taskId);
+      const auto taskId = startedTaskId(reply);
+      const auto end = session.waitForTaskEnd(taskId);
       REQUIRE(end);
       REQUIRE(end->completed);
 
       THEN("the prelude's switch is snapshotted before the first progress")
       {
-        const auto replyIndex = indexOfReply(client, reply.requestId);
+        const auto replyIndex = client.indexOfReply(reply.requestId);
         REQUIRE(replyIndex != SIZE_MAX);
         const auto snapshotIndex =
             indexOfFrom(client, StudioMessageType::ProjectSnapshot, replyIndex);
@@ -494,8 +407,7 @@ SCENARIO(
 
     WHEN("a render runs and requests arrive while a second is queued")
     {
-      const auto first =
-          session.startTask(session.request(RenderShot{0, shotId}));
+      const auto first = startedTaskId(session.request(RenderShot{0, shotId}));
       REQUIRE(client.waitForCount(StudioMessageType::TaskProgress, 1));
 
       // All three land in the latch while the first body holds the loop and
@@ -525,13 +437,13 @@ SCENARIO(
 
       THEN("the mutation is refused, the browse served, the first completes")
       {
-        const auto secondId = session.startTask(*secondReply);
+        const auto secondId = startedTaskId(*secondReply);
         REQUIRE_FALSE(createReply->ok);
         REQUIRE(createReply->error == "render in progress");
         REQUIRE(rootsReply->ok);
         REQUIRE(results<ListRootsResult>(*rootsReply));
 
-        const auto firstEnd = waitForTaskEnd(client, first);
+        const auto firstEnd = session.waitForTaskEnd(first);
         REQUIRE(firstEnd);
         REQUIRE(firstEnd->completed);
         REQUIRE(firstEnd->framesCompleted == 200);
@@ -539,7 +451,7 @@ SCENARIO(
         // Cancel the second wherever it stands: still queued or running.
         const auto cancel = session.request(CancelTask{0, secondId});
         REQUIRE(cancel.ok);
-        const auto secondEnd = waitForTaskEnd(client, secondId);
+        const auto secondEnd = session.waitForTaskEnd(secondId);
         REQUIRE(secondEnd);
         REQUIRE_FALSE(secondEnd->completed);
         REQUIRE(secondEnd->text == "cancelled");
@@ -550,15 +462,14 @@ SCENARIO(
 
     WHEN("the running render is cancelled")
     {
-      const auto taskId =
-          session.startTask(session.request(RenderShot{0, shotId}));
+      const auto taskId = startedTaskId(session.request(RenderShot{0, shotId}));
       REQUIRE(client.waitForCount(StudioMessageType::TaskProgress, 1));
       const auto cancel = session.request(CancelTask{0, taskId});
 
       THEN("it stops at the next frame with the count of frames written")
       {
         REQUIRE(cancel.ok);
-        const auto end = waitForTaskEnd(client, taskId);
+        const auto end = session.waitForTaskEnd(taskId);
         REQUIRE(end);
         REQUIRE_FALSE(end->completed);
         REQUIRE(end->text == "cancelled");
@@ -567,7 +478,7 @@ SCENARIO(
         const auto outputDir = data.projectDir / "renders" / shotId;
         REQUIRE(countPNGs(outputDir) == end->framesCompleted);
         // The cancel reply came after the body returned, so after the ending.
-        REQUIRE(indexOfReply(client, cancel.requestId)
+        REQUIRE(client.indexOfReply(cancel.requestId)
             > indexOfTaskEnd(client, taskId));
 
         const auto again = session.request(CancelTask{0, taskId});
@@ -577,13 +488,12 @@ SCENARIO(
 
     WHEN("the client disconnects mid-render and another connects")
     {
-      const auto taskId =
-          session.startTask(session.request(RenderShot{0, shotId}));
+      const auto taskId = startedTaskId(session.request(RenderShot{0, shotId}));
       REQUIRE(client.waitForCount(StudioMessageType::TaskProgress, 1));
       client.channel->disconnect();
 
       TestClient other;
-      bootstrapClient(other, session.server->port());
+      bootstrapClient(other, session.port(), RENDER_TIMEOUT);
 
       THEN("the bootstrap replays the finished render before the snapshot")
       {
@@ -594,7 +504,7 @@ SCENARIO(
             indexOfFrom(other, StudioMessageType::ProjectSnapshot, begin);
         // Every ending since the last bootstrap is replayed (the import and
         // the save among them); the render's is what matters here.
-        const auto completed = indexOfCompletedFrom(other, taskId, uiState);
+        const auto completed = other.indexOfCompletedFrom(taskId, uiState);
         REQUIRE(uiState < completed);
         REQUIRE(completed < snapshot);
         const auto ending = decode<TaskCompleted>(other.messages()[completed]);
@@ -611,8 +521,7 @@ SCENARIO(
 
     WHEN("the client leaves right after the render is accepted")
     {
-      const auto taskId =
-          session.startTask(session.request(RenderShot{0, shotId}));
+      const auto taskId = startedTaskId(session.request(RenderShot{0, shotId}));
       client.channel->disconnect();
       REQUIRE(waitFor(
           [&] {
@@ -621,7 +530,7 @@ SCENARIO(
           RENDER_TIMEOUT));
 
       TestClient other;
-      bootstrapClient(other, session.server->port());
+      bootstrapClient(other, session.port(), RENDER_TIMEOUT);
 
       THEN("the render ran anyway and the next bootstrap tells how it ended")
       {
@@ -630,7 +539,7 @@ SCENARIO(
             indexOfFrom(other, StudioMessageType::UIState, begin);
         const auto snapshot =
             indexOfFrom(other, StudioMessageType::ProjectSnapshot, begin);
-        const auto completed = indexOfCompletedFrom(other, taskId, uiState);
+        const auto completed = other.indexOfCompletedFrom(taskId, uiState);
         REQUIRE(uiState < completed);
         REQUIRE(completed < snapshot);
         const auto ending = decode<TaskCompleted>(other.messages()[completed]);
@@ -645,7 +554,7 @@ SCENARIO(
             return session.server->sessionState() == SessionState::Listening;
           }));
           TestClient third;
-          bootstrapClient(third, session.server->port());
+          bootstrapClient(third, session.port(), RENDER_TIMEOUT);
           REQUIRE(third.count(StudioMessageType::TaskCompleted) == 0);
         }
       }
@@ -672,7 +581,7 @@ SCENARIO("StudioServer hands the project's UI state back after an open",
     save.directory = data.projectDir;
     save.uiState = testUIState();
     const auto saved =
-        waitForTaskEnd(client, session->startTask(session->request(save)));
+        session->waitForTaskEnd(startedTaskId(session->request(save)));
     REQUIRE(saved);
     REQUIRE(saved->completed);
     client.clear();
@@ -680,14 +589,14 @@ SCENARIO("StudioServer hands the project's UI state back after an open",
     WHEN("the project is opened again")
     {
       const auto reply = session->request(OpenProject{0, data.projectDir});
-      const auto taskId = session->startTask(reply);
-      const auto end = waitForTaskEnd(client, taskId);
+      const auto taskId = startedTaskId(reply);
+      const auto end = session->waitForTaskEnd(taskId);
       REQUIRE(end);
       REQUIRE(end->completed);
 
       THEN("UIState arrives after the reply and before the snapshot")
       {
-        const auto replyIndex = indexOfReply(client, reply.requestId);
+        const auto replyIndex = client.indexOfReply(reply.requestId);
         const auto uiIndex =
             indexOfFrom(client, StudioMessageType::UIState, replyIndex);
         const auto endIndex = indexOfTaskEnd(client, taskId);
@@ -719,13 +628,12 @@ SCENARIO("StudioServer hands the project's UI state back after an open",
         {
           auto &client = fromDisk.client;
           client.clear();
-          const auto saved = waitForTaskEnd(
-              client, fromDisk.startTask(fromDisk.request(SaveProject{})));
+          const auto saved = fromDisk.waitForTaskEnd(
+              startedTaskId(fromDisk.request(SaveProject{})));
           REQUIRE(saved);
           REQUIRE(saved->completed);
-          const auto reopened = waitForTaskEnd(client,
-              fromDisk.startTask(
-                  fromDisk.request(OpenProject{0, data.projectDir})));
+          const auto reopened = fromDisk.waitForTaskEnd(
+              startedTaskId(fromDisk.request(OpenProject{0, data.projectDir})));
           REQUIRE(reopened);
           REQUIRE(reopened->completed);
           REQUIRE(layoutOf(client.lastDecoded<UIState>()) == LAYOUT_MARKER);

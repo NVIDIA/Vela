@@ -4,12 +4,22 @@
 #pragma once
 
 #include "NetworkTestHelpers.h"
+// catch
+#include "catch.hpp"
 // vsr_scivis_studio_server_core
+#include "ServerOptions.h"
 #include "StudioServer.h"
 // vsr_scivis_studio_protocol
 #include "ProjectOpReply.h"
+#include "ProjectSnapshot.h"
+#include "SessionMessages.h"
 #include "StudioCodec.h"
 #include "StudioProtocol.h"
+#include "TaskMessages.h"
+// vsr_scivis_studio_model
+#include "Project.h"
+// vsr_scene
+#include "vsr/scene/Scene.hpp"
 // vsr_network
 #include "vsr/network/NetworkChannel.hpp"
 // std
@@ -19,26 +29,37 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <thread>
 #include <vector>
 
 /*
  * Helpers for the tests that drive an in-process StudioServer over a raw
  * NetworkClient: a client that records every Studio message in arrival
- * order, and a loop guard that runs the server on its own thread and always
- * brings it down.
+ * order, a loop guard that runs the server on its own thread and always
+ * brings it down, a RunningServer that starts the helide server the suites
+ * share, and a ServerSession that adds one bootstrapped TestClient with the
+ * request/task helpers every project-op scenario opens with.
  *
  * Example:
- *   ServerLoop loop(&server);
- *   TestClient client;
- *   client.connect(server.port());
- *   REQUIRE(client.waitForCount(StudioMessageType::Hello, 1));
- *   client.send(Hello{});
- *   REQUIRE(client.waitForCount(StudioMessageType::BootstrapEnd, 1));
+ *   ServerSession session(testServerOptions({data.root}));
+ *   const auto taskId = startedTaskId(session.request(import));
+ *   const auto end = session.waitForTaskEnd(taskId);
+ *   REQUIRE(end && end->completed);
  */
+
+// How a task ended: its completion message or its error, and the frames a
+// render got through (0 for anything else).
+struct TaskEnd
+{
+  bool completed{false};
+  std::string text;
+  uint64_t framesCompleted{0};
+};
 
 // A raw NetworkClient that records every Studio message in arrival order.
 struct TestClient
@@ -67,8 +88,16 @@ struct TestClient
   std::optional<vsr::scivis_studio::protocol::ProjectOpReply> waitForReply(
       uint64_t requestId,
       std::chrono::milliseconds timeout = std::chrono::seconds(5));
+  // How task `taskId` ended, waiting for its TaskCompleted or TaskFailed.
+  std::optional<TaskEnd> waitForTaskEnd(uint64_t taskId,
+      std::chrono::milliseconds timeout = std::chrono::seconds(5));
   // Position of the first recorded message of a type, or SIZE_MAX.
   size_t indexOf(StudioMessageType type);
+  // Position of the ProjectOpReply answering `requestId`, or SIZE_MAX.
+  size_t indexOfReply(uint64_t requestId);
+  // Position of the TaskCompleted for `taskId` at or after `from`, or
+  // SIZE_MAX.
+  size_t indexOfCompletedFrom(uint64_t taskId, size_t from);
   void clear();
 
   std::shared_ptr<vsr::network::NetworkClient> channel;
@@ -88,6 +117,100 @@ struct ServerLoop
   std::atomic<bool> finished{false};
   std::thread thread;
 };
+
+// Options for an in-process test server: the helide device, a port the OS
+// picks, and the given Data Roots (none by default).
+inline vsr::scivis_studio::server::ServerOptions testServerOptions(
+    std::vector<std::filesystem::path> dataRoots = {})
+{
+  vsr::scivis_studio::server::ServerOptions options;
+  options.port = 0;
+  options.library = "helide";
+  options.dataRoots = std::move(dataRoots);
+  return options;
+}
+
+// A StudioServer started on `options` and run on its own loop thread.
+// Stopping it is what a client sees as the server going away: run() tears
+// the listening socket down. `beforeLoop` runs between start() and the loop
+// thread, the last moment the caller may touch the scene or the project, so
+// a test can seed objects the bootstrap will then mirror. Never REQUIREs
+// (`started` and `startError` say how start() went), so a restart may build
+// one off the test thread.
+struct RunningServer
+{
+  explicit RunningServer(
+      vsr::scivis_studio::server::ServerOptions options = testServerOptions(),
+      const std::function<void(vsr::scivis_studio::server::StudioServer &)>
+          &beforeLoop = {});
+
+  // Ends run() and joins the loop thread; what a client sees as the server
+  // going away.
+  void stop();
+  // Whether run() has returned (a Shutdown arrived, or stop() was called).
+  bool finished() const;
+  uint16_t port() const;
+  vsr::scene::Scene &scene();
+  const vsr::scivis_studio::Project &project();
+
+  vsr::scivis_studio::server::ServerOptions options;
+  std::unique_ptr<vsr::scivis_studio::server::StudioServer> server;
+  bool started{false};
+  std::string startError;
+  std::unique_ptr<ServerLoop> loop;
+};
+
+// Connects `client` and runs its Hello/bootstrap handshake, leaving the
+// bootstrap's messages recorded.
+inline void bootstrapClient(TestClient &client,
+    uint16_t port,
+    std::chrono::milliseconds timeout = std::chrono::seconds(5))
+{
+  using vsr::scivis_studio::protocol::Hello;
+  using vsr::scivis_studio::protocol::StudioMessageType;
+  client.connect(port);
+  REQUIRE(client.waitForCount(StudioMessageType::Hello, 1, timeout));
+  client.send(Hello{});
+  REQUIRE(client.waitForCount(StudioMessageType::BootstrapEnd, 1, timeout));
+}
+
+// A RunningServer with one TestClient through the handshake and the server
+// Established; the bootstrap's messages stay recorded until the caller
+// clears them. `timeout` bounds every wait the session makes. REQUIREs, so
+// build it on the test thread.
+struct ServerSession : RunningServer
+{
+  explicit ServerSession(
+      vsr::scivis_studio::server::ServerOptions options = testServerOptions(),
+      const std::function<void(vsr::scivis_studio::server::StudioServer &)>
+          &beforeLoop = {},
+      std::chrono::milliseconds timeout = std::chrono::seconds(5));
+
+  // Sends `req` with a fresh requestId and waits for its reply.
+  template <typename R>
+  vsr::scivis_studio::protocol::ProjectOpReply request(R req);
+  std::optional<TaskEnd> waitForTaskEnd(uint64_t taskId);
+  // Waits until `n` snapshots have arrived since the last clear().
+  bool waitForSnapshots(size_t n);
+  vsr::scivis_studio::protocol::ProjectSnapshot latestSnapshot();
+
+  TestClient client;
+  uint64_t nextRequestId{1};
+  std::chrono::milliseconds timeout;
+};
+
+// The task id a TaskStarted reply names; fails the test on any other reply.
+inline uint64_t startedTaskId(
+    const vsr::scivis_studio::protocol::ProjectOpReply &reply)
+{
+  using vsr::scivis_studio::protocol::TaskStartedResult;
+  REQUIRE(reply.ok);
+  const auto started =
+      vsr::scivis_studio::protocol::results<TaskStartedResult>(reply);
+  REQUIRE(started);
+  REQUIRE(started->taskId != 0);
+  return started->taskId;
+}
 
 // Writes the one-triangle OBJ (corners at the origin, (1, 0, 0) and
 // (0, 1, 0) in the z = 0 plane) the server suites import.
@@ -192,12 +315,66 @@ TestClient::waitForReply(uint64_t requestId, std::chrono::milliseconds timeout)
   return found;
 }
 
+inline std::optional<TaskEnd> TestClient::waitForTaskEnd(
+    uint64_t taskId, std::chrono::milliseconds timeout)
+{
+  using namespace vsr::scivis_studio::protocol;
+  std::optional<TaskEnd> end;
+  waitFor(
+      [&] {
+        for (const auto &msg : messages()) {
+          if (auto completed = decode<TaskCompleted>(msg);
+              completed && completed->taskId == taskId) {
+            end = TaskEnd{
+                true, completed->message, framesCompletedOf(*completed)};
+            return true;
+          }
+          if (auto failed = decode<TaskFailed>(msg);
+              failed && failed->taskId == taskId) {
+            end = TaskEnd{false, failed->error, framesCompletedOf(*failed)};
+            return true;
+          }
+        }
+        return false;
+      },
+      timeout);
+  return end;
+}
+
 inline size_t TestClient::indexOf(StudioMessageType type)
 {
   std::lock_guard lock(mutex);
   for (size_t i = 0; i < received.size(); ++i)
     if (received[i].header.type == uint8_t(type))
       return i;
+  return SIZE_MAX;
+}
+
+inline size_t TestClient::indexOfReply(uint64_t requestId)
+{
+  using vsr::scivis_studio::protocol::ProjectOpReply;
+  std::lock_guard lock(mutex);
+  for (size_t i = 0; i < received.size(); ++i) {
+    if (received[i].header.type != uint8_t(StudioMessageType::ProjectOpReply))
+      continue;
+    const auto reply =
+        vsr::scivis_studio::protocol::decode<ProjectOpReply>(received[i]);
+    if (reply && reply->requestId == requestId)
+      return i;
+  }
+  return SIZE_MAX;
+}
+
+inline size_t TestClient::indexOfCompletedFrom(uint64_t taskId, size_t from)
+{
+  using vsr::scivis_studio::protocol::TaskCompleted;
+  std::lock_guard lock(mutex);
+  for (size_t i = from; i < received.size(); ++i) {
+    if (auto completed =
+            vsr::scivis_studio::protocol::decode<TaskCompleted>(received[i]);
+        completed && completed->taskId == taskId)
+      return i;
+  }
   return SIZE_MAX;
 }
 
@@ -218,4 +395,92 @@ inline ServerLoop::~ServerLoop()
 {
   server->requestShutdown();
   thread.join();
+}
+
+inline RunningServer::RunningServer(
+    vsr::scivis_studio::server::ServerOptions options,
+    const std::function<void(vsr::scivis_studio::server::StudioServer &)>
+        &beforeLoop)
+    : options(std::move(options))
+{
+  server =
+      std::make_unique<vsr::scivis_studio::server::StudioServer>(this->options);
+  started = server->start(&startError);
+  if (!started)
+    return;
+  if (beforeLoop)
+    beforeLoop(*server);
+  loop = std::make_unique<ServerLoop>(server.get());
+}
+
+inline void RunningServer::stop()
+{
+  loop.reset();
+}
+
+inline bool RunningServer::finished() const
+{
+  return started && (!loop || loop->finished.load());
+}
+
+inline uint16_t RunningServer::port() const
+{
+  return server->port();
+}
+
+inline vsr::scene::Scene &RunningServer::scene()
+{
+  return server->appContext().vsr.scene;
+}
+
+inline const vsr::scivis_studio::Project &RunningServer::project()
+{
+  return server->projectContext().project();
+}
+
+inline ServerSession::ServerSession(
+    vsr::scivis_studio::server::ServerOptions options,
+    const std::function<void(vsr::scivis_studio::server::StudioServer &)>
+        &beforeLoop,
+    std::chrono::milliseconds timeout)
+    : RunningServer(std::move(options), beforeLoop), timeout(timeout)
+{
+  using vsr::scivis_studio::server::SessionState;
+  INFO(startError);
+  REQUIRE(started);
+  bootstrapClient(client, port(), timeout);
+  REQUIRE(waitFor(
+      [&] { return server->sessionState() == SessionState::Established; },
+      timeout));
+}
+
+template <typename R>
+inline vsr::scivis_studio::protocol::ProjectOpReply ServerSession::request(
+    R req)
+{
+  req.requestId = nextRequestId++;
+  client.send(req);
+  const auto reply = client.waitForReply(req.requestId, timeout);
+  REQUIRE(reply);
+  return *reply;
+}
+
+inline std::optional<TaskEnd> ServerSession::waitForTaskEnd(uint64_t taskId)
+{
+  return client.waitForTaskEnd(taskId, timeout);
+}
+
+inline bool ServerSession::waitForSnapshots(size_t n)
+{
+  return client.waitForCount(
+      TestClient::StudioMessageType::ProjectSnapshot, n, timeout);
+}
+
+inline vsr::scivis_studio::protocol::ProjectSnapshot
+ServerSession::latestSnapshot()
+{
+  const auto snapshot =
+      client.lastDecoded<vsr::scivis_studio::protocol::ProjectSnapshot>();
+  REQUIRE(snapshot);
+  return *snapshot;
 }
