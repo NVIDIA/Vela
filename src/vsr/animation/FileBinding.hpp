@@ -60,10 +60,10 @@ struct FileBinding : public Binding
   // after reconstruction from a legacy application-state DataNode.
   virtual void addCallbackToAnimation(Animation &anim) = 0;
 
-  // Records that the file for `frame` (this binding's own index) could not be
-  // loaded with the owning AnimationManager, which records it against the
-  // clock frame being applied and hands it on through takeLoadFailures().
-  // Keep logging as well: the record is for whoever drives time, the log for
+  // Reports that the file for `frame` (this binding's own index) could not be
+  // loaded to the owning AnimationManager, which converts it to the clock
+  // frame being applied and hands it to its LoadFailureCallback. Keep
+  // logging as well: the report is for whoever drives time, the log for
   // whoever reads it. A no-op for a binding no Animation owns yet.
   void reportLoadFailure(int frame, std::string message) const;
 

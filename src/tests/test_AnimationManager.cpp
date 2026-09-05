@@ -83,6 +83,13 @@ struct FailingFileBinding : public vsr::animation::FileBinding
   }
 };
 
+// What a load-failure callback saw, in order.
+struct LoadFailureRecord
+{
+  int frame{0};
+  std::string message;
+};
+
 } // namespace
 
 SCENARIO(
@@ -95,6 +102,10 @@ SCENARIO(
     mgr.setAnimationTotalFrames(5);
     auto &anim = mgr.addAnimation("files");
     auto &binding = anim.emplaceFileBinding<FailingFileBinding>(&scene, 5, 2);
+    std::vector<LoadFailureRecord> seen;
+    mgr.setLoadFailureCallback([&seen](int frame, std::string message) {
+      seen.push_back({frame, std::move(message)});
+    });
 
     WHEN("Time lands on a good frame")
     {
@@ -103,7 +114,7 @@ SCENARIO(
       THEN("Nothing is reported and the frame loaded")
       {
         REQUIRE(binding.loaded == 2);
-        REQUIRE(mgr.takeLoadFailures().empty());
+        REQUIRE(seen.empty());
       }
     }
 
@@ -112,14 +123,12 @@ SCENARIO(
       mgr.setAnimationFrame(3);
       mgr.setAnimationFrame(4);
 
-      THEN("takeLoadFailures() returns each failure once, then nothing")
+      THEN("The callback saw each failure once, as it happened")
       {
-        const auto failures = mgr.takeLoadFailures();
-        REQUIRE(failures.size() == 2);
-        REQUIRE(failures[0].frame == 3);
-        REQUIRE(failures[0].message == "frame 3 is bad");
-        REQUIRE(failures[1].frame == 4);
-        REQUIRE(mgr.takeLoadFailures().empty());
+        REQUIRE(seen.size() == 2);
+        REQUIRE(seen[0].frame == 3);
+        REQUIRE(seen[0].message == "frame 3 is bad");
+        REQUIRE(seen[1].frame == 4);
       }
     }
 
@@ -130,25 +139,23 @@ SCENARIO(
       mgr.play();
       mgr.tick(1.f);
 
-      THEN("The failure is collected and playback goes on")
+      THEN("The failure is reported and playback goes on")
       {
         REQUIRE(mgr.getAnimationFrame() == 3);
         REQUIRE(mgr.isPlaying());
-        REQUIRE(mgr.takeLoadFailures().size() == 1);
+        REQUIRE(seen.size() == 1);
       }
     }
 
-    WHEN("Nobody collects the failures")
+    WHEN("Nobody listens")
     {
-      for (int i = 0; i < 300; ++i)
-        mgr.setAnimationFrame(3 + (i % 2));
+      mgr.setLoadFailureCallback({});
+      mgr.setAnimationFrame(3);
 
-      THEN("The record is capped, keeping the newest")
+      THEN("The report is dropped and time still moved")
       {
-        const auto failures = mgr.takeLoadFailures();
-        REQUIRE(failures.size() == AnimationManager::MAX_LOAD_FAILURES);
-        REQUIRE(failures.back().frame == 4);
-        REQUIRE(failures.back().message == "frame 4 is bad");
+        REQUIRE(seen.empty());
+        REQUIRE(mgr.getAnimationFrame() == 3);
       }
     }
   }
@@ -161,6 +168,10 @@ SCENARIO(
     auto &anim = mgr.addAnimation("files");
     // Its own indices 0..4 span the clock; index 3 and 4 are bad.
     anim.emplaceFileBinding<FailingFileBinding>(&scene, 5, 2);
+    std::vector<LoadFailureRecord> seen;
+    mgr.setLoadFailureCallback([&seen](int frame, std::string message) {
+      seen.push_back({frame, std::move(message)});
+    });
 
     WHEN("Time lands on a clock frame the binding maps to a bad file")
     {
@@ -168,10 +179,9 @@ SCENARIO(
 
       THEN("The failure carries the clock frame, not the file index")
       {
-        const auto failures = mgr.takeLoadFailures();
-        REQUIRE(failures.size() == 1);
-        REQUIRE(failures[0].frame == 9);
-        REQUIRE(failures[0].message == "frame 4 is bad");
+        REQUIRE(seen.size() == 1);
+        REQUIRE(seen[0].frame == 9);
+        REQUIRE(seen[0].message == "frame 4 is bad");
       }
     }
 
@@ -181,9 +191,8 @@ SCENARIO(
 
       THEN("The binding's index passes through")
       {
-        const auto failures = mgr.takeLoadFailures();
-        REQUIRE(failures.size() == 1);
-        REQUIRE(failures[0].frame == 4);
+        REQUIRE(seen.size() == 1);
+        REQUIRE(seen[0].frame == 4);
       }
     }
   }

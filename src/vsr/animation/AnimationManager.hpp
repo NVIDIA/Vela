@@ -43,24 +43,18 @@ struct AnimationManager
   using PlaybackStoppedCallback = std::function<void()>;
   void setPlaybackStoppedCallback(PlaybackStoppedCallback cb);
 
-  // A frame a FileBinding could not load. `frame` is the clock frame that was
-  // being applied when the binding reported (the frame a timeline shows), so
-  // the conversion from a binding's own file index happens here, once, at
-  // the manager boundary; a report made outside a time application passes
-  // the binding's index through. `message` is the reason. Bindings report
-  // through FileBinding::reportLoadFailure(); whoever drives time collects
-  // them with takeLoadFailures(), which returns and clears the list. A driver
-  // that never collects (the monolith's transport) must not leak: the list
-  // holds at most MAX_LOAD_FAILURES, dropping the oldest past that and
-  // logging once per overflow.
-  struct LoadFailure
-  {
-    int frame{0};
-    std::string message;
-  };
-  static constexpr size_t MAX_LOAD_FAILURES = 256;
+  // Fired when a FileBinding reports a frame it could not load
+  // (FileBinding::reportLoadFailure()). `clockFrame` is the clock frame that
+  // was being applied when the binding reported (the frame a timeline
+  // shows), so the conversion from a binding's own file index happens here,
+  // once, at the manager boundary; a report made outside a time application
+  // passes the binding's index through. `message` is the reason. Whoever
+  // drives time listens; with no listener the report is dropped (the binding
+  // logs it regardless). One slot, last setter wins.
+  using LoadFailureCallback =
+      std::function<void(int clockFrame, std::string message)>;
+  void setLoadFailureCallback(LoadFailureCallback cb);
   void reportLoadFailure(int frame, std::string message);
-  std::vector<LoadFailure> takeLoadFailures();
 
   scene::Scene *scene() const;
 
@@ -121,8 +115,7 @@ struct AnimationManager
   scene::Scene *m_scene{nullptr};
   TimeChangedCallback m_timeChangedCallback;
   PlaybackStoppedCallback m_playbackStoppedCallback;
-  std::vector<LoadFailure> m_loadFailures;
-  bool m_loadFailuresOverflowed{false};
+  LoadFailureCallback m_loadFailureCallback;
   float m_incrementSize{0.01f};
   float m_animationFPS{30.f};
   float m_time{0.f};

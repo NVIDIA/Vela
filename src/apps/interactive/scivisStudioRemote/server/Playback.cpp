@@ -23,7 +23,17 @@ constexpr std::chrono::milliseconds SCRUB_COMMIT_QUIET{250};
 Playback::Playback(
     vsr::app::Context &ctx, ProjectContext &projectContext, SendFn send)
     : m_ctx(ctx), m_projectContext(projectContext), m_send(std::move(send))
-{}
+{
+  m_ctx.vsr.animationMgr.setLoadFailureCallback(
+      [this](int frame, std::string message) {
+        onLoadFailure(frame, std::move(message));
+      });
+}
+
+Playback::~Playback()
+{
+  m_ctx.vsr.animationMgr.setLoadFailureCallback({});
+}
 
 void Playback::applyTime(const SetTime &time, bool sessionUp)
 {
@@ -46,8 +56,8 @@ void Playback::applyTime(const SetTime &time, bool sessionUp)
     m_scrubDeadline = Clock::now() + SCRUB_COMMIT_QUIET;
   }
 
+  m_sessionUp = sessionUp;
   m_projectContext.setActiveShotFrame(time.frame);
-  pushLoadFailures(sessionUp);
 }
 
 void Playback::tick(bool sessionUp)
@@ -58,6 +68,7 @@ void Playback::tick(bool sessionUp)
     elapsed = std::chrono::duration<float>(now - *m_lastTick).count();
   m_lastTick = now;
 
+  m_sessionUp = sessionUp;
   if (!sessionUp)
     return;
   auto *shot = project::activeShot(m_projectContext.project());
@@ -70,7 +81,6 @@ void Playback::tick(bool sessionUp)
   if (shot->playing)
     m_scrubPending = false;
   m_ctx.vsr.animationMgr.tick(elapsed);
-  pushLoadFailures(true);
 }
 
 void Playback::commitScrubIfQuiet()
@@ -92,19 +102,15 @@ void Playback::cancelScrub()
   m_scrubPending = false;
 }
 
-void Playback::pushLoadFailures(bool sessionUp)
+void Playback::onLoadFailure(int frame, std::string message)
 {
-  auto failures = m_ctx.vsr.animationMgr.takeLoadFailures();
-  if (failures.empty() || !sessionUp)
+  if (!m_sessionUp)
     return;
-  const auto &project = m_projectContext.project();
-  for (auto &failure : failures) {
-    TimeAdvanceWarning warning;
-    warning.shotId = project.activeShotId;
-    warning.frame = failure.frame;
-    warning.message = std::move(failure.message);
-    m_send(encode(warning));
-  }
+  TimeAdvanceWarning warning;
+  warning.shotId = m_projectContext.project().activeShotId;
+  warning.frame = frame;
+  warning.message = std::move(message);
+  m_send(encode(warning));
 }
 
 } // namespace vsr::scivis_studio::server

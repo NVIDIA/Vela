@@ -205,12 +205,11 @@ latch slots (latest-wins); `RequestArrayHistogram` is a sync Project Op. See
   `{frame, message}` to its `AnimationManager`, which records it against the
   clock frame being applied (the shot frame the Timeline shows; a binding
   with fewer files than the shot has frames reports its own file index, and
-  the manager boundary is the one place that converts); after every tick or
-  `SetTime` the loop drains `takeLoadFailures()` and pushes one
-  `TimeAdvanceWarning{shotId, frame, message}` per failure. Load failure
-  never stops playback. The record holds at most
-  `AnimationManager::MAX_LOAD_FAILURES` (256) so a driver that never drains it
-  (the monolith) does not grow it forever.
+  the manager boundary is the one place that converts) and hands it to its
+  `LoadFailureCallback`. The server's `Playback` holds that slot and sends
+  one `TimeAdvanceWarning{shotId, frame, message}` per report while a
+  session is up. Load failure never stops playback. The monolith sets no
+  callback, so a report there is dropped (the binding logs it regardless).
 - **The manipulator follows client camera edits.** A `SetObjectParameter`
   landing on the active shot's camera object updates the server's
   `m_ctx.view.manipulator` from the camera pose (`followCameraEdit`), and a
@@ -1475,7 +1474,7 @@ decisions, `M7-n`).
 | `SetPlaying` sync op; auto-stop is a server-originated snapshot | implemented | `ProjectOpDispatcher.cpp`, `ProjectContext` callback | |
 | Scrubbing is optimistic `SetTime` through the latch; seek while playing keeps playing | implemented | `StudioServer::applyTime` | rest commit debounced 250 ms |
 | Never skip frames | implemented | `AnimationManager::tick` | about rendering and time advance; wire delivery is latest-wins (v1 behaviour, "Wire pacing") |
-| Load failure keeps playing, `TimeAdvanceWarning` | implemented | `StudioServer::pushLoadFailures` | |
+| Load failure keeps playing, `TimeAdvanceWarning` | implemented | `Playback::onLoadFailure` | |
 | The client has no `AnimationManager` | implemented | `client/` | |
 | **Picking, selection, and viewport passes** | | | |
 | One `Pick{x, y}` against the current camera and scene | implemented | `StudioServer::servicePendingPick` | pixels y-down from the top-left (spec now says so) |

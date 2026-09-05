@@ -46,8 +46,11 @@ struct Playback
 {
   using SendFn = std::function<void(vsr::network::Message &&)>;
 
-  // `send` carries the TimeAdvanceWarnings; the contexts outlive this.
+  // `send` carries the TimeAdvanceWarnings; the contexts outlive this. The
+  // constructor takes the AnimationManager's load-failure slot and the
+  // destructor gives it back.
   Playback(vsr::app::Context &ctx, ProjectContext &projectContext, SendFn send);
+  ~Playback();
 
   // Seeks the active shot to the latched SetTime; other shots are logged and
   // ignored. While paused it opens (or extends) the rest-commit window. The
@@ -55,8 +58,8 @@ struct Playback
   // with the client's Hello seeks silently (its Bootstrap carries the frame).
   void applyTime(const protocol::SetTime &time, bool sessionUp);
   // One tick per iteration. The clock advances regardless (so the first tick
-  // of a new session sees a small delta), but time moves and warnings go
-  // out only with a session up.
+  // of a new session sees a small delta), but time moves only with a session
+  // up. `sessionUp` also arms the warnings until the next call.
   void tick(bool sessionUp);
   // Commits Time at Rest (markRevised) once the scrub window has been quiet
   // for SCRUB_COMMIT_QUIET and the frame differs from the one it opened on.
@@ -65,9 +68,9 @@ struct Playback
   void cancelScrub();
 
  private:
-  // One TimeAdvanceWarning per load failure the manager collected; without a
-  // session up the failures are dropped (they were the seek's, not a tick's).
-  void pushLoadFailures(bool sessionUp);
+  // The manager's LoadFailureCallback: one TimeAdvanceWarning per failure,
+  // sent while a session is up (m_sessionUp) and dropped otherwise.
+  void onLoadFailure(int frame, std::string message);
 
   using Clock = std::chrono::steady_clock;
 
@@ -76,6 +79,7 @@ struct Playback
   SendFn m_send;
 
   std::optional<Clock::time_point> m_lastTick;
+  bool m_sessionUp{false}; // as of the last applyTime() or tick()
   bool m_scrubPending{false};
   Clock::time_point m_scrubDeadline{};
   int m_scrubFrameBefore{0}; // the frame time rested on when the window opened
