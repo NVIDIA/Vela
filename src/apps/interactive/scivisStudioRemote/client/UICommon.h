@@ -73,6 +73,33 @@ struct BufferedNameField
   bool m_stale{false};
 };
 
+/*
+ * An integer field whose value lives in the replica: the caller passes the
+ * replica's value each UI frame and gets the edited one back once, when the
+ * field deactivates. ImGui keeps a typed edit in progress itself, but the
+ * +/- step buttons change the value on the click frame only, so the value in
+ * progress is held here while the item is active; a snapshot landing
+ * meanwhile cannot yank either kind of edit away.
+ *
+ * Example:
+ *   int frameCount = 0;
+ *   if (m_frameCountField.draw("Frames", shot.frameCount, frameCount, 1, 10))
+ *     commit(shot, patchOf(frameCount));
+ */
+struct IntField
+{
+  // Draws the field showing `current` (or the edit in progress). True with
+  // `committed` set when the field just deactivated after an edit.
+  bool draw(const char *label,
+      int current,
+      int &committed,
+      int step = 1,
+      int stepFast = 100);
+
+ private:
+  std::optional<int> m_editing;
+};
+
 enum class ConfirmChoice
 {
   Pending,

@@ -87,6 +87,23 @@ void BufferedNameField::markStale()
 
 // Confirmation modal /////////////////////////////////////////////////////////
 
+bool IntField::draw(
+    const char *label, int current, int &committed, int step, int stepFast)
+{
+  int value = m_editing.value_or(current);
+  const bool changed = ImGui::InputInt(label, &value, step, stepFast);
+  if (ImGui::IsItemActive()) {
+    if (changed)
+      m_editing = value;
+    return false;
+  }
+  m_editing.reset();
+  if (!ImGui::IsItemDeactivatedAfterEdit())
+    return false;
+  committed = value;
+  return true;
+}
+
 ConfirmChoice confirmModal(const char *popupId,
     const std::string &message,
     const char *confirmLabel,

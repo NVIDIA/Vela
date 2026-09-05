@@ -1104,8 +1104,9 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   to the `loadDevice` it wraps; the binding is `ProjectContext::
   bindShotRenderer(shot, library, device) -> RendererAppRef`. The bind
   writes the pick into the `Shot` it is handed and nothing else: the
-  ShotEditor hands it a draft that lands through `updateShot` (whose dirty
-  marking stays the only one on that path), so the server alone keeps its
+  monolith's ShotEditor hands it the copy it edits, which lands through
+  `updateShot` (whose dirty marking stays the only one on that path), so
+  the server alone keeps its
   rule (filling in a shot that never picked leaves the dirty flag alone;
   overriding a real pick is an edit), by comparing the settings around the
   call. RenderShot does not bind: it loads the device through the shared
@@ -1304,10 +1305,17 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   stays for the monolith's editors. Each client control now reads the
   replica's value for the UI frame and commits a patch of its field alone
   (the renderer pick is one patch of its three fields); `applyEdits`, both
-  drafts and `Timeline::onProjectReplaced` are gone, the whole editor is
-  still greyed while its one update is pending, and a snapshot landing
-  mid-edit cannot yank a text or number edit because ImGui holds the edit
-  in progress itself. The patch design was preferred over field-scoped ops
+  drafts and `Timeline::onProjectReplaced` are gone, and the whole editor
+  is still greyed while its one update is pending. A snapshot landing
+  mid-edit cannot yank a typed edit because ImGui holds it itself; an
+  `InputInt`'s +/- step, though, lands on the click frame and would be
+  re-read from the replica before the release commits it, so the integer
+  fields (Frames, Frame count, Width, Height, Samples and the Timeline's
+  frame counter, whose +/- had the same gap) draw through `ui::IntField`,
+  which holds the value in progress only while the item is active. The
+  model spells each patch's scalar fields once (`forEachField` in
+  `Shot.cpp`) and derives both codecs, the emptiness test and `applyPatch`
+  from it. The patch design was preferred over field-scoped ops
   (`SetShotPlayback`, `SetShotRigs`, ...) because one message with optional
   fields is what the test client's `f=v` syntax already spelled and what a
   three-field renderer pick needs; the message keeps its name and type (38)

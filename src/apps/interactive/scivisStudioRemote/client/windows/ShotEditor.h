@@ -5,6 +5,7 @@
 
 // scivisStudioClient
 #include "EditorWindow.h"
+#include "UICommon.h"
 // vsr_scivis_studio_model
 #include "Shot.h"
 // std
@@ -55,6 +56,11 @@ struct ShotEditor : public EditorWindow
   void buildUI_datasets(const Project &project, const Shot &shot);
 
   RequestHandle m_pendingUpdate;
+  // The integer fields' edits in progress (see ui::IntField).
+  ui::IntField m_frameCountField;
+  ui::IntField m_widthField;
+  ui::IntField m_heightField;
+  ui::IntField m_samplesField;
   // The shot the Render confirmation is open for; empty when it is not.
   ShotID m_shotToRender;
   RequestHandle m_pendingRender;

@@ -201,10 +201,9 @@ void Timeline::buildUI_transport(const Shot &shot, int shownFrame)
     // Frame counter: typed values commit once, on leaving the field (or
     // Enter), like the Frames and FPS fields; the +/- steps commit on release.
     ImGui::TableNextColumn();
-    int frame = shownFrame;
+    int frame = 0;
     ImGui::SetNextItemWidth(110.f * uiScale);
-    ImGui::InputInt("##frame", &frame, 1, 10);
-    if (ImGui::IsItemDeactivatedAfterEdit())
+    if (m_frameField.draw("##frame", shownFrame, frame, 1, 10))
       requestTime(frame);
     ImGui::TableNextColumn();
     ImGui::Text("%d / %d", shownFrame, lastFrameOf(shot));
@@ -220,16 +219,16 @@ void Timeline::buildUI_transport(const Shot &shot, int shownFrame)
 }
 
 // Frame count and fps: each control shows the replica's value this UI frame
-// (ImGui holds an edit in progress itself) and commits a patch of its field
-// alone, so the frame time rests on, a scrub included, is never in it.
+// (ImGui or an IntField holds an edit in progress) and commits a patch of
+// its field alone, so the frame time rests on, a scrub included, is never in
+// it.
 void Timeline::buildUI_clock(const Shot &shot)
 {
   const float uiScale = ImGui::GetIO().FontGlobalScale;
   ImGui::TableNextColumn();
-  int frameCount = shot.frameCount;
+  int frameCount = 0;
   ImGui::SetNextItemWidth(120.f * uiScale);
-  ImGui::InputInt("Frames", &frameCount, 1, 10);
-  if (ImGui::IsItemDeactivatedAfterEdit()) {
+  if (m_frameCountField.draw("Frames", shot.frameCount, frameCount, 1, 10)) {
     ShotPatch patch;
     patch.frameCount = frameCount;
     commit(shot, patch);

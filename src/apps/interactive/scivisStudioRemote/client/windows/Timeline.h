@@ -4,6 +4,7 @@
 #pragma once
 
 #include "EditorWindow.h"
+#include "UICommon.h"
 // vsr_scivis_studio_model
 #include "Shot.h"
 // std
@@ -58,6 +59,9 @@ struct Timeline : public EditorWindow
 
   RequestHandle m_pendingUpdate;
   RequestHandle m_pendingPlaying;
+  // The frame counter's and the Frames field's edits in progress.
+  ui::IntField m_frameField;
+  ui::IntField m_frameCountField;
 
   // Scrubbing //
   std::optional<int> m_dragFrame; // the mouse is down on the ruler

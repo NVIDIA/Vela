@@ -63,11 +63,11 @@ std::vector<std::string> rendererLibraries(
 
 // A size field: edited as an int, committed on deactivation as at least 1.
 // True with `out` set when the field just committed.
-bool inputSize(const char *label, uint32_t current, uint32_t &out)
+bool inputSize(
+    ui::IntField &field, const char *label, uint32_t current, uint32_t &out)
 {
-  int value = int(current);
-  ImGui::InputInt(label, &value);
-  if (!ImGui::IsItemDeactivatedAfterEdit())
+  int value = 0;
+  if (!field.draw(label, int(current), value))
     return false;
   out = uint32_t(std::max(1, value));
   return true;
@@ -101,8 +101,8 @@ void ShotEditor::buildEditorUI(const Project &project)
   ImGui::BeginDisabled(pending(m_pendingUpdate));
 
   // Each control edits a copy of its field for this UI frame and commits a
-  // patch of that field alone; ImGui holds a text or number edit in progress
-  // itself, so a snapshot landing meanwhile does not yank it away.
+  // patch of that field alone; ImGui (or an IntField) holds an edit in
+  // progress, so a snapshot landing meanwhile does not yank it away.
   std::string name = shot->name;
   ImGui::InputText("Name", &name);
   if (ImGui::IsItemDeactivatedAfterEdit()) {
@@ -139,9 +139,8 @@ void ShotEditor::buildEditorUI(const Project &project)
 
 void ShotEditor::buildUI_playback(const Shot &shot)
 {
-  int frameCount = shot.frameCount;
-  ImGui::InputInt("Frame count", &frameCount);
-  if (ImGui::IsItemDeactivatedAfterEdit()) {
+  int frameCount = 0;
+  if (m_frameCountField.draw("Frame count", shot.frameCount, frameCount)) {
     ShotPatch patch;
     patch.frameCount = frameCount;
     commit(shot, patch);
@@ -164,17 +163,19 @@ void ShotEditor::buildUI_playback(const Shot &shot)
 void ShotEditor::buildUI_renderSettings(const Shot &shot)
 {
   const auto &settings = shot.renderSettings;
-  ShotPatch patch;
   uint32_t size = 0;
-  if (inputSize("Width", settings.width, size)) {
+  if (inputSize(m_widthField, "Width", settings.width, size)) {
+    ShotPatch patch;
     patch.renderSettings.width = size;
     commit(shot, patch);
   }
-  if (inputSize("Height", settings.height, size)) {
+  if (inputSize(m_heightField, "Height", settings.height, size)) {
+    ShotPatch patch;
     patch.renderSettings.height = size;
     commit(shot, patch);
   }
-  if (inputSize("Samples", settings.samples, size)) {
+  if (inputSize(m_samplesField, "Samples", settings.samples, size)) {
+    ShotPatch patch;
     patch.renderSettings.samples = size;
     commit(shot, patch);
   }

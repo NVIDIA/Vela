@@ -132,7 +132,7 @@ void setDatasetBinding(Shot &shot, const DatasetID &id, bool enabled);
 void applyPatch(Shot &shot, const ShotPatch &patch);
 // Brings a shot the user edited back inside its limits: at least one frame,
 // the current frame within them, fps and the render size and sample count at
-// least 1. What updateShot applies; a client editing a draft uses the same.
+// least 1. What updateShot applies to every edit, whole Shot or patch.
 void clampToValidRanges(Shot &shot);
 
 } // namespace shot

@@ -5,6 +5,7 @@
 #include "DataNodeFields.h"
 
 #include <algorithm>
+#include <type_traits>
 
 namespace vsr::scivis_studio {
 
@@ -100,43 +101,81 @@ bool fromNode(const vsr::core::DataNode &n, Shot &s)
 
 namespace {
 
-bool isEmpty(const ShotRenderSettingsPatch &p)
+// Each patch's scalar fields, spelled once: f(wireName, patchField,
+// &Struct::member) per field, so the codecs, the emptiness test and
+// applyPatch all walk the same list. `P` may be const.
+template <typename P, typename F>
+void forEachField(P &p, F &&f)
 {
-  return !p.width && !p.height && !p.samples && !p.rendererLibrary
-      && !p.rendererObjectIndex && !p.rendererSubtype && !p.outputFilePrefix;
+  if constexpr (std::is_same_v<std::remove_const_t<P>,
+                    ShotRenderSettingsPatch>) {
+    using S = ShotRenderSettings;
+    f("width", p.width, &S::width);
+    f("height", p.height, &S::height);
+    f("samples", p.samples, &S::samples);
+    f("rendererLibrary", p.rendererLibrary, &S::rendererLibrary);
+    f("rendererObjectIndex", p.rendererObjectIndex, &S::rendererObjectIndex);
+    f("rendererSubtype", p.rendererSubtype, &S::rendererSubtype);
+    f("outputFilePrefix", p.outputFilePrefix, &S::outputFilePrefix);
+  } else {
+    f("name", p.name, &Shot::name);
+    f("frameCount", p.frameCount, &Shot::frameCount);
+    f("fps", p.fps, &Shot::fps);
+    f("currentFrame", p.currentFrame, &Shot::currentFrame);
+    f("loop", p.loop, &Shot::loop);
+    f("lightRigId", p.lightRigId, &Shot::lightRigId);
+    f("cameraRigId", p.cameraRigId, &Shot::cameraRigId);
+  }
 }
 
-// `field = value` when the patch has one.
-template <typename T>
-void patchField(T &field, const std::optional<T> &value)
+template <typename P>
+void patchToNode(const P &p, vsr::core::DataNode &n)
 {
-  if (value)
-    field = *value;
+  forEachField(p, [&](const char *name, const auto &value, auto) {
+    writeChild(n, name, value);
+  });
+}
+
+template <typename P>
+bool nodeToPatch(const vsr::core::DataNode &n, P &p)
+{
+  bool ok = true;
+  forEachField(p, [&](const char *name, auto &value, auto) {
+    ok = ok && readOptionalChild(n, name, value);
+  });
+  return ok;
+}
+
+bool isEmpty(const ShotRenderSettingsPatch &p)
+{
+  bool engaged = false;
+  forEachField(p, [&](const char *, const auto &value, auto) {
+    engaged = engaged || value.has_value();
+  });
+  return !engaged;
+}
+
+// Writes the patch's engaged scalar fields into `target`.
+template <typename P, typename S>
+void applyFields(const P &p, S &target)
+{
+  forEachField(p, [&](const char *, const auto &value, auto member) {
+    if (value)
+      target.*member = *value;
+  });
 }
 
 } // namespace
 
 void toNode(const ShotRenderSettingsPatch &p, vsr::core::DataNode &n)
 {
-  writeChild(n, "width", p.width);
-  writeChild(n, "height", p.height);
-  writeChild(n, "samples", p.samples);
-  writeChild(n, "rendererLibrary", p.rendererLibrary);
-  writeChild(n, "rendererObjectIndex", p.rendererObjectIndex);
-  writeChild(n, "rendererSubtype", p.rendererSubtype);
-  writeChild(n, "outputFilePrefix", p.outputFilePrefix);
+  patchToNode(p, n);
 }
 
 bool fromNode(const vsr::core::DataNode &n, ShotRenderSettingsPatch &p)
 {
   ShotRenderSettingsPatch out;
-  if (!readOptionalChild(n, "width", out.width)
-      || !readOptionalChild(n, "height", out.height)
-      || !readOptionalChild(n, "samples", out.samples)
-      || !readOptionalChild(n, "rendererLibrary", out.rendererLibrary)
-      || !readOptionalChild(n, "rendererObjectIndex", out.rendererObjectIndex)
-      || !readOptionalChild(n, "rendererSubtype", out.rendererSubtype)
-      || !readOptionalChild(n, "outputFilePrefix", out.outputFilePrefix))
+  if (!nodeToPatch(n, out))
     return false;
   p = std::move(out);
   return true;
@@ -144,13 +183,7 @@ bool fromNode(const vsr::core::DataNode &n, ShotRenderSettingsPatch &p)
 
 void toNode(const ShotPatch &p, vsr::core::DataNode &n)
 {
-  writeChild(n, "name", p.name);
-  writeChild(n, "frameCount", p.frameCount);
-  writeChild(n, "fps", p.fps);
-  writeChild(n, "currentFrame", p.currentFrame);
-  writeChild(n, "loop", p.loop);
-  writeChild(n, "lightRigId", p.lightRigId);
-  writeChild(n, "cameraRigId", p.cameraRigId);
+  patchToNode(p, n);
   if (!isEmpty(p.renderSettings))
     toNode(p.renderSettings, n["renderSettings"]);
   writeNodeList(n, "datasetBindings", p.datasetBindings);
@@ -159,13 +192,7 @@ void toNode(const ShotPatch &p, vsr::core::DataNode &n)
 bool fromNode(const vsr::core::DataNode &n, ShotPatch &p)
 {
   ShotPatch out;
-  if (!readOptionalChild(n, "name", out.name)
-      || !readOptionalChild(n, "frameCount", out.frameCount)
-      || !readOptionalChild(n, "fps", out.fps)
-      || !readOptionalChild(n, "currentFrame", out.currentFrame)
-      || !readOptionalChild(n, "loop", out.loop)
-      || !readOptionalChild(n, "lightRigId", out.lightRigId)
-      || !readOptionalChild(n, "cameraRigId", out.cameraRigId)
+  if (!nodeToPatch(n, out)
       || !readOptionalChildNode(n, "renderSettings", out.renderSettings)
       || !readNodeList(n, "datasetBindings", out.datasetBindings))
     return false;
@@ -205,22 +232,8 @@ void setDatasetBinding(Shot &shot, const DatasetID &id, bool enabled)
 
 void applyPatch(Shot &shot, const ShotPatch &patch)
 {
-  patchField(shot.name, patch.name);
-  patchField(shot.frameCount, patch.frameCount);
-  patchField(shot.fps, patch.fps);
-  patchField(shot.currentFrame, patch.currentFrame);
-  patchField(shot.loop, patch.loop);
-  patchField(shot.lightRigId, patch.lightRigId);
-  patchField(shot.cameraRigId, patch.cameraRigId);
-  auto &r = shot.renderSettings;
-  const auto &p = patch.renderSettings;
-  patchField(r.width, p.width);
-  patchField(r.height, p.height);
-  patchField(r.samples, p.samples);
-  patchField(r.rendererLibrary, p.rendererLibrary);
-  patchField(r.rendererObjectIndex, p.rendererObjectIndex);
-  patchField(r.rendererSubtype, p.rendererSubtype);
-  patchField(r.outputFilePrefix, p.outputFilePrefix);
+  applyFields(patch, shot);
+  applyFields(patch.renderSettings, shot.renderSettings);
   for (const auto &binding : patch.datasetBindings)
     setDatasetBinding(shot, binding.datasetId, binding.enabled);
 }
