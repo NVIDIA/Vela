@@ -2344,9 +2344,9 @@ SCENARIO(
         server->scene().getObject(ANARI_CAMERA, shot->camera.objectIndex);
     REQUIRE(cameraObject);
     const std::string cameraName = cameraObject->name();
-    const auto ppm = (std::filesystem::temp_directory_path()
-        / ("vsrStudioTestClient-" + std::to_string(port) + ".ppm"))
-                         .string();
+    // Under the server's Data Root (the temp directory), gone with the test.
+    ScopedFixtureDirectory frames("vsrStudioTestClient-");
+    const auto ppm = (frames.path / "frame.ppm").string();
 
     TestSession session;
 
@@ -2503,7 +2503,6 @@ SCENARIO(
         std::vector<char> rgb(32 * 24 * 3);
         file.read(rgb.data(), std::streamsize(rgb.size()));
         REQUIRE(file.gcount() == std::streamsize(rgb.size()));
-        std::filesystem::remove(ppm);
       }
 
       THEN("the edits reached the server and the shutdown ended its run()")
