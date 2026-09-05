@@ -327,8 +327,11 @@ void updateShot(
 {
   std::vector<ProjectOpReply> replies;
   const int snapshots = replaced;
-  client.connection.projectOps().updateShot(
-      shotId, patch, [&](const ProjectOpReply &r) { replies.push_back(r); });
+  UpdateShot update;
+  update.shotId = shotId;
+  update.patch = patch;
+  client.connection.projectOps().send(
+      update, [&](const ProjectOpReply &r) { replies.push_back(r); });
   REQUIRE(pollUntil(
       client.connection, [&] { return replies.size() == 1; }, E2E_TIMEOUT));
   REQUIRE(replies[0].ok);
@@ -367,9 +370,11 @@ ShotPatch renderPatch(int frameCount, uint32_t width, uint32_t height)
 void setPlaying(Client &client, bool playing)
 {
   std::vector<ProjectOpReply> replies;
-  client.connection.projectOps().setPlaying(activeReplicaShot(client).id,
-      playing,
-      [&](const ProjectOpReply &r) { replies.push_back(r); });
+  SetPlaying play;
+  play.shotId = activeReplicaShot(client).id;
+  play.playing = playing;
+  client.connection.projectOps().send(
+      play, [&](const ProjectOpReply &r) { replies.push_back(r); });
   REQUIRE(pollUntil(
       client.connection, [&] { return replies.size() == 1; }, E2E_TIMEOUT));
   REQUIRE(replies[0].ok);
@@ -394,9 +399,11 @@ PickReply pick(Client &client, int x, int y)
 void importMesh(Client &client, const std::filesystem::path &mesh)
 {
   uint64_t taskId = 0;
-  client.connection.projectOps().importStaticDataset("Triangle",
-      mesh,
-      vsr::io::ImporterType::OBJ,
+  ImportStaticDataset import;
+  import.name = "Triangle";
+  import.sourcePath = mesh;
+  import.importerType = vsr::io::ImporterType::OBJ;
+  client.connection.projectOps().sendForResult<TaskStartedResult>(import,
       [&](const ProjectOpReply &r,
           const std::optional<TaskStartedResult> &started) {
         REQUIRE(r.ok);
@@ -439,7 +446,9 @@ size_t fileCount(const std::filesystem::path &directory)
 // on the record can start before the reply is in.
 void renderShot(Client &client, const ShotID &shotId, uint64_t &taskId)
 {
-  client.connection.projectOps().renderShot(shotId,
+  RenderShot render;
+  render.shotId = shotId;
+  client.connection.projectOps().sendForResult<TaskStartedResult>(render,
       [&](const ProjectOpReply &r,
           const std::optional<TaskStartedResult> &started) {
         REQUIRE(r.ok);
@@ -477,8 +486,9 @@ bool waitForReplies(
 void saveInPlace(Client &client, protocol::SubtreePtr uiState = {})
 {
   uint64_t taskId = 0;
-  client.connection.projectOps().saveProject(std::nullopt,
-      std::move(uiState),
+  SaveProject save; // in place
+  save.uiState = std::move(uiState);
+  client.connection.projectOps().sendForResult<TaskStartedResult>(save,
       [&](const ProjectOpReply &r,
           const std::optional<TaskStartedResult> &started) {
         REQUIRE(r.ok);
@@ -530,7 +540,8 @@ SCENARIO("scivisStudioServer and the client core run the project layer",
     WHEN("NewProject is requested")
     {
       std::vector<ProjectOpReply> replies;
-      ops.newProject([&](const ProjectOpReply &r) { replies.push_back(r); });
+      ops.send(
+          NewProject{}, [&](const ProjectOpReply &r) { replies.push_back(r); });
       REQUIRE(pollUntil(
           client.connection, [&] { return replies.size() == 1; }, E2E_TIMEOUT));
       REQUIRE(replies[0].ok);
@@ -551,7 +562,7 @@ SCENARIO("scivisStudioServer and the client core run the project layer",
             "CreateShot with no name yields a numbered shot in the replica")
         {
           std::optional<ShotID> createdId;
-          ops.createShot({},
+          ops.sendForResult<ShotCreatedResult>(CreateShot{},
               [&](const ProjectOpReply &r,
                   const std::optional<ShotCreatedResult> &result) {
                 REQUIRE(r.ok);
@@ -580,7 +591,9 @@ SCENARIO("scivisStudioServer and the client core run the project layer",
             REQUIRE(waitForFrameOf(client, *createdId));
 
             std::vector<ProjectOpReply> activeReplies;
-            ops.setActiveShot(firstShot,
+            SetActiveShot activate;
+            activate.shotId = firstShot;
+            ops.send(activate,
                 [&](const ProjectOpReply &r) { activeReplies.push_back(r); });
             REQUIRE(waitForFrameOf(client, firstShot));
             REQUIRE(activeReplies.size() == 1);
@@ -597,8 +610,9 @@ SCENARIO("scivisStudioServer and the client core run the project layer",
             {
               uint64_t taskId = 0;
               bool queuedAtReply = false;
-              ops.saveProject(scratch.saved,
-                  nullptr,
+              SaveProject saveAs;
+              saveAs.directory = scratch.saved;
+              ops.sendForResult<TaskStartedResult>(saveAs,
                   [&](const ProjectOpReply &r,
                       const std::optional<TaskStartedResult> &started) {
                     REQUIRE(r.ok);
@@ -638,7 +652,9 @@ SCENARIO("scivisStudioServer and the client core run the project layer",
               {
                 std::optional<ListDirectoryResult> listing;
                 std::vector<ProjectOpReply> listReplies;
-                ops.listDirectory(scratch.base,
+                ListDirectory list;
+                list.directory = scratch.base;
+                ops.sendForResult<ListDirectoryResult>(list,
                     [&](const ProjectOpReply &r,
                         const std::optional<ListDirectoryResult> &result) {
                       listReplies.push_back(r);
@@ -660,7 +676,9 @@ SCENARIO("scivisStudioServer and the client core run the project layer",
                 {
                   const auto objectsBefore = totalObjects(client.mirror);
                   uint64_t openTask = 0;
-                  ops.openProject(scratch.saved,
+                  OpenProject open;
+                  open.directory = scratch.saved;
+                  ops.sendForResult<TaskStartedResult>(open,
                       [&](const ProjectOpReply &r,
                           const std::optional<TaskStartedResult> &started) {
                         REQUIRE(r.ok);
@@ -693,7 +711,7 @@ SCENARIO("scivisStudioServer and the client core run the project layer",
                     // The client has not polled since: the request goes out
                     // on a link it still believes in.
                     const auto handle =
-                        ops.newProject([&](const ProjectOpReply &r) {
+                        ops.send(NewProject{}, [&](const ProjectOpReply &r) {
                           lostReplies.push_back(r);
                         });
                     REQUIRE(handle.valid());
@@ -1154,13 +1172,16 @@ SCENARIO("scivisStudioServer and the client core pick, outline and bin",
             {
               std::optional<ArrayHistogramResult> result;
               std::vector<ProjectOpReply> replies;
-              client.connection.projectOps().requestArrayHistogram(scalarArray,
-                  10,
-                  [&](const ProjectOpReply &r,
-                      const std::optional<ArrayHistogramResult> &h) {
-                    replies.push_back(r);
-                    result = h;
-                  });
+              RequestArrayHistogram histogram;
+              histogram.array = scalarArray;
+              histogram.binCount = 10;
+              client.connection.projectOps()
+                  .sendForResult<ArrayHistogramResult>(histogram,
+                      [&](const ProjectOpReply &r,
+                          const std::optional<ArrayHistogramResult> &h) {
+                        replies.push_back(r);
+                        result = h;
+                      });
               REQUIRE(pollUntil(
                   client.connection,
                   [&] { return replies.size() == 1; },
@@ -1180,12 +1201,15 @@ SCENARIO("scivisStudioServer and the client core pick, outline and bin",
                     findArray(client.mirror, ANARI_FLOAT32_VEC3);
                 REQUIRE(positions);
                 std::vector<ProjectOpReply> refused;
-                client.connection.projectOps().requestArrayHistogram(*positions,
-                    8,
-                    [&](const ProjectOpReply &r,
-                        const std::optional<ArrayHistogramResult> &) {
-                      refused.push_back(r);
-                    });
+                RequestArrayHistogram vectors;
+                vectors.array = *positions;
+                vectors.binCount = 8;
+                client.connection.projectOps()
+                    .sendForResult<ArrayHistogramResult>(vectors,
+                        [&](const ProjectOpReply &r,
+                            const std::optional<ArrayHistogramResult> &) {
+                          refused.push_back(r);
+                        });
                 REQUIRE(pollUntil(
                     client.connection,
                     [&] { return refused.size() == 1; },
@@ -1240,7 +1264,7 @@ SCENARIO("scivisStudioServer and the client core render shots and recover",
     const ShotID shotA = activeReplicaShot(client).id;
     updateActiveShot(client, replaced, renderPatch(3, 32, 24));
     std::optional<ShotID> shotB;
-    ops.createShot({},
+    ops.sendForResult<ShotCreatedResult>(CreateShot{},
         [&](const ProjectOpReply &r,
             const std::optional<ShotCreatedResult> &result) {
           REQUIRE(r.ok);
@@ -1255,8 +1279,9 @@ SCENARIO("scivisStudioServer and the client core render shots and recover",
         E2E_TIMEOUT));
 
     uint64_t saveTask = 0;
-    ops.saveProject(scratch.saved,
-        nullptr,
+    SaveProject saveAs;
+    saveAs.directory = scratch.saved;
+    ops.sendForResult<TaskStartedResult>(saveAs,
         [&](const ProjectOpReply &r,
             const std::optional<TaskStartedResult> &started) {
           REQUIRE(r.ok);
@@ -1341,11 +1366,16 @@ SCENARIO("scivisStudioServer and the client core render shots and recover",
           uint64_t second = 0;
           renderShot(client, shotA, second);
           std::vector<ProjectOpReply> lateReplies;
-          ops.createShot("Late", [&](const ProjectOpReply &r, const auto &) {
-            lateReplies.push_back(r);
-          });
+          CreateShot late;
+          late.name = "Late";
+          ops.sendForResult<ShotCreatedResult>(
+              late, [&](const ProjectOpReply &r, const auto &) {
+                lateReplies.push_back(r);
+              });
           std::vector<ProjectOpReply> cancelReplies;
-          ops.cancelTask(first,
+          CancelTask cancelFirst;
+          cancelFirst.taskId = first;
+          ops.send(cancelFirst,
               [&](const ProjectOpReply &r) { cancelReplies.push_back(r); });
 
           const auto firstStates = waitForTaskEnd(client, first);
@@ -1369,7 +1399,9 @@ SCENARIO("scivisStudioServer and the client core render shots and recover",
           // The second render runs now; it is cancelled the same way.
           REQUIRE(waitForRenderUnderWay(client, second));
           std::vector<ProjectOpReply> cancelSecond;
-          ops.cancelTask(second,
+          CancelTask cancelRunning;
+          cancelRunning.taskId = second;
+          ops.send(cancelRunning,
               [&](const ProjectOpReply &r) { cancelSecond.push_back(r); });
           const auto secondStates = waitForTaskEnd(client, second);
           REQUIRE_FALSE(secondStates.empty());
@@ -1382,9 +1414,12 @@ SCENARIO("scivisStudioServer and the client core render shots and recover",
           // Nothing is queued or running any more: edits go through again
           // and frames resume.
           std::vector<ProjectOpReply> afterReplies;
-          ops.createShot("After", [&](const ProjectOpReply &r, const auto &) {
-            afterReplies.push_back(r);
-          });
+          CreateShot after;
+          after.name = "After";
+          ops.sendForResult<ShotCreatedResult>(
+              after, [&](const ProjectOpReply &r, const auto &) {
+                afterReplies.push_back(r);
+              });
           REQUIRE(waitForReplies(client, afterReplies, 1));
           REQUIRE(afterReplies[0].ok);
           REQUIRE(pollUntil(
@@ -1468,7 +1503,7 @@ SCENARIO("scivisStudioServer and the client core render shots and recover",
               saveInPlace(client, tree);
 
               std::vector<ProjectOpReply> newReplies;
-              ops.newProject(
+              ops.send(NewProject{},
                   [&](const ProjectOpReply &r) { newReplies.push_back(r); });
               REQUIRE(waitForReplies(client, newReplies, 1));
               REQUIRE(newReplies[0].ok);
@@ -1482,7 +1517,9 @@ SCENARIO("scivisStudioServer and the client core render shots and recover",
 
               uiStates.clear();
               uint64_t open = 0;
-              ops.openProject(scratch.saved,
+              OpenProject reopen;
+              reopen.directory = scratch.saved;
+              ops.sendForResult<TaskStartedResult>(reopen,
                   [&](const ProjectOpReply &r,
                       const std::optional<TaskStartedResult> &started) {
                     REQUIRE(r.ok);

@@ -44,7 +44,7 @@ struct AddStaticDatasetDialog : public vsr::ui::imgui::Modal
   std::string m_sourcePath;
   int m_selectedSource{0};
   std::string m_error;
-  RequestHandle m_pending;
+  InFlight m_pending;
   RemoteBrowseDialog m_browse;
   // The archive load awaiting its rename, if any.
   ArchiveRenameFollowUp m_archiveRename;

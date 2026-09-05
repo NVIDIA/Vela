@@ -3,6 +3,7 @@
 
 #include "ProjectWindow.h"
 // scivisStudioClient
+#include "Application.h"
 #include "UICommon.h"
 // vsr_scivis_studio_model
 #include "Project.h"
@@ -17,27 +18,25 @@ constexpr const char *REMOVE_SHOT_POPUP = "Remove Shot?";
 
 } // namespace
 
-ProjectWindow::ProjectWindow(
-    vsr::ui::imgui::Application *app, EditorContext *context)
-    : EditorWindow(app, context, "Project")
+ProjectWindow::ProjectWindow(Application *app, EditorContext *context)
+    : EditorWindow(app, context, "Project"), m_studio(app)
 {}
 
 ProjectWindow::~ProjectWindow() = default;
 
 void ProjectWindow::buildEditorUI(const Project &project)
 {
-  const auto &actions = m_context->actions;
-  if (ImGui::Button("New") && actions.newProject)
-    actions.newProject();
+  if (ImGui::Button("New"))
+    m_studio->newProject();
   ImGui::SameLine();
-  if (ImGui::Button("Open...") && actions.openProject)
-    actions.openProject();
+  if (ImGui::Button("Open..."))
+    m_studio->openProjectDialog();
   ImGui::SameLine();
-  if (ImGui::Button("Save") && actions.saveProject)
-    actions.saveProject();
+  if (ImGui::Button("Save"))
+    m_studio->saveProject();
   ImGui::SameLine();
-  if (ImGui::Button("Save As...") && actions.saveProjectAs)
-    actions.saveProjectAs();
+  if (ImGui::Button("Save As..."))
+    m_studio->saveProjectAsDialog();
 
   ImGui::Text("Name: %s", project.name.c_str());
   ImGui::TextWrapped(
@@ -65,15 +64,17 @@ void ProjectWindow::buildEditorUI(const Project &project)
 void ProjectWindow::buildUI_shots(const Project &project)
 {
   ImGui::SeparatorText("Shots");
+  ProjectOps &ops = m_context->ops();
 
-  ImGui::BeginDisabled(pending(m_pendingCreate));
+  ImGui::BeginDisabled(m_create.busy(ops));
   if (ImGui::Button("Add Shot")) {
     // An empty name lets the server number the shot.
-    m_pendingCreate = ops().createShot({},
+    m_create.sendForResult<protocol::ShotCreatedResult>(ops,
+        protocol::CreateShot{},
         [this](const protocol::ProjectOpReply &reply,
             const std::optional<protocol::ShotCreatedResult> &) {
           if (!reply.ok)
-            reportError(reply.error);
+            m_context->error(reply.error);
         });
   }
   ImGui::EndDisabled();
@@ -81,7 +82,7 @@ void ProjectWindow::buildUI_shots(const Project &project)
   if (project.shots.empty())
     ImGui::TextDisabled("No shots");
 
-  const bool busy = pending(m_pendingSetActive) || pending(m_pendingRemove);
+  const bool busy = m_setActive.busy(ops) || m_remove.busy(ops);
   // The popup is opened once the per-shot id is off the stack, since
   // buildPopups() begins it at window scope and ImGui hashes popup ids with
   // whatever is pushed at the time.
@@ -95,7 +96,9 @@ void ProjectWindow::buildUI_shots(const Project &project)
             ImGuiSelectableFlags_AllowOverlap,
             ImVec2(ImGui::GetContentRegionAvail().x - 70.f, 0.f))
         && !active) {
-      m_pendingSetActive = ops().setActiveShot(shot.id, errorReporter());
+      protocol::SetActiveShot activate;
+      activate.shotId = shot.id;
+      m_setActive.send(ops, std::move(activate), m_context->errorReporter());
     }
     ImGui::SameLine();
     if (ImGui::SmallButton("Remove")) {
@@ -115,13 +118,17 @@ void ProjectWindow::buildPopups(const Project &project)
   const auto choice = ui::confirmModal(REMOVE_SHOT_POPUP,
       "Remove shot '" + (shot ? shot->name : m_shotToRemove) + "'?",
       "Remove",
-      canSend(),
+      m_context->canSend(),
       [&] {
         if (project.shots.size() <= 1)
           ui::warningText("This is the project's only shot.");
       });
-  if (choice == ui::ConfirmChoice::Confirmed)
-    m_pendingRemove = ops().removeShot(m_shotToRemove, errorReporter());
+  if (choice == ui::ConfirmChoice::Confirmed) {
+    protocol::RemoveShot remove;
+    remove.shotId = m_shotToRemove;
+    m_remove.send(
+        m_context->ops(), std::move(remove), m_context->errorReporter());
+  }
   if (choice != ui::ConfirmChoice::Pending)
     m_shotToRemove.clear();
 }

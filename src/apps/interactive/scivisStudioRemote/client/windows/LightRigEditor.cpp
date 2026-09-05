@@ -155,22 +155,29 @@ void LightRigEditor::buildEditorUI(const Project &project)
 
 void LightRigEditor::buildUI_toolbar(const Project &project)
 {
+  ProjectOps &ops = m_context->ops();
   auto createdReply = [this](const ProjectOpReply &reply,
                           const std::optional<LightRigCreatedResult> &result) {
     if (!reply.ok)
-      reportError(reply.error);
+      m_context->error(reply.error);
     else if (result)
       m_selectOnArrival = result->lightRigId;
   };
 
-  ImGui::BeginDisabled(pending(m_pendingOp));
-  if (ImGui::Button("Add Rig"))
-    m_pendingOp = ops().createLightRig("", createdReply);
+  ImGui::BeginDisabled(m_rigOp.busy(ops));
+  if (ImGui::Button("Add Rig")) {
+    m_rigOp.sendForResult<LightRigCreatedResult>(
+        ops, CreateLightRig{}, createdReply);
+  }
 
   ImGui::SameLine();
   ImGui::BeginDisabled(m_selected.empty());
-  if (ImGui::Button("Clone Rig"))
-    m_pendingOp = ops().cloneLightRig(m_selected, createdReply);
+  if (ImGui::Button("Clone Rig")) {
+    CloneLightRig clone;
+    clone.lightRigId = m_selected;
+    m_rigOp.sendForResult<LightRigCreatedResult>(
+        ops, std::move(clone), createdReply);
+  }
   ImGui::EndDisabled();
 
   ImGui::SameLine();
@@ -182,7 +189,10 @@ void LightRigEditor::buildUI_toolbar(const Project &project)
     request.startDirectory = project.projectDirectory;
     request.onAccept = [this, createdReply](
                            const std::vector<std::filesystem::path> &paths) {
-      m_pendingOp = ops().loadLightRigArchive(paths.front(), createdReply);
+      LoadLightRigArchive load;
+      load.file = paths.front();
+      m_rigOp.sendForResult<LightRigCreatedResult>(
+          m_context->ops(), std::move(load), createdReply);
     };
     m_browse.open(std::move(request));
   }
@@ -192,13 +202,17 @@ void LightRigEditor::buildUI_toolbar(const Project &project)
 // The buffer travels as RenameLightRig; a refusal restores the replica's name.
 void LightRigEditor::buildUI_nameField(const LightRig &rig)
 {
-  const auto newName = m_nameField.draw(
-      rig.id, rig.name, pending(m_pendingRename), "Invalid name: ");
+  ProjectOps &ops = m_context->ops();
+  const auto newName =
+      m_nameField.draw(rig.id, rig.name, m_rename.busy(ops), "Invalid name: ");
   if (!newName)
     return;
   const LightRigID id = rig.id;
-  m_pendingRename = ops().renameLightRig(
-      id, *newName, [this, id](const ProjectOpReply &reply) {
+  RenameLightRig rename;
+  rename.lightRigId = id;
+  rename.newName = *newName;
+  m_rename.send(
+      ops, std::move(rename), [this, id](const ProjectOpReply &reply) {
         m_nameField.onReply(id, reply.ok, reply.error);
       });
 }
@@ -206,16 +220,18 @@ void LightRigEditor::buildUI_nameField(const LightRig &rig)
 void LightRigEditor::buildUI_rigActions(
     const Project &project, const LightRig &rig)
 {
+  ProjectOps &ops = m_context->ops();
   const Shot *shot = project::activeShot(project);
   const bool activeShotUsesRig = shot && shot->lightRigId == rig.id;
 
-  ImGui::BeginDisabled(pending(m_pendingOp));
+  ImGui::BeginDisabled(m_rigOp.busy(ops));
 
   ImGui::BeginDisabled(!shot || activeShotUsesRig);
   if (ImGui::Button("Use for Active Shot") && shot) {
-    ShotPatch patch;
-    patch.lightRigId = rig.id;
-    m_pendingOp = ops().updateShot(shot->id, patch, errorReporter());
+    UpdateShot update;
+    update.shotId = shot->id;
+    update.patch.lightRigId = rig.id;
+    m_rigOp.send(ops, std::move(update), m_context->errorReporter());
   }
   ImGui::EndDisabled();
 
@@ -230,8 +246,11 @@ void LightRigEditor::buildUI_rigActions(
     const LightRigID id = rig.id;
     request.onAccept = [this, id](
                            const std::vector<std::filesystem::path> &paths) {
-      m_pendingOp = ops().saveLightRigArchive(
-          id, ui::withVsrExtension(paths.front()), errorReporter());
+      SaveLightRigArchive save;
+      save.lightRigId = id;
+      save.file = ui::withVsrExtension(paths.front());
+      m_rigOp.send(
+          m_context->ops(), std::move(save), m_context->errorReporter());
     };
     m_browse.open(std::move(request));
   }
@@ -242,7 +261,9 @@ void LightRigEditor::buildUI_rigActions(
       m_rigToRemove = rig.id;
       ImGui::OpenPopup(REMOVE_POPUP);
     } else {
-      m_pendingOp = ops().removeLightRig(rig.id, errorReporter());
+      RemoveLightRig remove;
+      remove.lightRigId = rig.id;
+      m_rigOp.send(ops, std::move(remove), m_context->errorReporter());
     }
   }
 
@@ -262,19 +283,23 @@ void LightRigEditor::buildUI_lightList(const LightRig &rig)
   }
 
   ImGui::SeparatorText("Lights");
+  ProjectOps &ops = m_context->ops();
 
-  ImGui::BeginDisabled(pending(m_pendingLightOp));
+  ImGui::BeginDisabled(m_lightOp.busy(ops));
   if (ImGui::Button("Add Light"))
     ImGui::OpenPopup(ADD_LIGHT_POPUP);
   if (ImGui::BeginPopup(ADD_LIGHT_POPUP)) {
     for (const auto &type : light_rig::LIGHT_SUBTYPES) {
       if (ImGui::MenuItem(type.label)) {
-        m_pendingLightOp = ops().addLightToRig(rig.id,
-            type.subtype,
+        AddLightToRig add;
+        add.lightRigId = rig.id;
+        add.subtype = type.subtype;
+        m_lightOp.sendForResult<LightAddedResult>(ops,
+            std::move(add),
             [this](const ProjectOpReply &reply,
                 const std::optional<LightAddedResult> &result) {
               if (!reply.ok) {
-                reportError(reply.error);
+                m_context->error(reply.error);
                 return;
               }
               // The node was pushed before the reply; select it.
@@ -334,14 +359,15 @@ void LightRigEditor::buildUI_lightList(const LightRig &rig)
       "Renaming a light is not in the protocol yet; edit the name in the"
       " Object Editor once it is");
   ImGui::SameLine();
-  ImGui::BeginDisabled(!hasSelection || pending(m_pendingLightOp));
+  ImGui::BeginDisabled(!hasSelection || m_lightOp.busy(ops));
   if (ImGui::Button("Remove Selected") && hasSelection) {
     auto node = nodes[selectedLight];
-    SceneNodeRef ref;
-    ref.layerName = rig.rootNode.layerName;
-    ref.nodeIndex = node.index();
+    RemoveLightFromRig remove;
+    remove.lightRigId = rig.id;
+    remove.lightNode.layerName = rig.rootNode.layerName;
+    remove.lightNode.nodeIndex = node.index();
     ctx->removeFromSelection(node);
-    m_pendingLightOp = ops().removeLightFromRig(rig.id, ref, errorReporter());
+    m_lightOp.send(ops, std::move(remove), m_context->errorReporter());
   }
   ImGui::EndDisabled();
 }
@@ -363,9 +389,13 @@ void LightRigEditor::buildUI_removeConfirmation(const Project &project)
           + std::to_string(useCount) + " shot reference"
           + (useCount == 1 ? "" : "s") + "?",
       "Delete",
-      canSend());
-  if (choice == ui::ConfirmChoice::Confirmed)
-    m_pendingOp = ops().removeLightRig(m_rigToRemove, errorReporter());
+      m_context->canSend());
+  if (choice == ui::ConfirmChoice::Confirmed) {
+    RemoveLightRig remove;
+    remove.lightRigId = m_rigToRemove;
+    m_rigOp.send(
+        m_context->ops(), std::move(remove), m_context->errorReporter());
+  }
   if (choice != ui::ConfirmChoice::Pending)
     m_rigToRemove.clear();
 }

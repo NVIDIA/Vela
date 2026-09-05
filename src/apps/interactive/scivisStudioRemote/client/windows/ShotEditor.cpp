@@ -81,9 +81,13 @@ ShotEditor::~ShotEditor() = default;
 
 void ShotEditor::commit(const Shot &shot, const ShotPatch &patch)
 {
-  if (!canSend())
+  if (!m_context->canSend())
     return;
-  m_pendingUpdate = ops().updateShot(shot.id, patch, errorReporter());
+  protocol::UpdateShot update;
+  update.shotId = shot.id;
+  update.patch = patch;
+  m_update.send(
+      m_context->ops(), std::move(update), m_context->errorReporter());
 }
 
 // UI /////////////////////////////////////////////////////////////////////////
@@ -96,7 +100,7 @@ void ShotEditor::buildEditorUI(const Project &project)
     return;
   }
 
-  ImGui::BeginDisabled(pending(m_pendingUpdate));
+  ImGui::BeginDisabled(m_update.busy(m_context->ops()));
 
   // Each control edits a copy of its field for this UI frame and commits a
   // patch of that field alone; ImGui (or an IntField) holds an edit in
@@ -181,7 +185,8 @@ void ShotEditor::buildUI_renderSettings(const Shot &shot)
 
 void ShotEditor::buildUI_render(const Project &project, const Shot &shot)
 {
-  const bool busy = pending(m_pendingRender) || m_context->renderInProgress();
+  const bool busy =
+      m_render.busy(m_context->ops()) || m_context->renderInProgress();
   ImGui::BeginDisabled(busy);
   if (ImGui::Button("Render Shot..."))
     m_shotToRender = shot.id;
@@ -208,7 +213,7 @@ void ShotEditor::buildPopups(const Project &project)
           + " frame(s) of '" + shot->name + "' to renders/" + shot->id
           + "/ on the server?",
       "Render",
-      canSend(),
+      m_context->canSend(),
       [&] {
         if (project.dirty)
           ui::warningText(
@@ -219,11 +224,14 @@ void ShotEditor::buildPopups(const Project &project)
             " refused while the render runs.");
       });
   if (choice == ui::ConfirmChoice::Confirmed) {
-    m_pendingRender = ops().renderShot(m_shotToRender,
+    protocol::RenderShot render;
+    render.shotId = m_shotToRender;
+    m_render.sendForResult<protocol::TaskStartedResult>(m_context->ops(),
+        std::move(render),
         [this](const protocol::ProjectOpReply &reply,
             const std::optional<protocol::TaskStartedResult> &) {
           if (!reply.ok)
-            reportError(reply.error);
+            m_context->error(reply.error);
         });
   }
   if (choice != ui::ConfirmChoice::Pending)

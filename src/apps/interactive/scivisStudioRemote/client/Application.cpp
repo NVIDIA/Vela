@@ -195,10 +195,6 @@ Application::Application(int argc, const char **argv)
   m_editorContext.reportStatus = [this](const std::string &message) {
     notify(message, false);
   };
-  m_editorContext.actions.newProject = [this] { newProject(); };
-  m_editorContext.actions.openProject = [this] { openProjectDialog(); };
-  m_editorContext.actions.saveProject = [this] { saveProject(); };
-  m_editorContext.actions.saveProjectAs = [this] { saveProjectAsDialog(); };
 
   const auto &supported = supportedFrameEncodings();
   if (std::find(supported.begin(), supported.end(), FrameEncoding::TurboJpeg)
@@ -373,7 +369,7 @@ void Application::uiMenu_Studio()
     }
     if (ImGui::MenuItem("Add Shot")) {
       // An empty name lets the server number the shot.
-      m_connection->projectOps().createShot({},
+      m_connection->projectOps().sendForResult<ShotCreatedResult>(CreateShot{},
           [this](const ProjectOpReply &reply,
               const std::optional<ShotCreatedResult> &) {
             if (!reply.ok)
@@ -540,8 +536,8 @@ void Application::newProject()
 {
   requestDirtyAction(
       "Discard unsaved changes and start a new project?", [this] {
-        m_connection->projectOps().newProject(
-            [this](const ProjectOpReply &reply) {
+        m_connection->projectOps().send(
+            NewProject{}, [this](const ProjectOpReply &reply) {
               if (!reply.ok)
                 notify(reply.error, true);
             });
@@ -566,8 +562,9 @@ void Application::saveProject()
     saveProjectAsDialog();
     return;
   }
-  m_connection->projectOps().saveProject(std::nullopt,
-      buildUIState(),
+  SaveProject save; // in place: no directory
+  save.uiState = buildUIState();
+  m_connection->projectOps().sendForResult<TaskStartedResult>(std::move(save),
       [this](const ProjectOpReply &reply,
           const std::optional<TaskStartedResult> &) {
         if (!reply.ok)

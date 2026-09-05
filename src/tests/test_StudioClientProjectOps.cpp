@@ -360,7 +360,9 @@ SCENARIO("ProjectOps decodes typed results for the callback", "[StudioClient]")
       std::optional<ShotCreatedResult> result;
       bool ok = false;
       int calls = 0;
-      const auto handle = f.ops().createShot("Shot 2",
+      CreateShot create;
+      create.name = "Shot 2";
+      const auto handle = f.ops().sendForResult<ShotCreatedResult>(create,
           [&](const ProjectOpReply &reply,
               const std::optional<ShotCreatedResult> &r) {
             calls++;
@@ -387,12 +389,14 @@ SCENARIO("ProjectOps decodes typed results for the callback", "[StudioClient]")
       }
     }
 
-    WHEN("a typed request fails")
+    WHEN("a sendForResult request fails")
     {
       std::optional<LightRigCreatedResult> result;
       bool ok = true;
       int calls = 0;
-      const auto handle = f.ops().cloneLightRig("lightrig_0009",
+      CloneLightRig clone;
+      clone.lightRigId = "lightrig_0009";
+      const auto handle = f.ops().sendForResult<LightRigCreatedResult>(clone,
           [&](const ProjectOpReply &reply,
               const std::optional<LightRigCreatedResult> &r) {
             calls++;
@@ -411,67 +415,45 @@ SCENARIO("ProjectOps decodes typed results for the callback", "[StudioClient]")
       }
     }
 
-    WHEN("every typed wrapper is used once")
+    WHEN("requests of several types go out through send and sendForResult")
     {
       auto &ops = f.ops();
       const auto ignore = [](const ProjectOpReply &) {};
       const auto ignoreR = [](const ProjectOpReply &, const auto &) {};
-      SceneNodeRef node;
-      node.layerName = "studio";
-      node.nodeIndex = 7;
-      const std::vector<std::filesystem::path> frames{"/d/a.raw", "/d/b.raw"};
-      const std::vector<std::string> list{"a.raw", "b.raw"};
 
       std::vector<StudioMessageType> expected;
       const auto expect = [&](StudioMessageType t, RequestHandle h) {
         REQUIRE(h.valid());
         expected.push_back(t);
       };
-      // clang-format off
-      expect(StudioMessageType::NewProject, ops.newProject(ignore));
-      expect(StudioMessageType::OpenProject, ops.openProject("/d/p", ignoreR));
-      expect(StudioMessageType::SaveProject, ops.saveProject(std::nullopt, nullptr, ignoreR));
-      expect(StudioMessageType::ImportStaticDataset, ops.importStaticDataset("n", "/d/f.obj", vsr::io::ImporterType::OBJ, ignoreR));
-      expect(StudioMessageType::ImportSubtreeDataset, ops.importSubtreeDataset("n", "/d/s.vsr", ignoreR));
-      expect(StudioMessageType::ImportFileAnimationDataset, ops.importFileAnimationDataset("n", frames, vsr::io::ImporterType::VOLUME_ANIMATION, true, ignoreR));
-      expect(StudioMessageType::DeclareFileAnimationDataset, ops.declareFileAnimationDataset("n", list, vsr::io::ImporterType::VOLUME_ANIMATION, true, ignoreR));
-      expect(StudioMessageType::ReimportDataset, ops.reimportDataset("dataset_0001", ignoreR));
-      expect(StudioMessageType::RenameDataset, ops.renameDataset("dataset_0001", "x", ignore));
-      expect(StudioMessageType::RemoveDataset, ops.removeDataset("dataset_0001", true, ignore));
-      expect(StudioMessageType::LoadDataset, ops.loadDataset("dataset_0001", ignoreR));
-      expect(StudioMessageType::UnloadDataset, ops.unloadDataset("dataset_0001", ignore));
-      expect(StudioMessageType::RefreshDatasetAvailability, ops.refreshDatasetAvailability("dataset_0001", ignore));
-      expect(StudioMessageType::SaveDatasetArchive, ops.saveDatasetArchive("dataset_0001", "/d/a.vsr", ignoreR));
-      expect(StudioMessageType::LoadDatasetArchive, ops.loadDatasetArchive("/d/a.vsr", ignoreR));
-      expect(StudioMessageType::DiscoverDatasetCandidates, ops.discoverDatasetCandidates(ignoreR));
-      expect(StudioMessageType::IncorporateDatasetCandidate, ops.incorporateDatasetCandidate("/d/c.vsr", "c", "c", ignoreR));
-      expect(StudioMessageType::CreateShot, ops.createShot("s", ignoreR));
-      expect(StudioMessageType::RemoveShot, ops.removeShot("shot_0001", ignore));
-      expect(StudioMessageType::UpdateShot, ops.updateShot("shot_0001", ShotPatch{}, ignore));
-      expect(StudioMessageType::SetActiveShot, ops.setActiveShot("shot_0001", ignore));
-      expect(StudioMessageType::CreateLightRig, ops.createLightRig("l", ignoreR));
-      expect(StudioMessageType::CloneLightRig, ops.cloneLightRig("lightrig_0001", ignoreR));
-      expect(StudioMessageType::RemoveLightRig, ops.removeLightRig("lightrig_0001", ignore));
-      expect(StudioMessageType::RenameLightRig, ops.renameLightRig("lightrig_0001", "x", ignore));
-      expect(StudioMessageType::AddLightToRig, ops.addLightToRig("lightrig_0001", "point", ignoreR));
-      expect(StudioMessageType::RemoveLightFromRig, ops.removeLightFromRig("lightrig_0001", node, ignore));
-      expect(StudioMessageType::CreateCameraRig, ops.createCameraRig("c", ignoreR));
-      expect(StudioMessageType::RemoveCameraRig, ops.removeCameraRig("camerarig_0001", ignore));
-      expect(StudioMessageType::RenameCameraRig, ops.renameCameraRig("camerarig_0001", "x", ignore));
-      expect(StudioMessageType::SaveCameraRigArchive, ops.saveCameraRigArchive("camerarig_0001", "/d/c.vsr", ignore));
-      expect(StudioMessageType::LoadCameraRigArchive, ops.loadCameraRigArchive("/d/c.vsr", ignoreR));
-      expect(StudioMessageType::SaveLightRigArchive, ops.saveLightRigArchive("lightrig_0001", "/d/l.vsr", ignore));
-      expect(StudioMessageType::LoadLightRigArchive, ops.loadLightRigArchive("/d/l.vsr", ignoreR));
-      expect(StudioMessageType::CreateColorMap, ops.createColorMap("m", ignoreR));
-      expect(StudioMessageType::RenameColorMap, ops.renameColorMap("colormap_0001", "x", ignore));
-      expect(StudioMessageType::RemoveColorMap, ops.removeColorMap("colormap_0001", ignore));
-      expect(StudioMessageType::ListRoots, ops.listRoots(ignoreR));
-      expect(StudioMessageType::ListDirectory, ops.listDirectory("/d", ignoreR));
-      expect(StudioMessageType::RenderShot, ops.renderShot("shot_0001", ignoreR));
-      expect(StudioMessageType::CancelTask, ops.cancelTask(3, ignore));
-      // clang-format on
+      expect(StudioMessageType::NewProject, ops.send(NewProject{}, ignore));
+      ImportStaticDataset import;
+      import.name = "n";
+      import.sourcePath = "/d/f.obj";
+      import.importerType = vsr::io::ImporterType::OBJ;
+      expect(StudioMessageType::ImportStaticDataset,
+          ops.sendForResult<TaskStartedResult>(import, ignoreR));
+      RemoveDataset removeDataset;
+      removeDataset.datasetId = "dataset_0001";
+      removeDataset.keepAssetFile = true;
+      expect(StudioMessageType::RemoveDataset, ops.send(removeDataset, ignore));
+      RemoveLightFromRig removeLight;
+      removeLight.lightRigId = "lightrig_0001";
+      removeLight.lightNode.layerName = "studio";
+      removeLight.lightNode.nodeIndex = 7;
+      expect(
+          StudioMessageType::RemoveLightFromRig, ops.send(removeLight, ignore));
+      expect(StudioMessageType::ListRoots,
+          ops.sendForResult<ListRootsResult>(ListRoots{}, ignoreR));
+      RenderShot render;
+      render.shotId = "shot_0001";
+      expect(StudioMessageType::RenderShot,
+          ops.sendForResult<TaskStartedResult>(render, ignoreR));
+      CancelTask cancel;
+      cancel.taskId = 3;
+      expect(StudioMessageType::CancelTask, ops.send(cancel, ignore));
 
-      THEN("the server sees one request of each type, in order, with ids")
+      THEN("the server sees one request of each, in order, with ids and fields")
       {
         REQUIRE(f.waitForRequests(expected.size()));
         const auto seen = f.requests();
@@ -480,28 +462,112 @@ SCENARIO("ProjectOps decodes typed results for the callback", "[StudioClient]")
           REQUIRE(seen[i].type == expected[i]);
           REQUIRE(seen[i].requestId != 0);
         }
-        // Payload fields land where the wrappers put them.
-        const auto rm = decode<RemoveDataset>(seen[9].raw);
-        REQUIRE(rm);
-        REQUIRE(rm->keepAssetFile);
-        const auto imp = decode<ImportStaticDataset>(seen[3].raw);
+        // The fields travel as the caller set them.
+        const auto imp = decode<ImportStaticDataset>(seen[1].raw);
         REQUIRE(imp);
         REQUIRE(imp->importerType == vsr::io::ImporterType::OBJ);
         REQUIRE(imp->sourcePath == "/d/f.obj");
-        const auto subtree = decode<ImportSubtreeDataset>(seen[4].raw);
-        REQUIRE(subtree);
-        REQUIRE(subtree->sourcePath == "/d/s.vsr");
-        const auto light = decode<RemoveLightFromRig>(seen[26].raw);
+        const auto rm = decode<RemoveDataset>(seen[2].raw);
+        REQUIRE(rm);
+        REQUIRE(rm->keepAssetFile);
+        const auto light = decode<RemoveLightFromRig>(seen[3].raw);
         REQUIRE(light);
         REQUIRE(light->lightNode.layerName == "studio");
         REQUIRE(light->lightNode.nodeIndex == 7);
-        const auto render = decode<RenderShot>(seen[seen.size() - 2].raw);
-        REQUIRE(render);
-        REQUIRE(render->shotId == "shot_0001");
-        const auto cancel = decode<CancelTask>(seen.back().raw);
-        REQUIRE(cancel);
-        REQUIRE(cancel->taskId == 3);
+        const auto shot = decode<RenderShot>(seen[5].raw);
+        REQUIRE(shot);
+        REQUIRE(shot->shotId == "shot_0001");
+        const auto cancelled = decode<CancelTask>(seen.back().raw);
+        REQUIRE(cancelled);
+        REQUIRE(cancelled->taskId == 3);
         REQUIRE(f.ops().pendingCount() == expected.size());
+      }
+    }
+  }
+}
+
+SCENARIO(
+    "taskLabel names the request that starts a Server Task", "[StudioClient]")
+{
+  GIVEN("the task-launching requests with their fields set")
+  {
+    THEN("each label quotes what the task works on")
+    {
+      OpenProject open;
+      open.directory = "/d/p";
+      REQUIRE(taskLabel(open) == "Open project '/d/p'");
+      SaveProject save;
+      REQUIRE(taskLabel(save) == "Save project");
+      save.directory = "/d/q";
+      REQUIRE(taskLabel(save) == "Save project as '/d/q'");
+      ImportStaticDataset import;
+      import.sourcePath = "/d/f.obj";
+      REQUIRE(taskLabel(import) == "Import '/d/f.obj'");
+      ImportFileAnimationDataset animation;
+      animation.name = "run";
+      animation.sourcePaths = {"/d/a.raw", "/d/b.raw"};
+      REQUIRE(taskLabel(animation) == "Import file animation 'run' (2 files)");
+      LoadDataset load;
+      load.datasetId = "dataset_0001";
+      REQUIRE(taskLabel(load) == "Load dataset dataset_0001");
+      IncorporateDatasetCandidate incorporate;
+      incorporate.proposedName = "proposed";
+      REQUIRE(taskLabel(incorporate) == "Incorporate dataset 'proposed'");
+      incorporate.name = "typed";
+      REQUIRE(taskLabel(incorporate) == "Incorporate dataset 'typed'");
+      RenderShot render;
+      render.shotId = "shot_0001";
+      REQUIRE(taskLabel(render) == "Render shot 'shot_0001'");
+    }
+
+    THEN("a request that starts no task has no label")
+    {
+      REQUIRE(taskLabel(NewProject{}).empty());
+      REQUIRE(taskLabel(CreateShot{}).empty());
+      REQUIRE(taskLabel(CancelTask{}).empty());
+    }
+  }
+}
+
+SCENARIO("InFlight sends one request at a time", "[StudioClient]")
+{
+  GIVEN("a connected client and an InFlight group")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+    InFlight group;
+    Recorded first;
+    REQUIRE_FALSE(group.busy(f.ops()));
+
+    WHEN("a request goes out through it")
+    {
+      REQUIRE(group.send(f.ops(), NewProject{}, first.recorder()));
+      REQUIRE(f.waitForRequests(1));
+
+      THEN("it is busy and refuses another until the reply comes")
+      {
+        REQUIRE(group.busy(f.ops()));
+        REQUIRE(group.handle.valid());
+        Recorded second;
+        REQUIRE_FALSE(group.send(f.ops(), NewProject{}, second.recorder()));
+        REQUIRE_FALSE(group.sendForResult<ListRootsResult>(
+            f.ops(), ListRoots{}, nullptr));
+        REQUIRE(f.ops().pendingCount() == 1);
+
+        f.server.send(encode(makeOkReply(group.handle.requestId)));
+        REQUIRE(pollUntil(f.connection, [&] { return first.count() == 1; }));
+        REQUIRE_FALSE(group.busy(f.ops()));
+        REQUIRE(group.send(f.ops(), NewProject{}, second.recorder()));
+        REQUIRE(group.busy(f.ops()));
+      }
+
+      THEN("clear() forgets the handle, though the request stays pending")
+      {
+        group.clear();
+        REQUIRE_FALSE(group.handle.valid());
+        REQUIRE_FALSE(group.busy(f.ops()));
+        REQUIRE(f.ops().pendingCount() == 1);
       }
     }
   }
@@ -602,7 +668,9 @@ SCENARIO(
     REQUIRE_FALSE(f.ops().tasksActive());
 
     std::optional<TaskStartedResult> started;
-    const auto handle = f.ops().openProject("/data/run7",
+    OpenProject open;
+    open.directory = "/data/run7";
+    const auto handle = f.ops().sendForResult<TaskStartedResult>(open,
         [&](const ProjectOpReply &, const std::optional<TaskStartedResult> &r) {
           started = r;
         });
@@ -695,10 +763,12 @@ SCENARIO(
           REQUIRE(f.ops().task(42)->outcome.empty());
         }
 
-        AND_THEN("cancelTask sends CancelTask for that id")
+        AND_THEN("a CancelTask for that id goes out")
         {
           Recorded cancel;
-          const auto ch = f.ops().cancelTask(42, cancel.recorder());
+          CancelTask cancelRequest;
+          cancelRequest.taskId = 42;
+          const auto ch = f.ops().send(cancelRequest, cancel.recorder());
           REQUIRE(f.waitForRequests(2));
           const auto seen = f.requests();
           REQUIRE(seen[1].type == StudioMessageType::CancelTask);
@@ -868,7 +938,9 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
     f.connect();
     REQUIRE(f.waitConnectedAndBootstrapped());
 
-    const auto handle = f.ops().openProject("/d/p", nullptr);
+    OpenProject open;
+    open.directory = "/d/p";
+    const auto handle = f.ops().sendForResult<TaskStartedResult>(open, nullptr);
     REQUIRE(f.waitForRequests(1));
     auto reply = makeOkReply(handle.requestId);
     setResults(reply, TaskStartedResult{5});
@@ -964,7 +1036,10 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
 
     WHEN("a render this client launched is still running across a reconnect")
     {
-      const auto render = f.ops().renderShot("shot_0001", nullptr);
+      RenderShot renderShot;
+      renderShot.shotId = "shot_0001";
+      const auto render =
+          f.ops().sendForResult<TaskStartedResult>(renderShot, nullptr);
       REQUIRE(f.waitForRequests(1));
       auto started = makeOkReply(render.requestId);
       setResults(started, TaskStartedResult{7});
@@ -1039,8 +1114,12 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
           [&] { return f.ops().task(5)->state == TaskState::Completed; }));
       REQUIRE(f.ended.size() == 1);
 
-      const auto again = f.ops().importStaticDataset(
-          "n", "/d/f.obj", vsr::io::ImporterType::OBJ, nullptr);
+      ImportStaticDataset import;
+      import.name = "n";
+      import.sourcePath = "/d/f.obj";
+      import.importerType = vsr::io::ImporterType::OBJ;
+      const auto again =
+          f.ops().sendForResult<TaskStartedResult>(import, nullptr);
       REQUIRE(f.waitForRequests(2));
       auto restarted = makeOkReply(again.requestId);
       setResults(restarted, TaskStartedResult{5});
@@ -1142,8 +1221,12 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
       REQUIRE(f.waitConnectedAndBootstrapped(2));
       REQUIRE(f.ops().task(5)->failedByClient);
 
-      const auto again = f.ops().importStaticDataset(
-          "n", "/d/f.obj", vsr::io::ImporterType::OBJ, nullptr);
+      ImportStaticDataset import;
+      import.name = "n";
+      import.sourcePath = "/d/f.obj";
+      import.importerType = vsr::io::ImporterType::OBJ;
+      const auto again =
+          f.ops().sendForResult<TaskStartedResult>(import, nullptr);
       REQUIRE(f.waitForRequests(2));
       auto restarted = makeOkReply(again.requestId);
       setResults(restarted, TaskStartedResult{5});
@@ -1263,7 +1346,9 @@ SCENARIO("ProjectOps flags the render it launched", "[StudioClient]")
     REQUIRE_FALSE(f.ops().renderActive());
 
     bool answered = false;
-    const auto handle = f.ops().renderShot("shot_0001",
+    RenderShot render;
+    render.shotId = "shot_0001";
+    const auto handle = f.ops().sendForResult<TaskStartedResult>(render,
         [&](const ProjectOpReply &reply,
             const std::optional<TaskStartedResult> &r) {
           answered = reply.ok && r && r->taskId == 7;
@@ -1376,7 +1461,9 @@ SCENARIO("ArchiveRenameFollowUp names the dataset an archive load adds",
     ArchiveRenameFollowUp follow;
     const auto idsBefore =
         ArchiveRenameFollowUp::datasetIds(f.connection.project());
-    f.ops().loadDatasetArchive("/data/a.vsr",
+    LoadDatasetArchive loadArchive;
+    loadArchive.file = "/data/a.vsr";
+    f.ops().sendForResult<TaskStartedResult>(loadArchive,
         [&](const ProjectOpReply &reply,
             const std::optional<TaskStartedResult> &started) {
           if (reply.ok && started)
@@ -1463,7 +1550,7 @@ SCENARIO("ProjectOps decodes Remote Browse results", "[StudioClient]")
     {
       std::optional<ListRootsResult> roots;
       int calls = 0;
-      const auto handle = f.ops().listRoots(
+      const auto handle = f.ops().sendForResult<ListRootsResult>(ListRoots{},
           [&](const ProjectOpReply &, const std::optional<ListRootsResult> &r) {
             calls++;
             roots = r;
@@ -1489,7 +1576,9 @@ SCENARIO("ProjectOps decodes Remote Browse results", "[StudioClient]")
     {
       std::optional<ListDirectoryResult> listing;
       int calls = 0;
-      const auto handle = f.ops().listDirectory("/data",
+      ListDirectory list;
+      list.directory = "/data";
+      const auto handle = f.ops().sendForResult<ListDirectoryResult>(list,
           [&](const ProjectOpReply &,
               const std::optional<ListDirectoryResult> &r) {
             calls++;
@@ -1537,7 +1626,9 @@ SCENARIO("ProjectOps decodes Remote Browse results", "[StudioClient]")
       std::optional<ListDirectoryResult> listing;
       std::string error;
       int calls = 0;
-      const auto handle = f.ops().listDirectory("/etc",
+      ListDirectory list;
+      list.directory = "/etc";
+      const auto handle = f.ops().sendForResult<ListDirectoryResult>(list,
           [&](const ProjectOpReply &reply,
               const std::optional<ListDirectoryResult> &r) {
             calls++;
@@ -1720,8 +1811,10 @@ SCENARIO(
     WHEN("setPlaying is answered ok")
     {
       Recorded recorded;
-      const auto handle =
-          f.ops().setPlaying("shot_0001", true, recorded.recorder());
+      SetPlaying play;
+      play.shotId = "shot_0001";
+      play.playing = true;
+      const auto handle = f.ops().send(play, recorded.recorder());
       REQUIRE(f.waitForRequests(1));
       const auto seen = f.requests();
       REQUIRE(seen[0].type == StudioMessageType::SetPlaying);
@@ -1740,19 +1833,20 @@ SCENARIO(
       }
     }
 
-    WHEN("requestArrayHistogram is answered with bins")
+    WHEN("RequestArrayHistogram is answered with bins")
     {
       std::optional<ArrayHistogramResult> result;
       int calls = 0;
-      const auto handle =
-          f.ops().requestArrayHistogram(SceneObjectRef{ANARI_ARRAY1D, 3},
-              16,
-              [&](const ProjectOpReply &reply,
-                  const std::optional<ArrayHistogramResult> &r) {
-                calls++;
-                if (reply.ok)
-                  result = r;
-              });
+      RequestArrayHistogram ask;
+      ask.array = SceneObjectRef{ANARI_ARRAY1D, 3};
+      ask.binCount = 16;
+      const auto handle = f.ops().sendForResult<ArrayHistogramResult>(ask,
+          [&](const ProjectOpReply &reply,
+              const std::optional<ArrayHistogramResult> &r) {
+            calls++;
+            if (reply.ok)
+              result = r;
+          });
       REQUIRE(f.waitForRequests(1));
       const auto request = decode<RequestArrayHistogram>(f.requests()[0].raw);
       REQUIRE(request);

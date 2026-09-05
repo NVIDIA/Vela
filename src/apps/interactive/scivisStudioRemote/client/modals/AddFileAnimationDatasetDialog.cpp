@@ -31,9 +31,11 @@ int naturalCompareString(const std::string &a, const std::string &b)
     if (digitA && digitB) {
       size_t enda = ia;
       size_t endb = ib;
-      while (enda < a.size() && std::isdigit(static_cast<unsigned char>(a[enda])))
+      while (
+          enda < a.size() && std::isdigit(static_cast<unsigned char>(a[enda])))
         ++enda;
-      while (endb < b.size() && std::isdigit(static_cast<unsigned char>(b[endb])))
+      while (
+          endb < b.size() && std::isdigit(static_cast<unsigned char>(b[endb])))
         ++endb;
 
       auto na = a.substr(ia, enda - ia);
@@ -104,9 +106,8 @@ std::string commonStemPrefix(const std::vector<std::string> &paths)
 
 bool anySelected(const std::vector<char> &selectedRows)
 {
-  return std::any_of(selectedRows.begin(), selectedRows.end(), [](char s) {
-    return s != 0;
-  });
+  return std::any_of(
+      selectedRows.begin(), selectedRows.end(), [](char s) { return s != 0; });
 }
 
 } // namespace
@@ -167,15 +168,18 @@ void AddFileAnimationDatasetDialog::submit()
     sourcePaths.emplace_back(path);
 
   m_error.clear();
-  m_pending = m_context->ops().importFileAnimationDataset(m_name,
-      sourcePaths,
-      vsr::io::ImporterType::VOLUME_ANIMATION,
-      true,
+  ImportFileAnimationDataset import;
+  import.name = m_name;
+  import.sourcePaths = std::move(sourcePaths);
+  import.importerType = vsr::io::ImporterType::VOLUME_ANIMATION;
+  import.setActiveShotFrameCount = true;
+  m_pending.sendForResult<TaskStartedResult>(m_context->ops(),
+      std::move(import),
       [this](const ProjectOpReply &reply,
           const std::optional<TaskStartedResult> &) {
-        if (reply.requestId != m_pending.requestId)
+        if (reply.requestId != m_pending.handle.requestId)
           return;
-        m_pending = {};
+        m_pending.clear();
         if (!reply.ok) {
           m_error = reply.error;
           return;
@@ -187,7 +191,7 @@ void AddFileAnimationDatasetDialog::submit()
 
 void AddFileAnimationDatasetDialog::buildUI()
 {
-  const bool busy = m_pending.valid() && m_context->ops().pending(m_pending);
+  const bool busy = m_pending.busy(m_context->ops());
 
   ImGui::BeginDisabled(busy);
   ImGui::SetNextItemWidth(420.f);

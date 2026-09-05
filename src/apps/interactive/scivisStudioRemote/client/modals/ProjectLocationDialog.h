@@ -56,7 +56,7 @@ struct ProjectLocationDialog : public vsr::ui::imgui::Modal
   ProjectLocationMode m_mode{ProjectLocationMode::OpenProject};
   std::string m_directory;
   std::string m_error;
-  RequestHandle m_pending;
+  InFlight m_pending;
   RemoteBrowseDialog m_browse;
 };
 

@@ -28,7 +28,7 @@ void ProjectLocationDialog::configure(ProjectLocationMode mode)
 {
   m_mode = mode;
   m_error.clear();
-  m_pending = {};
+  m_pending.clear();
   if (const Project *project = m_context->project()) {
     if (m_mode == ProjectLocationMode::SaveProjectAs
         && !project->projectDirectory.empty())
@@ -45,9 +45,9 @@ void ProjectLocationDialog::submit()
   const std::filesystem::path directory(m_directory);
   auto onReply = [this](const protocol::ProjectOpReply &reply,
                      const std::optional<protocol::TaskStartedResult> &) {
-    if (reply.requestId != m_pending.requestId)
+    if (reply.requestId != m_pending.handle.requestId)
       return;
-    m_pending = {};
+    m_pending.clear();
     if (!reply.ok) {
       m_error = reply.error;
       return;
@@ -55,11 +55,19 @@ void ProjectLocationDialog::submit()
     hide();
   };
   m_error.clear();
-  if (m_mode == ProjectLocationMode::OpenProject)
-    m_pending = m_context->ops().openProject(directory, onReply);
-  else
-    m_pending = m_context->ops().saveProject(
-        directory, m_uiState ? m_uiState() : nullptr, onReply);
+  ProjectOps &ops = m_context->ops();
+  if (m_mode == ProjectLocationMode::OpenProject) {
+    protocol::OpenProject open;
+    open.directory = directory;
+    m_pending.sendForResult<protocol::TaskStartedResult>(
+        ops, std::move(open), onReply);
+  } else {
+    protocol::SaveProject save;
+    save.directory = directory;
+    save.uiState = m_uiState ? m_uiState() : nullptr;
+    m_pending.sendForResult<protocol::TaskStartedResult>(
+        ops, std::move(save), onReply);
+  }
 }
 
 void ProjectLocationDialog::buildUI()
@@ -67,7 +75,7 @@ void ProjectLocationDialog::buildUI()
   const bool open = m_mode == ProjectLocationMode::OpenProject;
   ImGui::TextUnformatted(open ? "Open Project" : "Save Project As");
 
-  const bool busy = m_pending.valid() && m_context->ops().pending(m_pending);
+  const bool busy = m_pending.busy(m_context->ops());
   ImGui::BeginDisabled(busy);
   if (ImGui::Button("Browse...")) {
     BrowseRequest request;

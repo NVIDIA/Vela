@@ -46,7 +46,7 @@ struct AddFileAnimationDatasetDialog : public vsr::ui::imgui::Modal
   std::vector<char> m_selectedRows;
   std::string m_extensionWarning;
   std::string m_error;
-  RequestHandle m_pending;
+  InFlight m_pending;
   RemoteBrowseDialog m_browse;
 };
 

@@ -57,8 +57,8 @@ struct Timeline : public EditorWindow
   void requestTime(int frame);
   void flushTime(const Shot &shot);
 
-  RequestHandle m_pendingUpdate;
-  RequestHandle m_pendingPlaying;
+  InFlight m_update;
+  InFlight m_playing;
   // The frame counter's and the Frames field's edits in progress.
   ui::IntField m_frameField;
   ui::IntField m_frameCountField;

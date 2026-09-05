@@ -89,12 +89,15 @@ std::vector<HistogramPanel::ArrayChoice> HistogramPanel::arrayChoices(
 
 void HistogramPanel::refresh(const ArrayChoice &choice)
 {
-  if (!canSend())
+  if (!m_context->canSend())
     return;
   m_binCount = std::clamp(m_binCount, MIN_BINS, MAX_BINS);
   const std::string label = choice.label;
-  m_pending = ops().requestArrayHistogram(choice.ref,
-      uint32_t(m_binCount),
+  protocol::RequestArrayHistogram request;
+  request.array = choice.ref;
+  request.binCount = uint32_t(m_binCount);
+  m_request.sendForResult<protocol::ArrayHistogramResult>(m_context->ops(),
+      std::move(request),
       [this, label](const protocol::ProjectOpReply &reply,
           const std::optional<protocol::ArrayHistogramResult> &result) {
         if (!reply.ok) {
@@ -148,8 +151,9 @@ void HistogramPanel::buildEditorUI(const Project &)
       if (ImGui::InputInt("Bins", &m_binCount, 1, 16))
         m_binCount = std::clamp(m_binCount, MIN_BINS, MAX_BINS);
       ImGui::SameLine();
-      ImGui::BeginDisabled(pending(m_pending));
-      if (ImGui::Button(pending(m_pending) ? "Waiting..." : "Refresh"))
+      const bool waiting = m_request.busy(m_context->ops());
+      ImGui::BeginDisabled(waiting);
+      if (ImGui::Button(waiting ? "Waiting..." : "Refresh"))
         refresh(choices[m_choice]);
       ImGui::EndDisabled();
     }

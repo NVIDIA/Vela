@@ -55,9 +55,9 @@ struct LightRigEditor : public EditorWindow
   // A create/clone/load reply names the rig to select once it appears.
   LightRigID m_selectOnArrival;
 
-  RequestHandle m_pendingOp;
-  RequestHandle m_pendingRename;
-  RequestHandle m_pendingLightOp;
+  InFlight m_rigOp; // create/clone/load/save/remove, "Use for Active Shot"
+  InFlight m_rename;
+  InFlight m_lightOp; // add/remove a light
 
   ui::BufferedNameField m_nameField;
 

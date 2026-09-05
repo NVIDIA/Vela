@@ -73,8 +73,9 @@ const Dataset *DatasetEditor::resolveSelection(const Project &project)
 // The hint stats the asset file server-side; once a second is plenty.
 void DatasetEditor::refreshAvailability(const Dataset &dataset)
 {
-  if (dataset.residency != DatasetResidency::Unloaded || !canSend()
-      || pending(m_pendingRefresh))
+  ProjectOps &ops = m_context->ops();
+  if (dataset.residency != DatasetResidency::Unloaded || !m_context->canSend()
+      || m_refresh.busy(ops))
     return;
   const double now = ImGui::GetTime();
   if (m_availabilityDataset == dataset.id
@@ -82,8 +83,9 @@ void DatasetEditor::refreshAvailability(const Dataset &dataset)
     return;
   m_availabilityDataset = dataset.id;
   m_lastAvailabilityCheck = now;
-  m_pendingRefresh =
-      ops().refreshDatasetAvailability(dataset.id, errorReporter());
+  RefreshDatasetAvailability refresh;
+  refresh.datasetId = dataset.id;
+  m_refresh.send(ops, std::move(refresh), m_context->errorReporter());
 }
 
 // UI /////////////////////////////////////////////////////////////////////////
@@ -123,7 +125,8 @@ void DatasetEditor::buildEditorUI(const Project &project)
 
 void DatasetEditor::buildUI_toolbar(const Project &project)
 {
-  ImGui::BeginDisabled(pending(m_pendingOp));
+  ProjectOps &ops = m_context->ops();
+  ImGui::BeginDisabled(m_datasetOp.busy(ops));
   if (ImGui::Button("Load Archive...")) {
     BrowseRequest request;
     request.mode = BrowseMode::OpenFile;
@@ -131,11 +134,14 @@ void DatasetEditor::buildUI_toolbar(const Project &project)
     request.extensions = ui::archiveExtensions();
     request.startDirectory = project.projectDirectory;
     request.onAccept = [this](const std::vector<std::filesystem::path> &paths) {
-      m_pendingOp = ops().loadDatasetArchive(paths.front(),
+      LoadDatasetArchive load;
+      load.file = paths.front();
+      m_datasetOp.sendForResult<TaskStartedResult>(m_context->ops(),
+          std::move(load),
           [this](const ProjectOpReply &reply,
               const std::optional<TaskStartedResult> &) {
             if (!reply.ok)
-              reportError(reply.error);
+              m_context->error(reply.error);
           });
     };
     m_browse.open(std::move(request));
@@ -143,13 +149,14 @@ void DatasetEditor::buildUI_toolbar(const Project &project)
   ImGui::EndDisabled();
 
   ImGui::SameLine();
-  ImGui::BeginDisabled(pending(m_pendingDiscover));
+  ImGui::BeginDisabled(m_discover.busy(ops));
   if (ImGui::Button("Discover...")) {
-    m_pendingDiscover = ops().discoverDatasetCandidates(
+    m_discover.sendForResult<DiscoverDatasetCandidatesResult>(ops,
+        DiscoverDatasetCandidates{},
         [this](const ProjectOpReply &reply,
             const std::optional<DiscoverDatasetCandidatesResult> &result) {
           if (!reply.ok) {
-            reportError(reply.error);
+            m_context->error(reply.error);
             return;
           }
           m_candidates = result ? result->candidates
@@ -176,13 +183,17 @@ void DatasetEditor::buildUI_nameField(const Dataset &dataset)
     return;
   }
 
+  ProjectOps &ops = m_context->ops();
   const auto newName =
-      m_nameField.draw(dataset.id, dataset.name, pending(m_pendingRename));
+      m_nameField.draw(dataset.id, dataset.name, m_rename.busy(ops));
   if (!newName)
     return;
   const DatasetID id = dataset.id;
-  m_pendingRename = ops().renameDataset(
-      id, *newName, [this, id](const ProjectOpReply &reply) {
+  RenameDataset rename;
+  rename.datasetId = id;
+  rename.newName = *newName;
+  m_rename.send(
+      ops, std::move(rename), [this, id](const ProjectOpReply &reply) {
         m_nameField.onReply(id, reply.ok, reply.error);
       });
 }
@@ -225,15 +236,16 @@ void DatasetEditor::buildUI_details(const Dataset &dataset)
 void DatasetEditor::buildUI_actions(
     const Project &project, const Dataset &dataset)
 {
+  ProjectOps &ops = m_context->ops();
   const bool unloaded = dataset.residency == DatasetResidency::Unloaded;
   const DatasetID id = dataset.id;
   auto taskReply = [this](const ProjectOpReply &reply,
                        const std::optional<TaskStartedResult> &) {
     if (!reply.ok)
-      reportError(reply.error);
+      m_context->error(reply.error);
   };
 
-  ImGui::BeginDisabled(pending(m_pendingOp));
+  ImGui::BeginDisabled(m_datasetOp.busy(ops));
 
   ImGui::BeginDisabled(unloaded || dataset.status != DatasetStatus::Available);
   if (ImGui::Button("Save Archive...")) {
@@ -245,8 +257,11 @@ void DatasetEditor::buildUI_actions(
     request.defaultName = dataset.name + ".vsr";
     request.onAccept = [this, id, taskReply](
                            const std::vector<std::filesystem::path> &paths) {
-      m_pendingOp = ops().saveDatasetArchive(
-          id, ui::withVsrExtension(paths.front()), taskReply);
+      SaveDatasetArchive save;
+      save.datasetId = id;
+      save.file = ui::withVsrExtension(paths.front());
+      m_datasetOp.sendForResult<TaskStartedResult>(
+          m_context->ops(), std::move(save), taskReply);
     };
     m_browse.open(std::move(request));
   }
@@ -256,19 +271,30 @@ void DatasetEditor::buildUI_actions(
   ImGui::BeginDisabled(unloaded
       || dataset.sourceKind != DatasetSourceKind::Static
       || dataset.source.sourcePath.empty());
-  if (ImGui::Button("Reimport"))
-    m_pendingOp = ops().reimportDataset(id, taskReply);
+  if (ImGui::Button("Reimport")) {
+    ReimportDataset reimport;
+    reimport.datasetId = id;
+    m_datasetOp.sendForResult<TaskStartedResult>(
+        ops, std::move(reimport), taskReply);
+  }
   ImGui::EndDisabled();
 
   ImGui::SameLine();
   if (unloaded) {
-    if (ImGui::Button("Load"))
-      m_pendingOp = ops().loadDataset(id, taskReply);
+    if (ImGui::Button("Load")) {
+      LoadDataset load;
+      load.datasetId = id;
+      m_datasetOp.sendForResult<TaskStartedResult>(
+          ops, std::move(load), taskReply);
+    }
   } else {
     const char *blocked = unloadBlockedReason(dataset);
     ImGui::BeginDisabled(blocked != nullptr);
-    if (ImGui::Button("Unload"))
-      m_pendingOp = ops().unloadDataset(id, errorReporter());
+    if (ImGui::Button("Unload")) {
+      UnloadDataset unload;
+      unload.datasetId = id;
+      m_datasetOp.send(ops, std::move(unload), m_context->errorReporter());
+    }
     ImGui::EndDisabled();
     if (blocked && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
       ImGui::SetTooltip("%s", blocked);
@@ -331,19 +357,22 @@ void DatasetEditor::buildUI_discoveryReview()
     ImGui::CloseCurrentPopup();
   };
 
-  ImGui::BeginDisabled(!canSend() || m_candidates.empty());
+  ImGui::BeginDisabled(!m_context->canSend() || m_candidates.empty());
   if (ImGui::Button("Incorporate Selected")) {
+    // One task per candidate, none waited on: the review closes at once.
     for (size_t i = 0; i < m_candidates.size(); ++i) {
       if (!m_candidateSelected[i])
         continue;
       const auto file = m_candidates[i].file.filename().string();
-      ops().incorporateDatasetCandidate(m_candidates[i].file,
-          m_candidates[i].proposedName,
-          m_candidateNames[i],
+      IncorporateDatasetCandidate incorporate;
+      incorporate.file = m_candidates[i].file;
+      incorporate.proposedName = m_candidates[i].proposedName;
+      incorporate.name = m_candidateNames[i];
+      m_context->ops().sendForResult<TaskStartedResult>(std::move(incorporate),
           [this, file](const ProjectOpReply &reply,
               const std::optional<TaskStartedResult> &) {
             if (!reply.ok)
-              reportError(file + ": " + reply.error);
+              m_context->error(file + ": " + reply.error);
           });
     }
     close();
@@ -362,13 +391,16 @@ void DatasetEditor::buildUI_removeConfirmation(const Project &project)
       "Remove '" + (dataset ? dataset->name : m_datasetToRemove)
           + "' from the inventory and every shot?",
       "Remove",
-      canSend(),
+      m_context->canSend(),
       [this] {
         ImGui::Checkbox("Keep managed asset file", &m_keepRemovedAsset);
       });
   if (choice == ui::ConfirmChoice::Confirmed) {
-    m_pendingOp = ops().removeDataset(
-        m_datasetToRemove, m_keepRemovedAsset, errorReporter());
+    RemoveDataset remove;
+    remove.datasetId = m_datasetToRemove;
+    remove.keepAssetFile = m_keepRemovedAsset;
+    m_datasetOp.send(
+        m_context->ops(), std::move(remove), m_context->errorReporter());
   }
   if (choice != ui::ConfirmChoice::Pending)
     m_datasetToRemove.clear();

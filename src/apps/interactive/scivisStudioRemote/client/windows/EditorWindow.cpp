@@ -4,8 +4,6 @@
 #include "EditorWindow.h"
 // scivisStudioClient
 #include "UICommon.h"
-// vsr_scivis_studio_model
-#include "Project.h"
 // imgui
 #include <imgui.h>
 
@@ -30,7 +28,7 @@ void EditorWindow::buildUI()
     ui::warningText(
         "Render in progress: the server refuses edits until it ends");
 
-  ImGui::BeginDisabled(!canSend());
+  ImGui::BeginDisabled(!m_context->canSend());
   buildEditorUI(*project);
   ImGui::EndDisabled();
 
@@ -40,35 +38,5 @@ void EditorWindow::buildUI()
 void EditorWindow::onProjectReplaced() {}
 
 void EditorWindow::buildPopups(const Project &) {}
-
-const Project *EditorWindow::project() const
-{
-  return m_context->project();
-}
-
-ProjectOps &EditorWindow::ops() const
-{
-  return m_context->ops();
-}
-
-bool EditorWindow::canSend() const
-{
-  return m_context->canSend();
-}
-
-bool EditorWindow::pending(RequestHandle handle) const
-{
-  return handle.valid() && ops().pending(handle);
-}
-
-void EditorWindow::reportError(const std::string &message) const
-{
-  m_context->error(message);
-}
-
-ReplyCallback EditorWindow::errorReporter() const
-{
-  return m_context->errorReporter();
-}
 
 } // namespace vsr::scivis_studio::client

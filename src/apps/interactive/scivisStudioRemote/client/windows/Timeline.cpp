@@ -72,34 +72,45 @@ int Timeline::shownFrame(const Shot &shot) const
 
 void Timeline::commit(const Shot &shot, const ShotPatch &patch)
 {
-  if (!canSend())
+  if (!m_context->canSend())
     return;
-  m_pendingUpdate = ops().updateShot(shot.id, patch, errorReporter());
+  protocol::UpdateShot update;
+  update.shotId = shot.id;
+  update.patch = patch;
+  m_update.send(
+      m_context->ops(), std::move(update), m_context->errorReporter());
 }
 
 void Timeline::setPlaying(const Shot &shot, bool playing)
 {
-  if (!canSend() || pending(m_pendingPlaying))
+  if (!m_context->canSend())
     return;
-  m_pendingPlaying = ops().setPlaying(shot.id, playing, errorReporter());
+  protocol::SetPlaying play;
+  play.shotId = shot.id;
+  play.playing = playing;
+  m_playing.send(m_context->ops(), std::move(play), m_context->errorReporter());
 }
 
 void Timeline::stop(const Shot &shot)
 {
-  if (!canSend())
+  if (!m_context->canSend())
     return;
   if (!shot.playing) {
     requestTime(0);
     return;
   }
   const ShotID shotId = shot.id;
-  m_pendingPlaying = ops().setPlaying(
-      shotId, false, [this, shotId](const protocol::ProjectOpReply &reply) {
+  protocol::SetPlaying pause;
+  pause.shotId = shotId;
+  pause.playing = false;
+  m_playing.send(m_context->ops(),
+      std::move(pause),
+      [this, shotId](const protocol::ProjectOpReply &reply) {
         if (!reply.ok) {
-          reportError(reply.error);
+          m_context->error(reply.error);
           return;
         }
-        if (canSend())
+        if (m_context->canSend())
           m_context->connection->setTime(shotId, 0);
         m_scrubbedFrame = 0;
         m_scrubbedAt = Clock::now();
@@ -117,7 +128,7 @@ void Timeline::flushTime(const Shot &shot)
     return;
   const int frame = clampFrame(shot, *m_timeRequest);
   m_timeRequest.reset();
-  if (!canSend())
+  if (!m_context->canSend())
     return;
   m_context->connection->setTime(shot.id, frame);
   m_scrubbedFrame = frame;
@@ -172,7 +183,8 @@ void Timeline::buildUI_transport(const Shot &shot, int shownFrame)
     // Play/Pause and Stop: the button shows the replica's state, never an
     // assumed one.
     ImGui::TableNextColumn();
-    ImGui::BeginDisabled(pending(m_pendingPlaying));
+    ProjectOps &ops = m_context->ops();
+    ImGui::BeginDisabled(m_playing.busy(ops));
     if (shot.playing) {
       if (ImGui::Button("||"))
         setPlaying(shot, false);
@@ -189,7 +201,7 @@ void Timeline::buildUI_transport(const Shot &shot, int shownFrame)
     ImGui::EndDisabled();
 
     ImGui::SameLine();
-    ImGui::BeginDisabled(pending(m_pendingUpdate));
+    ImGui::BeginDisabled(m_update.busy(ops));
     bool loop = shot.loop;
     if (ImGui::Checkbox("Loop", &loop)) {
       ShotPatch patch;

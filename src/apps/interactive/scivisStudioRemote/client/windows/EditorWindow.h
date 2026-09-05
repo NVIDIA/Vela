@@ -31,8 +31,8 @@ namespace vsr::scivis_studio::client {
  *
  * Example:
  *   struct ShotList : EditorWindow {
- *     ShotList(Application *app, EditorContext *c) : EditorWindow(app, c, "Shots") {}
- *     void buildEditorUI(const Project &project) override { ... }
+ *     ShotList(Application *app, EditorContext *c) : EditorWindow(app, c,
+ * "Shots") {} void buildEditorUI(const Project &project) override { ... }
  *   };
  */
 struct EditorWindow : public vsr::ui::imgui::Window
@@ -51,14 +51,6 @@ struct EditorWindow : public vsr::ui::imgui::Window
  protected:
   virtual void buildEditorUI(const Project &project) = 0;
   virtual void buildPopups(const Project &project);
-
-  const Project *project() const;
-  ProjectOps &ops() const;
-  bool canSend() const;
-  // True while `handle` awaits its reply: grey the control that sent it.
-  bool pending(RequestHandle handle) const;
-  void reportError(const std::string &message) const;
-  ReplyCallback errorReporter() const;
 
   EditorContext *m_context{nullptr};
 };

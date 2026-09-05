@@ -12,17 +12,19 @@
 
 namespace vsr::scivis_studio::client {
 
+class Application;
+
 /*
  * The client's copy of the monolith's Project window: project name, server
  * directory and dirty state, the dataset inventory with status and residency,
  * and the shot list. Clicking a shot sends SetActiveShot; Add and Remove send
- * CreateShot/RemoveShot; New/Open/Save go through the application's project
- * actions (and their Remote Browse dialog). The highlighted shot is the
- * replica's activeShotId, never the click.
+ * CreateShot/RemoveShot; New/Open/Save are the Application's project actions
+ * (the File menu's, with their Remote Browse dialog). The highlighted shot is
+ * the replica's activeShotId, never the click.
  */
 struct ProjectWindow : public EditorWindow
 {
-  ProjectWindow(vsr::ui::imgui::Application *app, EditorContext *context);
+  ProjectWindow(Application *app, EditorContext *context);
   ~ProjectWindow() override;
 
  private:
@@ -31,9 +33,10 @@ struct ProjectWindow : public EditorWindow
 
   void buildUI_shots(const Project &project);
 
-  RequestHandle m_pendingSetActive;
-  RequestHandle m_pendingCreate;
-  RequestHandle m_pendingRemove;
+  Application *m_studio{nullptr};
+  InFlight m_setActive;
+  InFlight m_create;
+  InFlight m_remove;
   ShotID m_shotToRemove;
 };
 

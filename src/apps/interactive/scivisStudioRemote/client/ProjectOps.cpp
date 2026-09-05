@@ -185,419 +185,64 @@ void ProjectOps::forget(RequestHandle handle)
       m_undeliverable.end());
 }
 
-// Project ////////////////////////////////////////////////////////////////////
+// Task labels ////////////////////////////////////////////////////////////////
 
-RequestHandle ProjectOps::newProject(ReplyCallback callback)
+std::string taskLabel(const OpenProject &req)
 {
-  return send(NewProject{}, std::move(callback));
+  return "Open project " + quoted(req.directory);
 }
 
-RequestHandle ProjectOps::openProject(const std::filesystem::path &directory,
-    ResultCallback<TaskStartedResult> callback)
+std::string taskLabel(const SaveProject &req)
 {
-  OpenProject req;
-  req.directory = directory;
-  return sendForResult(
-      std::move(req), std::move(callback), "Open project " + quoted(directory));
+  return req.directory ? "Save project as " + quoted(*req.directory)
+                       : "Save project";
 }
 
-RequestHandle ProjectOps::saveProject(
-    const std::optional<std::filesystem::path> &directory,
-    SubtreePtr uiState,
-    ResultCallback<TaskStartedResult> callback)
+std::string taskLabel(const ImportStaticDataset &req)
 {
-  SaveProject req;
-  req.directory = directory;
-  req.uiState = std::move(uiState);
-  return sendForResult(std::move(req),
-      std::move(callback),
-      directory ? "Save project as " + quoted(*directory) : "Save project");
+  return "Import " + quoted(req.sourcePath);
 }
 
-// Datasets ///////////////////////////////////////////////////////////////////
-
-RequestHandle ProjectOps::importStaticDataset(const std::string &name,
-    const std::filesystem::path &sourcePath,
-    vsr::io::ImporterType importerType,
-    ResultCallback<TaskStartedResult> callback)
+std::string taskLabel(const ImportSubtreeDataset &req)
 {
-  ImportStaticDataset req;
-  req.name = name;
-  req.sourcePath = sourcePath;
-  req.importerType = importerType;
-  return sendForResult(
-      std::move(req), std::move(callback), "Import " + quoted(sourcePath));
+  return "Import " + quoted(req.sourcePath);
 }
 
-RequestHandle ProjectOps::importSubtreeDataset(const std::string &name,
-    const std::filesystem::path &sourcePath,
-    ResultCallback<TaskStartedResult> callback)
+std::string taskLabel(const ImportFileAnimationDataset &req)
 {
-  ImportSubtreeDataset req;
-  req.name = name;
-  req.sourcePath = sourcePath;
-  return sendForResult(
-      std::move(req), std::move(callback), "Import " + quoted(sourcePath));
+  return "Import file animation " + quoted(req.name) + " ("
+      + std::to_string(req.sourcePaths.size()) + " files)";
 }
 
-RequestHandle ProjectOps::importFileAnimationDataset(const std::string &name,
-    const std::vector<std::filesystem::path> &sourcePaths,
-    vsr::io::ImporterType importerType,
-    bool setActiveShotFrameCount,
-    ResultCallback<TaskStartedResult> callback)
+std::string taskLabel(const ReimportDataset &req)
 {
-  ImportFileAnimationDataset req;
-  req.name = name;
-  req.sourcePaths = sourcePaths;
-  req.importerType = importerType;
-  req.setActiveShotFrameCount = setActiveShotFrameCount;
-  return sendForResult(std::move(req),
-      std::move(callback),
-      "Import file animation " + quoted(name) + " ("
-          + std::to_string(sourcePaths.size()) + " files)");
+  return "Reimport dataset " + req.datasetId;
 }
 
-RequestHandle ProjectOps::declareFileAnimationDataset(const std::string &name,
-    const std::vector<std::string> &sourceList,
-    vsr::io::ImporterType importerType,
-    bool setActiveShotFrameCount,
-    ResultCallback<DatasetCreatedResult> callback)
+std::string taskLabel(const LoadDataset &req)
 {
-  DeclareFileAnimationDataset req;
-  req.name = name;
-  req.sourceList = sourceList;
-  req.importerType = importerType;
-  req.setActiveShotFrameCount = setActiveShotFrameCount;
-  return sendForResult(std::move(req), std::move(callback));
+  return "Load dataset " + req.datasetId;
 }
 
-RequestHandle ProjectOps::reimportDataset(
-    const DatasetID &datasetId, ResultCallback<TaskStartedResult> callback)
+std::string taskLabel(const SaveDatasetArchive &req)
 {
-  ReimportDataset req;
-  req.datasetId = datasetId;
-  return sendForResult(
-      std::move(req), std::move(callback), "Reimport dataset " + datasetId);
+  return "Save dataset archive " + quoted(req.file);
 }
 
-RequestHandle ProjectOps::renameDataset(const DatasetID &datasetId,
-    const std::string &newName,
-    ReplyCallback callback)
+std::string taskLabel(const LoadDatasetArchive &req)
 {
-  RenameDataset req;
-  req.datasetId = datasetId;
-  req.newName = newName;
-  return send(std::move(req), std::move(callback));
+  return "Load dataset archive " + quoted(req.file);
 }
 
-RequestHandle ProjectOps::removeDataset(
-    const DatasetID &datasetId, bool keepAssetFile, ReplyCallback callback)
+std::string taskLabel(const IncorporateDatasetCandidate &req)
 {
-  RemoveDataset req;
-  req.datasetId = datasetId;
-  req.keepAssetFile = keepAssetFile;
-  return send(std::move(req), std::move(callback));
+  return "Incorporate dataset "
+      + quoted(req.name.empty() ? req.proposedName : req.name);
 }
 
-RequestHandle ProjectOps::loadDataset(
-    const DatasetID &datasetId, ResultCallback<TaskStartedResult> callback)
+std::string taskLabel(const RenderShot &req)
 {
-  LoadDataset req;
-  req.datasetId = datasetId;
-  return sendForResult(
-      std::move(req), std::move(callback), "Load dataset " + datasetId);
-}
-
-RequestHandle ProjectOps::unloadDataset(
-    const DatasetID &datasetId, ReplyCallback callback)
-{
-  UnloadDataset req;
-  req.datasetId = datasetId;
-  return send(std::move(req), std::move(callback));
-}
-
-RequestHandle ProjectOps::refreshDatasetAvailability(
-    const DatasetID &datasetId, ReplyCallback callback)
-{
-  RefreshDatasetAvailability req;
-  req.datasetId = datasetId;
-  return send(std::move(req), std::move(callback));
-}
-
-RequestHandle ProjectOps::saveDatasetArchive(const DatasetID &datasetId,
-    const std::filesystem::path &file,
-    ResultCallback<TaskStartedResult> callback)
-{
-  SaveDatasetArchive req;
-  req.datasetId = datasetId;
-  req.file = file;
-  return sendForResult(std::move(req),
-      std::move(callback),
-      "Save dataset archive " + quoted(file));
-}
-
-RequestHandle ProjectOps::loadDatasetArchive(const std::filesystem::path &file,
-    ResultCallback<TaskStartedResult> callback)
-{
-  LoadDatasetArchive req;
-  req.file = file;
-  return sendForResult(std::move(req),
-      std::move(callback),
-      "Load dataset archive " + quoted(file));
-}
-
-RequestHandle ProjectOps::discoverDatasetCandidates(
-    ResultCallback<DiscoverDatasetCandidatesResult> callback)
-{
-  return sendForResult(DiscoverDatasetCandidates{}, std::move(callback));
-}
-
-RequestHandle ProjectOps::incorporateDatasetCandidate(
-    const std::filesystem::path &file,
-    const std::string &proposedName,
-    const std::string &name,
-    ResultCallback<TaskStartedResult> callback)
-{
-  IncorporateDatasetCandidate req;
-  req.file = file;
-  req.proposedName = proposedName;
-  req.name = name;
-  return sendForResult(std::move(req),
-      std::move(callback),
-      "Incorporate dataset " + quoted(name.empty() ? proposedName : name));
-}
-
-// Shots //////////////////////////////////////////////////////////////////////
-
-RequestHandle ProjectOps::createShot(
-    const std::string &name, ResultCallback<ShotCreatedResult> callback)
-{
-  CreateShot req;
-  req.name = name;
-  return sendForResult(std::move(req), std::move(callback));
-}
-
-RequestHandle ProjectOps::removeShot(
-    const ShotID &shotId, ReplyCallback callback)
-{
-  RemoveShot req;
-  req.shotId = shotId;
-  return send(std::move(req), std::move(callback));
-}
-
-RequestHandle ProjectOps::updateShot(
-    const ShotID &shotId, const ShotPatch &patch, ReplyCallback callback)
-{
-  UpdateShot req;
-  req.shotId = shotId;
-  req.patch = patch;
-  return send(std::move(req), std::move(callback));
-}
-
-RequestHandle ProjectOps::setActiveShot(
-    const ShotID &shotId, ReplyCallback callback)
-{
-  SetActiveShot req;
-  req.shotId = shotId;
-  return send(std::move(req), std::move(callback));
-}
-
-// Light rigs /////////////////////////////////////////////////////////////////
-
-RequestHandle ProjectOps::createLightRig(
-    const std::string &name, ResultCallback<LightRigCreatedResult> callback)
-{
-  CreateLightRig req;
-  req.name = name;
-  return sendForResult(std::move(req), std::move(callback));
-}
-
-RequestHandle ProjectOps::cloneLightRig(const LightRigID &lightRigId,
-    ResultCallback<LightRigCreatedResult> callback)
-{
-  CloneLightRig req;
-  req.lightRigId = lightRigId;
-  return sendForResult(std::move(req), std::move(callback));
-}
-
-RequestHandle ProjectOps::removeLightRig(
-    const LightRigID &lightRigId, ReplyCallback callback)
-{
-  RemoveLightRig req;
-  req.lightRigId = lightRigId;
-  return send(std::move(req), std::move(callback));
-}
-
-RequestHandle ProjectOps::renameLightRig(const LightRigID &lightRigId,
-    const std::string &newName,
-    ReplyCallback callback)
-{
-  RenameLightRig req;
-  req.lightRigId = lightRigId;
-  req.newName = newName;
-  return send(std::move(req), std::move(callback));
-}
-
-RequestHandle ProjectOps::addLightToRig(const LightRigID &lightRigId,
-    const std::string &subtype,
-    ResultCallback<LightAddedResult> callback)
-{
-  AddLightToRig req;
-  req.lightRigId = lightRigId;
-  req.subtype = subtype;
-  return sendForResult(std::move(req), std::move(callback));
-}
-
-RequestHandle ProjectOps::removeLightFromRig(const LightRigID &lightRigId,
-    const SceneNodeRef &lightNode,
-    ReplyCallback callback)
-{
-  RemoveLightFromRig req;
-  req.lightRigId = lightRigId;
-  req.lightNode = lightNode;
-  return send(std::move(req), std::move(callback));
-}
-
-RequestHandle ProjectOps::saveLightRigArchive(const LightRigID &lightRigId,
-    const std::filesystem::path &file,
-    ReplyCallback callback)
-{
-  SaveLightRigArchive req;
-  req.lightRigId = lightRigId;
-  req.file = file;
-  return send(std::move(req), std::move(callback));
-}
-
-RequestHandle ProjectOps::loadLightRigArchive(const std::filesystem::path &file,
-    ResultCallback<LightRigCreatedResult> callback)
-{
-  LoadLightRigArchive req;
-  req.file = file;
-  return sendForResult(std::move(req), std::move(callback));
-}
-
-// Camera rigs ////////////////////////////////////////////////////////////////
-
-RequestHandle ProjectOps::createCameraRig(
-    const std::string &name, ResultCallback<CameraRigCreatedResult> callback)
-{
-  CreateCameraRig req;
-  req.name = name;
-  return sendForResult(std::move(req), std::move(callback));
-}
-
-RequestHandle ProjectOps::removeCameraRig(
-    const CameraRigID &cameraRigId, ReplyCallback callback)
-{
-  RemoveCameraRig req;
-  req.cameraRigId = cameraRigId;
-  return send(std::move(req), std::move(callback));
-}
-
-RequestHandle ProjectOps::renameCameraRig(const CameraRigID &cameraRigId,
-    const std::string &newName,
-    ReplyCallback callback)
-{
-  RenameCameraRig req;
-  req.cameraRigId = cameraRigId;
-  req.newName = newName;
-  return send(std::move(req), std::move(callback));
-}
-
-RequestHandle ProjectOps::saveCameraRigArchive(const CameraRigID &cameraRigId,
-    const std::filesystem::path &file,
-    ReplyCallback callback)
-{
-  SaveCameraRigArchive req;
-  req.cameraRigId = cameraRigId;
-  req.file = file;
-  return send(std::move(req), std::move(callback));
-}
-
-RequestHandle ProjectOps::loadCameraRigArchive(
-    const std::filesystem::path &file,
-    ResultCallback<CameraRigCreatedResult> callback)
-{
-  LoadCameraRigArchive req;
-  req.file = file;
-  return sendForResult(std::move(req), std::move(callback));
-}
-
-// Color maps /////////////////////////////////////////////////////////////////
-
-RequestHandle ProjectOps::createColorMap(
-    const std::string &name, ResultCallback<ColorMapCreatedResult> callback)
-{
-  CreateColorMap req;
-  req.name = name;
-  return sendForResult(std::move(req), std::move(callback));
-}
-
-RequestHandle ProjectOps::renameColorMap(const ColorMapID &colorMapId,
-    const std::string &newName,
-    ReplyCallback callback)
-{
-  RenameColorMap req;
-  req.colorMapId = colorMapId;
-  req.newName = newName;
-  return send(std::move(req), std::move(callback));
-}
-
-RequestHandle ProjectOps::removeColorMap(
-    const ColorMapID &colorMapId, ReplyCallback callback)
-{
-  RemoveColorMap req;
-  req.colorMapId = colorMapId;
-  return send(std::move(req), std::move(callback));
-}
-
-// Remote Browse //////////////////////////////////////////////////////////////
-
-RequestHandle ProjectOps::listRoots(ResultCallback<ListRootsResult> callback)
-{
-  return sendForResult(ListRoots{}, std::move(callback));
-}
-
-RequestHandle ProjectOps::listDirectory(const std::filesystem::path &directory,
-    ResultCallback<ListDirectoryResult> callback)
-{
-  ListDirectory req;
-  req.directory = directory;
-  return sendForResult(std::move(req), std::move(callback));
-}
-
-// Playback ///////////////////////////////////////////////////////////////////
-
-RequestHandle ProjectOps::setPlaying(
-    const ShotID &shotId, bool playing, ReplyCallback callback)
-{
-  SetPlaying req;
-  req.shotId = shotId;
-  req.playing = playing;
-  return send(std::move(req), std::move(callback));
-}
-
-// Offline render /////////////////////////////////////////////////////////////
-
-RequestHandle ProjectOps::renderShot(
-    const ShotID &shotId, ResultCallback<TaskStartedResult> callback)
-{
-  RenderShot req;
-  req.shotId = shotId;
-  return sendForResult(
-      std::move(req), std::move(callback), "Render shot " + quoted(shotId));
-}
-
-// Array histogram ////////////////////////////////////////////////////////////
-
-RequestHandle ProjectOps::requestArrayHistogram(const SceneObjectRef &array,
-    uint32_t binCount,
-    ResultCallback<ArrayHistogramResult> callback)
-{
-  RequestArrayHistogram req;
-  req.array = array;
-  req.binCount = binCount;
-  return sendForResult(std::move(req), std::move(callback));
+  return "Render shot " + quoted(req.shotId);
 }
 
 // Pick ///////////////////////////////////////////////////////////////////////
@@ -613,13 +258,6 @@ RequestHandle ProjectOps::pick(int x, int y, PickCallback callback)
 }
 
 // Server Tasks ///////////////////////////////////////////////////////////////
-
-RequestHandle ProjectOps::cancelTask(uint64_t taskId, ReplyCallback callback)
-{
-  CancelTask req;
-  req.taskId = taskId;
-  return send(std::move(req), std::move(callback));
-}
 
 const std::vector<TaskRecord> &ProjectOps::tasks() const
 {

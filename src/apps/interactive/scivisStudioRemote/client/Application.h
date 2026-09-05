@@ -74,6 +74,13 @@ class Application : public vsr::ui::imgui::Application
 
   const ClientCommandLine &clientCommandLine() const;
 
+  // Project actions (the File menu's and the Project window's buttons) //
+
+  void newProject();
+  void openProjectDialog();
+  void saveProject();
+  void saveProjectAsDialog();
+
  protected:
   vsr::ui::imgui::WindowArray setupWindows() override;
   void uiFrameStart() override;
@@ -97,12 +104,6 @@ class Application : public vsr::ui::imgui::Application
   void resolveActiveShotCamera();
   std::vector<protocol::FrameEncoding> encodingPreference() const;
 
-  // Project actions (File menu and the Project window) //
-
-  void newProject();
-  void openProjectDialog();
-  void saveProject();
-  void saveProjectAsDialog();
   // Runs `action` at once, or after the user agrees to discard a dirty
   // project.
   void requestDirtyAction(std::string message, std::function<void()> action);

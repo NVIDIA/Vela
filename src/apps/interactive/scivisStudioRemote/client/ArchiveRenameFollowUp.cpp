@@ -58,9 +58,12 @@ RequestHandle ArchiveRenameFollowUp::apply(
     return {}; // the load has not landed yet
 
   RequestHandle sent;
-  if (added.size() == 1)
-    sent =
-        ops.renameDataset(added.front(), m_pending->name, std::move(onReply));
+  if (added.size() == 1) {
+    protocol::RenameDataset rename;
+    rename.datasetId = added.front();
+    rename.newName = m_pending->name;
+    sent = ops.send(std::move(rename), std::move(onReply));
+  }
   m_pending.reset();
   return sent;
 }

@@ -62,8 +62,7 @@ void TaskPanel::buildUI()
     ImGui::TableNextRow();
 
     ImGui::TableNextColumn();
-    ImGui::TextUnformatted(
-        task.label.empty() ? "<task>" : task.label.c_str());
+    ImGui::TextUnformatted(task.label.empty() ? "<task>" : task.label.c_str());
     vsr::ui::tooltipForPreviousItem(
         ("task id " + std::to_string(task.taskId)).c_str());
 
@@ -119,8 +118,11 @@ void TaskPanel::buildUI()
     ImGui::TableNextColumn();
     if (!task.finished()) {
       ImGui::BeginDisabled(!canCancel);
-      if (ImGui::SmallButton("Cancel"))
-        ops.cancelTask(task.taskId, m_context->errorReporter());
+      if (ImGui::SmallButton("Cancel")) {
+        protocol::CancelTask cancel;
+        cancel.taskId = task.taskId;
+        ops.send(std::move(cancel), m_context->errorReporter());
+      }
       ImGui::EndDisabled();
     }
     ImGui::PopID();

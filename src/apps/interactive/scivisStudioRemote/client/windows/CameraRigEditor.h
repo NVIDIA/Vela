@@ -47,8 +47,8 @@ struct CameraRigEditor : public EditorWindow
   CameraRigID m_selectOnArrival;
   int m_selectedKeyframe{-1};
 
-  RequestHandle m_pendingOp;
-  RequestHandle m_pendingRename;
+  InFlight m_rigOp; // create/load/save/remove, "Use for Active Shot"
+  InFlight m_rename;
 
   ui::BufferedNameField m_nameField;
 

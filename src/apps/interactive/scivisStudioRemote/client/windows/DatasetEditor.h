@@ -48,10 +48,10 @@ struct DatasetEditor : public EditorWindow
   void refreshAvailability(const Dataset &dataset);
 
   DatasetID m_selected;
-  RequestHandle m_pendingOp; // load/unload/reimport/remove/archives
-  RequestHandle m_pendingRename;
-  RequestHandle m_pendingRefresh;
-  RequestHandle m_pendingDiscover;
+  InFlight m_datasetOp; // load/unload/reimport/remove/archives
+  InFlight m_rename;
+  InFlight m_refresh;
+  InFlight m_discover;
 
   ui::BufferedNameField m_nameField;
 

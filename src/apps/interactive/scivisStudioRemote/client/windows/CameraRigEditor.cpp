@@ -150,17 +150,20 @@ void CameraRigEditor::buildEditorUI(const Project &project)
 
 void CameraRigEditor::buildUI_toolbar(const Project &project)
 {
+  ProjectOps &ops = m_context->ops();
   auto createdReply = [this](const ProjectOpReply &reply,
                           const std::optional<CameraRigCreatedResult> &result) {
     if (!reply.ok)
-      reportError(reply.error);
+      m_context->error(reply.error);
     else if (result)
       m_selectOnArrival = result->cameraRigId;
   };
 
-  ImGui::BeginDisabled(pending(m_pendingOp));
-  if (ImGui::Button("Add Rig"))
-    m_pendingOp = ops().createCameraRig("", createdReply);
+  ImGui::BeginDisabled(m_rigOp.busy(ops));
+  if (ImGui::Button("Add Rig")) {
+    m_rigOp.sendForResult<CameraRigCreatedResult>(
+        ops, CreateCameraRig{}, createdReply);
+  }
 
   ImGui::SameLine();
   ImGui::BeginDisabled(true);
@@ -178,7 +181,10 @@ void CameraRigEditor::buildUI_toolbar(const Project &project)
     request.startDirectory = project.projectDirectory;
     request.onAccept = [this, createdReply](
                            const std::vector<std::filesystem::path> &paths) {
-      m_pendingOp = ops().loadCameraRigArchive(paths.front(), createdReply);
+      LoadCameraRigArchive load;
+      load.file = paths.front();
+      m_rigOp.sendForResult<CameraRigCreatedResult>(
+          m_context->ops(), std::move(load), createdReply);
     };
     m_browse.open(std::move(request));
   }
@@ -187,13 +193,17 @@ void CameraRigEditor::buildUI_toolbar(const Project &project)
 
 void CameraRigEditor::buildUI_nameField(const CameraRig &rig)
 {
-  const auto newName = m_nameField.draw(
-      rig.id, rig.name, pending(m_pendingRename), "Invalid name: ");
+  ProjectOps &ops = m_context->ops();
+  const auto newName =
+      m_nameField.draw(rig.id, rig.name, m_rename.busy(ops), "Invalid name: ");
   if (!newName)
     return;
   const CameraRigID id = rig.id;
-  m_pendingRename = ops().renameCameraRig(
-      id, *newName, [this, id](const ProjectOpReply &reply) {
+  RenameCameraRig rename;
+  rename.cameraRigId = id;
+  rename.newName = *newName;
+  m_rename.send(
+      ops, std::move(rename), [this, id](const ProjectOpReply &reply) {
         m_nameField.onReply(id, reply.ok, reply.error);
       });
 }
@@ -201,16 +211,18 @@ void CameraRigEditor::buildUI_nameField(const CameraRig &rig)
 void CameraRigEditor::buildUI_rigActions(
     const Project &project, const CameraRig &rig)
 {
+  ProjectOps &ops = m_context->ops();
   const Shot *shot = project::activeShot(project);
   const bool activeShotUsesRig = shot && shot->cameraRigId == rig.id;
 
-  ImGui::BeginDisabled(pending(m_pendingOp));
+  ImGui::BeginDisabled(m_rigOp.busy(ops));
 
   ImGui::BeginDisabled(!shot || activeShotUsesRig);
   if (ImGui::Button("Use for Active Shot") && shot) {
-    ShotPatch patch;
-    patch.cameraRigId = rig.id;
-    m_pendingOp = ops().updateShot(shot->id, patch, errorReporter());
+    UpdateShot update;
+    update.shotId = shot->id;
+    update.patch.cameraRigId = rig.id;
+    m_rigOp.send(ops, std::move(update), m_context->errorReporter());
   }
   ImGui::EndDisabled();
 
@@ -225,8 +237,11 @@ void CameraRigEditor::buildUI_rigActions(
     const CameraRigID id = rig.id;
     request.onAccept = [this, id](
                            const std::vector<std::filesystem::path> &paths) {
-      m_pendingOp = ops().saveCameraRigArchive(
-          id, ui::withVsrExtension(paths.front()), errorReporter());
+      SaveCameraRigArchive save;
+      save.cameraRigId = id;
+      save.file = ui::withVsrExtension(paths.front());
+      m_rigOp.send(
+          m_context->ops(), std::move(save), m_context->errorReporter());
     };
     m_browse.open(std::move(request));
   }
@@ -237,7 +252,9 @@ void CameraRigEditor::buildUI_rigActions(
       m_rigToRemove = rig.id;
       ImGui::OpenPopup(REMOVE_POPUP);
     } else {
-      m_pendingOp = ops().removeCameraRig(rig.id, errorReporter());
+      RemoveCameraRig remove;
+      remove.cameraRigId = rig.id;
+      m_rigOp.send(ops, std::move(remove), m_context->errorReporter());
     }
   }
 
@@ -327,9 +344,13 @@ void CameraRigEditor::buildUI_removeConfirmation(const Project &project)
           + std::to_string(useCount) + " shot reference"
           + (useCount == 1 ? "" : "s") + "?",
       "Delete",
-      canSend());
-  if (choice == ui::ConfirmChoice::Confirmed)
-    m_pendingOp = ops().removeCameraRig(m_rigToRemove, errorReporter());
+      m_context->canSend());
+  if (choice == ui::ConfirmChoice::Confirmed) {
+    RemoveCameraRig remove;
+    remove.cameraRigId = m_rigToRemove;
+    m_rigOp.send(
+        m_context->ops(), std::move(remove), m_context->errorReporter());
+  }
   if (choice != ui::ConfirmChoice::Pending)
     m_rigToRemove.clear();
 }

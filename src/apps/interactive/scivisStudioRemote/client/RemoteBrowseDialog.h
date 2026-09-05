@@ -115,8 +115,8 @@ struct RemoteBrowseDialog : public vsr::ui::imgui::Modal
   std::string m_fileName; // SaveFile
   std::string m_error;
 
-  RequestHandle m_pendingRoots;
-  RequestHandle m_pendingList;
+  InFlight m_pendingRoots;
+  InFlight m_pendingList;
   std::filesystem::path m_requestedDirectory;
 };
 

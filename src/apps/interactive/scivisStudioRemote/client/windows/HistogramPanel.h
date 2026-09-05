@@ -47,7 +47,7 @@ struct HistogramPanel : public EditorWindow
   // Whose arrays the combo listed last; a new selection resets the choice.
   SceneObjectRef m_listedFor;
 
-  RequestHandle m_pending;
+  InFlight m_request;
   std::string m_error;
   std::string m_resultLabel;
   std::optional<protocol::ArrayHistogramResult> m_result;

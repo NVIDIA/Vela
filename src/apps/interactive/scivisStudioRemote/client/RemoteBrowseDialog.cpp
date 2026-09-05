@@ -97,8 +97,8 @@ void RemoteBrowseDialog::open(BrowseRequest request)
   m_fileName = m_request.defaultName;
   m_error.clear();
   // Stale replies for earlier browses are recognised by handle and dropped.
-  m_pendingRoots = {};
-  m_pendingList = {};
+  m_pendingRoots.clear();
+  m_pendingList.clear();
   m_requestedDirectory.clear();
 
   show();
@@ -125,19 +125,21 @@ const std::filesystem::path &RemoteBrowseDialog::lastDirectory() const
 
 void RemoteBrowseDialog::requestRoots()
 {
-  m_pendingRoots = m_context->ops().listRoots(
+  m_pendingRoots.sendForResult<ListRootsResult>(m_context->ops(),
+      ListRoots{},
       [this](const ProjectOpReply &reply,
           const std::optional<ListRootsResult> &result) {
-        if (reply.requestId != m_pendingRoots.requestId)
+        if (reply.requestId != m_pendingRoots.handle.requestId)
           return;
-        m_pendingRoots = {};
+        m_pendingRoots.clear();
         if (!reply.ok) {
           m_error = reply.error;
           return;
         }
         m_roots = result ? result->roots : std::vector<std::filesystem::path>{};
         // Nowhere to start from yet: land in the first root.
-        if (m_directory.empty() && !m_pendingList.valid() && !m_roots.empty())
+        if (m_directory.empty() && !m_pendingList.handle.valid()
+            && !m_roots.empty())
           navigateTo(m_roots.front());
       });
 }
@@ -148,12 +150,15 @@ void RemoteBrowseDialog::navigateTo(const std::filesystem::path &directory)
     return;
   m_error.clear();
   m_requestedDirectory = normalized(directory);
-  m_pendingList = m_context->ops().listDirectory(m_requestedDirectory,
+  ListDirectory list;
+  list.directory = m_requestedDirectory;
+  m_pendingList.sendForResult<ListDirectoryResult>(m_context->ops(),
+      std::move(list),
       [this](const ProjectOpReply &reply,
           const std::optional<ListDirectoryResult> &result) {
-        if (reply.requestId != m_pendingList.requestId)
+        if (reply.requestId != m_pendingList.handle.requestId)
           return;
-        m_pendingList = {};
+        m_pendingList.clear();
         if (!reply.ok) {
           m_error = reply.error;
           return;
@@ -182,7 +187,7 @@ void RemoteBrowseDialog::goUp()
 
 bool RemoteBrowseDialog::listing() const
 {
-  return m_pendingList.valid() || m_pendingRoots.valid();
+  return m_pendingList.handle.valid() || m_pendingRoots.handle.valid();
 }
 
 bool RemoteBrowseDialog::isRoot(const std::filesystem::path &directory) const
@@ -217,9 +222,9 @@ bool RemoteBrowseDialog::choosable(const DirectoryEntry &entry) const
 const DirectoryEntry *RemoteBrowseDialog::existingFile(
     const std::string &name) const
 {
-  auto it = std::find_if(m_entries.begin(), m_entries.end(), [&](const auto &e) {
-    return !isDirectory(e) && e.name == name;
-  });
+  auto it = std::find_if(m_entries.begin(),
+      m_entries.end(),
+      [&](const auto &e) { return !isDirectory(e) && e.name == name; });
   return it == m_entries.end() ? nullptr : &*it;
 }
 
@@ -290,7 +295,8 @@ std::vector<std::filesystem::path> RemoteBrowseDialog::chosenPaths(
     break;
   }
   case BrowseMode::OpenFiles:
-    for (size_t i = 0; i < m_entries.size() && i < m_multiSelected.size(); ++i) {
+    for (size_t i = 0; i < m_entries.size() && i < m_multiSelected.size();
+         ++i) {
       if (m_multiSelected[i])
         paths.push_back(m_directory / m_entries[i].name);
     }
@@ -444,8 +450,7 @@ void RemoteBrowseDialog::buildUI_entries()
     else if (dimmed)
       ImGui::PushStyleColor(
           ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-    const std::string label =
-        directory ? entry.name + "/" : entry.name;
+    const std::string label = directory ? entry.name + "/" : entry.name;
     if (ImGui::Selectable(label.c_str(),
             selected,
             ImGuiSelectableFlags_SpanAllColumns
@@ -476,12 +481,10 @@ void RemoteBrowseDialog::buildUI_target()
 {
   ImGui::SetNextItemWidth(ENTRIES_WIDTH - 90.f);
   if (m_request.mode == BrowseMode::SaveFile) {
-    if (ImGui::InputText("File name",
-            &m_fileName,
-            ImGuiInputTextFlags_EnterReturnsTrue))
+    if (ImGui::InputText(
+            "File name", &m_fileName, ImGuiInputTextFlags_EnterReturnsTrue))
       accept();
-    if (!m_fileName.empty()
-        && !std::filesystem::path(m_fileName).is_absolute()
+    if (!m_fileName.empty() && !std::filesystem::path(m_fileName).is_absolute()
         && existingFile(m_fileName)) {
       ui::warningText(
           "'" + m_fileName + "' exists here and will be overwritten.");
@@ -489,8 +492,8 @@ void RemoteBrowseDialog::buildUI_target()
     return;
   }
 
-  const bool enter = ImGui::InputText(
-      "Path", &m_target, ImGuiInputTextFlags_EnterReturnsTrue);
+  const bool enter =
+      ImGui::InputText("Path", &m_target, ImGuiInputTextFlags_EnterReturnsTrue);
   ImGui::SameLine();
   ImGui::BeginDisabled(m_target.empty() || listing());
   const bool go = ImGui::Button("Go");
@@ -506,7 +509,8 @@ void RemoteBrowseDialog::buildUI_buttons()
 {
   ImGui::Spacing();
   if (ImGui::Button("Cancel")
-      || (ImGui::IsKeyPressed(ImGuiKey_Escape) && !ImGui::GetIO().WantTextInput)) {
+      || (ImGui::IsKeyPressed(ImGuiKey_Escape)
+          && !ImGui::GetIO().WantTextInput)) {
     cancel();
     return;
   }

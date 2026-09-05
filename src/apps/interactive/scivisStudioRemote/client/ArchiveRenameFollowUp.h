@@ -30,10 +30,13 @@ namespace vsr::scivis_studio::client {
  *
  * Example:
  *   const auto before = ArchiveRenameFollowUp::datasetIds(context.project());
- *   ops.loadDatasetArchive(file, [=](const ProjectOpReply &, const auto &s) {
- *     if (s)
- *       m_rename.arm(s->taskId, before, typedName);
- *   });
+ *   LoadDatasetArchive load;
+ *   load.file = file;
+ *   ops.sendForResult<TaskStartedResult>(load,
+ *       [=](const ProjectOpReply &, const auto &s) {
+ *         if (s)
+ *           m_rename.arm(s->taskId, before, typedName);
+ *       });
  *   ...
  *   void onProjectReplaced() { m_rename.apply(*project, ops, onReply); }
  */

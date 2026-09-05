@@ -22,9 +22,13 @@ namespace vsr::scivis_studio::client::ui {
  * lexical and operate on server paths.
  *
  * Example:
- *   if (auto name = m_nameField.draw(rig.id, rig.name, pending(m_rename)))
- *     m_rename = ops().renameLightRig(rig.id, *name, ...);
- *   ops.saveDatasetArchive(id, ui::withVsrExtension(chosen), cb);
+ *   if (auto name = m_nameField.draw(rig.id, rig.name, m_rename.busy(ops))) {
+ *     RenameLightRig rename;
+ *     rename.lightRigId = rig.id;
+ *     rename.newName = *name;
+ *     m_rename.send(ops, std::move(rename), ...);
+ *   }
+ *   archive.file = ui::withVsrExtension(chosen);
  */
 
 constexpr ImVec4 ERROR_TEXT_COLOR{1.f, 0.4f, 0.4f, 1.f};

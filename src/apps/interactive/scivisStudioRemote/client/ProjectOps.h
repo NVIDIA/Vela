@@ -12,8 +12,6 @@
 #include "StudioCodec.h"
 #include "TaskMessages.h"
 #include "ViewportMessages.h"
-// vsr_scivis_studio_model
-#include "Shot.h"
 // vsr_network
 #include "vsr/network/Message.hpp"
 // vsr_core
@@ -100,6 +98,23 @@ struct TaskRecord
   std::string describeEnding() const;
 };
 
+// The TaskRecord label of a request that starts a Server Task, from its
+// fields ("Open project '/d/p'", "Render shot 'shot_0001'"); empty for a
+// request that starts none. send() names the record with it.
+std::string taskLabel(const protocol::OpenProject &req);
+std::string taskLabel(const protocol::SaveProject &req);
+std::string taskLabel(const protocol::ImportStaticDataset &req);
+std::string taskLabel(const protocol::ImportSubtreeDataset &req);
+std::string taskLabel(const protocol::ImportFileAnimationDataset &req);
+std::string taskLabel(const protocol::ReimportDataset &req);
+std::string taskLabel(const protocol::LoadDataset &req);
+std::string taskLabel(const protocol::SaveDatasetArchive &req);
+std::string taskLabel(const protocol::LoadDatasetArchive &req);
+std::string taskLabel(const protocol::IncorporateDatasetCandidate &req);
+std::string taskLabel(const protocol::RenderShot &req);
+template <typename Req>
+std::string taskLabel(const Req &);
+
 /*
  * The client's side of every Project Op: mints request ids, sends the
  * request, and hands the matching ProjectOpReply to the caller's callback;
@@ -113,23 +128,28 @@ struct TaskRecord
  * request failure"). Everything here runs on the UI thread; callbacks fire
  * only from ServerConnection::poll(), never from inside send().
  *
- * The typed wrappers cover every request type so UI code never builds a
- * payload by hand. Ops whose reply carries a *Result payload take a
- * ResultCallback<R>; task-launching ops report TaskStartedResult and register
- * the task, labelled after the request, in tasks(). A Pick shares the id
- * space but is answered by a plain PickReply, so it has its own callback
- * type but shares the pending list, so pending(), forget() and the
- * connection-loss failure cover it all the same; a server Error naming a
- * Pick ("Pick 7 refused: ...") fails the oldest pending one.
+ * A caller fills in the protocol's request struct (requestId excepted) and
+ * hands it to send(), or to sendForResult<R>() when the reply carries a
+ * *Result payload to decode. A request that starts a Server Task (its reply
+ * is a TaskStartedResult) registers the task in tasks() under taskLabel(req).
+ * A Pick shares the id space but is answered by a plain PickReply, so it has
+ * its own callback type but shares the pending list, so pending(), forget()
+ * and the connection-loss failure cover it all the same; a server Error
+ * naming a Pick ("Pick 7 refused: ...") fails the oldest pending one.
  *
  * Example:
  *   auto &ops = connection.projectOps();
- *   ops.createShot("Shot 2", [&](const ProjectOpReply &reply,
- *                                const std::optional<ShotCreatedResult> &r) {
- *     if (reply.ok) selectShot(r->shotId);
- *     else showError(reply.error);
- *   });
- *   ops.openProject("/data/run7", [](const auto &, const auto &) {});
+ *   CreateShot create;
+ *   create.name = "Shot 2";
+ *   ops.sendForResult<ShotCreatedResult>(create,
+ *       [&](const ProjectOpReply &reply,
+ *           const std::optional<ShotCreatedResult> &r) {
+ *         if (reply.ok) selectShot(r->shotId);
+ *         else showError(reply.error);
+ *       });
+ *   OpenProject open;
+ *   open.directory = "/data/run7";
+ *   ops.sendForResult<TaskStartedResult>(open, [](auto &, auto &) {});
  *   for (const TaskRecord &task : ops.tasks())
  *     drawTaskRow(task);
  */
@@ -146,15 +166,15 @@ struct ProjectOps
 
   // Generic sends ////////////////////////////////////////////////////////////
 
-  // Mints req.requestId, sends, and stores the callback under that id.
-  // `taskLabel` names the TaskRecord if the reply starts a task.
+  // Mints req.requestId, sends, and stores the callback under that id;
+  // taskLabel(req) names the TaskRecord if the reply starts a task.
   template <typename Req>
-  RequestHandle send(
-      Req req, ReplyCallback callback, std::string taskLabel = {});
+  RequestHandle send(Req req, ReplyCallback callback);
   // send() decoding the reply's results as an R for the callback.
   template <typename R, typename Req>
-  RequestHandle sendForResult(
-      Req req, ResultCallback<R> callback, std::string taskLabel = {});
+  RequestHandle sendForResult(Req req, ResultCallback<R> callback);
+  // x right, y down from the top-left of the frame, in frame-header pixels.
+  RequestHandle pick(int x, int y, PickCallback callback);
 
   // Project ops and picks awaiting their reply.
   size_t pendingCount() const;
@@ -164,161 +184,7 @@ struct ProjectOps
   // answers only the surviving Pick, so nothing would ever retire it.
   void forget(RequestHandle handle);
 
-  // Project (20..22) /////////////////////////////////////////////////////////
-
-  RequestHandle newProject(ReplyCallback callback);
-  RequestHandle openProject(const std::filesystem::path &directory,
-      ResultCallback<protocol::TaskStartedResult> callback);
-  // Absent directory saves in place; uiState may be null.
-  RequestHandle saveProject(
-      const std::optional<std::filesystem::path> &directory,
-      protocol::SubtreePtr uiState,
-      ResultCallback<protocol::TaskStartedResult> callback);
-
-  // Datasets (23..35, 63) ////////////////////////////////////////////////////
-
-  RequestHandle importStaticDataset(const std::string &name,
-      const std::filesystem::path &sourcePath,
-      vsr::io::ImporterType importerType,
-      ResultCallback<protocol::TaskStartedResult> callback);
-  RequestHandle importSubtreeDataset(const std::string &name,
-      const std::filesystem::path &sourcePath,
-      ResultCallback<protocol::TaskStartedResult> callback);
-  RequestHandle importFileAnimationDataset(const std::string &name,
-      const std::vector<std::filesystem::path> &sourcePaths,
-      vsr::io::ImporterType importerType,
-      bool setActiveShotFrameCount,
-      ResultCallback<protocol::TaskStartedResult> callback);
-  RequestHandle declareFileAnimationDataset(const std::string &name,
-      const std::vector<std::string> &sourceList,
-      vsr::io::ImporterType importerType,
-      bool setActiveShotFrameCount,
-      ResultCallback<protocol::DatasetCreatedResult> callback);
-  RequestHandle reimportDataset(const DatasetID &datasetId,
-      ResultCallback<protocol::TaskStartedResult> callback);
-  RequestHandle renameDataset(const DatasetID &datasetId,
-      const std::string &newName,
-      ReplyCallback callback);
-  RequestHandle removeDataset(
-      const DatasetID &datasetId, bool keepAssetFile, ReplyCallback callback);
-  RequestHandle loadDataset(const DatasetID &datasetId,
-      ResultCallback<protocol::TaskStartedResult> callback);
-  RequestHandle unloadDataset(
-      const DatasetID &datasetId, ReplyCallback callback);
-  RequestHandle refreshDatasetAvailability(
-      const DatasetID &datasetId, ReplyCallback callback);
-  RequestHandle saveDatasetArchive(const DatasetID &datasetId,
-      const std::filesystem::path &file,
-      ResultCallback<protocol::TaskStartedResult> callback);
-  RequestHandle loadDatasetArchive(const std::filesystem::path &file,
-      ResultCallback<protocol::TaskStartedResult> callback);
-  RequestHandle discoverDatasetCandidates(
-      ResultCallback<protocol::DiscoverDatasetCandidatesResult> callback);
-  RequestHandle incorporateDatasetCandidate(const std::filesystem::path &file,
-      const std::string &proposedName,
-      const std::string &name,
-      ResultCallback<protocol::TaskStartedResult> callback);
-
-  // Shots (36..39) ///////////////////////////////////////////////////////////
-
-  // An empty name is numbered by the server ("Shot N").
-  RequestHandle createShot(const std::string &name,
-      ResultCallback<protocol::ShotCreatedResult> callback);
-  RequestHandle removeShot(const ShotID &shotId, ReplyCallback callback);
-  // The patch's engaged fields; the server applies them to its copy and
-  // validates the result (`playing` is setPlaying's).
-  RequestHandle updateShot(
-      const ShotID &shotId, const ShotPatch &patch, ReplyCallback callback);
-  RequestHandle setActiveShot(const ShotID &shotId, ReplyCallback callback);
-
-  // Light rigs (40..45, 51..52) //////////////////////////////////////////////
-
-  RequestHandle createLightRig(const std::string &name,
-      ResultCallback<protocol::LightRigCreatedResult> callback);
-  RequestHandle cloneLightRig(const LightRigID &lightRigId,
-      ResultCallback<protocol::LightRigCreatedResult> callback);
-  RequestHandle removeLightRig(
-      const LightRigID &lightRigId, ReplyCallback callback);
-  RequestHandle renameLightRig(const LightRigID &lightRigId,
-      const std::string &newName,
-      ReplyCallback callback);
-  // subtype is the ANARI light subtype ("directional", "point", ...).
-  RequestHandle addLightToRig(const LightRigID &lightRigId,
-      const std::string &subtype,
-      ResultCallback<protocol::LightAddedResult> callback);
-  RequestHandle removeLightFromRig(const LightRigID &lightRigId,
-      const SceneNodeRef &lightNode,
-      ReplyCallback callback);
-  RequestHandle saveLightRigArchive(const LightRigID &lightRigId,
-      const std::filesystem::path &file,
-      ReplyCallback callback);
-  RequestHandle loadLightRigArchive(const std::filesystem::path &file,
-      ResultCallback<protocol::LightRigCreatedResult> callback);
-
-  // Camera rigs (46..50) /////////////////////////////////////////////////////
-
-  RequestHandle createCameraRig(const std::string &name,
-      ResultCallback<protocol::CameraRigCreatedResult> callback);
-  RequestHandle removeCameraRig(
-      const CameraRigID &cameraRigId, ReplyCallback callback);
-  RequestHandle renameCameraRig(const CameraRigID &cameraRigId,
-      const std::string &newName,
-      ReplyCallback callback);
-  RequestHandle saveCameraRigArchive(const CameraRigID &cameraRigId,
-      const std::filesystem::path &file,
-      ReplyCallback callback);
-  RequestHandle loadCameraRigArchive(const std::filesystem::path &file,
-      ResultCallback<protocol::CameraRigCreatedResult> callback);
-
-  // Color maps (53..55) //////////////////////////////////////////////////////
-
-  RequestHandle createColorMap(const std::string &name,
-      ResultCallback<protocol::ColorMapCreatedResult> callback);
-  RequestHandle renameColorMap(const ColorMapID &colorMapId,
-      const std::string &newName,
-      ReplyCallback callback);
-  RequestHandle removeColorMap(
-      const ColorMapID &colorMapId, ReplyCallback callback);
-
-  // Remote Browse (56..57) ///////////////////////////////////////////////////
-
-  RequestHandle listRoots(ResultCallback<protocol::ListRootsResult> callback);
-  RequestHandle listDirectory(const std::filesystem::path &directory,
-      ResultCallback<protocol::ListDirectoryResult> callback);
-
-  // Playback (58) ////////////////////////////////////////////////////////////
-
-  // shotId must be the active shot; the server confirms with a snapshot.
-  RequestHandle setPlaying(
-      const ShotID &shotId, bool playing, ReplyCallback callback);
-
-  // Offline render (60) //////////////////////////////////////////////////////
-
-  // Makes the shot active and renders its frames as a Server Task with
-  // determinate progress; refused unless the project is saved and no render
-  // is queued or running. The record is flagged `render`.
-  RequestHandle renderShot(const ShotID &shotId,
-      ResultCallback<protocol::TaskStartedResult> callback);
-
-  // Array histogram (59) /////////////////////////////////////////////////////
-
-  // Sync on the server: scalar element types only, binCount clamped to
-  // [1, 4096] there.
-  RequestHandle requestArrayHistogram(const SceneObjectRef &array,
-      uint32_t binCount,
-      ResultCallback<protocol::ArrayHistogramResult> callback);
-
-  // Pick (62) ////////////////////////////////////////////////////////////////
-
-  // x right, y down from the top-left of the frame, in frame-header pixels.
-  RequestHandle pick(int x, int y, PickCallback callback);
-
   // Server Tasks (61) ////////////////////////////////////////////////////////
-
-  // Cooperative: removes a queued task; the running one is stopped at its
-  // next frame boundary if it is a render, refused otherwise (the server
-  // decides).
-  RequestHandle cancelTask(uint64_t taskId, ReplyCallback callback);
 
   // Runs with the record a TaskCompleted/TaskFailed just finished, from
   // handleTaskCompleted/Failed (so from ServerConnection::poll()), once per
@@ -424,6 +290,36 @@ struct ProjectOps
   std::vector<TaskRecord> m_tasks;
 };
 
+/*
+ * One request at a time for a group of controls: remembers the last send,
+ * is busy() while its reply is outstanding, and refuses to send while busy,
+ * so "one op per group" is stated here once rather than as a
+ * BeginDisabled(pending(handle)) and a handle assignment at every control.
+ *
+ * Example:
+ *   ImGui::BeginDisabled(m_rigOp.busy(ops));
+ *   if (ImGui::Button("Remove Rig")) {
+ *     RemoveLightRig remove;
+ *     remove.lightRigId = rig.id;
+ *     m_rigOp.send(ops, std::move(remove), errorReporter);
+ *   }
+ *   ImGui::EndDisabled();
+ */
+struct InFlight
+{
+  // The last request sent; valid() once one was.
+  RequestHandle handle;
+
+  bool busy(const ProjectOps &ops) const;
+  // ProjectOps::send()/sendForResult() unless busy; false when refused.
+  template <typename Req>
+  bool send(ProjectOps &ops, Req req, ReplyCallback callback);
+  template <typename R, typename Req>
+  bool sendForResult(ProjectOps &ops, Req req, ResultCallback<R> callback);
+  // Forgets the handle: the reply was matched by hand, or the owner reset.
+  void clear();
+};
+
 // Inlined definitions ////////////////////////////////////////////////////////
 
 inline bool RequestHandle::valid() const
@@ -437,30 +333,62 @@ inline bool TaskRecord::finished() const
 }
 
 template <typename Req>
-inline RequestHandle ProjectOps::send(
-    Req req, ReplyCallback callback, std::string taskLabel)
+inline std::string taskLabel(const Req &)
+{
+  return {};
+}
+
+template <typename Req>
+inline RequestHandle ProjectOps::send(Req req, ReplyCallback callback)
 {
   req.requestId = m_nextRequestId++;
   return submit(req.requestId,
       Req::MESSAGE_TYPE,
       protocol::encode(req),
       std::move(callback),
-      std::move(taskLabel));
+      taskLabel(req));
 }
 
 template <typename R, typename Req>
 inline RequestHandle ProjectOps::sendForResult(
-    Req req, ResultCallback<R> callback, std::string taskLabel)
+    Req req, ResultCallback<R> callback)
 {
-  return send(
-      std::move(req),
+  return send(std::move(req),
       [callback = std::move(callback)](const protocol::ProjectOpReply &reply) {
         if (!callback)
           return;
         callback(
             reply, reply.ok ? protocol::results<R>(reply) : std::optional<R>{});
-      },
-      std::move(taskLabel));
+      });
+}
+
+inline bool InFlight::busy(const ProjectOps &ops) const
+{
+  return handle.valid() && ops.pending(handle);
+}
+
+template <typename Req>
+inline bool InFlight::send(ProjectOps &ops, Req req, ReplyCallback callback)
+{
+  if (busy(ops))
+    return false;
+  handle = ops.send(std::move(req), std::move(callback));
+  return true;
+}
+
+template <typename R, typename Req>
+inline bool InFlight::sendForResult(
+    ProjectOps &ops, Req req, ResultCallback<R> callback)
+{
+  if (busy(ops))
+    return false;
+  handle = ops.sendForResult<R>(std::move(req), std::move(callback));
+  return true;
+}
+
+inline void InFlight::clear()
+{
+  handle = {};
 }
 
 } // namespace vsr::scivis_studio::client

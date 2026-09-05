@@ -114,9 +114,9 @@ void AddStaticDatasetDialog::submit()
 
   auto onReply = [this, choice, name, idsBefore](const ProjectOpReply &reply,
                      const std::optional<TaskStartedResult> &started) {
-    if (reply.requestId != m_pending.requestId)
+    if (reply.requestId != m_pending.handle.requestId)
       return;
-    m_pending = {};
+    m_pending.clear();
     if (!reply.ok) {
       m_error = reply.error;
       return;
@@ -128,20 +128,28 @@ void AddStaticDatasetDialog::submit()
   };
 
   m_error.clear();
+  ProjectOps &ops = m_context->ops();
   if (choice.importer) {
-    m_pending = m_context->ops().importStaticDataset(
-        name, sourcePath, *choice.importer, onReply);
+    ImportStaticDataset import;
+    import.name = name;
+    import.sourcePath = sourcePath;
+    import.importerType = *choice.importer;
+    m_pending.sendForResult<TaskStartedResult>(ops, std::move(import), onReply);
   } else if (choice.subtree) {
-    m_pending =
-        m_context->ops().importSubtreeDataset(name, sourcePath, onReply);
+    ImportSubtreeDataset import;
+    import.name = name;
+    import.sourcePath = sourcePath;
+    m_pending.sendForResult<TaskStartedResult>(ops, std::move(import), onReply);
   } else {
-    m_pending = m_context->ops().loadDatasetArchive(sourcePath, onReply);
+    LoadDatasetArchive load;
+    load.file = sourcePath;
+    m_pending.sendForResult<TaskStartedResult>(ops, std::move(load), onReply);
   }
 }
 
 void AddStaticDatasetDialog::buildUI()
 {
-  const bool busy = m_pending.valid() && m_context->ops().pending(m_pending);
+  const bool busy = m_pending.busy(m_context->ops());
   const auto &choice = SOURCES[m_selectedSource];
 
   ImGui::BeginDisabled(busy);
