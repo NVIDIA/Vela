@@ -379,27 +379,29 @@ void AnariSceneRenderPass::render(ImageBuffers &b, int stageId)
   if (m_pendingRestart)
     restartFrame();
 
-  if (!m_runAsync) {
-    // Synchronous: this call's render of the current scene state is what is
-    // composited, so the caller's picture and its state agree.
+  // Asynchronous: the picture composited is the frame the previous call
+  // started, so the first call has nothing to show yet. Synchronous: this
+  // call's own render of the current scene state is what is composited, so
+  // the caller's picture and its state agree.
+  const bool nothingToShow = m_runAsync && m_firstFrame;
+  if (m_runAsync) {
+    startFirstFrame(false);
+  } else {
     if (!m_firstFrame)
       waitForCompletion();
     anari::render(m_device, m_frame);
     waitForCompletion();
     m_firstFrame = false;
-    copyFrameData();
-    composite(b, stageId);
-    return;
   }
-
-  startFirstFrame(false);
 
   if (anari::isReady(m_device, m_frame)) {
     copyFrameData();
-    anari::render(m_device, m_frame);
+    // Only the asynchronous mode keeps a render in flight between calls.
+    if (m_runAsync)
+      anari::render(m_device, m_frame);
   }
 
-  if (!m_firstFrame)
+  if (!nothingToShow)
     composite(b, stageId);
   else {
     const auto size = getDimensions();
