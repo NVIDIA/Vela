@@ -23,7 +23,7 @@ std::string upper(std::string text)
   return text;
 }
 
-std::string quoted(const std::string &text)
+std::string quotedText(const std::string &text)
 {
   return "\"" + text + "\"";
 }

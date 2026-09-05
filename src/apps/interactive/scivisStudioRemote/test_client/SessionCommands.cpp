@@ -214,8 +214,8 @@ CommandRunner::Failure CommandRunner::expectError(
     return "expected Error, got " + next.text();
   if (!command.args.empty()
       && m_session->lastError().find(command.args[0]) == std::string::npos) {
-    return "Error " + quoted(m_session->lastError()) + " does not contain "
-        + quoted(command.args[0]);
+    return "Error " + quotedText(m_session->lastError()) + " does not contain "
+        + quotedText(command.args[0]);
   }
   return {};
 }

@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "TestSession.h"
+#include "AnyText.h"
+#include "CommandText.h"
 // vsr_scivis_studio_protocol
 #include "PayloadCommon.h"
 #include "ProjectSnapshot.h"
@@ -23,8 +25,6 @@
 #include "vsr/core/Logging.hpp"
 // std
 #include <algorithm>
-#include <cctype>
-#include <charconv>
 #include <thread>
 
 namespace vsr::scivis_studio::test_client {
@@ -47,41 +47,6 @@ constexpr const char *CONNECTION_LOST = "connection lost";
 std::string endpointText(const std::string &host, uint16_t port)
 {
   return host + ":" + std::to_string(port);
-}
-
-std::string objectText(const SceneObjectRef &ref)
-{
-  return std::string(anari::toString(ref.type)) + " "
-      + std::to_string(ref.objectIndex);
-}
-
-std::string quotedText(const std::string &text)
-{
-  return "\"" + text + "\"";
-}
-
-// The shortest text that reads back as the same float.
-std::string numberText(float value)
-{
-  char buffer[32];
-  const auto result = std::to_chars(buffer, buffer + sizeof(buffer), value);
-  return std::string(buffer, result.ptr);
-}
-
-// "ANARI_SURFACE" -> "surface", the record stream's spelling of a type.
-std::string shortTypeName(anari::DataType type)
-{
-  std::string name = anari::toString(type);
-  if (name.rfind("ANARI_", 0) == 0)
-    name.erase(0, 6);
-  for (auto &c : name)
-    c = char(std::tolower(static_cast<unsigned char>(c)));
-  return name;
-}
-
-const char *boolText(bool value)
-{
-  return value ? "true" : "false";
 }
 
 } // namespace
@@ -783,7 +748,7 @@ vsr::scene::Object *TestSession::mirrorObject(
     return nullptr;
   auto *obj = m_mirror.getObject(object.type, object.objectIndex);
   if (!obj && error)
-    *error = "no " + objectText(object) + " in the mirror";
+    *error = "no " + objectRefText(object) + " in the mirror";
   return obj;
 }
 

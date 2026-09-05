@@ -376,9 +376,9 @@ CommandRunner::Failure CommandRunner::findObject(const Command &command)
   m_variables["lastObjectRef"] = objectRefText(ref);
   m_variables["lastObjectType"] = shortTypeName(*type);
   m_variables["lastObjectIndex"] = std::to_string(ref.objectIndex);
-  printRecord("EVT Object type=" + shortTypeName(*type)
-      + " index=" + std::to_string(found->index())
-      + " subtype=" + found->subtype().str() + " name=" + quoted(found->name())
+  printRecord("EVT Object type=" + shortTypeName(*type) + " index="
+      + std::to_string(found->index()) + " subtype=" + found->subtype().str()
+      + " name=" + quotedText(found->name())
       + " params=" + std::to_string(found->numParameters()));
   return {};
 }
@@ -396,7 +396,7 @@ CommandRunner::Failure CommandRunner::dumpScene(const Command &)
             return;
           printRecord("EVT Object type=" + shortTypeName(type)
               + " index=" + std::to_string(obj->index()) + " subtype="
-              + obj->subtype().str() + " name=" + quoted(obj->name())
+              + obj->subtype().str() + " name=" + quotedText(obj->name())
               + " params=" + std::to_string(obj->numParameters()));
         });
       });
@@ -413,7 +413,7 @@ CommandRunner::Failure CommandRunner::dumpLayers(const Command &)
     if (!layer)
       continue;
     printRecord("EVT Layer index=" + std::to_string(i) + " name="
-        + quoted(layer->name()) + " nodes=" + std::to_string(layer->size())
+        + quotedText(layer->name()) + " nodes=" + std::to_string(layer->size())
         + " active=" + boolText(scene.layerIsActive(layer->name())));
   }
   return {};
@@ -426,7 +426,7 @@ CommandRunner::Failure CommandRunner::dumpProject(const Command &)
   const auto *project = m_session->project();
   if (!project)
     return "no Project Replica";
-  printRecord("EVT Project name=" + quoted(project->name)
+  printRecord("EVT Project name=" + quotedText(project->name)
       + " activeShot=" + project->activeShotId
       + " shots=" + std::to_string(project->shots.size())
       + " datasets=" + std::to_string(project->datasets.size())
@@ -434,9 +434,9 @@ CommandRunner::Failure CommandRunner::dumpProject(const Command &)
       + " cameraRigs=" + std::to_string(project->cameraRigs.size())
       + " colorMaps=" + std::to_string(project->colorMaps.size())
       + " dirty=" + boolText(project->dirty)
-      + " directory=" + quoted(project->projectDirectory.generic_string()));
+      + " directory=" + quotedText(project->projectDirectory.generic_string()));
   for (const auto &shot : project->shots) {
-    printRecord("EVT Shot id=" + shot.id + " name=" + quoted(shot.name)
+    printRecord("EVT Shot id=" + shot.id + " name=" + quotedText(shot.name)
         + " frameCount=" + std::to_string(shot.frameCount)
         + " fps=" + numberText(shot.fps) + " currentFrame="
         + std::to_string(shot.currentFrame) + " loop=" + boolText(shot.loop)
@@ -446,7 +446,8 @@ CommandRunner::Failure CommandRunner::dumpProject(const Command &)
         + " active=" + boolText(shot.id == project->activeShotId));
   }
   for (const auto &dataset : project->datasets) {
-    printRecord("EVT Dataset id=" + dataset.id + " name=" + quoted(dataset.name)
+    printRecord("EVT Dataset id=" + dataset.id
+        + " name=" + quotedText(dataset.name)
         + " status=" + dataset::toString(dataset.status)
         + " residency=" + dataset::toString(dataset.residency)
         + " sourceKind=" + dataset::toString(dataset.sourceKind)
@@ -454,15 +455,15 @@ CommandRunner::Failure CommandRunner::dumpProject(const Command &)
         + nodeText(dataset.rootNode) + " dirty=" + boolText(dataset.dirty));
   }
   for (const auto &rig : project->lightRigs) {
-    printRecord("EVT LightRig id=" + rig.id + " name=" + quoted(rig.name)
+    printRecord("EVT LightRig id=" + rig.id + " name=" + quotedText(rig.name)
         + " rootNode=" + nodeText(rig.rootNode));
   }
   for (const auto &rig : project->cameraRigs) {
-    printRecord("EVT CameraRig id=" + rig.id + " name=" + quoted(rig.name)
+    printRecord("EVT CameraRig id=" + rig.id + " name=" + quotedText(rig.name)
         + " keyframes=" + std::to_string(rig.keyframes.size()));
   }
   for (const auto &map : project->colorMaps)
-    printRecord("EVT ColorMap id=" + map.id + " name=" + quoted(map.name));
+    printRecord("EVT ColorMap id=" + map.id + " name=" + quotedText(map.name));
   return {};
 }
 
@@ -516,8 +517,8 @@ CommandRunner::Failure CommandRunner::dumpUIState(const Command &)
   const std::function<void(const vsr::core::DataNode &, const std::string &)>
       walk = [&](const vsr::core::DataNode &node, const std::string &path) {
         if (node.numChildren() == 0) {
-          printRecord("EVT UIStateEntry path=" + quoted(path)
-              + " value=" + quoted(anyText(node.getValue())));
+          printRecord("EVT UIStateEntry path=" + quotedText(path)
+              + " value=" + quotedText(anyText(node.getValue())));
           return;
         }
         node.foreach_child_const([&](const vsr::core::DataNode &child) {
@@ -552,11 +553,11 @@ CommandRunner::Failure CommandRunner::assertValue(const Command &command)
   if (!compareValues(*lhs, command.args[1], rhs, holds, error))
     return error;
   if (!holds) {
-    std::string expected = quoted(command.args[2]);
+    std::string expected = quotedText(command.args[2]);
     if (rhs != command.args[2])
-      expected += " (" + quoted(rhs) + ")";
-    return command.args[0] + " is " + quoted(*lhs) + ", not " + command.args[1]
-        + " " + expected;
+      expected += " (" + quotedText(rhs) + ")";
+    return command.args[0] + " is " + quotedText(*lhs) + ", not "
+        + command.args[1] + " " + expected;
   }
   return {};
 }

@@ -13,8 +13,9 @@
 namespace vsr::scivis_studio::test_client {
 
 /*
- * Text the command handlers share: case folding, the spellings of the record
- * stream (quoted strings, true/false, layer:node and type:index references)
+ * Text the session and the command handlers share: case folding, the
+ * spellings of the record stream (quoted strings, true/false, layer:node and
+ * type:index references), written once so an Event and a dump-* line agree,
  * and the argument parsers more than one command uses. Nothing here knows
  * about the runner.
  *
@@ -28,7 +29,7 @@ namespace vsr::scivis_studio::test_client {
 
 std::string lower(std::string text);
 std::string upper(std::string text);
-std::string quoted(const std::string &text);
+std::string quotedText(const std::string &text);
 std::string join(const std::vector<std::string> &items, const char *sep);
 
 const char *boolText(bool value);

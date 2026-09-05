@@ -542,7 +542,7 @@ std::string CommandRunner::waitFailure(
     return "connection lost while waiting for " + awaited + ": "
         + m_session->failure();
   case WaitEnd::Error:
-    return "server answered Error " + quoted(m_session->lastError())
+    return "server answered Error " + quotedText(m_session->lastError())
         + " while waiting for " + awaited;
   case WaitEnd::TimedOut:
   case WaitEnd::Done:

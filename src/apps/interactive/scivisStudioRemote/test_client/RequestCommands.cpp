@@ -261,9 +261,9 @@ CommandRunner::Failure CommandRunner::discoverDatasetCandidates(
             for (const auto &candidate : result.candidates) {
               Event entry{"DatasetCandidate", {}};
               entry.fields.emplace_back(
-                  "file", quoted(candidate.file.generic_string()));
+                  "file", quotedText(candidate.file.generic_string()));
               entry.fields.emplace_back(
-                  "proposedName", quoted(candidate.proposedName));
+                  "proposedName", quotedText(candidate.proposedName));
               following.push_back(std::move(entry));
             }
           }));
@@ -434,7 +434,8 @@ CommandRunner::Failure CommandRunner::listRoots(
                 "roots", std::to_string(result.roots.size()));
             for (const auto &root : result.roots) {
               Event entry{"DataRoot", {}};
-              entry.fields.emplace_back("path", quoted(root.generic_string()));
+              entry.fields.emplace_back(
+                  "path", quotedText(root.generic_string()));
               following.push_back(std::move(entry));
             }
             if (!result.roots.empty())
@@ -462,7 +463,7 @@ CommandRunner::Failure CommandRunner::listDirectory(
                 "entries", std::to_string(result.entries.size()));
             for (const auto &e : result.entries) {
               Event entry{"DirectoryEntry", {}};
-              entry.fields.emplace_back("name", quoted(e.name));
+              entry.fields.emplace_back("name", quotedText(e.name));
               entry.fields.emplace_back("kind", toString(e.kind));
               entry.fields.emplace_back("size", std::to_string(e.size));
               entry.fields.emplace_back(
