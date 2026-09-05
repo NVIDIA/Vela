@@ -70,7 +70,8 @@ struct TaskControl
 
   TaskControl(uint64_t taskId,
       ReportFunction report,
-      const std::atomic<uint64_t> *cancelRequested);
+      const std::atomic<uint64_t> *cancelRequested,
+      const std::atomic<bool> *stopAll);
 
   void operator()(const std::string &phase) const;
   void operator()(
@@ -82,19 +83,23 @@ struct TaskControl
   uint64_t m_taskId{0};
   ReportFunction m_report;
   const std::atomic<uint64_t> *m_cancelRequested{nullptr};
+  const std::atomic<bool> *m_stopAll{nullptr};
 };
 
 using TaskBody = std::function<TaskResult(const TaskControl &)>;
 
 // A task that ended: what its body returned (or, for a task dropped from
 // the queue, the "cancelled" failure the runner made up for it), which is
-// what its TaskCompleted/TaskFailed said; kept for the task-status replay
+// what its TaskCompleted/TaskFailed says; kept for the task-status replay
 // of the next bootstrap.
 struct FinishedTask
 {
   uint64_t taskId{0};
   std::string description;
   TaskResult result;
+  // The exclusive task (the shot render): the loop has something to do
+  // before this ending goes out.
+  bool exclusive{false};
   // Its ending went out in a bootstrap replay; the next one skips it.
   bool replayed{false};
 };
@@ -116,16 +121,20 @@ struct RunningTask
  * (TaskStartedResult) right away; the loop then calls runOne() once per
  * iteration, between applying the Control-State Latch and rendering, so a
  * task runs to completion on the loop thread while frames pause. The runner
- * pushes the task's TaskProgress events and exactly one TaskCompleted or
- * TaskFailed. A body that throws is caught here and reported as TaskFailed
- * with the exception's message, so no request can bring the loop down.
+ * pushes the task's TaskProgress events and records exactly one ending,
+ * TaskCompleted or TaskFailed, which runOne() hands back for the loop to
+ * send with sendEnding() once whatever must precede it has gone out (the
+ * discard of the inputs a shot render latched). A body that throws is
+ * caught here and reported as TaskFailed with the exception's message, so
+ * no request can bring the loop down.
  *
  * Cancel is cooperative: a task still in the queue is dropped and reported
  * as TaskFailed{"cancelled"}; for the running one the IO thread raises the
  * cancel flag (requestCancelRunning) that a body polls through its
- * TaskControl. The body reports whether it stopped for the flag
- * (TaskOutcome::Cancelled; the shot render does, at its next frame). The
- * CancelTask itself, dispatched once the body has returned, is answered
+ * TaskControl, and stopAll() raises it for every body, running or yet to
+ * run, when the server is going down. The body reports whether it stopped for
+ * the flag (TaskOutcome::Cancelled; the shot render does, at its next frame).
+ * The CancelTask itself, dispatched once the body has returned, is answered
  * "ok" when the body reported Cancelled and "task already finished"
  * otherwise: the body ignored the flag and Completed (every other body
  * today), or Failed for a reason of its own. A task dropped from the queue
@@ -151,7 +160,8 @@ struct RunningTask
  *   });
  *   setResults(reply, TaskStartedResult{taskId});
  *   ...
- *   runner.runOne(); // once per loop iteration
+ *   if (const auto ran = runner.runOne()) // once per loop iteration
+ *     runner.sendEnding(*ran);
  */
 struct ServerTaskRunner
 {
@@ -176,10 +186,19 @@ struct ServerTaskRunner
   // false when it is not.
   bool requestCancelRunning(uint64_t taskId);
 
-  // Runs the oldest queued task to completion, sending its progress and its
-  // one TaskCompleted/TaskFailed, and returns its ending; empty when the
-  // queue was empty.
+  // Any thread, signal-safe. The server is going down: from now on every
+  // body's TaskControl reports a cancel request, so a running render stops
+  // at its next frame.
+  void stopAll();
+
+  // Runs the oldest queued task to completion, sending its progress, and
+  // records its ending for the replay and returns it, unsent: the caller
+  // sends it with sendEnding() once whatever must precede it is done. Empty
+  // when the queue was empty.
   std::optional<FinishedTask> runOne();
+
+  // Sends the TaskCompleted/TaskFailed of a task runOne() returned.
+  void sendEnding(const FinishedTask &finished);
 
   // Forgets every queued task without a word: the session they were sent on
   // is gone and their ids mean nothing to the next client. An exclusive task
@@ -209,8 +228,8 @@ struct ServerTaskRunner
   };
 
   const FinishedTask *findFinished(uint64_t taskId) const;
-  // Sends the ending and keeps it for the replay, forgetting the oldest
-  // beyond HISTORY_CAP.
+  // Keeps the ending for the replay, forgetting the oldest beyond
+  // HISTORY_CAP.
   void recordEnding(const FinishedTask &finished);
 
   SendFunction m_send;
@@ -219,10 +238,12 @@ struct ServerTaskRunner
   std::optional<RunningTask> m_running;
   std::deque<FinishedTask> m_finished;
 
-  // Shared with the IO thread: the running task's id (0 = none) and the id a
-  // cancel was requested for (0 = none).
+  // Shared with the IO thread: the running task's id (0 = none), the id a
+  // cancel was requested for (0 = none), and whether every task was asked to
+  // stop (stopAll).
   std::atomic<uint64_t> m_runningId{0};
   std::atomic<uint64_t> m_cancelRequested{0};
+  std::atomic<bool> m_stopAll{false};
 };
 
 } // namespace vsr::scivis_studio::server

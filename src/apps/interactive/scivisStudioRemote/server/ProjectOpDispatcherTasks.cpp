@@ -13,8 +13,6 @@
 // vsr_scivis_studio_model
 #include "ProjectPersistence.h"
 #include "RenderShot.h"
-// vsr_core
-#include "vsr/core/Logging.hpp"
 // std
 #include <cstdint>
 #include <filesystem>
@@ -351,8 +349,9 @@ void ProjectOpDispatcher::handle(const IncorporateDatasetCandidate &req)
 
 // The offline render. Sync prelude first (the shot becomes active; the loop
 // rebinds and snapshots on it), then the exclusive task whose body walks
-// the frames, reporting each and stopping at the next boundary
-// once a cancel or the shutdown is asked for. Partial frames stay on disk;
+// the frames, reporting each and stopping at the next boundary once its
+// cancel flag is raised (a CancelTask, or the server going down: the
+// runner's stopAll). Partial frames stay on disk;
 // the ending carries how many were written. dispatch() has already refused
 // this request when a render is pending, and the host held it back until
 // the tasks sent before it had run, so the prelude reads the Project those
@@ -385,30 +384,11 @@ void ProjectOpDispatcher::handle(const RenderShot &req)
           // that found otherwise would render the wrong shot.
           if (project().activeShotId != shotId)
             return taskFailure("shot '" + shotId + "' is no longer active");
-          // The latch must be discarded before the task's ending goes
-          // out, and a frame's load or encode can throw out of
-          // renderActiveShotToFrames: the destructor covers the throw
-          // (which runTaskBody rethrows to the runner) and the return.
-          struct LatchGuard
-          {
-            const std::function<void()> &drop;
-            ~LatchGuard()
-            {
-              if (drop)
-                drop();
-            }
-          } latchGuard{m_host.dropLatchedInputs};
 
           RenderShotProgress progress;
           progress.onFrame = [&](int frame, int totalFrames) {
             if (task.cancelRequested())
               return false;
-            if (m_host.shutdownRequested && m_host.shutdownRequested()) {
-              vsr::core::logStatus(
-                  "[StudioServer] shot render stopped: server shutting"
-                  " down");
-              return false;
-            }
             task(uint64_t(frame) + 1,
                 uint64_t(totalFrames),
                 "frame " + std::to_string(frame + 1) + " of "

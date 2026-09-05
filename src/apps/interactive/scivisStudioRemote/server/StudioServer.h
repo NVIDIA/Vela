@@ -108,11 +108,12 @@ const char *toString(SessionState state);
  * queued or running, mutating requests are refused with "render in
  * progress"; frames pause because the body holds the loop; a CancelTask
  * naming the running render raises the runner's cancel flag from the IO
- * thread so the body stops at its next frame, as does Shutdown. Scene edits,
- * SetTime and Pick latched while the body ran targeted a scene the render
- * was mutating: they are dropped (the pick with an Error) the moment it
- * returns, before its ending goes out, so a client reacting to the ending
- * loses nothing.
+ * thread so the body stops at its next frame, as does a shutdown (the
+ * runner's stopAll). Scene edits, SetTime and Pick latched while the body
+ * ran targeted a scene the render was mutating: the runner hands the
+ * ending back unsent and the loop drops them (the pick with an Error)
+ * before sending it (runOneTask), however the body left -- the last frame,
+ * a cancel, or a throw -- so a client reacting to the ending loses nothing.
  * The bootstrap replays how tasks ended since the last one (task-status
  * replay) between UIState and the ProjectSnapshot. A second client connecting
  * over a live session replaces it; the replaced client is sent the farewell
@@ -289,6 +290,9 @@ struct StudioServer
   void resetSession();
   void bootstrap();
   void sendSceneSnapshot();
+  // Runs one queued Server Task and sends its ending; after the exclusive
+  // one (the shot render) the latch is discarded first.
+  void runOneTask();
   // Drops the edits and SetTime a shot render's body accumulated in the
   // latch and answers a Pick with an Error: they targeted a scene the render
   // was mutating.

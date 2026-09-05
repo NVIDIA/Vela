@@ -133,7 +133,7 @@ bool mutatesProject(const ProjectRequest &request);
  * Runs project requests on the loop thread against the server's
  * ProjectContext. Sync ops call the context and send the ProjectOpReply;
  * task ops reply with a TaskStartedResult and enqueue their body on the
- * ServerTaskRunner, which runOneTask() runs one at a time. Neither decides
+ * ServerTaskRunner, which the loop runs one at a time. Neither decides
  * whether a snapshot follows: every mutation the context makes moves its
  * revision() (a "failed" call that still left a mark too -- an import
  * whose ImportFailed record stays, a load that marks a dataset
@@ -146,10 +146,11 @@ bool mutatesProject(const ProjectRequest &request);
  * precedes the task's progress); because the prelude reads the Project,
  * RenderShot waits for queued tasks like a sync op does. While the render
  * is queued or running every mutating request is refused with "render in
- * progress" (refuses()) and the body polls its cancel flag once per frame;
- * however the body leaves -- the last frame, a cancel, or a throw out of a
- * frame's load or encode -- the host drops the inputs latched meanwhile
- * (Host::dropLatchedInputs) before the ending goes out. At dispatch a task
+ * progress" (refuses()) and the body polls its cancel flag once per frame
+ * (a CancelTask or the server's shutdown raise it); what happens once the
+ * body has left is the loop's, not the dispatcher's: the runner hands the
+ * ending back unsent and the loop drops the inputs latched meanwhile
+ * before sending it (StudioServer::runOneTask). At dispatch a task
  * op checks only what does not depend on the Project (the paths it names
  * lie inside the Data Roots); whatever it reads from the Project -- a
  * dataset id, the project's own directory -- it reads when the task runs,
@@ -165,7 +166,7 @@ bool mutatesProject(const ProjectRequest &request);
  *   ...
  *   ProjectOpDispatcher dispatcher(host);
  *   dispatcher.dispatch(request); // loop thread
- *   dispatcher.runOneTask();      // once per loop iteration
+ *   tasks.runOne();               // the loop, once per iteration
  */
 struct ProjectOpDispatcher
 {
@@ -179,13 +180,6 @@ struct ProjectOpDispatcher
     std::function<void()> flushScenePushes;
     // The UI-state tree stored with the project (ui-state round trip).
     protocol::SubtreePtr *uiState{nullptr};
-    // The server is going down: a running render stops at its next frame.
-    std::function<bool()> shutdownRequested;
-    // The render body has left, by return or by throw: scene edits, SetTime
-    // and Pick latched while it held the loop targeted the scene it was
-    // mutating and are dropped now, before the ending is sent, so nothing
-    // sent in reaction to the ending is lost with them.
-    std::function<void()> dropLatchedInputs;
   };
 
   explicit ProjectOpDispatcher(Host host);
@@ -202,9 +196,6 @@ struct ProjectOpDispatcher
   // Serves `request`; a refused one gets its ProjectOpReply error and
   // nothing else happens.
   void dispatch(const ProjectRequest &request);
-
-  // Runs one queued task, if any.
-  void runOneTask();
 
  private:
   // One handler per alternative. The task-launching ones (RequestKind::Task
