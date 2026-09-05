@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -153,12 +154,13 @@ class Application : public vsr::ui::imgui::Application
   // reports the viewport's real size, not the undocked first-frame size.
   int m_autoConnectInFrames{-1};
 
+  // The dirty-project question awaiting an answer; engaged while it shows.
   struct Confirmation
   {
-    bool open{false};
     std::string message;
     std::function<void()> onConfirm;
-  } m_confirmation;
+  };
+  std::optional<Confirmation> m_confirmation;
 
   StatusOverlay m_statusOverlay;
   // The task state last announced, so each ending toasts once (a replay

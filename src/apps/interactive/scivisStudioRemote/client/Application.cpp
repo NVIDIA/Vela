@@ -4,6 +4,7 @@
 #include "Application.h"
 // scivisStudioClient
 #include "StudioViewport.h"
+#include "UICommon.h"
 #include "modals/AddFileAnimationDatasetDialog.h"
 #include "modals/AddStaticDatasetDialog.h"
 #include "modals/ProjectLocationDialog.h"
@@ -307,7 +308,7 @@ void Application::uiFrameStart()
   if (!typing && ImGui::IsKeyPressed(ImGuiKey_Escape))
     appContext()->clearSelected();
   if (!typing && ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_S)
-      && !m_confirmation.open && !m_projectLocationDialog->visible()
+      && !m_confirmation && !m_projectLocationDialog->visible()
       && !m_addStaticDatasetDialog->visible()
       && !m_addFileAnimationDialog->visible())
     saveProject();
@@ -497,38 +498,27 @@ void Application::uiLostBanner()
   }
 }
 
+// Opened here, at the frame's top level, rather than where requestDirtyAction
+// ran (a menu item, the Project window's button): ImGui hashes a popup id
+// with whatever is pushed at the time, and this is where it is drawn.
 void Application::uiConfirmation()
 {
-  if (!m_confirmation.open)
+  if (!m_confirmation)
     return;
-
   if (!ImGui::IsPopupOpen(CONFIRMATION_POPUP))
     ImGui::OpenPopup(CONFIRMATION_POPUP);
-
   const ImGuiViewport *mainViewport = ImGui::GetMainViewport();
   ImGui::SetNextWindowPos(
       mainViewport->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-  if (!ImGui::BeginPopupModal(
-          CONFIRMATION_POPUP, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+  const auto choice = ui::confirmModal(
+      CONFIRMATION_POPUP, m_confirmation->message, "Discard", true);
+  if (choice == ui::ConfirmChoice::Pending)
     return;
-
-  ImGui::TextWrapped("%s", m_confirmation.message.c_str());
-  ImGui::Spacing();
-  if (ImGui::Button("Discard")) {
-    m_confirmation.open = false;
-    ImGui::CloseCurrentPopup();
-    auto action = std::move(m_confirmation.onConfirm);
-    m_confirmation.onConfirm = nullptr;
-    if (action)
-      action();
-  }
-  ImGui::SameLine();
-  if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-    m_confirmation.open = false;
-    m_confirmation.onConfirm = nullptr;
-    ImGui::CloseCurrentPopup();
-  }
-  ImGui::EndPopup();
+  // Taken out before it runs: the action may ask another question.
+  Confirmation answered = std::move(*m_confirmation);
+  m_confirmation.reset();
+  if (choice == ui::ConfirmChoice::Confirmed && answered.onConfirm)
+    answered.onConfirm();
 }
 
 // Modals are not in the window array; their owner renders them.
@@ -601,9 +591,7 @@ void Application::requestDirtyAction(
     action();
     return;
   }
-  m_confirmation.open = true;
-  m_confirmation.message = std::move(message);
-  m_confirmation.onConfirm = std::move(action);
+  m_confirmation = Confirmation{std::move(message), std::move(action)};
 }
 
 SubtreePtr Application::buildUIState()
