@@ -215,11 +215,6 @@ bool ProjectOpDispatcher::refuses(const ProjectRequest &request) const
   return renderActive() && mutatesProject(request);
 }
 
-void ProjectOpDispatcher::runOneTask()
-{
-  m_host.tasks->runOne();
-}
-
 bool ProjectOpDispatcher::renderActive() const
 {
   return m_host.tasks->exclusivePending();

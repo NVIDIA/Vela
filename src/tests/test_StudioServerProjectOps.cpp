@@ -328,6 +328,13 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
 {
   std::vector<Message> sent;
   ServerTaskRunner runner([&](Message &&msg) { sent.push_back(msg); });
+  // What the loop does: run one, then send its ending.
+  const auto run = [&] {
+    const auto ran = runner.runOne();
+    if (ran)
+      runner.sendEnding(*ran);
+    return ran;
+  };
 
   GIVEN("three queued tasks")
   {
@@ -378,9 +385,9 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
       AND_WHEN("the queue is run down")
       {
         sent.clear();
-        const auto ranFirst = runner.runOne();
-        const auto ranSecond = runner.runOne();
-        const auto ranNothing = runner.runOne();
+        const auto ranFirst = run();
+        const auto ranSecond = run();
+        const auto ranNothing = run();
 
         THEN("each task reports progress and exactly one ending, in order")
         {
@@ -421,7 +428,7 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
       {
         REQUIRE(runner.queued() == 0);
         REQUIRE(sent.empty());
-        REQUIRE_FALSE(runner.runOne());
+        REQUIRE_FALSE(run());
       }
     }
 
@@ -442,7 +449,7 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
         REQUIRE(runner.queued() == 1);
         REQUIRE(runner.exclusivePending());
         REQUIRE(sent.empty());
-        const auto ran = runner.runOne();
+        const auto ran = run();
         REQUIRE(ran);
         REQUIRE(ran->taskId == render);
         REQUIRE(ranExclusive);
@@ -492,7 +499,7 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
 
     WHEN("it runs")
     {
-      const auto ran = runner.runOne();
+      const auto ran = run();
 
       THEN("it stopped at the next frame boundary and reports how far it got")
       {
@@ -524,7 +531,7 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
 
       AND_WHEN("the next bootstrap replays the history")
       {
-        runner.runOne(); // 'after' completes
+        run(); // 'after' completes
         sent.clear();
         std::vector<Message> replayed;
         runner.replayTo([&](Message &&msg) { replayed.push_back(msg); });
@@ -558,6 +565,74 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
     }
   }
 
+  GIVEN("an exclusive task and a task behind it, with the server going down")
+  {
+    bool renderSawStop = false;
+    bool afterSawStop = false;
+    runner.enqueue(
+        "render",
+        [&](const TaskControl &task) {
+          renderSawStop = task.cancelRequested();
+          return TaskResult{};
+        },
+        true);
+    runner.enqueue("after", [&](const TaskControl &task) {
+      afterSawStop = task.cancelRequested();
+      return TaskResult{};
+    });
+
+    WHEN("stopAll() is called before they run")
+    {
+      runner.stopAll();
+      const auto render = run();
+      const auto after = run();
+
+      THEN(
+          "every body reads a cancel request, and the exclusive flag rides "
+          "the ending")
+      {
+        REQUIRE(render);
+        REQUIRE(render->exclusive);
+        REQUIRE(renderSawStop);
+        REQUIRE(after);
+        REQUIRE_FALSE(after->exclusive);
+        REQUIRE(afterSawStop);
+      }
+    }
+  }
+
+  GIVEN("a task whose ending is not sent until the loop says so")
+  {
+    const auto id = runner.enqueue("import", [&](const TaskControl &) {
+      TaskResult result;
+      result.message = "dataset_0001";
+      return result;
+    });
+
+    WHEN("it runs")
+    {
+      const auto ran = runner.runOne();
+
+      THEN("runOne() records the ending and hands it back unsent")
+      {
+        REQUIRE(ran);
+        REQUIRE(ran->taskId == id);
+        REQUIRE(sent.empty());
+        REQUIRE(runner.finished().size() == 1);
+        std::string error;
+        REQUIRE_FALSE(runner.cancel(id, &error));
+        REQUIRE(error == "task already finished");
+
+        runner.sendEnding(*ran);
+        REQUIRE(sent.size() == 1);
+        const auto completed = decode<TaskCompleted>(sent.back());
+        REQUIRE(completed);
+        REQUIRE(completed->taskId == id);
+        REQUIRE(completed->message == "dataset_0001");
+      }
+    }
+  }
+
   GIVEN("a task that never polls its cancel flag")
   {
     uint64_t import = 0;
@@ -573,7 +648,7 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
 
     WHEN("it completes despite the flag")
     {
-      const auto ran = runner.runOne();
+      const auto ran = run();
       REQUIRE(ran);
       REQUIRE(ran->result.outcome == TaskOutcome::Completed);
 
@@ -603,7 +678,7 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
 
     WHEN("it runs")
     {
-      const auto ran = runner.runOne();
+      const auto ran = run();
       REQUIRE(ran);
       REQUIRE(ran->result.outcome == TaskOutcome::Failed);
 
@@ -624,7 +699,7 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
   {
     for (size_t i = 0; i < ServerTaskRunner::HISTORY_CAP + 3; ++i) {
       runner.enqueue("n", [&](const TaskControl &) { return TaskResult{}; });
-      runner.runOne();
+      run();
     }
 
     THEN("the oldest are forgotten first")
@@ -643,7 +718,7 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
       setResults(result, RenderShotResult{4});
       return result;
     });
-    runner.runOne();
+    run();
 
     THEN("TaskCompleted carries the frame count and the replay repeats it")
     {
@@ -676,8 +751,8 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
 
     WHEN("the queue is run")
     {
-      const auto ranThrower = runner.runOne();
-      const auto ranAfter = runner.runOne();
+      const auto ranThrower = run();
+      const auto ranAfter = run();
 
       THEN("the exception becomes that task's TaskFailed and the next runs")
       {

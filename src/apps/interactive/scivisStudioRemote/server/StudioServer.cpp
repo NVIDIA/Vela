@@ -119,11 +119,6 @@ ProjectOpDispatcher::Host StudioServer::makeDispatcherHost()
       sendSceneSnapshot();
   };
   host.uiState = &m_uiState;
-  host.shutdownRequested = [this] { return m_shutdownRequested.load(); };
-  host.dropLatchedInputs = [this] {
-    std::lock_guard lock(m_controlMutex);
-    discardStaleInputs(m_control);
-  };
   return host;
 }
 
@@ -492,7 +487,7 @@ void StudioServer::run()
     // render outlives its session (it runs with nobody listening and the
     // next bootstrap replays its ending).
     if (sessionEstablished() || m_dispatcher.renderActive())
-      m_dispatcher.runOneTask();
+      runOneTask();
     followProjectRevisions();
     // A Frame still on the wire gets a moment to finish before time moves
     // on, so a fast link never sees a header skip a frame; on a slow link
@@ -527,6 +522,22 @@ void StudioServer::run()
 void StudioServer::requestShutdown()
 {
   m_shutdownRequested.store(true);
+  m_tasks.stopAll();
+}
+
+void StudioServer::runOneTask()
+{
+  const auto ran = m_tasks.runOne();
+  if (!ran)
+    return;
+  if (ran->exclusive) {
+    // Whatever the render body latched while it held the loop targeted the
+    // scene it was mutating; drop it before the ending, so nothing sent in
+    // reaction to the ending is lost with it.
+    std::lock_guard lock(m_controlMutex);
+    discardStaleInputs(m_control);
+  }
+  m_tasks.sendEnding(*ran);
 }
 
 void StudioServer::applyControlState()

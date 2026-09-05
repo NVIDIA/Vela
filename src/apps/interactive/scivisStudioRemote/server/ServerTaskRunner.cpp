@@ -56,10 +56,12 @@ TaskResult taskFailure(std::string error)
 
 TaskControl::TaskControl(uint64_t taskId,
     ReportFunction report,
-    const std::atomic<uint64_t> *cancelRequested)
+    const std::atomic<uint64_t> *cancelRequested,
+    const std::atomic<bool> *stopAll)
     : m_taskId(taskId),
       m_report(std::move(report)),
-      m_cancelRequested(cancelRequested)
+      m_cancelRequested(cancelRequested),
+      m_stopAll(stopAll)
 {}
 
 void TaskControl::operator()(const std::string &phase) const
@@ -75,7 +77,8 @@ void TaskControl::operator()(
 
 bool TaskControl::cancelRequested() const
 {
-  return m_cancelRequested && m_cancelRequested->load() == m_taskId;
+  return (m_stopAll && m_stopAll->load())
+      || (m_cancelRequested && m_cancelRequested->load() == m_taskId);
 }
 
 uint64_t TaskControl::taskId() const
@@ -141,6 +144,7 @@ bool ServerTaskRunner::cancel(uint64_t taskId, std::string *error)
   finished.result = taskFailure("cancelled");
   m_queue.erase(itr);
   recordEnding(finished);
+  sendEnding(finished);
   return true;
 }
 
@@ -152,6 +156,11 @@ bool ServerTaskRunner::requestCancelRunning(uint64_t taskId)
   vsr::core::logStatus("[StudioServer] task %llu asked to stop",
       static_cast<unsigned long long>(taskId));
   return true;
+}
+
+void ServerTaskRunner::stopAll()
+{
+  m_stopAll.store(true);
 }
 
 std::optional<FinishedTask> ServerTaskRunner::runOne()
@@ -180,11 +189,13 @@ std::optional<FinishedTask> ServerTaskRunner::runOne()
         event.message = message;
         m_send(encode(event));
       },
-      &m_cancelRequested);
+      &m_cancelRequested,
+      &m_stopAll);
 
   FinishedTask finished;
   finished.taskId = task.id;
   finished.description = std::move(task.description);
+  finished.exclusive = task.exclusive;
   try {
     finished.result = task.body(control);
   } catch (const std::exception &e) {
@@ -209,6 +220,11 @@ std::optional<FinishedTask> ServerTaskRunner::runOne()
   }
   recordEnding(finished);
   return finished;
+}
+
+void ServerTaskRunner::sendEnding(const FinishedTask &finished)
+{
+  m_send(endingOf(finished.taskId, finished.result));
 }
 
 void ServerTaskRunner::dropQueued()
@@ -287,7 +303,6 @@ const FinishedTask *ServerTaskRunner::findFinished(uint64_t taskId) const
 
 void ServerTaskRunner::recordEnding(const FinishedTask &finished)
 {
-  m_send(endingOf(finished.taskId, finished.result));
   m_finished.push_back(finished);
   if (m_finished.size() > HISTORY_CAP)
     m_finished.pop_front();
