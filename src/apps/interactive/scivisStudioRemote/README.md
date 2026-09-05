@@ -1410,6 +1410,23 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
     waiting for the tick (`datasets.studio`, `errors_project.studio`); the
     GUI client no longer sends it. The `[StudioServer]` task scenario
     removes an unloaded dataset's asset and waits for the unasked snapshot.
+  - *The transport knows when its queue drains.* `NetworkServer` polled its
+    own write queue every 5 ms (`replace_when_drained`, `writes_idle()`,
+    `REPLACE_DRAIN_POLL`) to learn when a replaced connection's farewell had
+    left. `start_next_write` already sees the queue empty; it now runs the
+    one-shot continuation `when_writes_idle()` armed there, and the 200 ms
+    `m_replaceTimer` stays only as the deadline fallback -- whichever fires
+    first adopts the replacement (`adopt_replacement`) and disarms the
+    other. `writes_idle()`, the poll constant and the `mutable` on
+    `m_writeMutex` are gone. The two generation counters that guarded the
+    same hazard (`m_socketGeneration`, IO thread only, and the client's
+    atomic `m_connectGeneration`) are one atomic `m_socketGeneration`, bumped
+    by `notify_connected()` and by the client's `connect()`/`disconnect()`.
+    The `stop()` cleanup the document listed for removal stays: it drops the
+    replacement socket and re-arms the accept after a stop inside the drain
+    window, which the continuation does not make redundant
+    (`followups/16-network-stop-cleanup.md`). `[Network]` passes unchanged,
+    the M7 farewell-before-close scenario included.
 
 ### Spec conformance
 

@@ -96,8 +96,11 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
   void close_socket(const boost::system::error_code &reason);
   // Settles every queued write with `error`.
   void fail_pending_writes(const boost::system::error_code &error);
-  // True when nothing is queued or on the wire.
-  bool writes_idle() const;
+  // Runs `fn` once nothing is queued or on the wire: at once when that is
+  // already so, else from the completion of the last queued write. One at a
+  // time -- a later call replaces a continuation that has not run, and an
+  // empty `fn` disarms it. IO thread only.
+  void when_writes_idle(std::function<void()> fn);
 
   asio::io_context m_io_context;
   std::thread m_io_thread;
@@ -110,11 +113,12 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
   // True once the current connection's loss has been reported (or when there
   // is no connection to report on); armed by notify_connected().
   std::atomic<bool> m_disconnectReported{true};
-  // Bumped by notify_connected(). Every read and write completion carries the
-  // generation it was issued under and does nothing when the socket has been
-  // replaced since, so a cut-off operation on the old socket never closes the
-  // new one. IO thread only.
-  uint64_t m_socketGeneration{0};
+  // Bumped by notify_connected() and by the client's connect()/disconnect().
+  // Every read, write, resolve and connect completion carries the generation
+  // it was issued under and stands down when the socket has been replaced
+  // (or the attempt superseded) since, so a cut-off operation on the old
+  // socket never closes the new one.
+  std::atomic<uint64_t> m_socketGeneration{0};
   // False from stop_messaging() until the next start_messaging(); the
   // completions a stop cuts off see it false and stand down.
   std::atomic<bool> m_messagingActive{false};
@@ -140,9 +144,11 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
   template <typename T>
   Message make_message(uint8_t type, const T *data, uint32_t count);
 
-  mutable std::mutex m_writeMutex;
+  std::mutex m_writeMutex;
   std::deque<std::shared_ptr<PendingWrite>> m_pendingWrites;
   bool m_writeInProgress{false};
+  // The continuation when_writes_idle() holds until the queue drains.
+  std::function<void()> m_onWritesIdle;
 
   std::mutex m_lifecycleMutex;
   ConnectHandler m_connectHandler;
@@ -193,9 +199,10 @@ struct NetworkServer : public NetworkChannel
   // The accepted socket becomes the connection: announced, read from, and
   // the next accept armed.
   void adopt_connection(tcp::socket &&socket);
-  // Waits (polling on the IO thread) for the old connection's writes to
-  // drain, until `deadline`, then closes it and adopts m_replacement.
-  void replace_when_drained(std::chrono::steady_clock::time_point deadline);
+  // Closes the old connection and adopts m_replacement; runs when the old
+  // connection's writes have drained or, failing that, when the drain
+  // deadline (m_replaceTimer) passes, whichever comes first.
+  void adopt_replacement();
 
   tcp::acceptor m_acceptor;
   std::atomic<bool> m_acceptPending{false};
@@ -227,14 +234,11 @@ struct NetworkClient : public NetworkChannel
   NetworkClient(const std::string &host, uint16_t port);
   ~NetworkClient() override = default;
 
+  // Both bump m_socketGeneration, so a resolve or connect completion from
+  // an earlier attempt stands down instead of acting on the socket a later
+  // attempt owns.
   void connect(const std::string &host, uint16_t port);
   void disconnect();
-
- private:
-  // Bumped by every connect() and disconnect(); a resolve or connect
-  // completion from an earlier attempt compares and stands down instead of
-  // acting on the socket a later attempt owns.
-  std::atomic<uint64_t> m_connectGeneration{0};
 };
 
 // Inline definitions /////////////////////////////////////////////////////////

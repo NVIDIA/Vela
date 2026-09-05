@@ -13,9 +13,8 @@ namespace vsr::network {
 namespace {
 
 // How long a replaced connection's queued writes (a farewell among them) get
-// to leave before its socket closes, and how often the queue is looked at.
+// to leave before its socket closes regardless.
 constexpr std::chrono::milliseconds REPLACE_DRAIN_TIMEOUT{200};
-constexpr std::chrono::milliseconds REPLACE_DRAIN_POLL{5};
 
 } // namespace
 
@@ -184,12 +183,12 @@ void NetworkChannel::read_header()
 
   auto message = std::make_shared<Message>();
   auto self = shared_from_this();
-  const auto generation = m_socketGeneration;
+  const auto generation = m_socketGeneration.load();
   asio::async_read(m_socket,
       asio::buffer(&message->header, sizeof(Message::Header)),
       [this, self, message, generation](const boost::system::error_code &error,
           std::size_t bytes_transferred) {
-        if (generation != m_socketGeneration)
+        if (generation != m_socketGeneration.load())
           return; // a cut-off read on a socket since replaced
         log_asio_error(error, "ReadHeader");
         if (!error)
@@ -215,12 +214,12 @@ void NetworkChannel::read_payload(std::shared_ptr<Message> msg)
   msg->payload.resize(msg->header.payload_length);
 
   auto self = shared_from_this();
-  const auto generation = m_socketGeneration;
+  const auto generation = m_socketGeneration.load();
   asio::async_read(m_socket,
       asio::buffer(msg->payload.data(), msg->header.payload_length),
       [this, self, msg, generation](const boost::system::error_code &error,
           std::size_t bytes_transferred) {
-        if (generation != m_socketGeneration)
+        if (generation != m_socketGeneration.load())
           return;
         log_asio_error(error, "ReadPayload");
         if (!error) {
@@ -313,13 +312,23 @@ void NetworkChannel::enqueue_write(std::shared_ptr<PendingWrite> pending)
 void NetworkChannel::start_next_write()
 {
   std::shared_ptr<PendingWrite> pending;
+  std::function<void()> onIdle;
   {
     std::lock_guard lock(m_writeMutex);
     if (m_pendingWrites.empty()) {
+      // The queue just drained: this is the moment when_writes_idle() waits
+      // for.
       m_writeInProgress = false;
-      return;
+      onIdle = std::move(m_onWritesIdle);
+      m_onWritesIdle = nullptr;
+    } else {
+      pending = m_pendingWrites.front();
     }
-    pending = m_pendingWrites.front();
+  }
+  if (!pending) {
+    if (onIdle)
+      onIdle();
+    return;
   }
 
   if (!m_messagingActive.load() || !isConnected()) {
@@ -328,12 +337,12 @@ void NetworkChannel::start_next_write()
   }
 
   auto self = shared_from_this();
-  const auto generation = m_socketGeneration;
+  const auto generation = m_socketGeneration.load();
   asio::async_write(m_socket,
       asio::buffer(pending->wireData),
       [self, pending, generation](
           const boost::system::error_code &error, std::size_t) {
-        if (generation != self->m_socketGeneration) {
+        if (generation != self->m_socketGeneration.load()) {
           // The socket was replaced under this write; its queue was failed
           // with it, so only the promise (if still open) needs settling.
           self->complete_write(
@@ -370,10 +379,18 @@ void NetworkChannel::fail_pending_writes(const boost::system::error_code &error)
     complete_write(p, error);
 }
 
-bool NetworkChannel::writes_idle() const
+void NetworkChannel::when_writes_idle(std::function<void()> fn)
 {
-  std::lock_guard lock(m_writeMutex);
-  return m_pendingWrites.empty() && !m_writeInProgress;
+  {
+    std::lock_guard lock(m_writeMutex);
+    if (fn && (!m_pendingWrites.empty() || m_writeInProgress)) {
+      m_onWritesIdle = std::move(fn);
+      return;
+    }
+    m_onWritesIdle = nullptr;
+  }
+  if (fn)
+    fn();
 }
 
 void NetworkChannel::complete_write(
@@ -436,10 +453,12 @@ void NetworkServer::stop()
 {
   stop_messaging();
   // A stop while a replacement waited for the old connection to drain: the
-  // IO thread is joined, so the wait is cancelled here (its handler runs
-  // aborted at the next start), the replacement is dropped, and the accept
-  // that adopting it would have re-armed is re-armed now.
+  // IO thread is joined, so the drain continuation and the deadline are
+  // disarmed here (the timer's handler runs aborted at the next start), the
+  // replacement is dropped, and the accept that adopting it would have
+  // re-armed is re-armed now.
   if (m_replacement) {
+    when_writes_idle(nullptr);
     m_replaceTimer.cancel();
     m_replacement.reset();
     start_accept();
@@ -473,10 +492,12 @@ void NetworkServer::start_accept()
         if (m_replaceHandler)
           m_replaceHandler();
         m_replacement = socket;
-        const auto deadline =
-            std::chrono::steady_clock::now() + REPLACE_DRAIN_TIMEOUT;
-        boost::asio::post(m_io_context,
-            [this, deadline]() { replace_when_drained(deadline); });
+        m_replaceTimer.expires_after(REPLACE_DRAIN_TIMEOUT);
+        m_replaceTimer.async_wait([this](const boost::system::error_code &e) {
+          if (!e)
+            adopt_replacement(); // the drain took too long
+        });
+        when_writes_idle([this]() { adopt_replacement(); });
       });
 }
 
@@ -488,21 +509,13 @@ void NetworkServer::adopt_connection(tcp::socket &&socket)
   start_accept(); // Accept next connection
 }
 
-void NetworkServer::replace_when_drained(
-    std::chrono::steady_clock::time_point deadline)
+void NetworkServer::adopt_replacement()
 {
   if (!m_replacement || !m_messagingActive.load())
-    return;
-  if (m_socket.is_open() && !writes_idle()
-      && std::chrono::steady_clock::now() < deadline) {
-    m_replaceTimer.expires_after(REPLACE_DRAIN_POLL);
-    m_replaceTimer.async_wait(
-        [this, deadline](const boost::system::error_code &error) {
-          if (!error)
-            replace_when_drained(deadline);
-        });
-    return;
-  }
+    return; // already adopted, or the server stopped meanwhile
+  // Whichever of the drain and the deadline came first, the other is off.
+  m_replaceTimer.cancel();
+  when_writes_idle(nullptr);
   fail_pending_writes(asio::error::connection_aborted);
   close_socket(asio::error::connection_aborted);
   auto replacement = std::move(m_replacement);
@@ -523,7 +536,7 @@ void NetworkClient::connect(const std::string &host, uint16_t port)
   // a failed or closed connection behaves like a first connect. The latch is
   // armed here so that a failure below is reported exactly once.
   start_messaging();
-  const auto generation = ++m_connectGeneration;
+  const auto generation = ++m_socketGeneration;
   m_disconnectReported.store(false);
 
   const auto service = std::to_string(port);
@@ -536,7 +549,7 @@ void NetworkClient::connect(const std::string &host, uint16_t port)
       [this, resolver, generation, host, service](
           const boost::system::error_code &error,
           const tcp::resolver::results_type &endpoints) {
-        if (generation != m_connectGeneration.load())
+        if (generation != m_socketGeneration.load())
           return; // superseded by a later connect() or disconnect()
         if (error) {
           vsr::core::logError("[NetworkClient] Cannot resolve %s:%s: %s",
@@ -551,7 +564,7 @@ void NetworkClient::connect(const std::string &host, uint16_t port)
             endpoints,
             [this, generation](
                 const boost::system::error_code &error, const tcp::endpoint &) {
-              if (generation != m_connectGeneration.load())
+              if (generation != m_socketGeneration.load())
                 return;
               if (!error) {
                 vsr::core::logStatus("[NetworkClient] Connected to server");
@@ -568,7 +581,7 @@ void NetworkClient::connect(const std::string &host, uint16_t port)
 
 void NetworkClient::disconnect()
 {
-  ++m_connectGeneration;
+  ++m_socketGeneration;
   stop_messaging();
   vsr::core::logStatus("[NetworkClient] Disconnected from server");
 }
