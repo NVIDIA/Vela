@@ -184,6 +184,9 @@ Application::Application(int argc, const char **argv)
                                            const TimeAdvanceWarning &warning) {
     onTimeAdvanceWarning(warning);
   };
+  m_connection->projectOps().onTaskEnded = [this](const TaskRecord &task) {
+    onTaskEnded(task);
+  };
 
   m_editorContext.connection = m_connection.get();
   m_editorContext.reportError = [this](const std::string &message) {
@@ -287,7 +290,6 @@ void Application::uiFrameStart()
   // Everything the network delivered since the last frame lands in the
   // mirror, replica and callbacks here, before any panel reads them.
   m_connection->poll();
-  watchTasks();
 
   if (ImGui::BeginMainMenuBar()) {
     uiMainMenuBar();
@@ -632,38 +634,11 @@ void Application::onTimeAdvanceWarning(const TimeAdvanceWarning &warning)
   m_connection->clearTimeAdvanceWarning();
 }
 
-// Announces each task's completion or failure once; the task panel shows
-// the rest.
-void Application::watchTasks()
+// Each ending toasts once (ProjectOps decides what is news); the task panel
+// shows the rest.
+void Application::onTaskEnded(const TaskRecord &task)
 {
-  const auto &tasks = m_connection->projectOps().tasks();
-
-  // Forget the tasks the panel cleared (kept: the ones still listed).
-  vsr::core::FlatMap<uint64_t, AnnouncedTask> stillListed;
-  for (const auto &[announcedId, announced] : m_announcedTasks) {
-    const bool present = std::any_of(tasks.begin(),
-        tasks.end(),
-        [&](const TaskRecord &t) { return t.taskId == announcedId; });
-    if (present)
-      stillListed[announcedId] = announced;
-  }
-  m_announcedTasks = std::move(stillListed);
-
-  for (const TaskRecord &task : tasks) {
-    const auto *announced = m_announcedTasks.at(task.taskId);
-    if (announced && announced->generation == task.generation
-        && announced->state == task.state)
-      continue;
-    // The record says so itself: the client failed it at BootstrapBegin and
-    // the banner already said the connection was lost. Not recorded either,
-    // so the ending the replay brings (Failed again, with the server's
-    // reason) still toasts.
-    if (task.announced)
-      continue;
-    m_announcedTasks[task.taskId] = {task.generation, task.state};
-    if (task.finished())
-      notify(task.describeEnding(), task.state == TaskState::Failed);
-  }
+  notify(task.describeEnding(), task.state == TaskState::Failed);
 }
 
 // Connection lifecycle ///////////////////////////////////////////////////////

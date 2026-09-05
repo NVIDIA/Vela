@@ -1442,7 +1442,7 @@ SCENARIO("scivisStudioServer and the client core render shots and recover",
             const TaskRecord *replayed = ops.task(third);
             REQUIRE(replayed);
             REQUIRE(replayed->state == TaskState::Completed);
-            REQUIRE_FALSE(replayed->announced);
+            REQUIRE_FALSE(replayed->failedByClient);
             REQUIRE(replayed->framesCompleted == FRAMES);
             REQUIRE(replayed->lastProgress.message == outputDirectory.string());
             REQUIRE(fileCount(outputDirectory) >= FRAMES);

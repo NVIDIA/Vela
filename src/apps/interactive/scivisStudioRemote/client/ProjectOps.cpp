@@ -681,13 +681,12 @@ TaskRecord &ProjectOps::startOver(uint64_t taskId)
     m_tasks.push_back(std::move(fresh));
     return m_tasks.back();
   }
-  fresh.generation = existing->generation + 1;
-  // A record this client failed at BootstrapBegin (the only setter of
-  // announced) is one the server never finished, so a render it named may
-  // still be running and still refusing edits: keep the flag so the editors
-  // go on saying so. The label is not kept -- see startOver's comment in the
-  // header -- and a TaskStarted sets render itself right after.
-  fresh.render = existing->announced && existing->render;
+  // A record this client failed at BootstrapBegin is one the server never
+  // finished, so a render it named may still be running and still refusing
+  // edits: keep the flag so the editors go on saying so. The label is not
+  // kept -- see startOver's comment in the header -- and a TaskStarted sets
+  // render itself right after.
+  fresh.render = existing->failedByClient && existing->render;
   *existing = std::move(fresh);
   return *existing;
 }
@@ -757,9 +756,26 @@ void ProjectOps::handleTaskProgress(const TaskProgress &progress)
   record.lastProgress.message = progress.message;
 }
 
+// An ending is news unless the server already ended the record: the replay
+// repeats endings this client may have seen live.
+bool ProjectOps::endingIsNews(const TaskRecord &record)
+{
+  return !record.finished() || record.failedByClient;
+}
+
+void ProjectOps::announceEnding(const TaskRecord &record)
+{
+  if (!onTaskEnded)
+    return;
+  // A copy: the callback may clear the finished records.
+  const TaskRecord ended = record;
+  onTaskEnded(ended);
+}
+
 void ProjectOps::handleTaskCompleted(const TaskCompleted &completed)
 {
   TaskRecord &record = recordFor(completed.taskId);
+  const bool news = endingIsNews(record);
   record.state = TaskState::Completed;
   // The last phase text stays for the panel row; the outcome, when the task
   // has one, replaces it there and is what the completion toast quotes.
@@ -768,16 +784,21 @@ void ProjectOps::handleTaskCompleted(const TaskCompleted &completed)
     record.lastProgress.message = completed.message;
   record.framesCompleted = framesCompletedOf(completed);
   record.error.clear();
-  record.announced = false;
+  record.failedByClient = false;
+  if (news)
+    announceEnding(record);
 }
 
 void ProjectOps::handleTaskFailed(const TaskFailed &failed)
 {
   TaskRecord &record = recordFor(failed.taskId);
+  const bool news = endingIsNews(record);
   record.state = TaskState::Failed;
   record.error = failed.error;
   record.framesCompleted = framesCompletedOf(failed); // a cancelled render's
-  record.announced = false;
+  record.failedByClient = false;
+  if (news)
+    announceEnding(record);
 }
 
 bool ProjectOps::failOldestNamed(const std::string &message)
@@ -814,7 +835,7 @@ void ProjectOps::failUnfinishedTasks(const std::string &error)
       continue;
     record.state = TaskState::Failed;
     record.error = error;
-    record.announced = true; // the banner says it
+    record.failedByClient = true; // not an ending: the banner says it
   }
 }
 

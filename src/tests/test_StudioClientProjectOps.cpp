@@ -80,6 +80,7 @@ struct Fixture
   ServerConnection connection;
   int bootstraps{0};
   int projectReplaced{0};
+  std::vector<TaskRecord> ended; // every onTaskEnded, in order
   std::mutex mutex;
   std::vector<SeenRequest> seen;
 };
@@ -98,6 +99,9 @@ Fixture::Fixture(ConnectionTimings timings) : connection(&mirror, timings)
   };
   connection.onBootstrapComplete = [this]() { bootstraps++; };
   connection.onProjectReplaced = [this]() { projectReplaced++; };
+  connection.projectOps().onTaskEnded = [this](const TaskRecord &task) {
+    ended.push_back(task);
+  };
 }
 
 Fixture::~Fixture()
@@ -801,7 +805,8 @@ SCENARIO("ServerConnection applies snapshots outside the bootstrap",
 
       f.server.sendBootstrap();
 
-      THEN("the record is failed with 'connection lost', already announced")
+      THEN(
+          "the record is failed with 'connection lost' by the client, silently")
       {
         REQUIRE(f.waitConnectedAndBootstrapped(2));
         REQUIRE(f.ops().tasks().size() == 1);
@@ -810,9 +815,9 @@ SCENARIO("ServerConnection applies snapshots outside the bootstrap",
         REQUIRE(task);
         REQUIRE(task->state == TaskState::Failed);
         REQUIRE(task->error == "connection lost");
-        REQUIRE(task->announced);
-        REQUIRE(task->generation == 0);
+        REQUIRE(task->failedByClient);
         REQUIRE(task->label == "importing");
+        REQUIRE(f.ended.empty()); // the banner said it
       }
     }
 
@@ -898,13 +903,19 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
         const TaskRecord *task = f.ops().task(5);
         REQUIRE(task);
         REQUIRE(task->state == TaskState::Completed);
-        REQUIRE_FALSE(task->announced);
-        REQUIRE(task->generation == 0);
+        REQUIRE_FALSE(task->failedByClient);
         REQUIRE(task->label == "Open project '/d/p'");
         REQUIRE(task->lastProgress.message == "/d/p/renders/shot_0001");
         REQUIRE(task->outcome == "/d/p/renders/shot_0001");
         REQUIRE(task->framesCompleted == 3);
         REQUIRE(task->error.empty());
+        // The one ending announced: the replayed outcome, not the client's
+        // own failures of 5 and 6 at BootstrapBegin.
+        REQUIRE(f.ended.size() == 1);
+        REQUIRE(f.ended[0].taskId == 5);
+        REQUIRE(f.ended[0].state == TaskState::Completed);
+        REQUIRE(f.ended[0].describeEnding()
+            == "Open project '/d/p' completed (3 frames): /d/p/renders/shot_0001");
       }
 
       THEN("the task the server never mentioned again stays failed")
@@ -913,7 +924,7 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
         REQUIRE(task);
         REQUIRE(task->state == TaskState::Failed);
         REQUIRE(task->error == "connection lost");
-        REQUIRE(task->announced);
+        REQUIRE(task->failedByClient);
       }
 
       THEN("the running task is created, labelled with its description")
@@ -974,7 +985,6 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
         const TaskRecord *task = f.ops().task(7);
         REQUIRE(task);
         REQUIRE(task->state == TaskState::Running);
-        REQUIRE(task->generation == 1);
         REQUIRE(task->render);
         // The editors go on refusing edits while the server does.
         REQUIRE(f.ops().renderActive());
@@ -1010,8 +1020,7 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
         const TaskRecord *task = f.ops().task(6);
         REQUIRE(task);
         REQUIRE(task->state == TaskState::Running);
-        REQUIRE_FALSE(task->announced);
-        REQUIRE(task->generation == 1);
+        REQUIRE_FALSE(task->failedByClient);
         REQUIRE(task->label == "import '/d/f.obj'");
         REQUIRE(task->error.empty());
         REQUIRE(task->lastProgress.current == 3);
@@ -1028,8 +1037,7 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
       f.server.send(encode(done));
       REQUIRE(pollUntil(f.connection,
           [&] { return f.ops().task(5)->state == TaskState::Completed; }));
-      REQUIRE_FALSE(f.ops().task(5)->announced);
-      REQUIRE(f.ops().task(5)->generation == 0);
+      REQUIRE(f.ended.size() == 1);
 
       const auto again = f.ops().importStaticDataset(
           "n", "/d/f.obj", vsr::io::ImporterType::OBJ, nullptr);
@@ -1044,7 +1052,6 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
             [&] { return f.ops().task(5)->state == TaskState::Queued; }));
         const TaskRecord *task = f.ops().task(5);
         REQUIRE(task->label == "Import '/d/f.obj'");
-        REQUIRE(task->generation == 1);
         REQUIRE(task->outcome.empty());
         REQUIRE(task->lastProgress.message.empty());
         REQUIRE(f.ops().tasksActive());
@@ -1064,6 +1071,42 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
         REQUIRE(pollUntil(f.connection,
             [&] { return f.ops().task(5)->outcome == "dataset_0001"; }));
         REQUIRE(f.ops().task(5)->state == TaskState::Completed);
+        // The new task under the reused id ended too.
+        REQUIRE(f.ended.size() == 2);
+        REQUIRE(f.ended[1].label == "Import '/d/f.obj'");
+      }
+    }
+
+    WHEN("the next bootstrap replays an ending this client saw live")
+    {
+      TaskCompleted done;
+      done.taskId = 5;
+      done.message = "/d/p";
+      f.server.send(encode(done));
+      REQUIRE(pollUntil(f.connection, [&] { return f.ended.size() == 1; }));
+      REQUIRE(f.ended[0].taskId == 5);
+
+      // The server replays every ending it has not replayed before, whether
+      // or not the session that saw it live was this one.
+      f.server.bootstrap.push_back(encode(done));
+      f.server.sendBootstrap();
+      REQUIRE(f.waitConnectedAndBootstrapped(2));
+
+      THEN("the record stays completed and the ending is not announced again")
+      {
+        const TaskRecord *task = f.ops().task(5);
+        REQUIRE(task);
+        REQUIRE(task->state == TaskState::Completed);
+        REQUIRE(task->outcome == "/d/p");
+        REQUIRE_FALSE(task->failedByClient);
+        REQUIRE(f.ended.size() == 1);
+      }
+
+      THEN("the record the client failed meanwhile announced nothing")
+      {
+        REQUIRE(f.ops().task(6)->state == TaskState::Failed);
+        REQUIRE(f.ops().task(6)->failedByClient);
+        REQUIRE(f.ended.size() == 1);
       }
     }
 
@@ -1087,7 +1130,6 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
             [&] { return f.ops().task(6)->state == TaskState::Running; }));
         const TaskRecord *task = f.ops().task(6);
         REQUIRE(task->label == "render shot 'shot_0002'");
-        REQUIRE(task->generation == 1);
         REQUIRE(task->lastProgress.total == 4);
         REQUIRE(f.ops().tasksActive());
       }
@@ -1098,7 +1140,7 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
     {
       f.server.sendBootstrap();
       REQUIRE(f.waitConnectedAndBootstrapped(2));
-      REQUIRE(f.ops().task(5)->announced);
+      REQUIRE(f.ops().task(5)->failedByClient);
 
       const auto again = f.ops().importStaticDataset(
           "n", "/d/f.obj", vsr::io::ImporterType::OBJ, nullptr);
@@ -1112,8 +1154,7 @@ SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
         REQUIRE(pollUntil(f.connection,
             [&] { return f.ops().task(5)->state == TaskState::Queued; }));
         const TaskRecord *task = f.ops().task(5);
-        REQUIRE_FALSE(task->announced);
-        REQUIRE(task->generation == 1);
+        REQUIRE_FALSE(task->failedByClient);
         REQUIRE(task->label == "Import '/d/f.obj'");
         REQUIRE(task->error.empty());
         REQUIRE(f.ops().tasksActive());

@@ -86,16 +86,11 @@ struct TaskRecord
   // Launched by this client's RenderShot: the editors show a note while it
   // is active, since the server refuses edits until the render ends.
   bool render{false};
-  // Counts the times the record started over: a TaskStarted reply, or
-  // progress for a record that finished, names a new task under a reused id
-  // (a restarted server counts from 1 again), so the record is reset as if
-  // newly heard of. Lets a watcher tell a new task's ending from a repeat.
-  uint32_t generation{0};
-  // The user has already been told of this state, so it must not toast: set
-  // with the client's own "connection lost" failure at BootstrapBegin (the
-  // banner says it), cleared as soon as the server speaks of the task again
-  // (the replay's ending overwrites the record, its progress starts it over).
-  bool announced{false};
+  // Failed by this client at BootstrapBegin ("connection lost"), not by the
+  // server, which may still be running the task: the replay's word on it is
+  // news (its ending fires onTaskEnded, its progress starts the record over
+  // keeping `render`). Cleared as soon as the server speaks of the task.
+  bool failedByClient{false};
 
   bool finished() const;
   // The one-line toast for a finished record: "<label> completed (N frames):
@@ -325,6 +320,15 @@ struct ProjectOps
   // decides).
   RequestHandle cancelTask(uint64_t taskId, ReplyCallback callback);
 
+  // Runs with the record a TaskCompleted/TaskFailed just finished, from
+  // handleTaskCompleted/Failed (so from ServerConnection::poll()), once per
+  // ending that is news: a replayed ending for a record already finished by
+  // the server's word is not (the bootstrap replays every ending it has not
+  // replayed before, whether or not this client saw it live), and the
+  // client's own failures at BootstrapBegin are not endings (the banner says
+  // it) -- the replay's ending for such a record is.
+  std::function<void(const TaskRecord &)> onTaskEnded;
+
   // In the order the tasks were first heard of.
   const std::vector<TaskRecord> &tasks() const;
   const TaskRecord *task(uint64_t taskId) const;
@@ -359,8 +363,9 @@ struct ProjectOps
   // callback may send anew.
   void failAllPending(const std::string &error);
   // BootstrapBegin: every Queued or Running record becomes Failed with
-  // `error`, already `announced`; the bootstrap's task-status replay then
-  // overwrites the ones the server still knows about like any other event.
+  // `error`, marked `failedByClient` and without an onTaskEnded; the
+  // bootstrap's task-status replay then overwrites the ones the server still
+  // knows about like any other event.
   void failUnfinishedTasks(const std::string &error);
   void clearTasks();
   // Delivers the failures of sends the connection dropped.
@@ -396,11 +401,15 @@ struct ProjectOps
   // The record of `taskId`, made if new.
   TaskRecord &recordFor(uint64_t taskId);
   // The record of `taskId` as if newly heard of (Queued "Task N", nothing
-  // else kept), its generation bumped when there was one: a new task under
-  // the id. The one exception is `render` on a record this client failed at
-  // BootstrapBegin (announced): the server never ended that task, so a
-  // render it named may still be running and still refusing edits.
+  // else kept): a new task under the id. The one exception is `render` on a
+  // record this client failed at BootstrapBegin (failedByClient): the server
+  // never ended that task, so a render it named may still be running and
+  // still refusing edits.
   TaskRecord &startOver(uint64_t taskId);
+  // Whether a TaskCompleted/TaskFailed for `record` would be news, and the
+  // onTaskEnded call for one that is.
+  static bool endingIsNews(const TaskRecord &record);
+  void announceEnding(const TaskRecord &record);
   Pending *findPending(uint64_t requestId);
   const Pending *findPending(uint64_t requestId) const;
 

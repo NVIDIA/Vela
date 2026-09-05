@@ -14,8 +14,6 @@
 #include "StudioProtocol.h"
 // vsr_ui_imgui
 #include "vsr/ui/imgui/Application.h"
-// vsr_core
-#include "vsr/core/FlatMap.hpp"
 // std
 #include <cstdint>
 #include <functional>
@@ -117,7 +115,7 @@ class Application : public vsr::ui::imgui::Application
   // Log line plus toast.
   void notify(const std::string &text, bool isError);
   void onTimeAdvanceWarning(const protocol::TimeAdvanceWarning &warning);
-  void watchTasks();
+  void onTaskEnded(const TaskRecord &task);
 
   void uiMenu_File();
   void uiMenu_Studio();
@@ -163,14 +161,6 @@ class Application : public vsr::ui::imgui::Application
   std::optional<Confirmation> m_confirmation;
 
   StatusOverlay m_statusOverlay;
-  // The task state last announced, so each ending toasts once (a replay
-  // included) and a task started over under a reused id toasts again.
-  struct AnnouncedTask
-  {
-    uint32_t generation{0};
-    TaskState state{TaskState::Queued};
-  };
-  vsr::core::FlatMap<uint64_t, AnnouncedTask> m_announcedTasks;
 };
 
 } // namespace vsr::scivis_studio::client
