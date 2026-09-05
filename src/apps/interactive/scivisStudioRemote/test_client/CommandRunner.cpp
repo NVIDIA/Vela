@@ -47,11 +47,14 @@ CommandRunner::Run::Run(Fn f) : fn(std::move(f)) {}
 const std::vector<CommandRunner::CommandSpec> &CommandRunner::commands()
 {
   using K = Kind;
-  const Describe lightRigCreated = createdResult<LightRigCreatedResult>(
+  static const Describe lightRigCreated = createdResult<LightRigCreatedResult>(
       &LightRigCreatedResult::lightRigId, "lightRigId", "lastLightRigId");
-  const Describe cameraRigCreated = createdResult<CameraRigCreatedResult>(
-      &CameraRigCreatedResult::cameraRigId, "cameraRigId", "lastCameraRigId");
-  const Describe shotCreated = createdResult<ShotCreatedResult>(
+  static const Describe cameraRigCreated =
+      createdResult<CameraRigCreatedResult>(
+          &CameraRigCreatedResult::cameraRigId,
+          "cameraRigId",
+          "lastCameraRigId");
+  static const Describe shotCreated = createdResult<ShotCreatedResult>(
       &ShotCreatedResult::shotId, "shotId", "lastShotId");
 
   // Sorted by name; findCommand() searches it as such. A row's usage is what
@@ -119,7 +122,8 @@ const std::vector<CommandRunner::CommandSpec> &CommandRunner::commands()
           "TCP connect, exchange Hellos (exact PROTOCOL_VERSION match), await"
           " the complete Bootstrap"},
       {"create-camera-rig", "[name]", 0, 1, K::Request,
-          nameRequest<CreateCameraRig>(&CreateCameraRig::name, cameraRigCreated),
+          nameRequest<CreateCameraRig>(
+              &CreateCameraRig::name, cameraRigCreated),
           "sync; cameraRigId="},
       {"create-color-map", "[name]", 0, 1, K::Request,
           &CommandRunner::createColorMap,
@@ -228,7 +232,8 @@ const std::vector<CommandRunner::CommandSpec> &CommandRunner::commands()
               &RefreshDatasetAvailability::datasetId),
           "sync; checks again whether the dataset's source is there"},
       {"reimport-dataset", "<id>", 1, 1, K::Request,
-          idRequest<ReimportDataset>(&ReimportDataset::datasetId, taskStarted()),
+          idRequest<ReimportDataset>(
+              &ReimportDataset::datasetId, taskStarted()),
           "task: import the dataset again from its source"},
       {"remove-camera-rig", "<id>", 1, 1, K::Request,
           idRequest<RemoveCameraRig>(&RemoveCameraRig::cameraRigId),
@@ -268,8 +273,9 @@ const std::vector<CommandRunner::CommandSpec> &CommandRunner::commands()
           "task: render the shot's frames offline; needs a saved project,"
           " refused while another render is queued or running; the end carries"
           " framesCompleted= and the output directory as its message"},
-      {"request-array-histogram", "<type> <index> <bins> (or <type:index> <bins>)",
-          2, 3, K::Request, &CommandRunner::requestArrayHistogram,
+      {"request-array-histogram",
+          "<type> <index> <bins> (or <type:index> <bins>)", 2, 3, K::Request,
+          &CommandRunner::requestArrayHistogram,
           "sync: bin a scalar array on the server; the reply prints bins= min="
           " max= nonFinite= and fills the histogram.* values (cleared when the"
           " request goes out)"},
@@ -473,7 +479,7 @@ std::optional<std::string> CommandRunner::variable(
 
 // Pumping and output /////////////////////////////////////////////////////////
 
-CommandRunner::Wait CommandRunner::pumpUntil(
+CommandRunner::WaitEnd CommandRunner::pumpUntil(
     const std::function<bool()> &done, Deadline deadline, LossEnds lossEnds)
 {
   // Every event is taken as one, so the `done` test and the Error and Lost
@@ -482,7 +488,7 @@ CommandRunner::Wait CommandRunner::pumpUntil(
       [&](const Event &) { return false; }, deadline, nullptr, lossEnds, done);
 }
 
-CommandRunner::Wait CommandRunner::pumpUntilEvent(
+CommandRunner::WaitEnd CommandRunner::pumpUntilEvent(
     const std::function<bool(Event &)> &accept,
     Deadline deadline,
     Event *matched,
@@ -492,7 +498,7 @@ CommandRunner::Wait CommandRunner::pumpUntilEvent(
   // A wait that starts in Lost is not ended by it (await-lost, sleep after a
   // loss); one that watches the link go is.
   const bool wasLost = m_session->state() == SessionState::Lost;
-  Wait wait = Wait::TimedOut;
+  WaitEnd wait = WaitEnd::TimedOut;
   m_session->pollUntil(
       [&] {
         Event event;
@@ -503,23 +509,23 @@ CommandRunner::Wait CommandRunner::pumpUntilEvent(
           if (accepted) {
             if (matched)
               *matched = std::move(event);
-            wait = Wait::Done;
+            wait = WaitEnd::Done;
             return true;
           }
           if (event.name == "Error") {
             // Not what this command waited for: the server is objecting to
             // something, and the rest of the queue is the next command's.
-            wait = Wait::Error;
+            wait = WaitEnd::Error;
             return true;
           }
         }
         if (done && done()) {
-          wait = Wait::Done;
+          wait = WaitEnd::Done;
           return true;
         }
         if (lossEnds == LossEnds::Wait && !wasLost
             && m_session->state() == SessionState::Lost) {
-          wait = Wait::Lost;
+          wait = WaitEnd::Lost;
           return true;
         }
         return false;
@@ -529,17 +535,17 @@ CommandRunner::Wait CommandRunner::pumpUntilEvent(
 }
 
 std::string CommandRunner::waitFailure(
-    Wait wait, const std::string &awaited, Deadline deadline) const
+    WaitEnd wait, const std::string &awaited, Deadline deadline) const
 {
   switch (wait) {
-  case Wait::Lost:
+  case WaitEnd::Lost:
     return "connection lost while waiting for " + awaited + ": "
         + m_session->failure();
-  case Wait::Error:
+  case WaitEnd::Error:
     return "server answered Error " + quoted(m_session->lastError())
         + " while waiting for " + awaited;
-  case Wait::TimedOut:
-  case Wait::Done:
+  case WaitEnd::TimedOut:
+  case WaitEnd::Done:
     break;
   }
   return "no " + awaited + " within " + std::to_string(deadline.count())

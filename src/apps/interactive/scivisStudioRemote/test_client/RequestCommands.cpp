@@ -250,25 +250,23 @@ CommandRunner::Failure CommandRunner::discoverDatasetCandidates(
   return sendRequest(DiscoverDatasetCandidates{},
       deadline,
       modifiers,
-      [](CommandRunner &,
-          const ProjectOpReply &reply,
-          Event &event,
-          std::vector<Event> &following) -> Failure {
-        const auto result = results<DiscoverDatasetCandidatesResult>(reply);
-        if (!result)
-          return "the reply carries no DiscoverDatasetCandidatesResult";
-        event.fields.emplace_back(
-            "candidates", std::to_string(result->candidates.size()));
-        for (const auto &candidate : result->candidates) {
-          Event entry{"DatasetCandidate", {}};
-          entry.fields.emplace_back(
-              "file", quoted(candidate.file.generic_string()));
-          entry.fields.emplace_back(
-              "proposedName", quoted(candidate.proposedName));
-          following.push_back(std::move(entry));
-        }
-        return {};
-      });
+      withResult<DiscoverDatasetCandidatesResult>(
+          "DiscoverDatasetCandidatesResult",
+          [](CommandRunner &,
+              const DiscoverDatasetCandidatesResult &result,
+              Event &event,
+              std::vector<Event> &following) {
+            event.fields.emplace_back(
+                "candidates", std::to_string(result.candidates.size()));
+            for (const auto &candidate : result.candidates) {
+              Event entry{"DatasetCandidate", {}};
+              entry.fields.emplace_back(
+                  "file", quoted(candidate.file.generic_string()));
+              entry.fields.emplace_back(
+                  "proposedName", quoted(candidate.proposedName));
+              following.push_back(std::move(entry));
+            }
+          }));
 }
 
 CommandRunner::Failure CommandRunner::incorporateDatasetCandidate(
@@ -342,21 +340,19 @@ CommandRunner::Failure CommandRunner::requestArrayHistogram(
   return sendRequest(std::move(request),
       deadline,
       modifiers,
-      [](CommandRunner &self,
-          const ProjectOpReply &reply,
-          Event &event,
-          std::vector<Event> &) -> Failure {
-        const auto result = results<ArrayHistogramResult>(reply);
-        if (!result)
-          return "the reply carries no ArrayHistogramResult";
-        event.fields.emplace_back("bins", std::to_string(result->bins.size()));
-        event.fields.emplace_back("min", numberText(result->minValue));
-        event.fields.emplace_back("max", numberText(result->maxValue));
-        event.fields.emplace_back(
-            "nonFinite", std::to_string(result->nonFinite));
-        self.m_histogram = *result;
-        return {};
-      });
+      withResult<ArrayHistogramResult>("ArrayHistogramResult",
+          [](CommandRunner &self,
+              const ArrayHistogramResult &result,
+              Event &event,
+              std::vector<Event> &) {
+            event.fields.emplace_back(
+                "bins", std::to_string(result.bins.size()));
+            event.fields.emplace_back("min", numberText(result.minValue));
+            event.fields.emplace_back("max", numberText(result.maxValue));
+            event.fields.emplace_back(
+                "nonFinite", std::to_string(result.nonFinite));
+            self.m_histogram = result;
+          }));
 }
 
 CommandRunner::Failure CommandRunner::addLight(
@@ -369,19 +365,16 @@ CommandRunner::Failure CommandRunner::addLight(
   return sendRequest(std::move(request),
       deadline,
       modifiers,
-      [](CommandRunner &self,
-          const ProjectOpReply &reply,
-          Event &event,
-          std::vector<Event> &) -> Failure {
-        const auto result = results<LightAddedResult>(reply);
-        if (!result)
-          return "the reply carries no LightAddedResult";
-        event.fields.emplace_back("lightNode", nodeText(result->lightNode));
-        self.m_variables["lastLightLayer"] = result->lightNode.layerName;
-        self.m_variables["lastLightNode"] =
-            std::to_string(result->lightNode.nodeIndex);
-        return {};
-      });
+      withResult<LightAddedResult>("LightAddedResult",
+          [](CommandRunner &self,
+              const LightAddedResult &result,
+              Event &event,
+              std::vector<Event> &) {
+            event.fields.emplace_back("lightNode", nodeText(result.lightNode));
+            self.m_variables["lastLightLayer"] = result.lightNode.layerName;
+            self.m_variables["lastLightNode"] =
+                std::to_string(result.lightNode.nodeIndex);
+          }));
 }
 
 CommandRunner::Failure CommandRunner::removeLight(
@@ -408,22 +401,20 @@ CommandRunner::Failure CommandRunner::createColorMap(
   return sendRequest(std::move(request),
       deadline,
       modifiers,
-      [](CommandRunner &self,
-          const ProjectOpReply &reply,
-          Event &event,
-          std::vector<Event> &) -> Failure {
-        const auto result = results<ColorMapCreatedResult>(reply);
-        if (!result)
-          return "the reply carries no ColorMapCreatedResult";
-        event.fields.emplace_back("colorMapId", result->colorMapId);
-        event.fields.emplace_back("object", objectRefText(result->object));
-        self.m_variables["lastColorMapId"] = result->colorMapId;
-        self.m_variables["lastObjectRef"] = objectRefText(result->object);
-        self.m_variables["lastObjectType"] = shortTypeName(result->object.type);
-        self.m_variables["lastObjectIndex"] =
-            std::to_string(result->object.objectIndex);
-        return {};
-      });
+      withResult<ColorMapCreatedResult>("ColorMapCreatedResult",
+          [](CommandRunner &self,
+              const ColorMapCreatedResult &result,
+              Event &event,
+              std::vector<Event> &) {
+            event.fields.emplace_back("colorMapId", result.colorMapId);
+            event.fields.emplace_back("object", objectRefText(result.object));
+            self.m_variables["lastColorMapId"] = result.colorMapId;
+            self.m_variables["lastObjectRef"] = objectRefText(result.object);
+            self.m_variables["lastObjectType"] =
+                shortTypeName(result.object.type);
+            self.m_variables["lastObjectIndex"] =
+                std::to_string(result.object.objectIndex);
+          }));
 }
 
 // Remote Browse //////////////////////////////////////////////////////////////
@@ -434,24 +425,22 @@ CommandRunner::Failure CommandRunner::listRoots(
   return sendRequest(ListRoots{},
       deadline,
       modifiers,
-      [](CommandRunner &self,
-          const ProjectOpReply &reply,
-          Event &event,
-          std::vector<Event> &following) -> Failure {
-        const auto result = results<ListRootsResult>(reply);
-        if (!result)
-          return "the reply carries no ListRootsResult";
-        event.fields.emplace_back(
-            "roots", std::to_string(result->roots.size()));
-        for (const auto &root : result->roots) {
-          Event entry{"DataRoot", {}};
-          entry.fields.emplace_back("path", quoted(root.generic_string()));
-          following.push_back(std::move(entry));
-        }
-        if (!result->roots.empty())
-          self.m_variables["dataRoot"] = result->roots.front().generic_string();
-        return {};
-      });
+      withResult<ListRootsResult>("ListRootsResult",
+          [](CommandRunner &self,
+              const ListRootsResult &result,
+              Event &event,
+              std::vector<Event> &following) {
+            event.fields.emplace_back(
+                "roots", std::to_string(result.roots.size()));
+            for (const auto &root : result.roots) {
+              Event entry{"DataRoot", {}};
+              entry.fields.emplace_back("path", quoted(root.generic_string()));
+              following.push_back(std::move(entry));
+            }
+            if (!result.roots.empty())
+              self.m_variables["dataRoot"] =
+                  result.roots.front().generic_string();
+          }));
 }
 
 CommandRunner::Failure CommandRunner::listDirectory(
@@ -463,26 +452,24 @@ CommandRunner::Failure CommandRunner::listDirectory(
   return sendRequest(std::move(request),
       deadline,
       modifiers,
-      [](CommandRunner &self,
-          const ProjectOpReply &reply,
-          Event &event,
-          std::vector<Event> &following) -> Failure {
-        const auto result = results<ListDirectoryResult>(reply);
-        if (!result)
-          return "the reply carries no ListDirectoryResult";
-        self.m_browseEntries = result->entries;
-        event.fields.emplace_back(
-            "entries", std::to_string(result->entries.size()));
-        for (const auto &e : result->entries) {
-          Event entry{"DirectoryEntry", {}};
-          entry.fields.emplace_back("name", quoted(e.name));
-          entry.fields.emplace_back("kind", toString(e.kind));
-          entry.fields.emplace_back("size", std::to_string(e.size));
-          entry.fields.emplace_back("mtime", std::to_string(e.mtimeSeconds));
-          following.push_back(std::move(entry));
-        }
-        return {};
-      });
+      withResult<ListDirectoryResult>("ListDirectoryResult",
+          [](CommandRunner &self,
+              const ListDirectoryResult &result,
+              Event &event,
+              std::vector<Event> &following) {
+            self.m_browseEntries = result.entries;
+            event.fields.emplace_back(
+                "entries", std::to_string(result.entries.size()));
+            for (const auto &e : result.entries) {
+              Event entry{"DirectoryEntry", {}};
+              entry.fields.emplace_back("name", quoted(e.name));
+              entry.fields.emplace_back("kind", toString(e.kind));
+              entry.fields.emplace_back("size", std::to_string(e.size));
+              entry.fields.emplace_back(
+                  "mtime", std::to_string(e.mtimeSeconds));
+              following.push_back(std::move(entry));
+            }
+          }));
 }
 
 // Tasks //////////////////////////////////////////////////////////////////////
@@ -512,18 +499,15 @@ CommandRunner::Failure CommandRunner::cancelTask(
 
 CommandRunner::Describe CommandRunner::taskStarted(TaskMessage message)
 {
-  return [message](CommandRunner &self,
-             const ProjectOpReply &reply,
-             Event &event,
-             std::vector<Event> &) -> Failure {
-    const auto started = results<TaskStartedResult>(reply);
-    if (!started)
-      return "the reply carries no TaskStartedResult";
-    event.fields.emplace_back("taskId", std::to_string(started->taskId));
-    self.m_variables["lastTaskId"] = std::to_string(started->taskId);
-    self.m_taskMessages[started->taskId] = message;
-    return {};
-  };
+  return withResult<TaskStartedResult>("TaskStartedResult",
+      [message](CommandRunner &self,
+          const TaskStartedResult &started,
+          Event &event,
+          std::vector<Event> &) {
+        event.fields.emplace_back("taskId", std::to_string(started.taskId));
+        self.m_variables["lastTaskId"] = std::to_string(started.taskId);
+        self.m_taskMessages[started.taskId] = message;
+      });
 }
 
 // Shot arguments /////////////////////////////////////////////////////////////

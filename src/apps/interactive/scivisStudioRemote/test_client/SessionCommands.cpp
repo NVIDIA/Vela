@@ -148,7 +148,7 @@ CommandRunner::Failure CommandRunner::expectPong(
   Event next;
   const auto wait = pumpUntilEvent(
       [](const Event &e) { return e.name != "Frame"; }, deadline, &next);
-  if (wait != Wait::Done)
+  if (wait != WaitEnd::Done)
     return waitFailure(wait, "Pong", deadline);
   if (next.name != "Pong")
     return "expected Pong, got " + next.text();
@@ -160,8 +160,8 @@ CommandRunner::Failure CommandRunner::awaitLost(
 {
   const auto wait = pumpUntil(
       [&] { return m_session->state() == SessionState::Lost; }, deadline);
-  if (wait != Wait::Done) {
-    return wait == Wait::Error
+  if (wait != WaitEnd::Done) {
+    return wait == WaitEnd::Error
         ? waitFailure(wait, "the loss", deadline)
         : std::string("still ") + toString(m_session->state()) + " after "
             + std::to_string(deadline.count()) + " ms";
@@ -192,7 +192,7 @@ CommandRunner::Failure CommandRunner::sleep(const Command &command)
   // Passing time is the point, so a loss meanwhile is the next command's to
   // notice; an Error is still an answer nobody asked for.
   const auto wait = pumpUntil([] { return false; }, ms, LossEnds::Nothing);
-  if (wait == Wait::Error)
+  if (wait == WaitEnd::Error)
     return waitFailure(wait, "the sleep to end", ms);
   return {};
 }
@@ -208,7 +208,7 @@ CommandRunner::Failure CommandRunner::expectError(
       [](const Event &e) { return e.name != "Frame" && e.name != "Pong"; },
       deadline,
       &next);
-  if (wait != Wait::Done)
+  if (wait != WaitEnd::Done)
     return waitFailure(wait, "server message", deadline);
   if (next.name != "Error")
     return "expected Error, got " + next.text();
@@ -250,7 +250,7 @@ CommandRunner::Failure CommandRunner::setFrameConfig(
     return error;
   const auto wait = pumpUntilEvent(
       [](const Event &e) { return e.name == "FrameConfig"; }, deadline);
-  if (wait != Wait::Done)
+  if (wait != WaitEnd::Done)
     return waitFailure(wait, "FrameConfig ack", deadline);
   return {};
 }
@@ -309,7 +309,7 @@ CommandRunner::Failure CommandRunner::awaitFrame(
         return seen >= count;
       },
       deadline);
-  if (wait != Wait::Done) {
+  if (wait != WaitEnd::Done) {
     return waitFailure(wait,
         "frame " + std::to_string(seen + 1) + " of " + std::to_string(count),
         deadline);
@@ -337,7 +337,7 @@ CommandRunner::Failure CommandRunner::awaitFrameAt(
         return false;
       },
       deadline);
-  if (wait != Wait::Done)
+  if (wait != WaitEnd::Done)
     return waitFailure(wait, "a Frame at frame " + wanted, deadline);
   return {};
 }
@@ -355,7 +355,7 @@ CommandRunner::Failure CommandRunner::awaitFrameAdvance(
   const size_t target = m_session->framesAdvanced() + count;
   const auto wait = pumpUntil(
       [&] { return m_session->framesAdvanced() >= target; }, deadline);
-  if (wait != Wait::Done) {
+  if (wait != WaitEnd::Done) {
     const auto seen = target - m_session->framesAdvanced();
     return waitFailure(wait,
         "frame advance " + std::to_string(count - seen + 1) + " of "
@@ -372,7 +372,7 @@ CommandRunner::Failure CommandRunner::awaitWarning(
     return lost;
   const auto wait = pumpUntilEvent(
       [](const Event &e) { return e.name == "TimeAdvanceWarning"; }, deadline);
-  if (wait != Wait::Done)
+  if (wait != WaitEnd::Done)
     return waitFailure(wait, "TimeAdvanceWarning", deadline);
   return {};
 }
