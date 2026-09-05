@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // catch
+#include "StudioProtocolTestHelpers.h"
 #include "catch.hpp"
 // vsr_scivis_studio_protocol
 #include "BrowseMessages.h"
@@ -19,20 +20,6 @@ using vsr::scivis_studio::SceneNodeRef;
 using vsr::scivis_studio::SceneObjectRef;
 
 namespace {
-
-// Result payloads have no MESSAGE_TYPE; push them through a serialized tree.
-template <typename T>
-bool roundTripNode(const T &in, T &out)
-{
-  vsr::core::DataTree tree;
-  toNode(in, tree.root());
-  vsr::network::MessagePayload bytes;
-  tree.write(bytes);
-  vsr::core::DataTree copy;
-  if (!copy.read(bytes))
-    return false;
-  return fromNode(copy.root(), out);
-}
 
 SceneObjectRef makeRef(anari::DataType type, size_t index)
 {
@@ -56,14 +43,12 @@ SCENARIO("Remote Browse payloads", "[StudioProtocol]")
 
     THEN("they round-trip with their requestId")
     {
-      const auto r = decode<ListRoots>(encode(roots));
-      REQUIRE(r);
-      REQUIRE(r->requestId == 11);
+      const auto r = roundTrip(roots);
+      REQUIRE(r.requestId == 11);
 
-      const auto d = decode<ListDirectory>(encode(dir));
-      REQUIRE(d);
-      REQUIRE(d->requestId == 12);
-      REQUIRE(d->directory == std::filesystem::path("/data/run 1"));
+      const auto d = roundTrip(dir);
+      REQUIRE(d.requestId == 12);
+      REQUIRE(d.directory == std::filesystem::path("/data/run 1"));
     }
 
     THEN("a ListDirectory without a directory is rejected")
@@ -82,16 +67,15 @@ SCENARIO("Remote Browse payloads", "[StudioProtocol]")
 
     THEN("roots keep their order")
     {
-      ListRootsResult out;
-      REQUIRE(roundTripNode(result, out));
+      const auto out = roundTripTree(result);
       REQUIRE(out.roots == result.roots);
     }
 
     THEN("an empty result reads back empty")
     {
-      ListRootsResult out;
-      out.roots = {"/stale"};
-      REQUIRE(roundTripNode(ListRootsResult{}, out));
+      ListRootsResult stale;
+      stale.roots = {"/stale"};
+      const auto out = roundTripTree(ListRootsResult{}, stale);
       REQUIRE(out.roots.empty());
     }
   }
@@ -107,8 +91,7 @@ SCENARIO("Remote Browse payloads", "[StudioProtocol]")
 
     THEN("entry order, kinds, sizes and mtimes survive")
     {
-      ListDirectoryResult out;
-      REQUIRE(roundTripNode(result, out));
+      const auto out = roundTripTree(result);
       REQUIRE(out.entries.size() == 4);
       REQUIRE(out.entries[0].name == "zeta.vsr");
       REQUIRE(out.entries[0].kind == EntryKind::File);
@@ -145,8 +128,7 @@ SCENARIO("Remote Browse payloads", "[StudioProtocol]")
 
     THEN("an empty listing reads back empty")
     {
-      ListDirectoryResult out;
-      REQUIRE(roundTripNode(ListDirectoryResult{}, out));
+      const auto out = roundTripTree(ListDirectoryResult{});
       REQUIRE(out.entries.empty());
     }
   }
@@ -176,47 +158,40 @@ SCENARIO("Playback payloads", "[StudioProtocol]")
 
     THEN("each round-trips")
     {
-      const auto p = decode<SetPlaying>(encode(play));
-      REQUIRE(p);
-      REQUIRE(p->requestId == 21);
-      REQUIRE(p->shotId == "shot-a");
-      REQUIRE(p->playing);
+      const auto p = roundTrip(play);
+      REQUIRE(p.requestId == 21);
+      REQUIRE(p.shotId == "shot-a");
+      REQUIRE(p.playing);
 
-      const auto t = decode<SetTime>(encode(time));
-      REQUIRE(t);
-      REQUIRE(t->shotId == "shot-a");
-      REQUIRE(t->frame == 42);
+      const auto t = roundTrip(time);
+      REQUIRE(t.shotId == "shot-a");
+      REQUIRE(t.frame == 42);
 
-      const auto w = decode<TimeAdvanceWarning>(encode(warning));
-      REQUIRE(w);
-      REQUIRE(w->shotId == "shot-a");
-      REQUIRE(w->frame == 43);
-      REQUIRE(w->message == "frame 43: file missing");
+      const auto w = roundTrip(warning);
+      REQUIRE(w.shotId == "shot-a");
+      REQUIRE(w.frame == 43);
+      REQUIRE(w.message == "frame 43: file missing");
 
-      const auto r = decode<RenderShot>(encode(render));
-      REQUIRE(r);
-      REQUIRE(r->requestId == 22);
-      REQUIRE(r->shotId == "shot-b");
+      const auto r = roundTrip(render);
+      REQUIRE(r.requestId == 22);
+      REQUIRE(r.shotId == "shot-b");
     }
 
     THEN("playing false and frame 0 survive as values, not absences")
     {
       play.playing = false;
       time.frame = 0;
-      const auto p = decode<SetPlaying>(encode(play));
-      REQUIRE(p);
-      REQUIRE_FALSE(p->playing);
-      const auto t = decode<SetTime>(encode(time));
-      REQUIRE(t);
-      REQUIRE(t->frame == 0);
+      const auto p = roundTrip(play);
+      REQUIRE_FALSE(p.playing);
+      const auto t = roundTrip(time);
+      REQUIRE(t.frame == 0);
     }
 
     THEN("a warning without a message reads back empty")
     {
       warning.message.clear();
-      const auto w = decode<TimeAdvanceWarning>(encode(warning));
-      REQUIRE(w);
-      REQUIRE(w->message.empty());
+      const auto w = roundTrip(warning);
+      REQUIRE(w.message.empty());
     }
 
     THEN("a SetTime with a mistyped frame is rejected")
@@ -241,59 +216,53 @@ SCENARIO("Optimistic scene edit payloads", "[StudioProtocol]")
     THEN("a float value round-trips with its type")
     {
       edit.value = vsr::core::Any(0.25f);
-      const auto out = decode<SetObjectParameter>(encode(edit));
-      REQUIRE(out);
-      REQUIRE(out->object.type == ANARI_GEOMETRY);
-      REQUIRE(out->object.objectIndex == 7);
-      REQUIRE(out->name == "radius");
-      REQUIRE(out->value.is<float>());
-      REQUIRE(out->value.getAs<float>() == 0.25f);
+      const auto out = roundTrip(edit);
+      REQUIRE(out.object.type == ANARI_GEOMETRY);
+      REQUIRE(out.object.objectIndex == 7);
+      REQUIRE(out.name == "radius");
+      REQUIRE(out.value.is<float>());
+      REQUIRE(out.value.getAs<float>() == 0.25f);
     }
 
     THEN("an int value round-trips with its type")
     {
       edit.value = vsr::core::Any(-3);
-      const auto out = decode<SetObjectParameter>(encode(edit));
-      REQUIRE(out);
-      REQUIRE(out->value.is<int>());
-      REQUIRE_FALSE(out->value.is<float>());
-      REQUIRE(out->value.getAs<int>() == -3);
+      const auto out = roundTrip(edit);
+      REQUIRE(out.value.is<int>());
+      REQUIRE_FALSE(out.value.is<float>());
+      REQUIRE(out.value.getAs<int>() == -3);
     }
 
     THEN("a float3 value round-trips with its type")
     {
       edit.value = vsr::core::Any(vsr::math::float3(1.f, 2.f, 3.f));
-      const auto out = decode<SetObjectParameter>(encode(edit));
-      REQUIRE(out);
-      REQUIRE(out->value.is<vsr::math::float3>());
-      REQUIRE(out->value.getAs<vsr::math::float3>()
+      const auto out = roundTrip(edit);
+      REQUIRE(out.value.is<vsr::math::float3>());
+      REQUIRE(out.value.getAs<vsr::math::float3>()
           == vsr::math::float3(1.f, 2.f, 3.f));
     }
 
     THEN("a string value round-trips with its type")
     {
       edit.value = vsr::core::Any(std::string("scientific"));
-      const auto out = decode<SetObjectParameter>(encode(edit));
-      REQUIRE(out);
-      REQUIRE(out->value.is<std::string>());
-      REQUIRE(out->value.getString() == "scientific");
+      const auto out = roundTrip(edit);
+      REQUIRE(out.value.is<std::string>());
+      REQUIRE(out.value.getString() == "scientific");
     }
 
     THEN("a bool and a mat4 value round-trip with their types")
     {
       edit.value = vsr::core::Any(true);
-      auto out = decode<SetObjectParameter>(encode(edit));
-      REQUIRE(out);
-      REQUIRE(out->value.is<bool>());
-      REQUIRE(out->value.getAs<bool>());
+      auto out = roundTrip(edit);
+      REQUIRE(out.value.is<bool>());
+      REQUIRE(out.value.getAs<bool>());
 
       auto m = vsr::math::IDENTITY_MAT4;
       m[3] = vsr::math::float4(1.f, 2.f, 3.f, 1.f);
       edit.value = vsr::core::Any(m);
-      out = decode<SetObjectParameter>(encode(edit));
-      REQUIRE(out);
-      REQUIRE(out->value.is<vsr::math::mat4>());
-      REQUIRE(out->value.getAs<vsr::math::mat4>() == m);
+      out = roundTrip(edit);
+      REQUIRE(out.value.is<vsr::math::mat4>());
+      REQUIRE(out.value.getAs<vsr::math::mat4>() == m);
     }
 
     THEN("an empty value is rejected")
@@ -327,11 +296,10 @@ SCENARIO("Optimistic scene edit payloads", "[StudioProtocol]")
     RemoveObjectParameter remove;
     remove.object = makeRef(ANARI_MATERIAL, 2);
     remove.name = "color";
-    const auto out = decode<RemoveObjectParameter>(encode(remove));
-    REQUIRE(out);
-    REQUIRE(out->object.type == ANARI_MATERIAL);
-    REQUIRE(out->object.objectIndex == 2);
-    REQUIRE(out->name == "color");
+    const auto out = roundTrip(remove);
+    REQUIRE(out.object.type == ANARI_MATERIAL);
+    REQUIRE(out.object.objectIndex == 2);
+    REQUIRE(out.name == "color");
   }
 
   GIVEN("a SetNodeTransform")
@@ -345,11 +313,10 @@ SCENARIO("Optimistic scene edit payloads", "[StudioProtocol]")
 
     THEN("the node ref and matrix round-trip")
     {
-      const auto out = decode<SetNodeTransform>(encode(xf));
-      REQUIRE(out);
-      REQUIRE(out->node.layerName == "lights");
-      REQUIRE(out->node.nodeIndex == 4);
-      REQUIRE(out->transform == xf.transform);
+      const auto out = roundTrip(xf);
+      REQUIRE(out.node.layerName == "lights");
+      REQUIRE(out.node.nodeIndex == 4);
+      REQUIRE(out.transform == xf.transform);
     }
 
     THEN("a missing transform is rejected")
@@ -370,11 +337,10 @@ SCENARIO("Viewport payloads", "[StudioProtocol]")
     pick.requestId = 31;
     pick.x = 640;
     pick.y = -1;
-    const auto out = decode<Pick>(encode(pick));
-    REQUIRE(out);
-    REQUIRE(out->requestId == 31);
-    REQUIRE(out->x == 640);
-    REQUIRE(out->y == -1);
+    const auto out = roundTrip(pick);
+    REQUIRE(out.requestId == 31);
+    REQUIRE(out.x == 640);
+    REQUIRE(out.y == -1);
   }
 
   GIVEN("a PickReply")
@@ -387,14 +353,13 @@ SCENARIO("Viewport payloads", "[StudioProtocol]")
     THEN("with an object identity it round-trips")
     {
       reply.objectIdentity = makeRef(ANARI_VOLUME, 3);
-      const auto out = decode<PickReply>(encode(reply));
-      REQUIRE(out);
-      REQUIRE(out->requestId == 31);
-      REQUIRE(out->hit);
-      REQUIRE(out->worldPosition == vsr::math::float3(1.5f, -2.f, 0.25f));
-      REQUIRE(out->objectIdentity);
-      REQUIRE(out->objectIdentity->type == ANARI_VOLUME);
-      REQUIRE(out->objectIdentity->objectIndex == 3);
+      const auto out = roundTrip(reply);
+      REQUIRE(out.requestId == 31);
+      REQUIRE(out.hit);
+      REQUIRE(out.worldPosition == vsr::math::float3(1.5f, -2.f, 0.25f));
+      REQUIRE(out.objectIdentity);
+      REQUIRE(out.objectIdentity->type == ANARI_VOLUME);
+      REQUIRE(out.objectIdentity->objectIndex == 3);
     }
 
     THEN("without an identity (background) it round-trips with it absent")
@@ -434,11 +399,10 @@ SCENARIO("Viewport payloads", "[StudioProtocol]")
     {
       SetOutline outline;
       outline.objectIdentity = makeRef(ANARI_SURFACE, 9);
-      const auto out = decode<SetOutline>(encode(outline));
-      REQUIRE(out);
-      REQUIRE(out->objectIdentity);
-      REQUIRE(out->objectIdentity->type == ANARI_SURFACE);
-      REQUIRE(out->objectIdentity->objectIndex == 9);
+      const auto out = roundTrip(outline);
+      REQUIRE(out.objectIdentity);
+      REQUIRE(out.objectIdentity->type == ANARI_SURFACE);
+      REQUIRE(out.objectIdentity->objectIndex == 9);
     }
   }
 
@@ -457,17 +421,16 @@ SCENARIO("Viewport payloads", "[StudioProtocol]")
 
     THEN("every toggle round-trips")
     {
-      const auto out = decode<ViewportSettings>(encode(settings));
-      REQUIRE(out);
-      REQUIRE_FALSE(out->highlightSelection);
-      REQUIRE(out->outlinePrimitives);
-      REQUIRE(out->showWorldBounds);
-      REQUIRE(out->worldBoundsColor == vsr::math::float4(1.f, 0.5f, 0.f, 1.f));
-      REQUIRE(out->worldBoundsWidth == 3);
-      REQUIRE(out->visualizeAOV == vsr::rendering::AOVType::OBJECT_ID);
-      REQUIRE(out->depthVisualMinimum == 0.1f);
-      REQUIRE(out->depthVisualMaximum == 100.f);
-      REQUIRE(out->edgeInvert);
+      const auto out = roundTrip(settings);
+      REQUIRE_FALSE(out.highlightSelection);
+      REQUIRE(out.outlinePrimitives);
+      REQUIRE(out.showWorldBounds);
+      REQUIRE(out.worldBoundsColor == vsr::math::float4(1.f, 0.5f, 0.f, 1.f));
+      REQUIRE(out.worldBoundsWidth == 3);
+      REQUIRE(out.visualizeAOV == vsr::rendering::AOVType::OBJECT_ID);
+      REQUIRE(out.depthVisualMinimum == 0.1f);
+      REQUIRE(out.depthVisualMaximum == 100.f);
+      REQUIRE(out.edgeInvert);
     }
 
     THEN("the AOV mode travels as its enumerator name")
@@ -483,11 +446,10 @@ SCENARIO("Viewport payloads", "[StudioProtocol]")
 
     THEN("defaults round-trip and an empty tree yields the defaults")
     {
-      const auto out = decode<ViewportSettings>(encode(ViewportSettings{}));
-      REQUIRE(out);
-      REQUIRE(out->highlightSelection);
-      REQUIRE_FALSE(out->outlinePrimitives);
-      REQUIRE(out->visualizeAOV == vsr::rendering::AOVType::NONE);
+      const auto out = roundTrip(ViewportSettings{});
+      REQUIRE(out.highlightSelection);
+      REQUIRE_FALSE(out.outlinePrimitives);
+      REQUIRE(out.visualizeAOV == vsr::rendering::AOVType::NONE);
 
       vsr::core::DataTree tree;
       ViewportSettings partial = settings;
@@ -519,12 +481,11 @@ SCENARIO("Viewport payloads", "[StudioProtocol]")
 
     THEN("the request round-trips")
     {
-      const auto out = decode<RequestArrayHistogram>(encode(request));
-      REQUIRE(out);
-      REQUIRE(out->requestId == 41);
-      REQUIRE(out->array.type == ANARI_ARRAY1D);
-      REQUIRE(out->array.objectIndex == 15);
-      REQUIRE(out->binCount == 64);
+      const auto out = roundTrip(request);
+      REQUIRE(out.requestId == 41);
+      REQUIRE(out.array.type == ANARI_ARRAY1D);
+      REQUIRE(out.array.objectIndex == 15);
+      REQUIRE(out.binCount == 64);
     }
 
     THEN("the bins vector and range round-trip")
@@ -534,8 +495,7 @@ SCENARIO("Viewport payloads", "[StudioProtocol]")
       result.minValue = -1.5f;
       result.maxValue = 42.f;
       result.nonFinite = 9;
-      ArrayHistogramResult out;
-      REQUIRE(roundTripNode(result, out));
+      const auto out = roundTripTree(result);
       REQUIRE(out.bins == result.bins);
       REQUIRE(out.minValue == -1.5f);
       REQUIRE(out.maxValue == 42.f);
@@ -558,9 +518,9 @@ SCENARIO("Viewport payloads", "[StudioProtocol]")
       ArrayHistogramResult result;
       result.minValue = 0.f;
       result.maxValue = 1.f;
-      ArrayHistogramResult out;
-      out.bins = {9};
-      REQUIRE(roundTripNode(result, out));
+      ArrayHistogramResult stale;
+      stale.bins = {9};
+      const auto out = roundTripTree(result, stale);
       REQUIRE(out.bins.empty());
     }
 

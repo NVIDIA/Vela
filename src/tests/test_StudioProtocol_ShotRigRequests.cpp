@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // catch
+#include "StudioProtocolTestHelpers.h"
 #include "catch.hpp"
 // vsr_scivis_studio_protocol
 #include "PayloadCommon.h"
@@ -17,32 +18,6 @@ using vsr::scivis_studio::Shot;
 using vsr::scivis_studio::ShotPatch;
 
 namespace {
-
-// Encodes, decodes and hands back the payload; fails the test on a miss.
-template <typename T>
-T roundTrip(const T &in)
-{
-  const auto msg = encode(in);
-  REQUIRE(msg.header.type == uint8_t(T::MESSAGE_TYPE));
-  const auto out = decode<T>(msg);
-  REQUIRE(out);
-  return *out;
-}
-
-// Result payloads never travel alone, so they round-trip through raw bytes.
-template <typename T>
-T roundTripResult(const T &in)
-{
-  vsr::core::DataTree tree;
-  toNode(in, tree.root());
-  vsr::network::MessagePayload bytes;
-  tree.write(bytes);
-  vsr::core::DataTree copy;
-  REQUIRE(copy.read(bytes));
-  T out;
-  REQUIRE(fromNode(copy.root(), out));
-  return out;
-}
 
 // A request with only a requestId and no other child must be rejected.
 template <typename T>
@@ -624,15 +599,15 @@ SCENARIO("Shot, rig and color map results", "[StudioProtocol]")
     {
       ShotCreatedResult shot;
       shot.shotId = "shot-3";
-      REQUIRE(roundTripResult(shot).shotId == "shot-3");
+      REQUIRE(roundTripTree(shot).shotId == "shot-3");
 
       LightRigCreatedResult light;
       light.lightRigId = "lightrig-3";
-      REQUIRE(roundTripResult(light).lightRigId == "lightrig-3");
+      REQUIRE(roundTripTree(light).lightRigId == "lightrig-3");
 
       CameraRigCreatedResult camera;
       camera.cameraRigId = "camerarig-3";
-      REQUIRE(roundTripResult(camera).cameraRigId == "camerarig-3");
+      REQUIRE(roundTripTree(camera).cameraRigId == "camerarig-3");
 
       vsr::core::DataTree empty;
       REQUIRE_FALSE(fromNode(empty.root(), shot));
@@ -649,7 +624,7 @@ SCENARIO("Shot, rig and color map results", "[StudioProtocol]")
 
     THEN("it round-trips its SceneNodeRef")
     {
-      const auto out = roundTripResult(result);
+      const auto out = roundTripTree(result);
       REQUIRE(out.lightNode.layerName == "lights");
       REQUIRE(out.lightNode.nodeIndex == 9);
     }
@@ -670,7 +645,7 @@ SCENARIO("Shot, rig and color map results", "[StudioProtocol]")
 
     THEN("both halves round-trip")
     {
-      const auto out = roundTripResult(result);
+      const auto out = roundTripTree(result);
       REQUIRE(out.colorMapId == "colormap-5");
       REQUIRE(out.object.type == ANARI_ARRAY1D);
       REQUIRE(out.object.objectIndex == 14);

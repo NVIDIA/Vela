@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // catch
+#include "StudioProtocolTestHelpers.h"
 #include "catch.hpp"
 // vsr_scivis_studio_protocol
 #include "PayloadCommon.h"
@@ -127,16 +128,15 @@ SCENARIO("ProjectOpReply payload", "[StudioProtocol]")
 {
   GIVEN("an ok reply")
   {
-    const auto out = decode<ProjectOpReply>(encode(makeOkReply(42)));
-    REQUIRE(out);
-    REQUIRE(out->requestId == 42);
-    REQUIRE(out->ok);
-    REQUIRE(out->error.empty());
-    REQUIRE_FALSE(out->results);
+    const auto out = roundTrip(makeOkReply(42));
+    REQUIRE(out.requestId == 42);
+    REQUIRE(out.ok);
+    REQUIRE(out.error.empty());
+    REQUIRE_FALSE(out.results);
 
     THEN("results<T>() on a reply without results is empty")
     {
-      REQUIRE_FALSE(results<TaskStartedResult>(*out));
+      REQUIRE_FALSE(results<TaskStartedResult>(out));
     }
   }
 
@@ -159,10 +159,9 @@ SCENARIO("ProjectOpReply payload", "[StudioProtocol]")
 
     THEN("the result decodes on the receiving side")
     {
-      const auto out = decode<ProjectOpReply>(encode(reply));
-      REQUIRE(out);
-      REQUIRE(out->results);
-      const auto started = results<TaskStartedResult>(*out);
+      const auto out = roundTrip(reply);
+      REQUIRE(out.results);
+      const auto started = results<TaskStartedResult>(out);
       REQUIRE(started);
       REQUIRE(started->taskId == 99);
     }
@@ -210,22 +209,20 @@ SCENARIO("Server Task payloads", "[StudioProtocol]")
     p.current = 30;
     p.total = 120;
     p.message = "frame 30";
-    const auto out = decode<TaskProgress>(encode(p));
-    REQUIRE(out);
-    REQUIRE(out->taskId == 5);
-    REQUIRE(out->current == 30);
-    REQUIRE(out->total == 120);
-    REQUIRE(out->message == "frame 30");
+    const auto out = roundTrip(p);
+    REQUIRE(out.taskId == 5);
+    REQUIRE(out.current == 30);
+    REQUIRE(out.total == 120);
+    REQUIRE(out.message == "frame 30");
 
     THEN("an indeterminate progress keeps total == 0")
     {
       TaskProgress ind;
       ind.taskId = 6;
-      const auto o = decode<TaskProgress>(encode(ind));
-      REQUIRE(o);
-      REQUIRE(o->total == 0);
-      REQUIRE(o->current == 0);
-      REQUIRE(o->message.empty());
+      const auto o = roundTrip(ind);
+      REQUIRE(o.total == 0);
+      REQUIRE(o.current == 0);
+      REQUIRE(o.message.empty());
     }
   }
 
@@ -235,11 +232,10 @@ SCENARIO("Server Task payloads", "[StudioProtocol]")
     c.taskId = 8;
     c.message = "rendered";
     setResults(c, RenderShotResult{240});
-    const auto out = decode<TaskCompleted>(encode(c));
-    REQUIRE(out);
-    REQUIRE(out->taskId == 8);
-    REQUIRE(out->message == "rendered");
-    const auto rendered = results<RenderShotResult>(*out);
+    const auto out = roundTrip(c);
+    REQUIRE(out.taskId == 8);
+    REQUIRE(out.message == "rendered");
+    const auto rendered = results<RenderShotResult>(out);
     REQUIRE(rendered);
     REQUIRE(rendered->framesCompleted == 240);
     REQUIRE_FALSE(decode<TaskFailed>(encode(c)));
@@ -248,10 +244,9 @@ SCENARIO("Server Task payloads", "[StudioProtocol]")
     {
       TaskCompleted plain;
       plain.taskId = 8;
-      const auto o = decode<TaskCompleted>(encode(plain));
-      REQUIRE(o);
-      REQUIRE_FALSE(o->results);
-      REQUIRE_FALSE(results<RenderShotResult>(*o));
+      const auto o = roundTrip(plain);
+      REQUIRE_FALSE(o.results);
+      REQUIRE_FALSE(results<RenderShotResult>(o));
     }
 
     THEN("results<T>() rejects a subtree of another shape")
@@ -269,11 +264,10 @@ SCENARIO("Server Task payloads", "[StudioProtocol]")
     f.taskId = 9;
     f.error = "disk full";
     setResults(f, RenderShotResult{17});
-    const auto out = decode<TaskFailed>(encode(f));
-    REQUIRE(out);
-    REQUIRE(out->taskId == 9);
-    REQUIRE(out->error == "disk full");
-    const auto rendered = results<RenderShotResult>(*out);
+    const auto out = roundTrip(f);
+    REQUIRE(out.taskId == 9);
+    REQUIRE(out.error == "disk full");
+    const auto rendered = results<RenderShotResult>(out);
     REQUIRE(rendered);
     REQUIRE(rendered->framesCompleted == 17);
   }
@@ -283,10 +277,9 @@ SCENARIO("Server Task payloads", "[StudioProtocol]")
     CancelTask c;
     c.requestId = 11;
     c.taskId = 9;
-    const auto out = decode<CancelTask>(encode(c));
-    REQUIRE(out);
-    REQUIRE(out->requestId == 11);
-    REQUIRE(out->taskId == 9);
+    const auto out = roundTrip(c);
+    REQUIRE(out.requestId == 11);
+    REQUIRE(out.taskId == 9);
 
     THEN("a missing taskId is rejected")
     {
@@ -460,12 +453,11 @@ SCENARIO("ProjectSnapshot payload", "[StudioProtocol]")
 
   GIVEN("a default project")
   {
-    const auto out = decode<ProjectSnapshot>(encode(ProjectSnapshot{}));
-    REQUIRE(out);
-    REQUIRE(out->project.name == "Untitled");
-    REQUIRE(out->project.datasets.empty());
-    REQUIRE(out->project.shots.empty());
-    REQUIRE_FALSE(out->project.dirty);
+    const auto out = roundTrip(ProjectSnapshot{});
+    REQUIRE(out.project.name == "Untitled");
+    REQUIRE(out.project.datasets.empty());
+    REQUIRE(out.project.shots.empty());
+    REQUIRE_FALSE(out.project.dirty);
   }
 
   GIVEN("a snapshot whose project carries only the manifest fields")
@@ -592,9 +584,8 @@ SCENARIO("UIState payload", "[StudioProtocol]")
 
     THEN("an absent tree decodes as null")
     {
-      const auto out = decode<UIState>(encode(UIState{}));
-      REQUIRE(out);
-      REQUIRE_FALSE(out->tree);
+      const auto out = roundTrip(UIState{});
+      REQUIRE_FALSE(out.tree);
     }
   }
 }

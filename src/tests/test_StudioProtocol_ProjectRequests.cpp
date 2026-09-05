@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // catch
+#include "StudioProtocolTestHelpers.h"
 #include "catch.hpp"
 // vsr_scivis_studio_protocol
 #include "PayloadCommon.h"
@@ -17,32 +18,6 @@ using namespace vsr::scivis_studio::protocol;
 using vsr::io::ImporterType;
 
 namespace {
-
-// Round-trips a message-level payload through the codec and returns the copy.
-template <typename T>
-T roundTrip(const T &payload)
-{
-  const auto msg = encode(payload);
-  REQUIRE(msg.header.type == uint8_t(T::MESSAGE_TYPE));
-  const auto out = decode<T>(msg);
-  REQUIRE(out);
-  return *out;
-}
-
-// Round-trips a result payload (no MESSAGE_TYPE) through a serialized DataTree.
-template <typename T>
-T roundTripTree(const T &payload)
-{
-  vsr::core::DataTree tree;
-  toNode(payload, tree.root());
-  vsr::network::MessagePayload bytes;
-  tree.write(bytes);
-  vsr::core::DataTree copy;
-  REQUIRE(copy.read(bytes));
-  T out;
-  REQUIRE(fromNode(copy.root(), out));
-  return out;
-}
 
 const std::filesystem::path NON_ASCII_PATH = std::filesystem::path(
     "/data/r\xC3\xA9sultats/\xE6\xB8\xA9\xE5\xBA\xA6.vsr");
