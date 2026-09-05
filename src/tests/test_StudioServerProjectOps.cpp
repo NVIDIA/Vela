@@ -41,7 +41,6 @@
 #include <optional>
 #include <string>
 #include <system_error>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -1389,9 +1388,13 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
       {
         client.send(StartRendering{});
         REQUIRE(waitFor([&] { return session.server->streaming(); }));
-        std::this_thread::sleep_for(200ms);
-        REQUIRE(client.count(StudioMessageType::Frame) == 0);
-        REQUIRE(session.server->streaming());
+        // Long enough for several frames at any rate the loop renders at.
+        REQUIRE(staysFalse(
+            [&] {
+              return client.count(StudioMessageType::Frame) != 0
+                  || !session.server->streaming();
+            },
+            200ms));
 
         AND_THEN("a Pick is refused with an Error instead of a miss")
         {

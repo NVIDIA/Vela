@@ -10,11 +10,15 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
-#include <thread>
 
 using namespace vsr::network;
+using namespace std::chrono_literals;
 
 namespace {
+
+// The span within which a burst of read/write errors on one connection
+// lands, so a handler that fired once must not fire again during it.
+constexpr auto ERROR_BURST = 50ms;
 
 struct LifecycleCounters
 {
@@ -48,7 +52,7 @@ SCENARIO(
     clientCounters.attach(*client);
 
     server->start();
-    client->connect("127.0.0.1", port);
+    client->connect(LOOPBACK, port);
     REQUIRE(waitFor([&] {
       return serverCounters.connected == 1 && clientCounters.connected == 1;
     }));
@@ -63,11 +67,12 @@ SCENARIO(
       {
         REQUIRE(waitFor([&] { return serverCounters.disconnected == 1; }));
         REQUIRE(clientCounters.disconnected == 1);
-        // Settle: a burst of read/write errors on the same connection must
-        // not report again.
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        REQUIRE(serverCounters.disconnected == 1);
-        REQUIRE(clientCounters.disconnected == 1);
+        REQUIRE(staysFalse(
+            [&] {
+              return serverCounters.disconnected != 1
+                  || clientCounters.disconnected != 1;
+            },
+            ERROR_BURST));
         REQUIRE_FALSE(client->isConnected());
       }
     }
@@ -80,9 +85,12 @@ SCENARIO(
       {
         REQUIRE(waitFor([&] { return clientCounters.disconnected == 1; }));
         REQUIRE(serverCounters.disconnected == 1);
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        REQUIRE(clientCounters.disconnected == 1);
-        REQUIRE(serverCounters.disconnected == 1);
+        REQUIRE(staysFalse(
+            [&] {
+              return clientCounters.disconnected != 1
+                  || serverCounters.disconnected != 1;
+            },
+            ERROR_BURST));
       }
     }
 
@@ -111,7 +119,7 @@ SCENARIO(
       auto second = std::make_shared<NetworkClient>();
       LifecycleCounters secondCounters;
       secondCounters.attach(*second);
-      second->connect("127.0.0.1", port);
+      second->connect(LOOPBACK, port);
 
       THEN("the first is told, reported lost, and the second stays connected")
       {
@@ -122,8 +130,8 @@ SCENARIO(
         REQUIRE(farewells == 1);
         REQUIRE(farewellsBeforeClose == 1);
         REQUIRE(waitFor([&] { return secondCounters.connected == 1; }));
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        REQUIRE(secondCounters.disconnected == 0);
+        REQUIRE(staysFalse(
+            [&] { return secondCounters.disconnected != 0; }, ERROR_BURST));
         REQUIRE(server->isConnected());
         REQUIRE(second->isConnected());
 
@@ -138,7 +146,7 @@ SCENARIO(
       client->disconnect();
       REQUIRE(waitFor([&] { return serverCounters.disconnected == 1; }));
 
-      client->connect("127.0.0.1", port);
+      client->connect(LOOPBACK, port);
 
       THEN("the connection is re-established and re-armed")
       {
@@ -173,8 +181,8 @@ SCENARIO(
             std::chrono::seconds(30)));
         REQUIRE(counters.connected == 0);
         REQUIRE_FALSE(client->isConnected());
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        REQUIRE(counters.disconnected == 1);
+        REQUIRE(staysFalse(
+            [&] { return counters.disconnected != 1; }, ERROR_BURST));
       }
     }
   }
@@ -193,22 +201,22 @@ SCENARIO(
 
     WHEN("connect is attempted")
     {
-      client->connect("127.0.0.1", port);
+      client->connect(LOOPBACK, port);
 
       THEN("the failure is reported once through the disconnect handler")
       {
         REQUIRE(waitFor([&] { return counters.disconnected == 1; }));
         REQUIRE(counters.connected == 0);
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        REQUIRE(counters.disconnected == 1);
+        REQUIRE(staysFalse(
+            [&] { return counters.disconnected != 1; }, ERROR_BURST));
       }
 
       THEN("a disconnect while the attempt is in flight is not confused by it")
       {
         client->disconnect();
         REQUIRE(waitFor([&] { return counters.disconnected == 1; }));
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        REQUIRE(counters.disconnected == 1);
+        REQUIRE(staysFalse(
+            [&] { return counters.disconnected != 1; }, ERROR_BURST));
         REQUIRE(counters.connected == 0);
       }
 
@@ -217,7 +225,7 @@ SCENARIO(
         REQUIRE(waitFor([&] { return counters.disconnected == 1; }));
         auto server = std::make_shared<NetworkServer>(port);
         server->start();
-        client->connect("127.0.0.1", port);
+        client->connect(LOOPBACK, port);
         REQUIRE(waitFor([&] { return counters.connected == 1; }));
         REQUIRE(client->isConnected());
         client->disconnect();

@@ -2587,9 +2587,12 @@ SCENARIO(
 
         AND_THEN("reconnect retries until a restarted server listens")
         {
-          // The server comes back while reconnect is already being refused.
+          // The server comes back while reconnect is already being refused:
+          // the session is not the restarter's to watch, so it waits out a
+          // span the retry cadence (50 ms, doubling to 200 ms) is well
+          // inside.
           std::thread restarter([&] {
-            std::this_thread::sleep_for(500ms);
+            settle(500ms);
             server =
                 std::make_unique<RunningServer>(tempRootServerOptions(port));
           });

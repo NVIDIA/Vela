@@ -25,13 +25,13 @@
 #include "vsr/scene/objects/Camera.hpp"
 #include "vsr/scene/objects/Renderer.hpp"
 // std
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <string>
-#include <thread>
 #include <vector>
 
 using namespace vsr::scivis_studio;
@@ -41,6 +41,11 @@ using vsr::network::Message;
 using namespace std::chrono_literals;
 
 namespace {
+
+// Long enough to be sure the server's scrub window (250 ms of quiet, then
+// the commit) has run out: a snapshot that has not arrived by then never
+// will.
+constexpr auto PAST_SCRUB_COMMIT = 400ms;
 
 // A file binding whose frames past `lastGoodFrame` refuse to load: the
 // in-process stand-in for a file animation with a corrupt tail.
@@ -90,6 +95,9 @@ struct PlaybackSession : ServerSession
   bool waitForFrame(int frame);
   // Waits until `n` more frames than now have arrived.
   bool waitForMoreFrames(size_t n);
+  // True if the snapshot count stays at `n` for as long as a scrub commit
+  // could take to arrive.
+  bool noMoreSnapshotsThan(size_t n);
 
   ShotID shotId;
   SceneObjectRef cameraRef;
@@ -133,6 +141,13 @@ void PlaybackSession::setClock(int frameCount, float fps, bool loop)
   REQUIRE(request(update).ok);
   REQUIRE(waitForSnapshots(snapshots + 1));
   initialShot = latestSnapshot().project.shots.front();
+}
+
+bool PlaybackSession::noMoreSnapshotsThan(size_t n)
+{
+  return staysFalse(
+      [&] { return client.count(StudioMessageType::ProjectSnapshot) != n; },
+      PAST_SCRUB_COMMIT);
 }
 
 std::vector<int> PlaybackSession::frameNumbers()
@@ -408,8 +423,7 @@ SCENARIO("A paused scrub shows at once and commits after a quiet spell",
         REQUIRE(shot);
         REQUIRE(shot->currentFrame == 7);
         REQUIRE_FALSE(shot->playing);
-        std::this_thread::sleep_for(400ms);
-        REQUIRE(session.client.count(StudioMessageType::ProjectSnapshot) == 1);
+        REQUIRE(session.noMoreSnapshotsThan(1));
       }
     }
 
@@ -425,17 +439,14 @@ SCENARIO("A paused scrub shows at once and commits after a quiet spell",
         const auto *shot = findShot(session.latestSnapshot(), session.shotId);
         REQUIRE(shot);
         REQUIRE(shot->currentFrame == 29);
-        std::this_thread::sleep_for(400ms);
-        REQUIRE(session.client.count(StudioMessageType::ProjectSnapshot) == 1);
+        REQUIRE(session.noMoreSnapshotsThan(1));
 
         AND_THEN("a scrub that lands where time already rests commits nothing")
         {
           session.client.clear();
           session.client.send(SetTime{session.shotId, 29});
           REQUIRE(session.waitForMoreFrames(2));
-          std::this_thread::sleep_for(400ms);
-          REQUIRE(
-              session.client.count(StudioMessageType::ProjectSnapshot) == 0);
+          REQUIRE(session.noMoreSnapshotsThan(0));
         }
       }
     }
@@ -453,13 +464,19 @@ SCENARIO("A paused scrub shows at once and commits after a quiet spell",
       THEN("it is ignored: frames stay on frame 0 and no snapshot is sent")
       {
         REQUIRE(session.waitForMoreFrames(3));
-        std::this_thread::sleep_for(400ms);
-        for (const int frame : session.frameNumbers())
-          REQUIRE(frame == 0);
+        REQUIRE(staysFalse(
+            [&] {
+              const auto frames = session.frameNumbers();
+              return std::any_of(frames.begin(),
+                         frames.end(),
+                         [](int frame) { return frame != 0; })
+                  || session.client.count(StudioMessageType::ProjectSnapshot)
+                  != 0;
+            },
+            PAST_SCRUB_COMMIT));
         const auto header = session.latestFrameHeader();
         REQUIRE(header);
         REQUIRE(header->shotId == active);
-        REQUIRE(session.client.count(StudioMessageType::ProjectSnapshot) == 0);
       }
     }
   }

@@ -224,11 +224,11 @@ SCENARIO("ProjectOps matches replies to requests by id", "[StudioClient]")
     WHEN("a reply sits in the inbound queue and the UI has not polled")
     {
       f.server.send(encode(makeOkReply(h1.requestId)));
-      std::this_thread::sleep_for(50ms);
 
       THEN("the callback waits for poll()")
       {
-        REQUIRE(first.count() == 0);
+        // Long enough for the IO thread to have queued the reply.
+        REQUIRE(staysFalse([&] { return first.count() != 0; }, 50ms));
         REQUIRE(pollUntil(f.connection, [&] { return first.count() == 1; }));
       }
     }
