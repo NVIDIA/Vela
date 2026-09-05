@@ -157,18 +157,6 @@ VSR_REQUEST_KIND(CancelTask,                     Independent)
 
 #undef VSR_REQUEST_KIND
 
-constexpr bool readsProjectAtDispatch(RequestKind kind)
-{
-  return kind == RequestKind::SyncMutating || kind == RequestKind::SyncReadOnly
-      || kind == RequestKind::RenderShot;
-}
-
-constexpr bool mutates(RequestKind kind)
-{
-  return kind == RequestKind::SyncMutating || kind == RequestKind::Task
-      || kind == RequestKind::RenderShot;
-}
-
 } // namespace
 
 RequestKind kindOf(const ProjectRequest &request)
@@ -180,7 +168,9 @@ RequestKind kindOf(const ProjectRequest &request)
 
 bool waitsForQueuedTasks(const ProjectRequest &request)
 {
-  return readsProjectAtDispatch(kindOf(request));
+  const auto kind = kindOf(request);
+  return kind == RequestKind::SyncMutating || kind == RequestKind::SyncReadOnly
+      || kind == RequestKind::RenderShot;
 }
 
 bool independentOfQueuedTasks(const ProjectRequest &request)
@@ -190,7 +180,9 @@ bool independentOfQueuedTasks(const ProjectRequest &request)
 
 bool mutatesProject(const ProjectRequest &request)
 {
-  return mutates(kindOf(request));
+  const auto kind = kindOf(request);
+  return kind == RequestKind::SyncMutating || kind == RequestKind::Task
+      || kind == RequestKind::RenderShot;
 }
 
 // Dispatcher /////////////////////////////////////////////////////////////////

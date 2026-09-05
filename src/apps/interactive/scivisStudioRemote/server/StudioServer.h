@@ -15,6 +15,7 @@
 #include "PayloadCommon.h"
 #include "PlaybackMessages.h"
 #include "SceneEditMessages.h"
+#include "StudioCodec.h"
 #include "ViewportMessages.h"
 // vsr_scivis_studio_model
 #include "ProjectContext.h"
@@ -408,5 +409,40 @@ struct StudioServer
   uint64_t m_connectionSerial{0};
   bool m_helloAccepted{false};
 };
+
+// Inlined definitions ////////////////////////////////////////////////////////
+
+template <typename T>
+inline std::optional<T> StudioServer::decodeOrRefuse(
+    const vsr::network::Message &msg)
+{
+  auto payload = protocol::decode<T>(msg);
+  if (!payload) {
+    replyError("malformed " + std::string(protocol::toString(T::MESSAGE_TYPE))
+        + " payload");
+  }
+  return payload;
+}
+
+template <typename T>
+inline void StudioServer::latch(
+    const vsr::network::Message &msg, std::optional<T> ControlState::*slot)
+{
+  auto payload = decodeOrRefuse<T>(msg);
+  if (!payload)
+    return;
+  std::lock_guard lock(m_controlMutex);
+  m_control.*slot = std::move(*payload);
+}
+
+template <typename T>
+inline void StudioServer::latchEdit(const vsr::network::Message &msg)
+{
+  auto edit = decodeOrRefuse<T>(msg);
+  if (!edit)
+    return;
+  std::lock_guard lock(m_controlMutex);
+  m_control.edits.emplace_back(std::move(*edit));
+}
 
 } // namespace vsr::scivis_studio::server

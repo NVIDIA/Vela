@@ -1253,40 +1253,6 @@ void StudioServer::latchSessionEvent(SessionEvent event)
   m_control.events.push_back(std::move(event));
 }
 
-// The three templates below are private and instantiated only here.
-
-template <typename T>
-std::optional<T> StudioServer::decodeOrRefuse(const Message &msg)
-{
-  auto payload = decode<T>(msg);
-  if (!payload) {
-    replyError(
-        "malformed " + std::string(toString(T::MESSAGE_TYPE)) + " payload");
-  }
-  return payload;
-}
-
-template <typename T>
-void StudioServer::latch(
-    const Message &msg, std::optional<T> ControlState::*slot)
-{
-  auto payload = decodeOrRefuse<T>(msg);
-  if (!payload)
-    return;
-  std::lock_guard lock(m_controlMutex);
-  m_control.*slot = std::move(*payload);
-}
-
-template <typename T>
-void StudioServer::latchEdit(const Message &msg)
-{
-  auto edit = decodeOrRefuse<T>(msg);
-  if (!edit)
-    return;
-  std::lock_guard lock(m_controlMutex);
-  m_control.edits.emplace_back(std::move(*edit));
-}
-
 void StudioServer::requestClose(
     const std::string &reason, vsr::network::MessageFuture farewell)
 {
