@@ -51,27 +51,17 @@
  *       + "\ncreate-shot A\ncreate-shot B\nawait-snapshot\n");
  *   REQUIRE(server.requests<CreateShot>().size() == 2);
  *
- * Milestone 6: SetPlaying flips the active shot's `playing` (another shot id
- * is refused) and, like a shot that auto-stops at once, follows its snapshot
- * with a second one at rest on frame 5; StartRendering streams four 2x2 frames
- * at frames 0, 1, 2, 0 (a loop wrap), spaced so the client's latest-wins slot
- * sees each; SetTime answers with one frame at the scrubbed frame, or with a
- * TimeAdvanceWarning when the frame is 99; Pick misses at (0,0) and hits
- * surface 4 elsewhere, after a stray PickReply nobody asked for;
- * RequestArrayHistogram bins array 0 and refuses every other array as not
- * scalar. SetOutline and ViewportSettings are only recorded.
- *
- * Milestone 7: RenderShot needs a saved project and is a task with
- * determinate progress (1..frameCount of frameCount) and a TaskCompleted
- * whose message is the output directory and framesCompleted the frame count;
- * a shot of more than 8 frames is a "long" render that reports one frame and
- * then holds, refusing CreateShot with "render in progress" until a
- * CancelTask naming it ends it as TaskFailed "cancelled" with framesCompleted
- * 1. Every finished task's end message is replayed by the next bootstrap
- * (between UIState and the snapshot) until then, as the real server does
- * since the last bootstrap. SaveProject retains the request's UIState tree,
- * the bootstrap carries it, and OpenProject of the saved directory succeeds,
- * sending UIState before its TaskCompleted.
+ * The surface is what a real server cannot be made to produce: a stray
+ * ProjectOpReply before CreateShot's own and a stray PickReply before a
+ * Pick's; snapshots held back (`deferSnapshots`) or delayed
+ * (`snapshotDelay`); a SetTime that is always answered with a
+ * TimeAdvanceWarning; a RequestArrayHistogram refused as not scalar; a
+ * RenderShot (which needs a saved project) that reports frame 1 of
+ * frameCount and then holds, refusing CreateShot with "render in progress"
+ * until a CancelTask naming it ends it as TaskFailed "cancelled" with
+ * framesCompleted 1; and a task-status replay at every bootstrap of the ends
+ * sent since the last one, as the real server does. The happy path of the
+ * command surface runs against a real server in the StudioScenario scripts.
  */
 struct FakeProjectServer
 {
@@ -103,8 +93,6 @@ struct FakeProjectServer
   uint64_t nextTaskId{1};
   int nextShot{2};
   int nextDataset{1};
-  // The UI state the last SaveProject carried (null until one).
-  vsr::scivis_studio::protocol::SubtreePtr uiState;
   // The end messages of the tasks finished since the last bootstrap.
   std::vector<Message> finishedSinceBootstrap;
   // The long render, while it runs.
@@ -118,12 +106,7 @@ struct FakeProjectServer
   std::chrono::milliseconds snapshotDelay{0};
   std::vector<Message> deferred;
   std::vector<std::thread> delayedSends;
-  // StartRendering's frames go out from here: a send posted from a handler
-  // is only written once the handler returns, so pacing them needs a thread
-  // of their own.
-  std::thread streamer;
 
-  void sendFrame(const std::string &shotId, int frame);
   void endTask(Message end);
   // The TaskFailed a cancelled render ends with: RenderShotResult results.
   Message failedRender(uint64_t taskId, uint64_t framesCompleted);
@@ -166,8 +149,6 @@ inline FakeProjectServer::~FakeProjectServer()
 {
   for (auto &thread : delayedSends)
     thread.join();
-  if (streamer.joinable())
-    streamer.join();
 }
 
 inline uint16_t FakeProjectServer::port() const
@@ -243,19 +224,6 @@ inline uint64_t FakeProjectServer::startTask(uint64_t requestId)
   return taskId;
 }
 
-inline void FakeProjectServer::sendFrame(const std::string &shotId, int frame)
-{
-  using namespace vsr::scivis_studio::protocol;
-
-  FrameHeader header;
-  header.width = 2;
-  header.height = 2;
-  header.shotId = shotId;
-  header.frame = frame;
-  const std::vector<std::byte> pixels(2 * 2 * 4, std::byte{0x7f});
-  send(encodeFrame(header, pixels.data(), pixels.size()));
-}
-
 inline void FakeProjectServer::endTask(Message end)
 {
   finishedSinceBootstrap.push_back(end);
@@ -284,7 +252,7 @@ inline void FakeProjectServer::sendBootstrap()
   config.width = 640;
   config.height = 480;
   send(encode(config));
-  send(encode(UIState{uiState}));
+  send(encode(UIState{})); // every bootstrap carries one, null here
   // The task-status replay: what ended while nobody was listening, or
   // since the last bootstrap.
   for (auto &end : finishedSinceBootstrap)
@@ -377,8 +345,6 @@ inline void FakeProjectServer::onRequest(const Message &msg)
     project.projectDirectory = req.directory.value_or("/data/unnamed");
     project.name = project.projectDirectory.filename().string();
     project.dirty = false;
-    if (req.uiState)
-      uiState = req.uiState;
     TaskCompleted completed;
     completed.taskId = taskId;
     endTask(encode(completed));
@@ -398,7 +364,7 @@ inline void FakeProjectServer::onRequest(const Message &msg)
     }
     // The saved project again: its UI state goes out before the end.
     project.dirty = false;
-    send(encode(UIState{uiState}));
+    send(encode(UIState{})); // every bootstrap carries one, null here
     TaskCompleted completed;
     completed.taskId = taskId;
     endTask(encode(completed));
@@ -423,30 +389,14 @@ inline void FakeProjectServer::onRequest(const Message &msg)
     project.activeShotId = shot->id;
     const auto taskId = startTask(req.requestId);
     sendSnapshot(); // the active-shot change, before the task runs
-    const auto frames = uint64_t(shot->frameCount);
-    const auto sendProgress = [&](uint64_t frame) {
-      TaskProgress progress;
-      progress.taskId = taskId;
-      progress.current = frame;
-      progress.total = frames;
-      progress.message = "frame";
-      send(encode(progress));
-    };
-    if (frames > 8) {
-      // The long render: one frame, then it holds for a CancelTask.
-      sendProgress(1);
-      renderRunning = taskId;
-      return;
-    }
-    for (uint64_t frame = 1; frame <= frames; ++frame)
-      sendProgress(frame);
-    TaskCompleted completed;
-    completed.taskId = taskId;
-    completed.message =
-        (project.projectDirectory / "renders" / shot->id).generic_string();
-    setResults(completed, RenderShotResult{frames});
-    endTask(encode(completed));
-    sendSnapshot();
+    // One frame of progress, then it holds for a CancelTask.
+    TaskProgress progress;
+    progress.taskId = taskId;
+    progress.current = 1;
+    progress.total = uint64_t(shot->frameCount);
+    progress.message = "frame";
+    send(encode(progress));
+    renderRunning = taskId;
     return;
   }
   case StudioMessageType::ImportStaticDataset: {
@@ -566,48 +516,13 @@ inline void FakeProjectServer::onRequest(const Message &msg)
     return;
   }
 
-  case StudioMessageType::SetPlaying: {
-    const auto req = *decode<SetPlaying>(msg);
-    if (req.shotId != project.activeShotId) {
-      replyError(
-          req.requestId, "shot '" + req.shotId + "' is not the active shot");
-      return;
-    }
-    auto *shot = project::findShot(project, req.shotId);
-    shot->playing = req.playing;
-    replyOk(req.requestId);
-    sendSnapshot();
-    if (req.playing) {
-      // The auto-stop, right behind: two snapshots in one poll.
-      shot->playing = false;
-      shot->currentFrame = 5;
-      sendSnapshot();
-    }
-    return;
-  }
-  case StudioMessageType::StartRendering: {
-    // Paced so the client's latest-wins slot consumes every header.
-    if (streamer.joinable())
-      streamer.join();
-    streamer = std::thread([this, shotId = project.activeShotId] {
-      for (const int frame : {0, 1, 2, 0}) {
-        sendFrame(shotId, frame);
-        std::this_thread::sleep_for(std::chrono::milliseconds(30));
-      }
-    });
-    return;
-  }
   case StudioMessageType::SetTime: {
     const auto req = *decode<SetTime>(msg);
-    if (req.frame == 99) {
-      TimeAdvanceWarning warning;
-      warning.shotId = req.shotId;
-      warning.frame = req.frame;
-      warning.message = "frame 99 failed to load";
-      send(encode(warning));
-      return;
-    }
-    sendFrame(req.shotId, req.frame);
+    TimeAdvanceWarning warning;
+    warning.shotId = req.shotId;
+    warning.frame = req.frame;
+    warning.message = "frame " + std::to_string(req.frame) + " failed to load";
+    send(encode(warning));
     return;
   }
   case StudioMessageType::Pick: {
@@ -629,22 +544,11 @@ inline void FakeProjectServer::onRequest(const Message &msg)
     send(encode(reply));
     return;
   }
-  case StudioMessageType::SetOutline:
-  case StudioMessageType::ViewportSettings:
-    return; // recorded above, nothing to answer
   case StudioMessageType::RequestArrayHistogram: {
     const auto req = *decode<RequestArrayHistogram>(msg);
-    if (req.array.type != ANARI_ARRAY || req.array.objectIndex != 0) {
-      replyError(req.requestId,
-          "array " + std::to_string(req.array.objectIndex)
-              + " element type ANARI_FLOAT32_VEC3 is not scalar");
-      return;
-    }
-    ArrayHistogramResult result;
-    result.bins = {1, 2, 3};
-    result.minValue = 0.f;
-    result.maxValue = 1.f;
-    reply(req.requestId, result);
+    replyError(req.requestId,
+        "array " + std::to_string(req.array.objectIndex)
+            + " element type ANARI_FLOAT32_VEC3 is not scalar");
     return;
   }
 

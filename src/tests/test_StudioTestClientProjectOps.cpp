@@ -228,39 +228,12 @@ SCENARIO("the test client drives project ops against a fake server",
       }
     }
 
-    WHEN("a script runs the playback, pick, viewport and histogram commands")
+    WHEN("the server answers a pick nobody sent and refuses a scrub")
     {
-      const std::string script =
+      // A real server answers only the picks it was asked; the fake sends a
+      // stray PickReply first, and warns of every scrub instead of serving it.
+      const auto result = runScript(session,
           "connect " + endpoint + "\n"
-          "assert shot.active.playing == false\n"
-          "assert shot.active.frameCount == @shot.shot_0001.frameCount\n"
-          // The SetPlaying's snapshot and the auto-stop's arrive together;
-          // each await-snapshot consumes one.
-          "set-playing active on\n"
-          "await-snapshot\n"
-          "await-snapshot\n"
-          "assert snapshots.received == 3\n"
-          "assert shot.active.playing == false\n"
-          "assert shot.shot_0001.currentFrame == 5\n"
-          "expect-fail set-playing shot_9999 on\n"
-          "assert lastReplyError contains active\n"
-          "assert replies.failed == 1\n"
-          // Frames 0, 1, 2, 0: three advances, the wrap is not a step.
-          "start-rendering\n"
-          "await-frame-advance 3\n"
-          "assert frames.advanced == 3\n"
-          "assert frames.maxStep == 1\n"
-          "assert frame.frame == 0\n"
-          "set-time active 7\n"
-          "await-frame-at 7\n"
-          "assert frame.frame == 7\n"
-          "assert frames.advanced == 4\n"
-          // A forward scrub is a forward step; only backward ones are not.
-          "assert frames.maxStep == 7\n"
-          "set-time shot_0001 99\n"
-          "await-warning\n"
-          "assert warnings.received == 1\n"
-          "assert lastWarning contains load\n"
           "pick 0 0\n"
           "assert pick.hit == false\n"
           "assert pick.objectType == none\n"
@@ -272,117 +245,42 @@ SCENARIO("the test client drives project ops against a fake server",
           "assert pick.worldPosition == \"0.5 0.25 -1\"\n"
           "assert var.lastPickType == surface\n"
           "assert var.lastPickIndex == 4\n"
-          "set-outline $lastPickType $lastPickIndex\n"
-          "set-outline volume:2\n"
-          "set-outline none\n"
-          "set-outline\n"
-          "viewport-settings visualizeAOV=depth depthVisualMinimum=0 depthVisualMaximum=10\n"
-          "viewport-settings showWorldBounds=on worldBoundsWidth=2 worldBoundsColor=1,0,0,1\n"
-          "viewport-settings\n"
-          "request-array-histogram array 0 3\n"
-          "assert histogram.bins == 3\n"
-          "assert histogram.total == 6\n"
-          "assert histogram.min == 0\n"
-          "assert histogram.max == 1\n"
-          "expect-fail request-array-histogram array:5 16\n"
-          "assert lastReplyError contains scalar\n"
+          "set-time active 99\n"
+          "await-warning\n"
+          "assert warnings.received == 1\n"
+          "assert lastWarning contains load\n"
           "assert errors.received == 0\n"
-          "disconnect\n";
-      const auto result = runScript(session, script);
+          "disconnect\n");
       for (const auto &f : failLines(result.records))
         WARN(f);
       REQUIRE(result.ok);
 
-      THEN("the records show the snapshot's time, the frames and the replies")
+      THEN("the stray reply is an event the wait looks past")
       {
         const auto &r = result.records;
-        REQUIRE(hasLine(r,
-            "EVT ProjectSnapshot activeShot=shot_0001 shots=1 datasets=0"
-            " lightRigs=1 cameraRigs=1 colorMaps=0 dirty=true playing=true"
-            " currentFrame=0"));
-        REQUIRE(hasLine(r,
-            "EVT ProjectSnapshot activeShot=shot_0001 shots=1 datasets=0"
-            " lightRigs=1 cameraRigs=1 colorMaps=0 dirty=true playing=false"
-            " currentFrame=5"));
-        REQUIRE(hasLine(r,
-            "EVT ProjectOpReply requestId=2 ok=false error=\"shot 'shot_9999'"
-            " is not the active shot\""));
-        REQUIRE(countStarting(r,
-                    "EVT Frame width=2 height=2 encoding=Raw"
-                    " pixelFormat=RGBA8_sRGB shotId=shot_0001 frame=0 bytes=16")
-            == 2);
-        REQUIRE(hasLine(r,
-            "EVT Frame width=2 height=2 encoding=Raw pixelFormat=RGBA8_sRGB"
-            " shotId=shot_0001 frame=7 bytes=16"));
-        REQUIRE(hasLine(r,
-            "EVT TimeAdvanceWarning shotId=shot_0001 frame=99"
-            " message=\"frame 99 failed to load\""));
         REQUIRE(countStarting(r,
                     "EVT PickReply requestId=777 hit=false"
                     " worldPosition=\"0 0 0\" objectType=none objectIndex=none")
             == 2);
         REQUIRE(hasLine(r,
-            "EVT PickReply requestId=3 hit=false worldPosition=\"0 0 0\""
+            "EVT PickReply requestId=1 hit=false worldPosition=\"0 0 0\""
             " objectType=none objectIndex=none"));
         REQUIRE(hasLine(r,
-            "EVT PickReply requestId=4 hit=true worldPosition=\"0.5 0.25 -1\""
+            "EVT PickReply requestId=2 hit=true worldPosition=\"0.5 0.25 -1\""
             " objectType=surface objectIndex=4"));
         REQUIRE(hasLine(r,
-            "EVT ProjectOpReply requestId=5 ok=true error=\"\" bins=3 min=0"
-            " max=1 nonFinite=0"));
-        REQUIRE(hasLine(r, "OK set-outline $lastPickType $lastPickIndex"));
-      }
-
-      THEN("the wire carries the resolved ids, pixels and composed settings")
-      {
-        const auto playing = server.requests<SetPlaying>();
-        REQUIRE(playing.size() == 2);
-        REQUIRE(playing[0].shotId == "shot_0001");
-        REQUIRE(playing[0].playing);
-        REQUIRE(playing[1].shotId == "shot_9999");
-        const auto times = server.requests<SetTime>();
-        REQUIRE(times.size() == 2);
-        REQUIRE(times[0].shotId == "shot_0001");
-        REQUIRE(times[0].frame == 7);
-        REQUIRE(times[1].frame == 99);
+            "EVT TimeAdvanceWarning shotId=shot_0001 frame=99"
+            " message=\"frame 99 failed to load\""));
         const auto picks = server.requests<Pick>();
         REQUIRE(picks.size() == 2);
         REQUIRE(picks[0].x == 0);
         REQUIRE(picks[0].y == 0);
         REQUIRE(picks[1].x == 10);
         REQUIRE(picks[1].y == 5);
-        const auto outlines = server.requests<SetOutline>();
-        REQUIRE(outlines.size() == 4);
-        REQUIRE(outlines[0].objectIdentity);
-        REQUIRE(outlines[0].objectIdentity->type == ANARI_SURFACE);
-        REQUIRE(outlines[0].objectIdentity->objectIndex == 4);
-        REQUIRE(outlines[1].objectIdentity);
-        REQUIRE(outlines[1].objectIdentity->type == ANARI_VOLUME);
-        REQUIRE(outlines[1].objectIdentity->objectIndex == 2);
-        REQUIRE_FALSE(outlines[2].objectIdentity);
-        REQUIRE_FALSE(outlines[3].objectIdentity);
-        const auto settings = server.requests<ViewportSettings>();
-        REQUIRE(settings.size() == 3);
-        REQUIRE(settings[0].visualizeAOV == vsr::rendering::AOVType::DEPTH);
-        REQUIRE(settings[0].depthVisualMaximum == 10.f);
-        REQUIRE_FALSE(settings[0].showWorldBounds);
-        REQUIRE(settings[0].highlightSelection); // the default, sent whole
-        REQUIRE(settings[1].visualizeAOV == vsr::rendering::AOVType::DEPTH);
-        REQUIRE(settings[1].depthVisualMaximum == 10.f);
-        REQUIRE(settings[1].showWorldBounds);
-        REQUIRE(settings[1].worldBoundsWidth == 2);
-        REQUIRE(settings[1].worldBoundsColor.x == 1.f);
-        REQUIRE(settings[1].worldBoundsColor.y == 0.f);
-        REQUIRE(settings[1].worldBoundsColor.w == 1.f);
-        REQUIRE(settings[2].showWorldBounds);
-        REQUIRE(settings[2].visualizeAOV == vsr::rendering::AOVType::DEPTH);
-        const auto histograms = server.requests<RequestArrayHistogram>();
-        REQUIRE(histograms.size() == 2);
-        REQUIRE(histograms[0].array.type == ANARI_ARRAY);
-        REQUIRE(histograms[0].array.objectIndex == 0);
-        REQUIRE(histograms[0].binCount == 3);
-        REQUIRE(histograms[1].array.objectIndex == 5);
-        REQUIRE(histograms[1].binCount == 16);
+        const auto times = server.requests<SetTime>();
+        REQUIRE(times.size() == 1);
+        REQUIRE(times[0].shotId == "shot_0001");
+        REQUIRE(times[0].frame == 99);
       }
     }
 
@@ -463,8 +361,7 @@ SCENARIO("the test client drives project ops against a fake server",
         REQUIRE(server.requests<RequestArrayHistogram>().size() == 1);
       }
     }
-
-    WHEN("a script renders a shot, cancels a long render and reads UI state")
+    WHEN("a render is refused, holds, refuses an edit and is cancelled")
     {
       const std::string script =
           "connect " + endpoint + "\n"
@@ -473,33 +370,17 @@ SCENARIO("the test client drives project ops against a fake server",
           "expect-fail render-shot active\n"
           "assert lastReplyError contains saved\n"
           "expect-fail render-shot shot_9999\n"
-          "set-ui-state layout=abc theme=dark\n"
-          "set-ui-state theme=light\n"
           "save-project /data/p1\n"
           "await-task\n"
           "await-snapshot\n"
           "assert task.last.state == Completed\n"
-          "update-shot active frameCount=3\n"
-          "await-snapshot\n"
-          // The render: the active-shot snapshot, three determinate steps,
-          // the end with the frame count and the output directory.
-          "render-shot active\n"
-          "assert var.lastTaskId == 2\n"
-          "await-task\n"
-          "await-snapshot\n"
-          "assert task.last.state == Completed\n"
-          "assert task.last.framesCompleted == 3\n"
-          "assert task.last.current == 3\n"
-          "assert task.last.total == 3\n"
-          "assert task.2.message == /data/p1/renders/shot_0001\n"
-          "assert tasks.completed == 2\n"
-          "assert tasks.replayed == 0\n"
-          // The long render: progress, a refused edit, the cancel.
           "update-shot active frameCount=400\n"
           "await-snapshot\n"
+          // The render: the active-shot snapshot, one frame of progress, then
+          // it holds; a mutating request meeting it is refused.
           "no-wait render-shot active\n"
           "await-reply\n"
-          "assert var.lastTaskId == 3\n"
+          "assert var.lastTaskId == 2\n"
           "await-task-progress\n"
           "assert task.last.state == Running\n"
           "assert task.last.current == 1\n"
@@ -513,44 +394,32 @@ SCENARIO("the test client drives project ops against a fake server",
           "assert task.last.message == cancelled\n"
           "assert task.last.framesCompleted >= 1\n"
           "assert tasks.failed == 1\n"
-          // The UI state round trip: the saved tree comes back with the
-          // OpenProject, and with the bootstrap of a fresh connection.
+          // A task that ends without ever reporting progress FAILs the wait.
           "open-project /data/p1\n"
           "await-task\n"
           "await-task-progress timeout=100\n"
-          "assert uiState.present == true\n"
-          "assert uiState.layout == abc\n"
-          "assert uiState.theme == light\n"
-          "dump-ui-state\n"
-          // A save that sends no tree leaves the retained one alone.
-          "set-ui-state none\n"
-          "save-project /data/p1\n"
-          "await-task\n"
-          "await-snapshot\n"
-          "disconnect\n"
-          "assert uiState.present == false\n"
-          "reconnect\n"
-          "assert uiState.theme == light\n"
           // The replay: every task that ended since the last bootstrap, the
           // ends heard live before the disconnect counted again.
-          "assert tasks.replayed == 5\n"
-          "assert task.3.state == Failed\n"
-          "assert task.3.framesCompleted == 1\n"
-          "assert task.2.framesCompleted == 3\n"
-          "assert task.5.state == Completed\n"
-          "assert tasks.completed == 8\n"
+          "disconnect\n"
+          "reconnect\n"
+          "assert tasks.replayed == 3\n"
+          "assert task.2.state == Failed\n"
+          "assert task.2.framesCompleted == 1\n"
+          "assert task.3.state == Completed\n"
+          "assert tasks.completed == 4\n"
           "assert tasks.failed == 2\n"
           // Nothing ended since: an empty replay, and a disconnect forgets.
           "disconnect\n"
           "reconnect\n"
           "assert tasks.replayed == 0\n"
-          "assert task.2.state == Completed\n"
+          "assert task.2.state == Failed\n"
           "disconnect\n";
       const auto result = runScript(session, script, keepGoing());
       for (const auto &f : failLines(result.records))
         WARN(f);
 
-      THEN("the records show the progress, the ends and the UI state")
+      THEN(
+          "the records show the refusals, the progress, the end and the replay")
       {
         const auto &r = result.records;
         const auto fails = failLines(r);
@@ -558,62 +427,39 @@ SCENARIO("the test client drives project ops against a fake server",
         // reporting progress, and a record a disconnect forgot.
         REQUIRE(fails.size() == 2);
         REQUIRE(fails[0]
-            == "FAIL await-task-progress timeout=100: task 4 ended (Completed)"
+            == "FAIL await-task-progress timeout=100: task 3 ended (Completed)"
                " before reporting progress");
         REQUIRE(fails[1]
-            == "FAIL assert task.2.state == Completed: task.2.state: nothing"
+            == "FAIL assert task.2.state == Failed: task.2.state: nothing"
                " has been heard of task 2");
         REQUIRE(hasLine(r,
             "EVT ProjectOpReply requestId=1 ok=false error=\"project must be"
             " saved before rendering\""));
         REQUIRE(hasLine(r, "OK assert lastReplyError contains saved"));
         REQUIRE(hasLine(r,
-            "EVT TaskProgress taskId=2 current=1 total=3 message=\"frame\""));
+            "EVT ProjectOpReply requestId=2 ok=false error=\"shot not found\""));
         REQUIRE(hasLine(r,
-            "EVT TaskProgress taskId=2 current=3 total=3 message=\"frame\""));
+            "EVT TaskProgress taskId=2 current=1 total=400 message=\"frame\""));
         REQUIRE(hasLine(r,
-            "EVT TaskCompleted taskId=2 message=\"/data/p1/renders/shot_0001\""
-            " framesCompleted=3"));
-        REQUIRE(hasLine(r,
-            "EVT TaskProgress taskId=3 current=1 total=400 message=\"frame\""));
-        REQUIRE(hasLine(r,
-            "EVT TaskFailed taskId=3 error=\"cancelled\" framesCompleted=1"));
+            "EVT TaskFailed taskId=2 error=\"cancelled\" framesCompleted=1"));
         REQUIRE(hasLine(r, "OK expect-fail await-reply"));
         REQUIRE(hasLine(r, "OK assert lastReplyError contains progress"));
         REQUIRE(hasLine(r, "EVT UIState present=false children=0"));
-        REQUIRE(hasLine(r, "EVT UIState present=true children=1"));
-        REQUIRE(hasLine(r,
-            "EVT UIStateEntry path=\"windows/layout\""
-            " value=\"abc\""));
-        REQUIRE(hasLine(r,
-            "EVT UIStateEntry path=\"windows/theme\""
-            " value=\"light\""));
-        REQUIRE(hasLine(r, "OK assert tasks.replayed == 5"));
-        REQUIRE(hasLine(r, "OK assert tasks.completed == 8"));
+        REQUIRE(hasLine(r, "OK assert tasks.replayed == 3"));
+        REQUIRE(hasLine(r, "OK assert tasks.completed == 4"));
         REQUIRE(hasLine(r, "OK assert tasks.replayed == 0"));
-        REQUIRE(hasLine(r, "OK assert uiState.present == false"));
       }
 
-      THEN("the wire carries the resolved shot ids and the UI state tree")
+      THEN("the wire carries the resolved shot ids and the cancel")
       {
         const auto renders = server.requests<RenderShot>();
-        REQUIRE(renders.size() == 4);
+        REQUIRE(renders.size() == 3);
         REQUIRE(renders[0].shotId == "shot_0001");
         REQUIRE(renders[1].shotId == "shot_9999");
-        REQUIRE(renders[3].shotId == "shot_0001");
-        const auto saves = server.requests<SaveProject>();
-        REQUIRE(saves.size() == 2);
-        REQUIRE_FALSE(saves[1].uiState);
-        REQUIRE(saves[0].uiState);
-        const auto *windows = saves[0].uiState->root().child("windows");
-        REQUIRE(windows);
-        REQUIRE(windows->numChildren() == 2);
-        REQUIRE(windows->child("layout")->getValueAs<std::string>() == "abc");
-        REQUIRE(windows->child("theme")->getValueAs<std::string>() == "light");
-        REQUIRE(saves[0].uiState->root().child("layout") == nullptr);
+        REQUIRE(renders[2].shotId == "shot_0001");
         const auto cancels = server.requests<CancelTask>();
         REQUIRE(cancels.size() == 1);
-        REQUIRE(cancels[0].taskId == 3);
+        REQUIRE(cancels[0].taskId == 2);
       }
     }
 
