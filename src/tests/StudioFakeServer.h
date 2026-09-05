@@ -18,17 +18,21 @@
 #include "vsr/scene/Scene.hpp"
 // std
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include <vector>
 
 /*
  * A Studio server reduced to its session behaviour, for the client-core
  * tests: Hello on accept, the prebuilt bootstrap on the client's Hello, Pong
  * on Ping unless silenced, and every other request handed to `onRequest` so
- * a test can script the replies. Everything runs on the server's IO thread;
- * the test reads the counters.
+ * a test can script the replies. `onHello` runs after each Hello has been
+ * answered (or held), for a fake that builds its own bootstrap or says
+ * farewell. Everything runs on the server's IO thread; the test reads the
+ * counters.
  *
  * Example:
  *   vsr::scene::Scene source;
@@ -97,6 +101,13 @@ struct FakeStudioServer
   void sendBootstrapEnd();
   // The prebuilt bracket, then End unless it is being held back.
   void sendBootstrap();
+  // Flushes `msg` and then closes the client's socket off the IO thread, the
+  // way StudioServer refuses a Hello or evicts a session; `closeDelay` lets
+  // the client's connect settle before the loss lands. The listener stays.
+  void farewell(Message msg,
+      std::chrono::milliseconds closeDelay = std::chrono::milliseconds(0));
+  // Closes the client's socket without a word, as a crash would.
+  void dropConnection();
   void onMessage(const Message &msg);
 
   // Read on the IO thread at each accept; a test may change it between two.
@@ -110,8 +121,11 @@ struct FakeStudioServer
   // Every message other than Hello and Ping, on the IO thread; set it before
   // the client connects.
   std::function<void(const Message &)> onRequest;
+  // Every Hello, once the bootstrap went out or was held, on the IO thread.
+  std::function<void()> onHello;
   std::mutex mutex;
   std::vector<Message> received;
+  std::vector<std::thread> closers; // one per farewell, joined on teardown
 };
 
 // Inlined definitions ////////////////////////////////////////////////////////
@@ -140,6 +154,19 @@ inline FakeStudioServer::FakeStudioServer(int helloVersion, uint16_t port)
 
 inline FakeStudioServer::~FakeStudioServer()
 {
+  // A closer restarts the channel, so every one must be done before the
+  // channel stops; a farewell may still be queuing one from the IO thread.
+  for (;;) {
+    std::vector<std::thread> pending;
+    {
+      std::lock_guard lock(mutex);
+      pending.swap(closers);
+    }
+    if (pending.empty())
+      break;
+    for (auto &closer : pending)
+      closer.join();
+  }
   channel->stop();
 }
 
@@ -186,6 +213,24 @@ inline void FakeStudioServer::sendBootstrap()
     sendBootstrapEnd();
 }
 
+inline void FakeStudioServer::farewell(
+    Message msg, std::chrono::milliseconds closeDelay)
+{
+  auto flushed = channel->send(std::move(msg));
+  std::lock_guard lock(mutex);
+  closers.emplace_back(
+      [this, flushed = std::move(flushed), closeDelay]() mutable {
+        flushed.wait_for(std::chrono::seconds(1));
+        std::this_thread::sleep_for(closeDelay);
+        channel->restart();
+      });
+}
+
+inline void FakeStudioServer::dropConnection()
+{
+  channel->restart();
+}
+
 inline void FakeStudioServer::onMessage(const Message &msg)
 {
   using namespace vsr::scivis_studio::protocol;
@@ -198,6 +243,8 @@ inline void FakeStudioServer::onMessage(const Message &msg)
   case StudioMessageType::Hello:
     if (!holdBootstrap)
       sendBootstrap();
+    if (onHello)
+      onHello();
     break;
   case StudioMessageType::Ping:
     if (!silent)

@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // catch
+#include "StudioFakeProjectServer.h"
+#include "StudioFakeServer.h"
 #include "StudioRemoteTestHelpers.h"
 #include "TestDirectories.h"
 #include "catch.hpp"
@@ -125,700 +127,6 @@ RunResult runScript(
   result.ok = runner.run(commands);
   result.records = lines(out.str());
   return result;
-}
-
-// A fake server on a bare NetworkServer that misbehaves in one scripted way,
-// so the client's failure paths run without a StudioServer.
-struct ScriptedServer
-{
-  enum class Behaviour
-  {
-    MismatchedHello, // a Hello of the wrong version, nothing else
-    HelloOnly, // the right Hello, then silence: no Bootstrap ever comes
-    RefuseOnHello, // answers the client's Hello with an Error and closes
-    SilentAfterBootstrap, // an empty Bootstrap, then nothing, Pings included
-    FarewellAfterBootstrap // an empty Bootstrap, Disconnect{reason}, close
-  };
-
-  explicit ScriptedServer(Behaviour behaviour);
-  ~ScriptedServer();
-
-  uint16_t port() const;
-
-  std::shared_ptr<vsr::network::NetworkServer> channel;
-  std::atomic<size_t> pingsReceived{0};
-  // RefuseOnHello and FarewellAfterBootstrap: the last message is flushed
-  // and the socket closed off the IO thread, the way StudioServer's
-  // farewell works; the farewell's close waits a little longer so the
-  // client's connect has settled before the loss lands.
-  std::atomic<bool> closing{false};
-  std::chrono::milliseconds closeDelay{0};
-  vsr::network::MessageFuture farewell;
-  std::thread closer;
-};
-
-ScriptedServer::ScriptedServer(Behaviour behaviour)
-{
-  channel = std::make_shared<vsr::network::NetworkServer>(0);
-  channel->setConnectHandler([this, behaviour]() {
-    Hello hello;
-    hello.version = behaviour == Behaviour::MismatchedHello
-        ? PROTOCOL_VERSION + 1
-        : PROTOCOL_VERSION;
-    hello.buildInfo = "scripted server";
-    channel->send(encode(hello));
-    if (behaviour == Behaviour::SilentAfterBootstrap
-        || behaviour == Behaviour::FarewellAfterBootstrap) {
-      channel->send(encode(BootstrapBegin{}));
-      channel->send(encode(BootstrapEnd{}));
-    }
-    if (behaviour == Behaviour::FarewellAfterBootstrap) {
-      Disconnect goodbye;
-      goodbye.reason = "replaced by another client";
-      farewell = channel->send(encode(goodbye));
-      closing.store(true);
-    }
-  });
-  channel->registerHandler(uint8_t(StudioMessageType::Ping),
-      [this](const vsr::network::Message &) { ++pingsReceived; });
-  if (behaviour == Behaviour::RefuseOnHello) {
-    channel->registerHandler(uint8_t(StudioMessageType::Hello),
-        [this](const vsr::network::Message &) {
-          Error error;
-          error.message = "the scripted server refuses";
-          farewell = channel->send(encode(error));
-          closing.store(true);
-        });
-  }
-  if (behaviour == Behaviour::RefuseOnHello
-      || behaviour == Behaviour::FarewellAfterBootstrap) {
-    if (behaviour == Behaviour::FarewellAfterBootstrap)
-      closeDelay = 300ms;
-    closer = std::thread([this] {
-      // Also woken by the destructor, with no farewell to flush.
-      if (!waitFor([&] { return closing.load(); }) || !farewell.valid())
-        return;
-      farewell.wait_for(1s);
-      std::this_thread::sleep_for(closeDelay);
-      channel->restart();
-    });
-  }
-  channel->start();
-}
-
-ScriptedServer::~ScriptedServer()
-{
-  closing.store(true);
-  if (closer.joinable())
-    closer.join();
-  channel->stop();
-}
-
-uint16_t ScriptedServer::port() const
-{
-  return channel->port();
-}
-
-/*
- * A fake project server: the Bootstrap on the client's Hello, then scripted
- * answers to the project requests the runner's commands send, kept minimal
- * but shaped like the real ones -- replies by request id, results, Server
- * Task messages, a ProjectSnapshot after every mutation. Every handler runs
- * on the server's IO thread and answers at once, so a task's completion is
- * usually in the client's queue before the script awaits it.
- *
- * Milestone 6: SetPlaying flips the active shot's `playing` (another shot id
- * is refused) and, like a shot that auto-stops at once, follows its snapshot
- * with a second one at rest on frame 5; StartRendering streams four 2x2 frames
- * at frames 0, 1, 2, 0 (a loop wrap), spaced so the client's latest-wins slot
- * sees each; SetTime answers with one frame at the scrubbed frame, or with a
- * TimeAdvanceWarning when the frame is 99; Pick misses at (0,0) and hits
- * surface 4 elsewhere, after a stray PickReply nobody asked for;
- * RequestArrayHistogram bins array 0 and refuses every other array as not
- * scalar. SetOutline and ViewportSettings are only recorded.
- *
- * Milestone 7: RenderShot needs a saved project and is a task with
- * determinate progress (1..frameCount of frameCount) and a TaskCompleted
- * whose message is the output directory and framesCompleted the frame count;
- * a shot of more than 8 frames is a "long" render that reports one frame and
- * then holds, refusing CreateShot with "render in progress" until a
- * CancelTask naming it ends it as TaskFailed "cancelled" with framesCompleted
- * 1. Every finished task's end message is replayed by the next bootstrap
- * (between UIState and the snapshot) until then, as the real server does
- * since the last bootstrap. SaveProject retains the request's UIState tree,
- * the bootstrap carries it, and OpenProject of the saved directory succeeds,
- * sending UIState before its TaskCompleted.
- */
-struct ProjectOpsServer
-{
-  using Message = vsr::network::Message;
-
-  ProjectOpsServer();
-  ~ProjectOpsServer();
-
-  uint16_t port() const;
-  // Every request of type T received so far, decoded, in arrival order.
-  template <typename T>
-  std::vector<T> requests();
-
-  void onMessage(const Message &msg);
-  void send(Message msg);
-  void sendSnapshot();
-  template <typename Result>
-  void reply(uint64_t requestId, const Result &result);
-  void replyOk(uint64_t requestId);
-  void replyError(uint64_t requestId, const std::string &error);
-  uint64_t startTask(uint64_t requestId);
-
-  std::shared_ptr<vsr::network::NetworkServer> channel;
-  std::mutex mutex;
-  std::vector<Message> received;
-  Project project;
-  uint64_t nextTaskId{1};
-  int nextShot{2};
-  int nextDataset{1};
-  // The UI state the last SaveProject carried (null until one).
-  SubtreePtr uiState;
-  // The end messages of the tasks finished since the last bootstrap.
-  std::vector<Message> finishedSinceBootstrap;
-  // The long render, while it runs.
-  std::optional<uint64_t> renderRunning;
-  // Network lag, staged: the next `deferSnapshots` snapshots are held back
-  // until the request after them arrives (and go out ahead of its reply,
-  // as the order on the wire demands); every snapshot sent normally waits
-  // `snapshotDelay` first, off the IO thread so the reply before it is not
-  // held up too.
-  std::atomic<int> deferSnapshots{0};
-  std::chrono::milliseconds snapshotDelay{0};
-  std::vector<Message> deferred;
-  std::vector<std::thread> delayedSends;
-  // StartRendering's frames go out from here: a send posted from a handler
-  // is only written once the handler returns, so pacing them needs a thread
-  // of their own.
-  std::thread streamer;
-
-  void sendFrame(const std::string &shotId, int frame);
-  void endTask(Message end);
-  // The TaskFailed a cancelled render ends with: RenderShotResult results.
-  Message failedRender(uint64_t taskId, uint64_t framesCompleted);
-};
-
-ProjectOpsServer::ProjectOpsServer()
-{
-  Shot shot;
-  shot.id = "shot_0001";
-  shot.name = "Shot 1";
-  project.shots.push_back(shot);
-  project.activeShotId = shot.id;
-  LightRig rig;
-  rig.id = "lightRig_0001";
-  rig.name = "Default";
-  project.lightRigs.push_back(rig);
-  CameraRig cameraRig;
-  cameraRig.id = "cameraRig_0001";
-  cameraRig.name = "Default";
-  project.cameraRigs.push_back(cameraRig);
-  project.dirty = true;
-
-  channel = std::make_shared<vsr::network::NetworkServer>(0);
-  channel->setConnectHandler([this]() {
-    Hello hello;
-    hello.version = PROTOCOL_VERSION;
-    hello.buildInfo = "fake project server";
-    channel->send(encode(hello));
-  });
-  for (int value = 1; value < vsr::network::MESSAGE_TYPE_INVALID; ++value) {
-    if (!isStudioMessageType(uint8_t(value)))
-      continue;
-    channel->registerHandler(
-        uint8_t(value), [this](const Message &msg) { onMessage(msg); });
-  }
-  channel->start();
-}
-
-ProjectOpsServer::~ProjectOpsServer()
-{
-  for (auto &thread : delayedSends)
-    thread.join();
-  if (streamer.joinable())
-    streamer.join();
-  channel->stop();
-}
-
-uint16_t ProjectOpsServer::port() const
-{
-  return channel->port();
-}
-
-template <typename T>
-std::vector<T> ProjectOpsServer::requests()
-{
-  std::lock_guard lock(mutex);
-  std::vector<T> out;
-  for (const auto &msg : received)
-    if (auto decoded = decode<T>(msg))
-      out.push_back(std::move(*decoded));
-  return out;
-}
-
-void ProjectOpsServer::send(Message msg)
-{
-  channel->send(std::move(msg));
-}
-
-void ProjectOpsServer::sendSnapshot()
-{
-  if (deferSnapshots > 0) {
-    --deferSnapshots;
-    deferred.push_back(encode(ProjectSnapshot{project}));
-    return;
-  }
-  if (snapshotDelay.count() > 0) {
-    delayedSends.emplace_back(
-        [this, snapshot = encode(ProjectSnapshot{project})]() mutable {
-          std::this_thread::sleep_for(snapshotDelay);
-          send(std::move(snapshot));
-        });
-    return;
-  }
-  send(encode(ProjectSnapshot{project}));
-}
-
-template <typename Result>
-void ProjectOpsServer::reply(uint64_t requestId, const Result &result)
-{
-  auto r = makeOkReply(requestId);
-  setResults(r, result);
-  send(encode(r));
-}
-
-void ProjectOpsServer::replyOk(uint64_t requestId)
-{
-  send(encode(makeOkReply(requestId)));
-}
-
-void ProjectOpsServer::replyError(uint64_t requestId, const std::string &error)
-{
-  send(encode(makeErrorReply(requestId, error)));
-}
-
-uint64_t ProjectOpsServer::startTask(uint64_t requestId)
-{
-  const auto taskId = nextTaskId++;
-  reply(requestId, TaskStartedResult{taskId});
-  return taskId;
-}
-
-void ProjectOpsServer::sendFrame(const std::string &shotId, int frame)
-{
-  FrameHeader header;
-  header.width = 2;
-  header.height = 2;
-  header.shotId = shotId;
-  header.frame = frame;
-  const std::vector<std::byte> pixels(2 * 2 * 4, std::byte{0x7f});
-  send(encodeFrame(header, pixels.data(), pixels.size()));
-}
-
-void ProjectOpsServer::endTask(Message end)
-{
-  finishedSinceBootstrap.push_back(end);
-  send(std::move(end));
-}
-
-vsr::network::Message ProjectOpsServer::failedRender(
-    uint64_t taskId, uint64_t framesCompleted)
-{
-  TaskFailed failed;
-  failed.taskId = taskId;
-  failed.error = "cancelled";
-  setResults(failed, RenderShotResult{framesCompleted});
-  return encode(failed);
-}
-
-void ProjectOpsServer::onMessage(const Message &msg)
-{
-  std::lock_guard lock(mutex);
-  received.push_back(msg);
-  const auto type = messageType(msg);
-  if (!type)
-    return;
-
-  switch (*type) {
-  case StudioMessageType::Hello: {
-    send(encode(BootstrapBegin{}));
-    FrameConfig config;
-    config.width = 640;
-    config.height = 480;
-    send(encode(config));
-    send(encode(UIState{uiState}));
-    // The task-status replay: what ended while nobody was listening, or
-    // since the last bootstrap.
-    for (auto &end : finishedSinceBootstrap)
-      send(std::move(end));
-    finishedSinceBootstrap.clear();
-    send(encode(ProjectSnapshot{project})); // never staged: the bootstrap's
-    send(encode(BootstrapEnd{}));
-    return;
-  }
-  case StudioMessageType::Ping:
-    send(encode(Pong{}));
-    return;
-  default:
-    break;
-  }
-
-  // A request arrived: whatever earlier snapshots were held back go first.
-  for (auto &held : deferred)
-    send(std::move(held));
-  deferred.clear();
-
-  switch (*type) {
-  case StudioMessageType::CreateShot: {
-    const auto req = *decode<CreateShot>(msg);
-    if (renderRunning) {
-      replyError(req.requestId, "render in progress");
-      return;
-    }
-    // A reply to a request nobody sent: the runner must look past it.
-    replyOk(999999);
-    Shot shot;
-    char id[16];
-    std::snprintf(id, sizeof(id), "shot_%04d", nextShot++);
-    shot.id = id;
-    shot.name = req.name;
-    project.shots.push_back(shot);
-    project.activeShotId = shot.id;
-    reply(req.requestId, ShotCreatedResult{shot.id});
-    sendSnapshot();
-    return;
-  }
-  case StudioMessageType::RemoveShot: {
-    const auto req = *decode<RemoveShot>(msg);
-    auto *shot = project::findShot(project, req.shotId);
-    if (!shot || project.shots.size() < 2) {
-      replyError(req.requestId,
-          shot ? "cannot remove the last shot" : "shot not found");
-      return;
-    }
-    project.shots.erase(project.shots.begin() + (shot - project.shots.data()));
-    project.activeShotId = project.shots.front().id;
-    replyOk(req.requestId);
-    sendSnapshot();
-    return;
-  }
-  case StudioMessageType::UpdateShot: {
-    const auto req = *decode<UpdateShot>(msg);
-    auto *shot = project::findShot(project, req.shotId);
-    if (!shot) {
-      replyError(req.requestId, "shot not found");
-      return;
-    }
-    shot::applyPatch(*shot, req.patch);
-    replyOk(req.requestId);
-    sendSnapshot();
-    return;
-  }
-  case StudioMessageType::SetActiveShot: {
-    const auto req = *decode<SetActiveShot>(msg);
-    if (!project::findShot(project, req.shotId)) {
-      replyError(req.requestId, "shot not found");
-      return;
-    }
-    project.activeShotId = req.shotId;
-    replyOk(req.requestId);
-    sendSnapshot();
-    return;
-  }
-
-  case StudioMessageType::SaveProject: {
-    const auto req = *decode<SaveProject>(msg);
-    const auto taskId = startTask(req.requestId);
-    TaskProgress progress;
-    progress.taskId = taskId;
-    progress.message = "writing";
-    send(encode(progress));
-    project.projectDirectory = req.directory.value_or("/data/unnamed");
-    project.name = project.projectDirectory.filename().string();
-    project.dirty = false;
-    if (req.uiState)
-      uiState = req.uiState;
-    TaskCompleted completed;
-    completed.taskId = taskId;
-    endTask(encode(completed));
-    sendSnapshot();
-    return;
-  }
-  case StudioMessageType::OpenProject: {
-    const auto req = *decode<OpenProject>(msg);
-    const auto taskId = startTask(req.requestId);
-    if (req.directory != project.projectDirectory
-        || project.projectDirectory.empty()) {
-      TaskFailed failed;
-      failed.taskId = taskId;
-      failed.error = "project directory does not exist";
-      endTask(encode(failed));
-      return;
-    }
-    // The saved project again: its UI state goes out before the end.
-    project.dirty = false;
-    send(encode(UIState{uiState}));
-    TaskCompleted completed;
-    completed.taskId = taskId;
-    endTask(encode(completed));
-    sendSnapshot();
-    return;
-  }
-  case StudioMessageType::RenderShot: {
-    const auto req = *decode<RenderShot>(msg);
-    const auto *shot = project::findShot(project, req.shotId);
-    if (!shot) {
-      replyError(req.requestId, "shot not found");
-      return;
-    }
-    if (project.projectDirectory.empty()) {
-      replyError(req.requestId, "project must be saved before rendering");
-      return;
-    }
-    if (renderRunning) {
-      replyError(req.requestId, "render in progress");
-      return;
-    }
-    project.activeShotId = shot->id;
-    const auto taskId = startTask(req.requestId);
-    sendSnapshot(); // the active-shot change, before the task runs
-    const auto frames = uint64_t(shot->frameCount);
-    const auto sendProgress = [&](uint64_t frame) {
-      TaskProgress progress;
-      progress.taskId = taskId;
-      progress.current = frame;
-      progress.total = frames;
-      progress.message = "frame";
-      send(encode(progress));
-    };
-    if (frames > 8) {
-      // The long render: one frame, then it holds for a CancelTask.
-      sendProgress(1);
-      renderRunning = taskId;
-      return;
-    }
-    for (uint64_t frame = 1; frame <= frames; ++frame)
-      sendProgress(frame);
-    TaskCompleted completed;
-    completed.taskId = taskId;
-    completed.message =
-        (project.projectDirectory / "renders" / shot->id).generic_string();
-    setResults(completed, RenderShotResult{frames});
-    endTask(encode(completed));
-    sendSnapshot();
-    return;
-  }
-  case StudioMessageType::ImportStaticDataset: {
-    const auto req = *decode<ImportStaticDataset>(msg);
-    const auto taskId = startTask(req.requestId);
-    TaskProgress progress;
-    progress.taskId = taskId;
-    progress.message = "importing";
-    send(encode(progress));
-    Dataset dataset;
-    char id[20];
-    std::snprintf(id, sizeof(id), "dataset_%04d", nextDataset++);
-    dataset.id = id;
-    dataset.name = req.name;
-    dataset.status = DatasetStatus::Available;
-    project.datasets.push_back(dataset);
-    TaskCompleted completed;
-    completed.taskId = taskId;
-    completed.message = dataset.id;
-    send(encode(completed));
-    sendSnapshot();
-    return;
-  }
-  case StudioMessageType::DeclareFileAnimationDataset: {
-    const auto req = *decode<DeclareFileAnimationDataset>(msg);
-    Dataset dataset;
-    char id[20];
-    std::snprintf(id, sizeof(id), "dataset_%04d", nextDataset++);
-    dataset.id = id;
-    dataset.name = req.name;
-    dataset.sourceKind = DatasetSourceKind::FileAnimation;
-    dataset.declared = true;
-    project.datasets.push_back(dataset);
-    reply(req.requestId, DatasetCreatedResult{dataset.id});
-    sendSnapshot();
-    return;
-  }
-  case StudioMessageType::CancelTask: {
-    const auto req = *decode<CancelTask>(msg);
-    if (renderRunning && *renderRunning == req.taskId) {
-      // Cooperative, at the next frame: ok once the body has returned.
-      replyOk(req.requestId);
-      endTask(failedRender(req.taskId, 1));
-      renderRunning.reset();
-      sendSnapshot();
-      return;
-    }
-    replyError(req.requestId, "unknown task " + std::to_string(req.taskId));
-    return;
-  }
-
-  case StudioMessageType::CreateLightRig: {
-    const auto req = *decode<CreateLightRig>(msg);
-    LightRig rig;
-    rig.id = "lightRig_0002";
-    rig.name = req.name;
-    project.lightRigs.push_back(rig);
-    reply(req.requestId, LightRigCreatedResult{rig.id});
-    sendSnapshot();
-    return;
-  }
-  case StudioMessageType::AddLightToRig: {
-    const auto req = *decode<AddLightToRig>(msg);
-    SceneNodeRef node;
-    node.layerName = "studio";
-    node.nodeIndex = 7;
-    reply(req.requestId, LightAddedResult{node});
-    return;
-  }
-  case StudioMessageType::CreateCameraRig: {
-    const auto req = *decode<CreateCameraRig>(msg);
-    CameraRig rig;
-    rig.id = "cameraRig_0002";
-    rig.name = req.name.empty() ? "Camera Rig 2" : req.name;
-    project.cameraRigs.push_back(rig);
-    reply(req.requestId, CameraRigCreatedResult{rig.id});
-    sendSnapshot();
-    return;
-  }
-  case StudioMessageType::CreateColorMap: {
-    const auto req = *decode<CreateColorMap>(msg);
-    ColorMapRecord record;
-    record.id = "colorMap_0001";
-    record.name = req.name;
-    project.colorMaps.push_back(record);
-    SceneObjectRef object;
-    object.type = ANARI_ARRAY1D;
-    object.objectIndex = 3;
-    reply(req.requestId, ColorMapCreatedResult{record.id, object});
-    sendSnapshot();
-    return;
-  }
-
-  case StudioMessageType::ListRoots: {
-    const auto req = *decode<ListRoots>(msg);
-    reply(req.requestId, ListRootsResult{{"/data"}});
-    return;
-  }
-  case StudioMessageType::ListDirectory: {
-    const auto req = *decode<ListDirectory>(msg);
-    if (req.directory != "/data") {
-      replyError(req.requestId,
-          "'" + req.directory.generic_string()
-              + "' is outside every Data Root");
-      return;
-    }
-    ListDirectoryResult result;
-    DirectoryEntry dir;
-    dir.name = "runs";
-    dir.kind = EntryKind::Directory;
-    DirectoryEntry file;
-    file.name = "mesh.obj";
-    file.size = 32;
-    file.mtimeSeconds = 1700000000;
-    result.entries = {dir, file};
-    reply(req.requestId, result);
-    return;
-  }
-
-  case StudioMessageType::SetPlaying: {
-    const auto req = *decode<SetPlaying>(msg);
-    if (req.shotId != project.activeShotId) {
-      replyError(
-          req.requestId, "shot '" + req.shotId + "' is not the active shot");
-      return;
-    }
-    auto *shot = project::findShot(project, req.shotId);
-    shot->playing = req.playing;
-    replyOk(req.requestId);
-    sendSnapshot();
-    if (req.playing) {
-      // The auto-stop, right behind: two snapshots in one poll.
-      shot->playing = false;
-      shot->currentFrame = 5;
-      sendSnapshot();
-    }
-    return;
-  }
-  case StudioMessageType::StartRendering: {
-    // Paced so the client's latest-wins slot consumes every header.
-    if (streamer.joinable())
-      streamer.join();
-    streamer = std::thread([this, shotId = project.activeShotId] {
-      for (const int frame : {0, 1, 2, 0}) {
-        sendFrame(shotId, frame);
-        std::this_thread::sleep_for(30ms);
-      }
-    });
-    return;
-  }
-  case StudioMessageType::SetTime: {
-    const auto req = *decode<SetTime>(msg);
-    if (req.frame == 99) {
-      TimeAdvanceWarning warning;
-      warning.shotId = req.shotId;
-      warning.frame = req.frame;
-      warning.message = "frame 99 failed to load";
-      send(encode(warning));
-      return;
-    }
-    sendFrame(req.shotId, req.frame);
-    return;
-  }
-  case StudioMessageType::Pick: {
-    const auto req = *decode<Pick>(msg);
-    // A reply to a pick nobody sent: the runner must look past it.
-    PickReply stray;
-    stray.requestId = 777;
-    send(encode(stray));
-    PickReply reply;
-    reply.requestId = req.requestId;
-    reply.hit = !(req.x == 0 && req.y == 0);
-    if (reply.hit) {
-      reply.worldPosition = {0.5f, 0.25f, -1.f};
-      SceneObjectRef identity;
-      identity.type = ANARI_SURFACE;
-      identity.objectIndex = 4;
-      reply.objectIdentity = identity;
-    }
-    send(encode(reply));
-    return;
-  }
-  case StudioMessageType::SetOutline:
-  case StudioMessageType::ViewportSettings:
-    return; // recorded above, nothing to answer
-  case StudioMessageType::RequestArrayHistogram: {
-    const auto req = *decode<RequestArrayHistogram>(msg);
-    if (req.array.type != ANARI_ARRAY || req.array.objectIndex != 0) {
-      replyError(req.requestId,
-          "array " + std::to_string(req.array.objectIndex)
-              + " element type ANARI_FLOAT32_VEC3 is not scalar");
-      return;
-    }
-    ArrayHistogramResult result;
-    result.bins = {1, 2, 3};
-    result.minValue = 0.f;
-    result.maxValue = 1.f;
-    reply(req.requestId, result);
-    return;
-  }
-
-  default: {
-    Error error;
-    error.message = std::string(toString(*type)) + " is not served by the fake";
-    send(encode(error));
-    return;
-  }
-  }
 }
 
 } // namespace
@@ -1405,7 +713,7 @@ SCENARIO("the test client refuses a server speaking another protocol version",
 {
   GIVEN("a server whose Hello carries the wrong version")
   {
-    ScriptedServer server(ScriptedServer::Behaviour::MismatchedHello);
+    FakeStudioServer server(PROTOCOL_VERSION + 1);
     TestSession session;
     const auto result = runScript(session,
         "connect 127.0.0.1 " + std::to_string(server.port()) + "\n"
@@ -1417,7 +725,7 @@ SCENARIO("the test client refuses a server speaking another protocol version",
       REQUIRE(result.records.size() == 2);
       REQUIRE(result.records[0]
           == "EVT Hello version=" + std::to_string(PROTOCOL_VERSION + 1)
-              + " buildInfo=\"scripted server\"");
+              + " buildInfo=\"fake server\"");
       REQUIRE(result.records[1].rfind("FAIL connect", 0) == 0);
       REQUIRE(result.records[1].find("protocol version mismatch")
           != std::string::npos);
@@ -1427,7 +735,13 @@ SCENARIO("the test client refuses a server speaking another protocol version",
 
   GIVEN("a server that answers the client's Hello with an Error and closes")
   {
-    ScriptedServer server(ScriptedServer::Behaviour::RefuseOnHello);
+    FakeStudioServer server;
+    server.holdBootstrap = true;
+    server.onHello = [&] {
+      Error error;
+      error.message = "the scripted server refuses";
+      server.farewell(encode(error));
+    };
     TestSession session;
     const auto result = runScript(
         session, "connect 127.0.0.1 " + std::to_string(server.port()) + "\n");
@@ -1451,7 +765,8 @@ SCENARIO("the test client stays unconnected until the Bootstrap completes",
 {
   GIVEN("a server that says Hello and never bootstraps")
   {
-    ScriptedServer server(ScriptedServer::Behaviour::HelloOnly);
+    FakeStudioServer server;
+    server.holdBootstrap = true;
     TestSession session;
     const auto endpoint = "127.0.0.1 " + std::to_string(server.port());
     const auto result = runScript(session,
@@ -1492,7 +807,15 @@ SCENARIO("the test client takes the loss reason from the server's farewell",
 {
   GIVEN("a server that bootstraps, says Disconnect{reason} and closes")
   {
-    ScriptedServer server(ScriptedServer::Behaviour::FarewellAfterBootstrap);
+    FakeStudioServer server;
+    server.bootstrap = {encode(BootstrapBegin{})}; // empty, but complete
+    server.onHello = [&] {
+      // The close waits a little so the client's connect has settled
+      // before the loss lands.
+      Disconnect goodbye;
+      goodbye.reason = "replaced by another client";
+      server.farewell(encode(goodbye), 300ms);
+    };
     TestSession session;
     const auto result = runScript(session,
         "connect 127.0.0.1 " + std::to_string(server.port()) + "\n"
@@ -1517,7 +840,9 @@ SCENARIO("the test client's liveness timers end a wait on a silent server",
       "a server that bootstraps and then never speaks again, and a session"
       " with fast timings")
   {
-    ScriptedServer server(ScriptedServer::Behaviour::SilentAfterBootstrap);
+    FakeStudioServer server;
+    server.bootstrap = {encode(BootstrapBegin{})}; // empty, but complete
+    server.silent = true;
     SessionTimings timings;
     timings.pingAfterQuiet = 100ms;
     timings.lossAfterSilence = 400ms;
@@ -1552,7 +877,7 @@ SCENARIO("the test client's liveness timers end a wait on a silent server",
       REQUIRE(hasLine(result.records, "OK assert state == Lost"));
       REQUIRE(elapsed < 4s);
       // The script's Ping and at least one liveness Ping after the quiet.
-      REQUIRE(server.pingsReceived >= 2);
+      REQUIRE(server.count(StudioMessageType::Ping) >= 2);
     }
   }
 }
@@ -1562,7 +887,7 @@ SCENARIO("the test client drives project ops against a fake server",
 {
   GIVEN("a fake project server and a session")
   {
-    ProjectOpsServer server;
+    FakeProjectServer server;
     TestSession session;
     const auto endpoint = "127.0.0.1 " + std::to_string(server.port());
 
@@ -2171,7 +1496,7 @@ SCENARIO("the test client drives project ops against a fake server",
           "assert task.last.state == Running\n");
       REQUIRE(first.ok);
       // The server drops the socket without a word, as a crash would.
-      server.channel->restart();
+      server.fake.dropConnection();
       // A fresh runner: the render is task 2, not $lastTaskId.
       const auto lost = runScript(session,
           "await-lost\n"
@@ -2210,7 +1535,7 @@ SCENARIO("the test client drives project ops against a fake server",
       REQUIRE(first.ok);
       // A kill and restart: the socket drops and the new process counts task
       // ids from 1 again.
-      server.channel->restart();
+      server.fake.dropConnection();
       server.nextTaskId = 1;
       server.renderRunning.reset();
       const auto reused = runScript(session,
