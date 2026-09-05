@@ -428,9 +428,8 @@ vsr::scene::RendererAppRef ProjectContext::bindShotRenderer(
     return {};
 
   auto &settings = shot.renderSettings;
-  const bool hadPick = settings.rendererObjectIndex != VSR_INVALID_INDEX;
   vsr::scene::RendererAppRef renderer;
-  if (hadPick) {
+  if (settings.rendererObjectIndex != VSR_INVALID_INDEX) {
     auto candidate =
         scene.getObject<vsr::scene::Renderer>(settings.rendererObjectIndex);
     if (candidate && candidate->rendererDeviceName() == library)
@@ -439,15 +438,9 @@ vsr::scene::RendererAppRef ProjectContext::bindShotRenderer(
   if (!renderer)
     renderer = renderers.front();
 
-  if (settings.rendererObjectIndex != renderer->index()
-      || settings.rendererSubtype != renderer->subtype().str()
-      || settings.rendererLibrary != library) {
-    settings.rendererObjectIndex = renderer->index();
-    settings.rendererSubtype = renderer->subtype().str();
-    settings.rendererLibrary = library;
-    if (hadPick)
-      m_project.markDirty();
-  }
+  settings.rendererLibrary = library;
+  settings.rendererObjectIndex = renderer->index();
+  settings.rendererSubtype = renderer->subtype().str();
   return renderer;
 }
 

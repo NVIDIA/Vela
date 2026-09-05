@@ -175,9 +175,10 @@ struct ProjectContext
   // of the library's renderers, else the first of them, creating the
   // library's standard set on `device` when the scene has none (a fresh or
   // reopened project). Records the pick (library, index, subtype) in the
-  // shot; filling in a shot that never picked leaves the dirty flag alone,
-  // overriding a real pick is an edit. Returns the bound renderer, or null
-  // when the library offers none (the shot is then untouched).
+  // shot and nothing else: `shot` may be a draft or a record the caller will
+  // restore, so whether a rewritten pick is an edit is the caller's call.
+  // Returns the bound renderer, or null when the library offers none (the
+  // shot is then untouched).
   vsr::scene::RendererAppRef bindShotRenderer(
       Shot &shot, const std::string &library, anari::Device device);
   LightRig *createLightRig(const std::string &name = "");

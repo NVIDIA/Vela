@@ -1100,16 +1100,26 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   the loaded device did not have). The fallback is now
   `ANARIDeviceManager::loadFirstAvailableDevice(libName)`, one warning, next
   to the `loadDevice` it wraps; the binding is `ProjectContext::
-  bindShotRenderer(shot, library, device) -> RendererAppRef`, with the
-  server's dirty rule (filling in a shot that never picked leaves the dirty
-  flag alone; overriding a real pick is an edit). `bindActiveShotRendering`
-  is camera and pass wiring around one call and the server's `m_renderers`
-  is gone; the ShotEditor loads the device once per library as before and
-  reports the fix-up as an edit of its draft, so it still lands through
-  `updateShot`. RenderShot binds before it builds its render index, so a
-  shot whose library is not on the machine now renders with the fallback
-  device's first renderer instead of failing "Renderer object index N is
-  unavailable" after the device fallback had already picked another library.
+  bindShotRenderer(shot, library, device) -> RendererAppRef`. The bind
+  writes the pick into the `Shot` it is handed and nothing else: the
+  ShotEditor hands it a draft that lands through `updateShot` (whose dirty
+  marking stays the only one on that path) and RenderShot hands it a record
+  the render restores, so the server alone keeps its rule (filling in a shot
+  that never picked leaves the dirty flag alone; overriding a real pick is
+  an edit), by comparing the settings around the call. The document asked
+  for the private `ensureRendererDefaults(Shot &)` to be promoted into this
+  function; it stays as it was, because it does a different job (it picks a
+  default *library name* for a new shot from the device manager's list,
+  before any device exists) and the two calls it serves have no device to
+  bind with. `bindActiveShotRendering` is camera and pass wiring around one
+  call and the server's `m_renderers` is gone; the ShotEditor loads the
+  device once per library as before and reports the fix-up as an edit of
+  its draft. RenderShot binds before it builds its render index, so a shot
+  whose library is not on the machine now renders with the fallback
+  device's first renderer (and its record names what rendered, dirty flag
+  restored with the rest) instead of failing "Renderer object index N is
+  unavailable" after the device fallback had already picked another
+  library; this is the one behaviour change of the fix-up.
   `ProjectContext::createLightRig` calls `applyActiveShot()` like
   `cloneLightRig` and `loadLightRigArchive`, so a new rig starts hidden
   wherever it is created; the dispatcher's compensating call after
