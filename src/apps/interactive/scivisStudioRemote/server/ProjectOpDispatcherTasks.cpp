@@ -28,6 +28,22 @@ using namespace protocol;
 
 namespace {
 
+// A render's ending as the task's. (The model's RenderShotResult, not the
+// protocol's results subtree of the same name.)
+using RenderEnding = scivis_studio::RenderShotResult::Outcome;
+TaskOutcome taskOutcome(RenderEnding rendered)
+{
+  switch (rendered) {
+  case RenderEnding::Completed:
+    return TaskOutcome::Completed;
+  case RenderEnding::Cancelled:
+    return TaskOutcome::Cancelled;
+  case RenderEnding::Failed:
+    break;
+  }
+  return TaskOutcome::Failed;
+}
+
 // The failure of a task body whose dataset is gone by the time it runs.
 TaskResult datasetNotFound()
 {
@@ -373,9 +389,7 @@ void ProjectOpDispatcher::handle(const RenderShot &req)
           };
           const auto rendered = renderActiveShotToFrames(context(), &progress);
           TaskResult result;
-          result.outcome = rendered.cancelled ? TaskOutcome::Cancelled
-              : rendered.completed            ? TaskOutcome::Completed
-                                              : TaskOutcome::Failed;
+          result.outcome = taskOutcome(rendered.outcome);
           result.error = rendered.error;
           result.message = rendered.outputDirectory.string();
           setResults(result,

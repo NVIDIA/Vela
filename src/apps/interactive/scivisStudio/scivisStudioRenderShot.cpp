@@ -8,6 +8,7 @@
 #include "vsr/app/Context.h"
 #include "vsr/core/Logging.hpp"
 
+#include <algorithm>
 #include <csignal>
 #include <cstdio>
 #include <iostream>
@@ -96,14 +97,18 @@ int main(int argc, const char **argv)
     return true;
   };
 
-  if (!renderActiveShotToFrames(projectContext, &progress).completed) {
-    if (g_canceled)
-      std::cerr << "Canceled\n";
-    else
-      std::cerr << "Render failed\n";
+  const auto result = renderActiveShotToFrames(projectContext, &progress);
+  switch (result.outcome) {
+  case RenderShotResult::Outcome::Completed:
+    std::cout << "Done\n";
+    return 0;
+  case RenderShotResult::Outcome::Cancelled:
+    std::cerr << "Canceled after " << result.framesCompleted << " of "
+              << std::max(1, shot->frameCount) << " frames\n";
+    return 1;
+  case RenderShotResult::Outcome::Failed:
+    std::cerr << "Render failed: " << result.error << '\n';
     return 1;
   }
-
-  std::cout << "Done\n";
-  return 0;
+  return 1;
 }

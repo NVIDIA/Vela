@@ -37,15 +37,22 @@ bool makeShotDatasetsResident(ProjectContext &projectContext,
 void restoreShotDatasetResidency(
     ProjectContext &projectContext, const ShotDatasetResidencyRestore &restore);
 
-// How a shot render ended. `completed` when every frame was written;
-// `cancelled` when onFrame stopped it; otherwise `error` says why it never
-// started (an unsaved project, a missing camera, a dataset that could not be
-// made resident) or stopped early. framesCompleted counts the frames written
-// before it ended -- they stay on disk under outputDirectory.
+// How a shot render ended. Completed when every frame was written; Cancelled
+// when onFrame stopped it; Failed when it never started (an unsaved project, a
+// missing camera, a dataset that could not be made resident, a renderer pick
+// the loaded device does not have), with `error` saying why. framesCompleted
+// counts the frames written before it ended -- they stay on disk under
+// outputDirectory.
 struct RenderShotResult
 {
-  bool completed{false};
-  bool cancelled{false};
+  enum class Outcome
+  {
+    Completed,
+    Cancelled,
+    Failed
+  };
+
+  Outcome outcome{Outcome::Failed};
   std::string error;
   int framesCompleted{0};
   std::filesystem::path outputDirectory;
@@ -53,7 +60,9 @@ struct RenderShotResult
 
 // Renders the active shot's frames to <project>/renders/<shotId>/. The
 // result tells a completed render from a cancel or a failure and how far it
-// got; a throw from a frame's load or encode propagates.
+// got. A throw from a frame's load or encode propagates; the guards that put
+// the shot's datasets, time and playback state back afterwards log a restore
+// that fails rather than throw over it.
 RenderShotResult renderActiveShotToFrames(
     ProjectContext &projectContext, RenderShotProgress *progress = nullptr);
 

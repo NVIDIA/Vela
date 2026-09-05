@@ -20,11 +20,12 @@ namespace vsr::scivis_studio {
 
 namespace {
 
-// Logs `error`, records it in `out` and hands `out` back as the render's
-// result; every early exit of the render.
+// Logs `error`, records it in `out` as a Failed ending and hands `out` back
+// as the render's result; every early exit of the render.
 RenderShotResult failRender(RenderShotResult &out, std::string error)
 {
   vsr::core::logError("[SciVisStudio] %s", error.c_str());
+  out.outcome = RenderShotResult::Outcome::Failed;
   out.error = std::move(error);
   return std::move(out);
 }
@@ -221,6 +222,8 @@ RenderShotResult renderActiveShotToFrames(
   // The shot's time and playback state come back whatever ends the frame
   // loop, and the interactive pipeline follows the shot again; declared
   // after the index guard so this runs first, while the index still stands.
+  // A restore that fails is logged, never thrown: a destructor cannot
+  // propagate, and the frames already written are the result that matters.
   struct ShotStateGuard
   {
     ProjectContext &projectContext;
@@ -249,7 +252,7 @@ RenderShotResult renderActiveShotToFrames(
       totalFrames,
       outputDirectory.string().c_str());
 
-  out.completed = true;
+  out.outcome = RenderShotResult::Outcome::Completed;
   for (int frame = 0; frame < totalFrames; ++frame) {
     if (progress && progress->onFrame
         && !progress->onFrame(frame, totalFrames)) {
@@ -257,8 +260,7 @@ RenderShotResult renderActiveShotToFrames(
           "[SciVisStudio] Shot render canceled before frame %d/%d",
           frame,
           totalFrames);
-      out.completed = false;
-      out.cancelled = true;
+      out.outcome = RenderShotResult::Outcome::Cancelled;
       break;
     }
 

@@ -3546,8 +3546,7 @@ SCENARIO(
     THEN("The render refuses with the reason and no frames")
     {
       const auto result = renderActiveShotToFrames(projectContext);
-      REQUIRE_FALSE(result.completed);
-      REQUIRE_FALSE(result.cancelled);
+      REQUIRE(result.outcome == RenderShotResult::Outcome::Failed);
       REQUIRE(result.error == "Cannot render an unsaved project");
       REQUIRE(result.framesCompleted == 0);
       REQUIRE(result.outputDirectory.empty());
