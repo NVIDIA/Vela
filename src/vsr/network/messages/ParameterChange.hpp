@@ -24,7 +24,7 @@ struct ParameterChange : public StructuredMessage
   ParameterChange(const Message &msg, vsr::scene::Scene *scene);
 
   // Receiver behavior
-  void execute() override;
+  bool execute() override;
 
  private:
   vsr::scene::Scene *m_scene{nullptr};

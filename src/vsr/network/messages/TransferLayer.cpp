@@ -33,12 +33,12 @@ TransferLayer::TransferLayer(const Message &msg, vsr::scene::Scene *scene)
       msg.header.payload_length);
 }
 
-void TransferLayer::execute()
+bool TransferLayer::execute()
 {
   if (!m_scene) {
     vsr::core::logError(
         "[message::TransferLayer] No scene set to transfer data into");
-    return;
+    return false;
   }
 
   auto &root = m_tree.root();
@@ -52,8 +52,17 @@ void TransferLayer::execute()
     vsr::core::logDebug("[message::TransferLayer] Updating existing layer '%s'",
         layerName.c_str());
   }
-  vsr::io::deserialize_Layer(root["l"], *layer, *m_scene);
+  // A slot the payload records but the layer cannot honour refuses the whole
+  // layer: it is left empty rather than numbered differently from the sender.
+  const bool applied = vsr::io::deserialize_Layer(root["l"], *layer, *m_scene);
+  if (!applied) {
+    vsr::core::logError(
+        "[message::TransferLayer] Layer '%s' refused: its node numbering "
+        "cannot be reproduced",
+        layerName.c_str());
+  }
   m_scene->signalLayerStructureChanged(layer);
+  return applied;
 }
 
 } // namespace vsr::network::messages

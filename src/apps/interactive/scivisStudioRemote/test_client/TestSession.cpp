@@ -1130,21 +1130,27 @@ void TestSession::handleHello(const Message &msg)
 void TestSession::applySceneMessage(StudioMessageType type, const Message &msg)
 {
   Event event(type);
+  bool applied = true;
   switch (type) {
   case StudioMessageType::TransferScene:
-    messages::TransferScene(msg, &m_mirror).execute();
+    applied = messages::TransferScene(msg, &m_mirror).execute();
     break;
   case StudioMessageType::TransferLayer:
-    messages::TransferLayer(msg, &m_mirror).execute();
+    applied = messages::TransferLayer(msg, &m_mirror).execute();
     break;
   case StudioMessageType::ObjectAdded:
-    messages::NewObject(msg, &m_mirror).execute();
+    applied = messages::NewObject(msg, &m_mirror).execute();
     break;
   case StudioMessageType::ObjectRemoved:
-    messages::RemoveObject(msg, &m_mirror).execute();
+    applied = messages::RemoveObject(msg, &m_mirror).execute();
     break;
   default:
     break;
+  }
+  if (!applied) {
+    // The mirror could not take the push as sent; the server hears it.
+    replyError(std::string(toString(type)) + " refused by the mirror");
+    event.fields.emplace_back("malformed", "true");
   }
   event.fields.emplace_back("objects", std::to_string(totalObjects(m_mirror)));
   event.fields.emplace_back(

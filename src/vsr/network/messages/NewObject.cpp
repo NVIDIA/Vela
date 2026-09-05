@@ -26,14 +26,15 @@ NewObject::NewObject(const Message &msg, vsr::scene::Scene *scene)
       msg.header.payload_length);
 }
 
-void NewObject::execute()
+bool NewObject::execute()
 {
   if (!m_scene) {
     vsr::core::logError("[message::NewObject] No scene provided for exec");
-    return;
+    return false;
   }
 
   vsr::io::deserialize_Object(*m_scene, m_tree.root());
+  return true;
 }
 
 } // namespace vsr::network::messages

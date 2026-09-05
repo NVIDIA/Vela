@@ -73,8 +73,11 @@ struct StructuredMessage
 
   const vsr::core::DataTree &tree() const;
 
-  // Child classes override to associate behavior on receipt using tree contents
-  virtual void execute() = 0;
+  // Child classes override to apply the tree's contents on receipt. True when
+  // the message was applied; false, after logging why, when the receiver
+  // could not honour it (no scene, an unknown object, a payload the scene
+  // cannot take as recorded).
+  virtual bool execute() = 0;
 
  protected:
   vsr::core::DataTree m_tree;

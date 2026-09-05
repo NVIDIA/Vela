@@ -62,12 +62,12 @@ TransferArrayData::TransferArrayData(
       msg.header.payload_length);
 }
 
-void TransferArrayData::execute()
+bool TransferArrayData::execute()
 {
   if (!m_scene) {
     vsr::core::logError(
         "[message::TransferArrayData] No scene provided for exec");
-    return;
+    return false;
   }
 
   auto a = m_tree.root()["a"].getValue();
@@ -77,7 +77,7 @@ void TransferArrayData::execute()
         "[message::TransferArrayData] Unable to find array (%s, %zu)",
         anari::toString(a.type()),
         a.getAsObjectIndex());
-    return;
+    return false;
   }
 
   auto &d = m_tree.root()["d"];
@@ -94,7 +94,7 @@ void TransferArrayData::execute()
         anari::toString(type),
         anari::toString(a.type()),
         a.getAsObjectIndex());
-    return;
+    return false;
   } else if (array->size() != size) {
     vsr::core::logError(
         "[message::TransferArrayData] Array size mismatch (%zu != %zu) for "
@@ -103,12 +103,13 @@ void TransferArrayData::execute()
         size,
         anari::toString(a.type()),
         a.getAsObjectIndex());
-    return;
+    return false;
   }
 
   if (array->isProxy())
     array->convertProxyToHost();
   array->setData(ptr);
+  return true;
 }
 
 } // namespace vsr::network::messages

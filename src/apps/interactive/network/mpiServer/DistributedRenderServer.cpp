@@ -473,8 +473,7 @@ void DistributedRenderServer::setup_Messaging()
         if (vsr::network::payloadRead(msg, pos, filename)) {
           vsr::core::logStatus(
               "[vsrMPIServer] Saving Scene Archive '%s'...", filename.c_str());
-          if (!vsr::io::save_SceneArchive(
-                  m_ctx.vsr.scene, filename.c_str())) {
+          if (!vsr::io::save_SceneArchive(m_ctx.vsr.scene, filename.c_str())) {
             vsr::core::logError(
                 "[vsrMPIServer] Failed to save Scene Archive '%s'",
                 filename.c_str());
@@ -678,7 +677,10 @@ int DistributedRenderServer::determineTargetRank(const Message &msg)
   struct Peek : public StructuredMessage
   {
     Peek(const Message &m) : StructuredMessage(m) {}
-    void execute() override {}
+    bool execute() override
+    {
+      return true;
+    }
   };
 
   try {

@@ -827,6 +827,7 @@ void ServerConnection::applySceneMessage(
   // Origin-based echo suppression: what the server pushes must not be sent
   // back as an optimistic edit.
   setDelegateEnabled(false);
+  bool applied = true;
   switch (type) {
   case StudioMessageType::TransferScene:
     // A whole-scene push outside the bootstrap (the server re-sent its scene)
@@ -834,21 +835,26 @@ void ServerConnection::applySceneMessage(
     // it and the mirror is empty.
     if (!bootstrapping())
       announceMirrorReplace();
-    messages::TransferScene(msg, m_mirror).execute();
+    applied = messages::TransferScene(msg, m_mirror).execute();
     break;
   case StudioMessageType::TransferLayer:
-    messages::TransferLayer(msg, m_mirror).execute();
+    applied = messages::TransferLayer(msg, m_mirror).execute();
     break;
   case StudioMessageType::ObjectAdded:
-    messages::NewObject(msg, m_mirror).execute();
+    applied = messages::NewObject(msg, m_mirror).execute();
     break;
   case StudioMessageType::ObjectRemoved:
-    messages::RemoveObject(msg, m_mirror).execute();
+    applied = messages::RemoveObject(msg, m_mirror).execute();
     break;
   default:
     break;
   }
   syncDelegate();
+  // A push the mirror could not take as sent (a layer whose node numbering
+  // it cannot reproduce) is a protocol error: the message logged why, the
+  // affected layer stays empty, and the server hears the refusal.
+  if (!applied)
+    replyError(std::string(toString(type)) + " refused by the mirror");
 }
 
 void ServerConnection::announceMirrorReplace()

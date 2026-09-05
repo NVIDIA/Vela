@@ -40,9 +40,12 @@ void serialize_Layer(const scene::Layer &layer,
 void serialize_LayerSubtree(
     const scene::Layer &layer, scene::LayerNodeRef start, core::DataNode &node);
 // Clears the layer, then rebuilds it: a node that records its index is
-// placed back in that slot; any other node, or one whose slot is taken, is
-// appended with the next dense index.
-void deserialize_Layer(
+// placed back in that slot; any other node is appended with the next dense
+// index. False, with the layer left empty, when a recorded slot cannot be
+// honoured (two nodes recording one index, or a dense node having taken it):
+// a Preserved layer renumbered on one side would name every later node
+// wrongly, so the whole layer is refused instead.
+bool deserialize_Layer(
     core::DataNode &node, scene::Layer &layer, scene::Scene &scene);
 
 } // namespace vsr::io

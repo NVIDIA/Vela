@@ -23,14 +23,15 @@ RemoveObject::RemoveObject(const Message &msg, vsr::scene::Scene *scene)
       msg.header.payload_length);
 }
 
-void RemoveObject::execute()
+bool RemoveObject::execute()
 {
   if (!m_scene) {
     vsr::core::logError("[message::RemoveObject] No scene provided for exec");
-    return;
+    return false;
   }
 
   m_scene->removeObject(m_tree.root().getValue());
+  return true;
 }
 
 } // namespace vsr::network::messages

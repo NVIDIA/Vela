@@ -63,7 +63,13 @@ from creation replies and scene pushes.
 Layer structure is server-push-only: there is **no client layer-edit message
 in the protocol at all**. The server pushes whole-layer `TransferLayer`
 snapshots; the client's `LayerTree` ships as a read-only inspector
-(`LayerTree::EditMode::ReadOnly` in `vsr_ui_imgui`).
+(`LayerTree::EditMode::ReadOnly` in `vsr_ui_imgui`). A pushed layer carries
+each node's server index (`LayerNodeNumbering::Preserved`) and the mirror
+places every node back in that slot, so a `SceneNodeRef` names the same node
+on both sides. A payload the mirror cannot reproduce (two nodes recording one
+slot) is refused whole -- `deserialize_Layer` returns false and leaves the
+layer empty, and the client answers with an `Error` -- never renumbered
+densely, since a renumbered mirror would misname every later reference.
 
 Echo suppression is by origin: the server's push delegate is disabled while it
 applies a client message — the same trick the demo client's

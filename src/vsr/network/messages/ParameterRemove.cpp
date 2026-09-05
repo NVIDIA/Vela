@@ -28,12 +28,12 @@ ParameterRemove::ParameterRemove(const Message &msg, vsr::scene::Scene *scene)
       msg.header.payload_length);
 }
 
-void ParameterRemove::execute()
+bool ParameterRemove::execute()
 {
   if (!m_scene) {
     vsr::core::logError(
         "[message::ParameterRemove] No scene provided for exec");
-    return;
+    return false;
   }
 
   auto o = m_tree.root()["o"].getValue();
@@ -43,11 +43,12 @@ void ParameterRemove::execute()
         "[message::ParameterRemove] Unable to find object (%s, %zu)",
         anari::toString(o.type()),
         o.getAsObjectIndex());
-    return;
+    return false;
   }
 
   auto paramName = m_tree.root()["n"].getValueAs<std::string>();
   obj->removeParameter(paramName.c_str());
+  return true;
 }
 
 } // namespace vsr::network::messages

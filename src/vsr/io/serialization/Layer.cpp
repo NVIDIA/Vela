@@ -39,17 +39,17 @@ void deserializeLayerNodeInstanceParameters(
 }
 
 // A node recorded with LayerNodeNumbering::Preserved goes back into its
-// recorded slot; anything else (or a slot already taken) is appended densely.
+// recorded slot, or nowhere (an empty ref) when that slot is taken; anything
+// else is appended densely.
 scene::LayerNodeRef insertLayerNode(
     core::DataNode &node, scene::LayerNodeRef parent, scene::Layer &layer)
 {
   if (auto *index = node.child("index"); index != nullptr) {
     const auto slot = index->getValueOr(core::INVALID_INDEX);
-    if (auto placed = parent->insert_last_child_at(slot, {&layer}))
-      return placed;
-    core::logWarning(
-        "[deserialize_Layer] node slot %zu unavailable; numbering densely",
-        slot);
+    auto placed = parent->insert_last_child_at(slot, {&layer});
+    if (!placed)
+      core::logError("[deserialize_Layer] node slot %zu unavailable", slot);
+    return placed;
   }
   return parent->insert_last_child({&layer});
 }
@@ -129,7 +129,7 @@ void serialize_LayerSubtree(
   detail::serialize_LayerSubtree(layer, start, node, nullptr);
 }
 
-void deserialize_Layer(
+bool deserialize_Layer(
     core::DataNode &rootNode, scene::Layer &layer, scene::Scene &)
 {
   layer.clear();
@@ -138,7 +138,10 @@ void deserialize_Layer(
   scene::LayerNodeRef currentParentNode;
   scene::LayerNodeRef currentNode = layer.root();
   int currentLevel = -1;
+  bool placed = true;
   rootNode.traverse([&](core::DataNode &node, int level) {
+    if (!placed)
+      return false;
     if (level & 0x1 || !node.child("children"))
       return true;
 
@@ -158,6 +161,10 @@ void deserialize_Layer(
       currentNode = layer.root();
     } else {
       currentNode = insertLayerNode(node, currentParentNode, layer);
+      if (!currentNode) {
+        placed = false;
+        return false;
+      }
       if (auto *child = node.child("transformSRT"); child != nullptr)
         (*currentNode)->setAsTransform(child->getValueAs<math::mat3>());
       else
@@ -169,6 +176,10 @@ void deserialize_Layer(
 
     return true;
   });
+
+  if (!placed)
+    layer.clear();
+  return placed;
 }
 
 } // namespace vsr::io

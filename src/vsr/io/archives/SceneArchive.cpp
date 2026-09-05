@@ -463,7 +463,9 @@ bool serializeSceneArchive(const scene::Scene &scene,
   return true;
 }
 
-void reconstructSceneArchive(scene::Scene &scene, core::DataNode &sceneArchive)
+// False when a layer could not be rebuilt as recorded (a Preserved slot
+// collision); the objects and the layers before it are already in place.
+bool reconstructSceneArchive(scene::Scene &scene, core::DataNode &sceneArchive)
 {
   scene.removeAllObjects();
 
@@ -476,11 +478,16 @@ void reconstructSceneArchive(scene::Scene &scene, core::DataNode &sceneArchive)
     }
   }
 
+  bool layersRebuilt = true;
   if (auto *layers = payload.child("layers")) {
     layers->foreach_child([&](core::DataNode &layerNode) {
       const core::Token layerName(layerNode.name());
       auto &layer = *scene.addLayer(layerName);
-      deserialize_Layer(layerNode, layer, scene);
+      if (!deserialize_Layer(layerNode, layer, scene)) {
+        core::logError("[deserialize_SceneArchive] layer '%s' refused",
+            layerNode.name().c_str());
+        layersRebuilt = false;
+      }
       const bool active = layerNode.child("isActive")
           ? layerNode["isActive"].getValueOr(true)
           : true;
@@ -489,6 +496,7 @@ void reconstructSceneArchive(scene::Scene &scene, core::DataNode &sceneArchive)
     });
   }
   scene.signalActiveLayersChanged();
+  return layersRebuilt;
 }
 
 } // namespace
@@ -572,8 +580,7 @@ bool deserialize_SceneArchive(scene::Scene &scene,
   if (!archiveValidation.accepted())
     return false;
 
-  reconstructSceneArchive(scene, archive);
-  return true;
+  return reconstructSceneArchive(scene, archive);
 }
 
 bool save_SceneArchive(

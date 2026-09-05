@@ -254,11 +254,28 @@ SCENARIO(
         for (int i = 0; i < 3; ++i)
           targetScene.insertChildTransformNode(
               targetLayer->root(), vsr::math::IDENTITY_MAT4, "stale");
-        vsr::io::deserialize_Layer(tree.root(), *targetLayer, targetScene);
+        REQUIRE(
+            vsr::io::deserialize_Layer(tree.root(), *targetLayer, targetScene));
         REQUIRE(targetLayer->size() == 4);
         REQUIRE(!targetLayer->at(2));
         REQUIRE((*targetLayer->at(3))->name() == "group");
         REQUIRE((*targetLayer->at(4))->name() == "leaf");
+      }
+
+      THEN("two nodes recording one slot refuse the whole layer")
+      {
+        auto &groupNode = *tree.root()["children"].child(1);
+        groupNode["children"].child(0)->child("index")->setValue(size_t(3));
+
+        vsr::scene::Scene targetScene;
+        auto *targetLayer = targetScene.defaultLayer();
+        targetScene.insertChildTransformNode(
+            targetLayer->root(), vsr::math::IDENTITY_MAT4, "stale");
+        REQUIRE_FALSE(
+            vsr::io::deserialize_Layer(tree.root(), *targetLayer, targetScene));
+        REQUIRE(targetLayer->size() == 1);
+        REQUIRE(!targetLayer->at(1));
+        REQUIRE(!targetLayer->at(3));
       }
     }
   }
