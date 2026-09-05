@@ -85,6 +85,9 @@ struct FakeProjectServer
   void replyOk(uint64_t requestId);
   void replyError(uint64_t requestId, const std::string &error);
   uint64_t startTask(uint64_t requestId);
+  void endTask(Message end);
+  // The TaskFailed a cancelled render ends with: RenderShotResult results.
+  Message failedRender(uint64_t taskId, uint64_t framesCompleted);
 
   // Guards the state below: a handler runs on the IO thread, a test pokes
   // the state between two connections.
@@ -106,10 +109,7 @@ struct FakeProjectServer
   std::chrono::milliseconds snapshotDelay{0};
   std::vector<Message> deferred;
   std::vector<std::thread> delayedSends;
-
-  void endTask(Message end);
-  // The TaskFailed a cancelled render ends with: RenderShotResult results.
-  Message failedRender(uint64_t taskId, uint64_t framesCompleted);
+  bool tearingDown{false}; // under `mutex`: no delayed send may start after
 
   // The session behaviour (Hello, Ping, the message log) and the socket.
   // Last, so its IO thread is stopped before the state its handlers read
@@ -147,7 +147,16 @@ inline FakeProjectServer::FakeProjectServer()
 
 inline FakeProjectServer::~FakeProjectServer()
 {
-  for (auto &thread : delayedSends)
+  // The flag and the swap share the lock with the handlers, so a snapshot
+  // delayed from the IO thread either queued its thread before this or finds
+  // the teardown under way and goes out at once.
+  std::vector<std::thread> pending;
+  {
+    std::lock_guard lock(mutex);
+    tearingDown = true;
+    pending.swap(delayedSends);
+  }
+  for (auto &thread : pending)
     thread.join();
 }
 
@@ -181,7 +190,7 @@ inline void FakeProjectServer::sendSnapshot()
     deferred.push_back(encode(ProjectSnapshot{project}));
     return;
   }
-  if (snapshotDelay.count() > 0) {
+  if (snapshotDelay.count() > 0 && !tearingDown) {
     delayedSends.emplace_back(
         [this, snapshot = encode(ProjectSnapshot{project})]() mutable {
           std::this_thread::sleep_for(snapshotDelay);
@@ -364,7 +373,7 @@ inline void FakeProjectServer::onRequest(const Message &msg)
     }
     // The saved project again: its UI state goes out before the end.
     project.dirty = false;
-    send(encode(UIState{})); // every bootstrap carries one, null here
+    send(encode(UIState{})); // the opened project's UI state, none here
     TaskCompleted completed;
     completed.taskId = taskId;
     endTask(encode(completed));

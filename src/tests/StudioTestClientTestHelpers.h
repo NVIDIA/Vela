@@ -85,14 +85,14 @@ inline vsr::scivis_studio::test_client::RunnerOptions keepGoing()
   return options;
 }
 
-// Parses `script` and runs it through a fresh runner on `session`, returning
-// run()'s verdict and the record stream.
+// run()'s verdict on a script and the record stream it printed.
 struct RunResult
 {
   bool ok{false};
   std::vector<std::string> records;
 };
 
+// Parses `script` and runs it through a fresh runner on `session`.
 inline RunResult runScript(
     vsr::scivis_studio::test_client::TestSession &session,
     const std::string &script,

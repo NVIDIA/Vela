@@ -126,6 +126,7 @@ struct FakeStudioServer
   std::mutex mutex;
   std::vector<Message> received;
   std::vector<std::thread> closers; // one per farewell, joined on teardown
+  bool tearingDown{false}; // under `mutex`: no closer may start after it
 };
 
 // Inlined definitions ////////////////////////////////////////////////////////
@@ -155,18 +156,17 @@ inline FakeStudioServer::FakeStudioServer(int helloVersion, uint16_t port)
 inline FakeStudioServer::~FakeStudioServer()
 {
   // A closer restarts the channel, so every one must be done before the
-  // channel stops; a farewell may still be queuing one from the IO thread.
-  for (;;) {
-    std::vector<std::thread> pending;
-    {
-      std::lock_guard lock(mutex);
-      pending.swap(closers);
-    }
-    if (pending.empty())
-      break;
-    for (auto &closer : pending)
-      closer.join();
+  // channel stops. The flag and the swap share the lock with farewell(), so
+  // a farewell from the IO thread either queued its closer before this or
+  // finds the teardown under way and spawns none.
+  std::vector<std::thread> pending;
+  {
+    std::lock_guard lock(mutex);
+    tearingDown = true;
+    pending.swap(closers);
   }
+  for (auto &closer : pending)
+    closer.join();
   channel->stop();
 }
 
@@ -218,6 +218,8 @@ inline void FakeStudioServer::farewell(
 {
   auto flushed = channel->send(std::move(msg));
   std::lock_guard lock(mutex);
+  if (tearingDown)
+    return;
   closers.emplace_back(
       [this, flushed = std::move(flushed), closeDelay]() mutable {
         flushed.wait_for(std::chrono::seconds(1));

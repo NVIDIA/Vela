@@ -155,7 +155,7 @@ SCENARIO("the test client refuses a server speaking another protocol version",
     server.holdBootstrap = true;
     server.onHello = [&] {
       Error error;
-      error.message = "the scripted server refuses";
+      error.message = "the fake server refuses";
       server.farewell(encode(error));
     };
     TestSession session;
@@ -166,10 +166,10 @@ SCENARIO("the test client refuses a server speaking another protocol version",
     {
       REQUIRE_FALSE(result.ok);
       REQUIRE(hasLine(
-          result.records, "EVT Error message=\"the scripted server refuses\""));
+          result.records, "EVT Error message=\"the fake server refuses\""));
       REQUIRE(result.records.back().rfind("FAIL connect", 0) == 0);
-      REQUIRE(result.records.back().find(
-                  "server refused: the scripted server refuses")
+      REQUIRE(
+          result.records.back().find("server refused: the fake server refuses")
           != std::string::npos);
       REQUIRE(session.state() == test_client::SessionState::NeverConnected);
     }
