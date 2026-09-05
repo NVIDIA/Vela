@@ -572,8 +572,12 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
     runner.enqueue(
         "render",
         [&](const TaskControl &task) {
+          // What the shot render does at its next frame.
           renderSawStop = task.cancelRequested();
-          return TaskResult{};
+          TaskResult result;
+          if (renderSawStop)
+            result.outcome = TaskOutcome::Cancelled;
+          return result;
         },
         true);
     runner.enqueue("after", [&](const TaskControl &task) {
@@ -594,6 +598,10 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
         REQUIRE(render);
         REQUIRE(render->exclusive);
         REQUIRE(renderSawStop);
+        REQUIRE(render->result.outcome == TaskOutcome::Cancelled);
+        const auto failed = decode<TaskFailed>(sent.front());
+        REQUIRE(failed);
+        REQUIRE(failed->error == "cancelled");
         REQUIRE(after);
         REQUIRE_FALSE(after->exclusive);
         REQUIRE(afterSawStop);
