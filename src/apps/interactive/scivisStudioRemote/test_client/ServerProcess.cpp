@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "ServerProcess.h"
+// vsr_scivis_studio_protocol
+#include "StudioProtocol.h"
 // std
+#include <cctype>
 #include <cerrno>
 #include <cstring>
 #include <fstream>
@@ -28,24 +31,18 @@ constexpr const char *NO_DEVICE = "no ANARI device could be loaded";
 constexpr auto POLL_INTERVAL = 20ms;
 constexpr auto STOP_GRACE = 5s;
 
-// The number after the last Listening line in `text`, if any.
+// The port the last Listening line in `text` names, if any.
 bool listeningPort(const std::string &text, uint16_t &port)
 {
   const auto at = text.rfind(LISTENING);
   if (at == std::string::npos)
     return false;
   const auto digits = at + std::strlen(LISTENING);
-  unsigned long value = 0;
-  size_t consumed = 0;
-  try {
-    value = std::stoul(text.substr(digits), &consumed);
-  } catch (const std::exception &) {
-    return false;
-  }
-  if (consumed == 0 || value > 65535)
-    return false;
-  port = uint16_t(value);
-  return true;
+  auto end = digits;
+  while (
+      end < text.size() && std::isdigit(static_cast<unsigned char>(text[end])))
+    ++end;
+  return protocol::parsePort(text.substr(digits, end - digits), port);
 }
 
 std::string readFile(const std::filesystem::path &path, std::uintmax_t from)
@@ -150,19 +147,22 @@ ServerProcess::Start ServerProcess::check(std::string *error)
   // The log is read before the process is checked: what the server wrote
   // just before exiting counts.
   const auto text = logSinceStart();
-  if (listeningPort(text, m_port)) {
-    m_listening = true;
-    return Start::Listening;
+  const bool listening = listeningPort(text, m_port);
+  // A server that has exited is not Listening, whatever it printed first.
+  if (reap(false)) {
+    if (text.find(NO_DEVICE) != std::string::npos)
+      return Start::NoDevice;
+    if (error) {
+      *error = std::string("the server exited ")
+          + (listening ? "after" : "before") + " listening ("
+          + exitText(m_exitStatus) + ")";
+    }
+    return Start::Failed;
   }
-  if (!reap(false))
+  if (!listening)
     return Start::Starting;
-  if (text.find(NO_DEVICE) != std::string::npos)
-    return Start::NoDevice;
-  if (error) {
-    *error =
-        "the server exited before listening (" + exitText(m_exitStatus) + ")";
-  }
-  return Start::Failed;
+  m_listening = true;
+  return Start::Listening;
 }
 
 ServerProcess::Start ServerProcess::awaitListening(

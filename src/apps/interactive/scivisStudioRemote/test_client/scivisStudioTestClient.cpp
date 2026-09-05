@@ -85,6 +85,14 @@ void dumpServerLog(const ServerProcess &server)
             << server.log() << "====\n";
 }
 
+// A failed run's epilogue: the server log, and the work dir left in place.
+void keepWorkDir(const ServerProcess &server, const std::filesystem::path &work)
+{
+  dumpServerLog(server);
+  std::cerr << "[scivisStudioTestClient] work dir kept: " << work.string()
+            << '\n';
+}
+
 } // namespace
 
 int main(int argc, const char **argv)
@@ -169,9 +177,7 @@ int main(int argc, const char **argv)
     }
     if (started != ServerProcess::Start::Listening) {
       std::cerr << error << '\n';
-      dumpServerLog(*server);
-      std::cerr << "[scivisStudioTestClient] work dir kept: " << work.string()
-                << '\n';
+      keepWorkDir(*server, work);
       return 1;
     }
     options.runner.port = server->port();
@@ -184,13 +190,10 @@ int main(int argc, const char **argv)
 
   if (server) {
     server->stop();
-    if (ok) {
+    if (ok)
       std::filesystem::remove_all(work);
-    } else {
-      dumpServerLog(*server);
-      std::cerr << "[scivisStudioTestClient] work dir kept: " << work.string()
-                << '\n';
-    }
+    else
+      keepWorkDir(*server, work);
   }
   return ok ? 0 : 1;
 }

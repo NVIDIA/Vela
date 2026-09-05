@@ -4,8 +4,8 @@
 # Raw frame streaming: negotiate the Raw encoding, request a frame size, run
 # the stream, check the frame header against the request and save a frame.
 #
-# `save-frame` writes relative to the working directory; run_scenario.sh runs
-# the client inside its temporary directory so the file lands there.
+# `save-frame` writes relative to the working directory; under --spawn-server
+# that is the run's temporary directory, so the file lands there.
 
 connect
 

@@ -3,6 +3,8 @@
 
 #pragma once
 
+// vsr_core
+#include "vsr/core/TypeMacros.hpp"
 // std
 #include <chrono>
 #include <cstdint>
@@ -60,8 +62,7 @@ struct ServerProcess
   // stop()s a server still running.
   ~ServerProcess();
 
-  ServerProcess(const ServerProcess &) = delete;
-  ServerProcess &operator=(const ServerProcess &) = delete;
+  VSR_NOT_COPYABLE(ServerProcess)
 
   // Spawns the server. False with the reason when the spawn itself fails (no
   // such binary, say) or one is already running; whether the server then
