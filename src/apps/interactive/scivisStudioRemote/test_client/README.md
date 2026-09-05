@@ -23,6 +23,7 @@ measurement beyond deadlines.
 ```
 scivisStudioTestClient [--host H] [--port N] [--timeout MS] [--keep-going]
                        [--quiet-events] [--script FILE | -e "cmd; cmd" ...]
+                       [--require-device] [--spawn-server SERVER [args...]]
 scivisStudioTestClient --help | --markdown
 ```
 
@@ -34,12 +35,15 @@ scivisStudioTestClient --help | --markdown
 | `--timeout MS` | deadline of every waiting command unless it carries `timeout=MS` (5000) |
 | `--keep-going` | continue after a FAIL; the exit status is still non-zero |
 | `--quiet-events` | print no `EVT` lines except those of the `dump-*` commands |
+| `--spawn-server SERVER [args...]` | the rest of the line: start SERVER with those arguments plus `--port 0 --data-root <work>/data` in a fresh temporary working directory, wait for its `Listening on port` line, run the script against that port and stop it (see [Scenarios](#scenarios)); cannot be combined with `--port` |
+| `--require-device` | with `--spawn-server`: exit 77 (ctest's skip) instead of 1 when the server loads no ANARI device |
 | `--markdown` | print the [command table](#commands) as Markdown and exit |
 
 Without `--script` or `-e` the script is read from stdin. Exit status: 0 iff
 every command printed `OK`; 1 when any FAILed; 2 for a bad command line or a
-script that does not parse. The record stream is stdout alone; transport and
-session log lines go to stderr.
+script that does not parse; 77 under `--require-device` when the spawned
+server loads no ANARI device. The record stream is stdout alone; transport
+and session log lines go to stderr.
 
 ### Script syntax
 
@@ -94,6 +98,7 @@ anything reaches the wire.
 | `await-frame-at <frame>` | session | wait for a Frame whose header says frame == FRAME; the headers meanwhile print as they come |
 | `await-lost` | session | wait until the connection is Lost (mirror and replica stay as a frozen view) |
 | `await-reply [requestId]` | wait | collect the reply of a no-wait request, the oldest pending by default |
+| `await-server` | session | wait until the server kill-server started reaches Listening (the session keeps polling meanwhile); needs --spawn-server |
 | `await-snapshot` | session | wait for a ProjectSnapshot newer than the last thing awaited (the last request's reply, the last await-task's end, or the previous await-snapshot); each await consumes one snapshot |
 | `await-task [taskId]` | wait | wait for the task (default $lastTaskId) to end; FAIL on TaskFailed, or under expect-fail on TaskCompleted |
 | `await-task-progress [taskId]` | session | wait until the task (default $lastTaskId) has reported progress at least once (a report an earlier command printed counts); FAIL at once when it ends without any |
@@ -101,6 +106,7 @@ anything reaches the wire.
 | `cancel-task <taskId>` | request | sync; removes a queued task (it then ends as TaskFailed "cancelled") or asks a running render to stop at its next frame; a finished task is an error reply |
 | `clone-light-rig <id>` | request | sync; lightRigId= |
 | `connect [host] [port]` | session | TCP connect, exchange Hellos (exact PROTOCOL_VERSION match), await the complete Bootstrap |
+| `copy-fixture <file>` | session | copy FILE (relative to the script's directory) into the spawned server's data root, so a script can import $dataRoot/<basename> without writing anything itself; needs --spawn-server |
 | `create-camera-rig [name]` | request | sync; cameraRigId= |
 | `create-color-map [name]` | request | sync; colorMapId= and object=TYPE:INDEX, the record and its scene-side Array |
 | `create-light-rig [name]` | request | sync; lightRigId= |
@@ -119,6 +125,7 @@ anything reaches the wire.
 | `import-file-animation-dataset <name> <importer> <path>... [set-frame-count=BOOL]` | request | task: import a file animation from those files |
 | `import-static-dataset <path> [name] [importer\|VSR_SUBTREE]` | request | task; IMPORTER is a vsr::io::ImporterType name (OBJ, PLY, ...) or VSR_SUBTREE for a subtree archive |
 | `incorporate-dataset-candidate <file> [proposedName] [name]` | request | task: import a candidate discover-dataset-candidates found |
+| `kill-server` | session | SIGKILL the spawned server (the process went away, no farewell) and start a replacement on the same port without waiting for it; needs --spawn-server |
 | `list-directory <directory>` | request | one EVT DirectoryEntry name= kind= size= mtime= per entry (File, Directory, ProjectDirectory); refused outside every Data Root |
 | `list-roots` | request | one EVT DataRoot path= per Data Root; the first is $dataRoot |
 | `load-camera-rig-archive <file>` | request | sync; cameraRigId= |
@@ -184,7 +191,13 @@ once. `set-ui-state` composes: a key set again is overwritten, the others
 stay; after `set-ui-state none`, `save-project` sends no tree and the server
 keeps the one the project opened with. `sleep`'s MS, like every
 `timeout=MS`, must fit a deadline. `save-frame` writes relative to the
-working directory.
+working directory. `copy-fixture`, `kill-server` and `await-server` act on
+the server `--spawn-server` started and FAIL without one: `copy-fixture`
+resolves a relative FILE against the script's directory (the working
+directory for `-e`) and puts it under the spawned server's data root;
+`kill-server` is the "process went away" case, a SIGKILL with no farewell,
+after which a replacement is started on the same port and `await-server`
+waits for its `Listening` line, so a loss script needs no guessed sleep.
 
 ### Playback, picking and the viewport
 
@@ -414,7 +427,7 @@ own except those a fresh server mints deterministically (`shot_0001`,
 | `frames_turbojpeg.studio` | the same with TurboJpeg; needs `VSR_USE_TURBOJPEG` at both ends |
 | `scene_edits.studio` | `set-param`/`remove-param` on the active shot's camera, mirror asserts, frames still arrive |
 | `errors.studio` | `send-raw` of unknown, unassigned and not-yet-implemented types, each answered with an Error |
-| `loss.studio` | the server killed externally: `await-lost`, frozen mirror, `reconnect` to a restarted server |
+| `loss.studio` | the server killed externally (`kill-server`): `await-lost`, frozen mirror, `await-server`, `reconnect` to the restarted server |
 | `project_lifecycle.studio` | `new-project`, shots created, switched, edited (`update-shot`, clamping, a refused rig id) and removed (the last one refused), `save-project` as a task, `open-project` of the result |
 | `rigs.studio` | light rigs: create, `add-light`/`remove-light`, rename (collisions refused), clone, archive save and load, bind to the active shot, remove; camera rigs likewise |
 | `color_maps.studio` | create (record plus scene-side Array), rename, remove, refusals on a removed id |
@@ -433,7 +446,7 @@ own except those a fresh server mints deterministically (`shot_0001`,
 | `render_cancel.studio` | a 400-frame render cancelled after its first progress: a second `render-shot` and a `create-shot` sent meanwhile are latched behind the body and dispatched together after the cancel, so the second queues and the `create-shot` is refused with "render in progress"; the cancel's reply is ok, the task ends `Failed "cancelled"` with the frames written so far, the second render is cancelled too, and edits go through again afterwards |
 | `task_replay.studio` | a 60-frame render left running by a `disconnect`: the `reconnect` is bootstrapped once the render is done and its Bootstrap replays the `TaskCompleted` (`tasks.replayed >= 1`, `task.last.state == Completed`); the next Bootstrap replays nothing |
 | `ui_state.studio` | `set-ui-state` leaves saved with the project, absent on a fresh project, back after `open-project` (a `UIState` before the task's end) and in every later Bootstrap, and kept by a save that sends no tree |
-| `loss_during_task.studio` | the server killed while a 400-frame render of this client runs (kill-restart mode): Lost keeps the record `Running`, the reconnect's Bootstrap fails it with `connection lost`, the restarted server replays nothing |
+| `loss_during_task.studio` | the server killed (`kill-server`) while a 400-frame render of this client runs: Lost keeps the record `Running`, the reconnect's Bootstrap fails it with `connection lost`, the restarted server replays nothing |
 
 ### By hand
 
@@ -446,49 +459,47 @@ scivisStudioTestClient --port 12345 --script test_client/scenarios/session.studi
 scivisStudioTestClient --port 12345 -e "connect; start-rendering; await-frame 3; dump-frame; shutdown"
 ```
 
-Or let `scenarios/run_scenario.sh` do it: it picks a free port (picking again
-when another process grabs it before the server binds), starts the server
-with `--library helide --data-root <mktemp -d>` in a temporary directory
-(where `save-frame` files land), waits for its `Listening on port` line, runs
-the client with `--script`, propagates the client's exit code, and always
-stops the server. On success the temporary directory is removed; on failure
-both logs are printed and the directory is kept, its path in the output, for
-a post-mortem. Extra arguments go to the server after `--library helide
---data-root <tmp>` (a `--project`, say); do not pass `--port`, the runner owns
-it.
+Or let the client start the server itself with `--spawn-server`, which takes
+the rest of the command line as the server binary and its arguments:
 
 ```bash
-test_client/scenarios/run_scenario.sh build/scivisStudioServer \
-  build/scivisStudioTestClient test_client/scenarios/frames_raw.studio
+scivisStudioTestClient --script test_client/scenarios/frames_raw.studio \
+  --spawn-server build/scivisStudioServer --library helide
 ```
 
-`datasets.studio`, `tasks.studio`, `pick.studio`, `histogram.studio` and the
-render scenarios carry the hint `# runner: fixture fixtures/triangle.obj` in
-their opening comment block: the runner copies the file (relative to the
-scenario) into the data root before the server starts, so the script imports
-`$dataRoot/triangle.obj` without writing anything itself. The hint may
-repeat, and combine with the one below.
+The client makes a temporary working directory (`vsrStudioScenario-<name>-*`
+under the system temp dir) holding the server's data root (`data/`) and its
+log (`server.log`, stdout and stderr of every server lifetime), starts the
+server there with `--port 0 --data-root <work>/data` appended to the given
+arguments, waits up to 30 s for its `Listening on port N` line and connects
+to that `N`, so no port is picked ahead of the bind and two runs never
+collide. The script runs from the working directory (where `save-frame`
+files land), the server is stopped afterwards (SIGTERM, then SIGKILL), and
+the directory is removed on success or kept on failure, its path and the
+server log on stderr for a post-mortem. Do not pass `--port` or `--data-root`
+to the server; the client owns them.
 
-`loss.studio` carries the hint `# runner: kill-restart-after 3` in its
-opening comment block: once the client has printed three `OK` records the
-runner kills the server (SIGKILL) and starts a new one on the same port,
-which is what the script's `await-lost` and `reconnect` need. The runner
-gives the restarted server 30 s to reach `Listening on port` and the
-script's `reconnect timeout=45000` outlasts that, retrying while the port is
-refused, so no fixed sleep is involved. Run without the runner, `await-lost`
-FAILs after its deadline because nothing kills the server.
-`loss_during_task.studio` uses the same mode with a count that lands right
-after its render has reported progress: the count is the number of `OK`
-records the script prints up to and including `await-task-progress`, so a
-command added before that point moves it.
+`datasets.studio`, `tasks.studio`, `pick.studio`, `histogram.studio` and the
+render scenarios open with `copy-fixture fixtures/triangle.obj`, which copies
+the file (relative to the scenario) into the data root, so the script imports
+`$dataRoot/triangle.obj` without writing anything itself.
+
+`loss.studio` and `loss_during_task.studio` script the server's loss:
+`kill-server` SIGKILLs the spawned server and starts a fresh one on the same
+port without waiting, `await-lost` sees the socket close, `await-server
+timeout=30000` waits for the replacement's `Listening` line and `reconnect`
+then finds it at once. Against a server started by hand these three commands
+FAIL, since there is nothing of the client's to kill.
 
 ### Under ctest
 
 `test_client/CMakeLists.txt` registers one `vsr::StudioScenario.<name>` test
 per scenario when `BUILD_TESTING` is on (`frames_turbojpeg` only with
-`VSR_USE_TURBOJPEG`), each running `run_scenario.sh` with a 120 s timeout.
-The runner exits 77 when the server can load no ANARI device, which ctest
-reports as a skip (`SKIP_RETURN_CODE 77`) rather than a failure.
+`VSR_USE_TURBOJPEG`), each running the client with `--script`,
+`--require-device` and `--spawn-server <scivisStudioServer> --library
+helide`, with a 120 s timeout. The client exits 77 when the server can load
+no ANARI device, which ctest reports as a skip (`SKIP_RETURN_CODE 77`)
+rather than a failure.
 
 ```bash
 LD_LIBRARY_PATH=<anari prefix>/lib ctest --test-dir build -R StudioScenario -j 8
@@ -517,6 +528,6 @@ whole protocol:
    this file carries both.
 2. Cover the command in `src/tests/test_StudioTestClient.cpp`, which runs
    scripts against an in-process `StudioServer`.
-3. Add `scenarios/<name>.studio` (self-contained, commented) and an
-   `add_studio_scenario(<name>)` line in `CMakeLists.txt`; add the command and
-   the scenario to the tables above.
+3. Add `scenarios/<name>.studio` (self-contained, commented; `copy-fixture`
+   first when it imports a fixture) and an `add_studio_scenario(<name>)` line
+   in `CMakeLists.txt`; add the command and the scenario to the tables above.

@@ -1211,6 +1211,38 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   timing (temp paths, mtimes, Frame arrival, which poll batch a snapshot
   lands in); every scenario passes unchanged.
 
+- **The scenario runner is the test client.** `test_client/scenarios/
+  run_scenario.sh` (254 lines of bash) picked a port ahead of the server's
+  bind (and retried when it lost the race), parsed `# runner: fixture` and
+  `# runner: kill-restart-after N` hints out of each scenario's comment
+  block with `sed`/`grep`, and in kill-restart mode tailed the client's
+  stdout counting `^OK ` lines to decide when to SIGKILL the server, so any
+  command added before the kill moved `N` and `--keep-going` broke the
+  count. The lifecycle is now the client's: `--spawn-server SERVER
+  [args...]` (the rest of the command line) makes a temporary working
+  directory with the data root and one server log, starts the server with
+  `--port 0 --data-root <work>/data` appended, reads the bound port off its
+  `Listening on port N` line (no pick, no race; `scivisStudioServer` now
+  accepts `--port 0`), runs the script from that directory, stops the
+  server (SIGTERM, then SIGKILL) and removes the directory on success or
+  keeps it, path and server log on stderr, on failure. `--require-device`
+  turns a server that loads no ANARI device into exit 77, ctest's skip, so
+  the `vsr::StudioScenario.*` contract (`SKIP_RETURN_CODE 77`, 120 s) is
+  unchanged and `add_studio_scenario` invokes the binary directly. The
+  hints are commands: `copy-fixture <file>` (relative to the script's
+  directory, into the spawned server's data root), `kill-server` (SIGKILL,
+  then a replacement started on the same port without waiting) and
+  `await-server` (its `Listening` line, the session polling meanwhile), all
+  `Session` rows that FAIL without a spawned server; the process wrapper is
+  `test_client/ServerProcess.{h,cpp}` (`posix_spawnp`, the log file polled
+  for the Listening and no-device lines, `check()`/`awaitListening()`,
+  `kill()`, `stop()`), which the `[StudioTestClient]` suite drives with
+  `/bin/sh` standing in for the server. `loss.studio` reads `kill-server;
+  await-lost; ...; await-server; reconnect` and `loss_during_task.studio`
+  kills right after `await-task-progress`, with no count to keep in step;
+  the eight fixture scenarios open with `copy-fixture fixtures/triangle.obj`
+  where the hint was. Every scenario passes; nothing else changes.
+
 ### Spec conformance
 
 Every bullet of the spec sections named below, against the tree at

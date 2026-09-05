@@ -1,14 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# runner: fixture fixtures/triangle.obj
-#
 # Server Tasks: progress and completion, a queue of two with the second
 # cancelled before it runs, and the cancel errors. Tasks are single-lane and
 # ids are allocated in order, so two imports and a cancel of the second sent
 # back to back (`no-wait`) land on the loop thread before the first has
 # finished; `await-reply` then collects the three replies in send order.
 
+copy-fixture fixtures/triangle.obj
 connect
 list-roots
 

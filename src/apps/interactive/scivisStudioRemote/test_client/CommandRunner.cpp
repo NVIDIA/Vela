@@ -91,6 +91,10 @@ const std::vector<CommandRunner::CommandSpec> &CommandRunner::commands()
           &CommandRunner::awaitReply,
           "collect the reply of a no-wait request, the oldest pending by"
           " default"},
+      {"await-server", "", 0, 0, K::Session,
+          &CommandRunner::awaitServer,
+          "wait until the server kill-server started reaches Listening (the"
+          " session keeps polling meanwhile); needs --spawn-server"},
       {"await-snapshot", "", 0, 0, K::Session,
           &CommandRunner::awaitSnapshot,
           "wait for a ProjectSnapshot newer than the last thing awaited (the"
@@ -121,6 +125,11 @@ const std::vector<CommandRunner::CommandSpec> &CommandRunner::commands()
           &CommandRunner::connect,
           "TCP connect, exchange Hellos (exact PROTOCOL_VERSION match), await"
           " the complete Bootstrap"},
+      {"copy-fixture", "<file>", 1, 1, K::Session,
+          &CommandRunner::copyFixture,
+          "copy FILE (relative to the script's directory) into the spawned"
+          " server's data root, so a script can import $dataRoot/<basename>"
+          " without writing anything itself; needs --spawn-server"},
       {"create-camera-rig", "[name]", 0, 1, K::Request,
           nameRequest<CreateCameraRig>(
               &CreateCameraRig::name, cameraRigCreated),
@@ -189,6 +198,11 @@ const std::vector<CommandRunner::CommandSpec> &CommandRunner::commands()
       {"incorporate-dataset-candidate", "<file> [proposedName] [name]", 1, 3,
           K::Request, &CommandRunner::incorporateDatasetCandidate,
           "task: import a candidate discover-dataset-candidates found"},
+      {"kill-server", "", 0, 0, K::Session,
+          &CommandRunner::killServer,
+          "SIGKILL the spawned server (the process went away, no farewell) and"
+          " start a replacement on the same port without waiting for it;"
+          " needs --spawn-server"},
       {"list-directory", "<directory>", 1, 1, K::Request,
           &CommandRunner::listDirectory,
           "one EVT DirectoryEntry name= kind= size= mtime= per entry (File,"
@@ -389,9 +403,14 @@ const CommandRunner::CommandSpec *CommandRunner::findCommand(
 
 // Construction ///////////////////////////////////////////////////////////////
 
-CommandRunner::CommandRunner(
-    TestSession *session, std::ostream *out, RunnerOptions options)
-    : m_session(session), m_out(out), m_options(std::move(options))
+CommandRunner::CommandRunner(TestSession *session,
+    std::ostream *out,
+    RunnerOptions options,
+    ServerProcess *server)
+    : m_session(session),
+      m_out(out),
+      m_options(std::move(options)),
+      m_server(server)
 {}
 
 // Running ////////////////////////////////////////////////////////////////////

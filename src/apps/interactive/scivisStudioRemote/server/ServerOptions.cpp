@@ -48,9 +48,12 @@ bool parseServerOptions(const std::vector<std::string> &args,
     }
 
     if (arg == "--port") {
-      if (!protocol::parsePort(value, options.port)) {
+      // 0 asks the OS for a free port; the Listening line names it.
+      if (value == "0") {
+        options.port = 0;
+      } else if (!protocol::parsePort(value, options.port)) {
         setError(
-            error, "--port requires an integer in 1..65535, got: " + value);
+            error, "--port requires an integer in 0..65535, got: " + value);
         return false;
       }
     } else if (arg == "--library") {
@@ -93,7 +96,8 @@ std::string serverUsage(const std::string &programName)
          "\n"
          "  --port N          TCP port to listen on (default "
       << protocol::DEFAULT_PORT
-      << ")\n"
+      << "); 0 asks the OS for a free\n"
+         "                    port, named in the \"Listening on port\" line\n"
          "  --library NAME    ANARI library to render with (default: first"
          " entry of the\n"
          "                    ANARI library list; VSR_ANARI_LIBRARIES, else"

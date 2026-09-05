@@ -14,6 +14,7 @@ add_library(vsr_scivis_studio_test_client_core OBJECT
   RequestCommands.cpp
   SceneCommands.cpp
   Script.cpp
+  ServerProcess.cpp
   SessionCommands.cpp
   TestClientOptions.cpp
   TestSession.cpp
@@ -46,10 +47,11 @@ PRIVATE
 
 ## Scenario tests ##
 
-# One ctest per scenario script, run through run_scenario.sh against a server
-# started on a free port. Exit 77 from the runner (no ANARI device loads) is a
-# SKIP, not a failure. The turbojpeg scenario needs both ends to encode and
-# decode JPEG, so it exists only when the tree has it.
+# One ctest per scenario script: the test client spawns a server on a port of
+# the OS's choosing in a fresh temporary directory (--spawn-server), runs the
+# script against it and stops it. Exit 77 (--require-device: no ANARI device
+# loads) is a SKIP, not a failure. The turbojpeg scenario needs both ends to
+# encode and decode JPEG, so it exists only when the tree has it.
 if (NOT BUILD_TESTING)
   return()
 endif()
@@ -58,10 +60,10 @@ set(scenario_dir ${CMAKE_CURRENT_LIST_DIR}/scenarios)
 
 function(add_studio_scenario name)
   add_test(NAME vsr::StudioScenario.${name}
-    COMMAND ${scenario_dir}/run_scenario.sh
-      $<TARGET_FILE:scivisStudioServer>
-      $<TARGET_FILE:scivisStudioTestClient>
-      ${scenario_dir}/${name}.studio
+    COMMAND scivisStudioTestClient
+      --script ${scenario_dir}/${name}.studio
+      --require-device
+      --spawn-server $<TARGET_FILE:scivisStudioServer> --library helide
   )
   set_tests_properties(vsr::StudioScenario.${name} PROPERTIES
     SKIP_RETURN_CODE 77
@@ -85,11 +87,11 @@ if (VSR_USE_TURBOJPEG)
 endif()
 add_studio_scenario(scene_edits)
 add_studio_scenario(errors)
-# loss.studio carries the `# runner: kill-restart-after` hint, so the same
-# runner kills and restarts the server mid-script.
+# loss.studio kills and restarts the spawned server mid-script (kill-server,
+# await-server).
 add_studio_scenario(loss)
 # Milestone 5: Project Ops, Server Tasks and Remote Browse. datasets and tasks
-# carry a `# runner: fixture` hint that puts a tiny OBJ under the data root.
+# copy-fixture a tiny OBJ into the data root.
 add_studio_scenario(project_lifecycle)
 add_studio_scenario(rigs)
 add_studio_scenario(color_maps)
@@ -110,7 +112,7 @@ add_studio_scenario(viewport)
 add_studio_scenario(histogram)
 # Milestone 7: offline shot rendering, its cancel and pause-and-refuse, the
 # task-status replay, the UI state round trip, and loss while a task runs
-# (kill-restart mode). All but ui_state import the fixture OBJ.
+# (kill-server mid-render). All but ui_state import the fixture OBJ.
 add_studio_scenario(render_shot)
 add_studio_scenario(render_cancel)
 add_studio_scenario(task_replay)

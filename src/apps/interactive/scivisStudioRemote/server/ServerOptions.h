@@ -33,7 +33,8 @@ namespace vsr::scivis_studio::server {
  */
 struct ServerOptions
 {
-  // 0 asks the OS for a free port (tests); the parser only accepts 1..65535.
+  // 0 asks the OS for a free port, which the "Listening on port" status
+  // line then names: how the test client's --spawn-server finds it.
   uint16_t port{protocol::DEFAULT_PORT};
   // ANARI library to render with; empty means the first entry of the
   // ANARIDeviceManager library list, exactly what the monolith's viewport

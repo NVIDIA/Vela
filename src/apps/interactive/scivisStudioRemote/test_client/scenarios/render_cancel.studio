@@ -1,8 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# runner: fixture fixtures/triangle.obj
-#
 # Cancelling a running render, and pause-and-refuse while it runs. The cancel
 # is cooperative: the server honours a CancelTask naming the running render at
 # the next frame boundary, the task ends as TaskFailed "cancelled" carrying
@@ -12,6 +10,7 @@
 # create-shot sent right behind it meets the queued render and is refused
 # with "render in progress".
 
+copy-fixture fixtures/triangle.obj
 connect
 list-roots
 import-static-dataset $dataRoot/triangle.obj Tri OBJ

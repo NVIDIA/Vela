@@ -1,8 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# runner: fixture fixtures/triangle.obj
-#
 # The milestone-5 surface in one session, in orders the per-area scenarios
 # never take: a project holding a dataset, rigs, a color map and a bound
 # second shot is saved, replaced by a fresh project, reopened and checked
@@ -11,6 +9,7 @@
 # task ahead of a sync op does not hold it up; and frames follow the active
 # shot across all of it.
 
+copy-fixture fixtures/triangle.obj
 connect
 list-roots
 assert project.dirty == false
@@ -140,7 +139,7 @@ await-snapshot
 assert project.dirty == false
 assert project.directory == $dataRoot/all
 list-directory $dataRoot
-# The project directory and the fixture the runner copied in.
+# The project directory and the fixture copy-fixture put there.
 assert browse.entries == 2
 start-rendering
 await-frame 2

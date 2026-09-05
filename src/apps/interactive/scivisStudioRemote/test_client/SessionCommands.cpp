@@ -2,24 +2,28 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * The CommandRunner handlers for the connection and the frame stream:
- * connect, disconnect, shutdown, ping, expect-pong, await-lost, reconnect,
- * sleep, expect-error, send-raw, set-frame-config, set-encodings,
- * start-rendering, stop-rendering, await-frame, await-frame-at,
- * await-frame-advance, await-warning and save-frame. The table in
+ * The CommandRunner handlers for the connection, the frame stream and the
+ * spawned server: connect, disconnect, shutdown, ping, expect-pong,
+ * await-lost, reconnect, sleep, expect-error, send-raw, set-frame-config,
+ * set-encodings, start-rendering, stop-rendering, await-frame,
+ * await-frame-at, await-frame-advance, await-warning, save-frame,
+ * copy-fixture, kill-server and await-server. The table in
  * CommandRunner.cpp has checked each command's argument count before a
  * handler runs; what is left to check is the arguments' values.
  */
 
 #include "CommandRunner.h"
 #include "CommandText.h"
+#include "ServerProcess.h"
 // vsr_scivis_studio_protocol
 #include "FrameCodec.h"
 // std
 #include <cctype>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <system_error>
 
 namespace vsr::scivis_studio::test_client {
 
@@ -404,6 +408,77 @@ CommandRunner::Failure CommandRunner::saveFrame(const Command &command)
           error))
     return error;
   return {};
+}
+
+// The spawned server //////////////////////////////////////////////////////////
+
+CommandRunner::Failure CommandRunner::noSpawnedServer() const
+{
+  if (m_server)
+    return {};
+  return "no spawned server (run with --spawn-server)";
+}
+
+CommandRunner::Failure CommandRunner::copyFixture(const Command &command)
+{
+  if (const auto none = noSpawnedServer())
+    return none;
+  std::filesystem::path source = command.args[0];
+  if (source.is_relative())
+    source = m_options.scriptDir / source;
+  const auto target = m_server->dataRoot() / source.filename();
+  std::error_code ec;
+  std::filesystem::copy_file(
+      source, target, std::filesystem::copy_options::overwrite_existing, ec);
+  if (ec) {
+    return "cannot copy " + source.string() + " to " + target.string() + ": "
+        + ec.message();
+  }
+  return {};
+}
+
+CommandRunner::Failure CommandRunner::killServer(const Command &)
+{
+  if (const auto none = noSpawnedServer())
+    return none;
+  if (!m_server->running())
+    return "the spawned server is not running";
+  m_server->kill();
+  std::string error;
+  if (!m_server->start(&error))
+    return "cannot start the replacement server: " + error;
+  return {};
+}
+
+CommandRunner::Failure CommandRunner::awaitServer(
+    const Command &, Deadline deadline)
+{
+  if (const auto none = noSpawnedServer())
+    return none;
+  // The session keeps polling so events print as they come; the loss the
+  // kill causes is expected here and left for await-lost.
+  std::string error;
+  auto start = ServerProcess::Start::Starting;
+  const auto wait = pumpUntil(
+      [&] {
+        start = m_server->check(&error);
+        return start != ServerProcess::Start::Starting;
+      },
+      deadline,
+      LossEnds::Nothing);
+  if (wait == WaitEnd::Error)
+    return waitFailure(wait, "the server to listen", deadline);
+  switch (start) {
+  case ServerProcess::Start::Listening:
+    return {};
+  case ServerProcess::Start::NoDevice:
+    return "the server loaded no ANARI device";
+  case ServerProcess::Start::Failed:
+    return error;
+  case ServerProcess::Start::Starting:
+    break;
+  }
+  return waitFailure(wait, "the server to listen", deadline);
 }
 
 } // namespace vsr::scivis_studio::test_client

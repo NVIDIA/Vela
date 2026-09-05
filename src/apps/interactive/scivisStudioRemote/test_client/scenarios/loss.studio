@@ -1,28 +1,24 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# runner: kill-restart-after 3
-#
 # Server loss and recovery. The server is killed *externally* while the client
 # is connected: the client notices the closed socket, goes Lost with the
 # Structural Mirror and Project Replica frozen, and a `reconnect` to a
 # restarted server bootstraps it again.
 #
-# The `runner:` line above is a hint for run_scenario.sh (read anywhere in this
-# opening comment block): once the client has printed three `OK` records
-# (connect and the two asserts below), the runner kills the server, waits for
-# it to exit, and starts a fresh one on the same port, giving it 30 s to reach
-# Listening. `reconnect` retries refused attempts until its deadline, which is
-# set to outlast that budget, so nothing here sleeps for a guessed span.
-# Without the runner (a plain `--script` run) `await-lost` FAILs after 20 s
-# because nothing kills the server; this scenario is registered with ctest
-# through the runner only.
+# `kill-server` SIGKILLs the server the test client spawned (--spawn-server)
+# and starts a fresh one on the same port without waiting for it;
+# `await-server` waits for that one to reach Listening, so nothing here
+# sleeps for a guessed span. Without a spawned server (a plain `--script` run
+# against a server started by hand) `kill-server` FAILs, since there is
+# nothing of ours to kill.
 
 connect
 assert state == Connected
 assert scene.objects >= 1
 
-# The runner kills the server now.
+# The server goes away now, without a farewell.
+kill-server
 await-lost timeout=20000
 assert state == Lost
 
@@ -30,9 +26,9 @@ assert state == Lost
 assert scene.objects >= 1
 assert project.shots >= 1
 
-# ...and the runner is restarting the server meanwhile; keep trying until it
-# listens again.
-reconnect timeout=45000
+# ...while the replacement comes up.
+await-server timeout=30000
+reconnect timeout=10000
 assert state == Connected
 assert scene.objects >= 1
 assert project.shots >= 1

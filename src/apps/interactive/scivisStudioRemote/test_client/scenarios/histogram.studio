@@ -1,8 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# runner: fixture fixtures/triangle.obj
-#
 # RequestArrayHistogram: a sync Project Op that bins a scalar array on the
 # server (the client's mirror holds array descriptors, not data) and answers
 # with bins, min and max in the reply. Vector, matrix and object arrays are
@@ -12,6 +10,7 @@
 # this scenario exercises the refusals; the binning itself is covered by the
 # server's unit tests until a scalar fixture exists.
 
+copy-fixture fixtures/triangle.obj
 connect
 list-roots
 import-static-dataset $dataRoot/triangle.obj Tri OBJ

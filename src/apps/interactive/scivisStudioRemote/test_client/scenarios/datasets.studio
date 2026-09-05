@@ -1,16 +1,15 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# runner: fixture fixtures/triangle.obj
-#
 # Datasets: a static import (a Server Task whose completion message is the
 # new dataset's id), a declared file animation (sync), rename, shot
 # bindings, a Dataset Archive saved and loaded back, unload/load against a
 # saved project, candidates discovered and incorporated, and removal.
 #
-# The runner copies fixtures/triangle.obj into the data root, which
+# `copy-fixture` puts fixtures/triangle.obj into the data root, which
 # `list-roots` reveals as $dataRoot.
 
+copy-fixture fixtures/triangle.obj
 connect
 list-roots
 assert project.datasets == 0

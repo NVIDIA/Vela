@@ -7,6 +7,7 @@
 // vsr_scivis_studio_test_client_core
 #include "CommandRunner.h"
 #include "Script.h"
+#include "ServerProcess.h"
 #include "TestClientOptions.h"
 #include "TestSession.h"
 // vsr_scivis_studio_server_core
@@ -46,6 +47,8 @@
 #include <string>
 #include <thread>
 #include <vector>
+// posix
+#include <unistd.h>
 
 using namespace vsr::scivis_studio;
 using namespace vsr::scivis_studio::protocol;
@@ -1047,6 +1050,41 @@ SCENARIO("the test client parses its command line", "[StudioTestClient]")
       REQUIRE_FALSE(parseTestClientOptions(
           argv({"--script", "a.studio", "-e", "ping"}), options, &error));
     }
+    THEN("--spawn-server takes the rest of the line as the server's")
+    {
+      REQUIRE(parseTestClientOptions(argv({"--script",
+                                         "a.studio",
+                                         "--require-device",
+                                         "--spawn-server",
+                                         "/bin/server",
+                                         "--library",
+                                         "helide",
+                                         "--timeout",
+                                         "7"}),
+          options,
+          &error));
+      REQUIRE(options.spawnServer
+          == std::vector<std::string>{
+              "/bin/server", "--library", "helide", "--timeout", "7"});
+      REQUIRE(options.requireDevice);
+      REQUIRE(options.runner.timeout == 5000ms);
+    }
+    THEN(
+        "--spawn-server needs a binary, owns the port, and --require-device"
+        " needs it")
+    {
+      REQUIRE_FALSE(
+          parseTestClientOptions(argv({"--spawn-server"}), options, &error));
+      REQUIRE(error.find("--spawn-server") != std::string::npos);
+      REQUIRE_FALSE(parseTestClientOptions(
+          argv({"--port", "4242", "--spawn-server", "/bin/server"}),
+          options,
+          &error));
+      REQUIRE(error.find("--port") != std::string::npos);
+      REQUIRE_FALSE(
+          parseTestClientOptions(argv({"--require-device"}), options, &error));
+      REQUIRE(error.find("--require-device") != std::string::npos);
+    }
     THEN("an unknown flag and a bad port are rejected by name")
     {
       REQUIRE_FALSE(parseTestClientOptions(argv({"--bogus"}), options, &error));
@@ -1072,7 +1110,9 @@ SCENARIO("the test client parses its command line", "[StudioTestClient]")
                "-e",
                "--timeout",
                "--keep-going",
-               "--quiet-events"})
+               "--quiet-events",
+               "--spawn-server",
+               "--require-device"})
         REQUIRE(usage.find(flag) != std::string::npos);
       for (const auto &spec : CommandRunner::namedValues())
         REQUIRE(usage.find(spec.name) != std::string::npos);
@@ -1080,6 +1120,119 @@ SCENARIO("the test client parses its command line", "[StudioTestClient]")
         REQUIRE(usage.find(std::string("  ") + spec.name) != std::string::npos);
     }
   }
+}
+
+SCENARIO("the test client owns a server it spawned", "[StudioTestClient]")
+{
+  // A stand-in for scivisStudioServer: /bin/sh printing what the real one
+  // prints. ServerProcess appends `--port N --data-root DIR`, which land in
+  // the shell's positional parameters and are echoed back as a check.
+  const auto work = std::filesystem::temp_directory_path()
+      / ("vsrStudioServerProcess-" + std::to_string(::getpid()));
+  std::filesystem::remove_all(work);
+  std::filesystem::create_directories(work / "data");
+  const auto log = work / "server.log";
+  const auto fakeServer = [&](const char *script) {
+    return ServerProcess({"/bin/sh", "-c", script, "fake"}, work / "data", log);
+  };
+  std::string error;
+
+  GIVEN("a server that listens")
+  {
+    auto server = fakeServer(
+        "echo \"[StudioServer] args: $*\";"
+        " echo \"[StudioServer] Listening on port 4321\"; exec sleep 30");
+    REQUIRE(server.start(&error));
+
+    THEN("its Listening line gives the port and the log shows the arguments")
+    {
+      REQUIRE(server.awaitListening(TEST_TIMEOUT, &error)
+          == ServerProcess::Start::Listening);
+      REQUIRE(server.port() == 4321);
+      REQUIRE(server.running());
+      REQUIRE(server.log().find(
+                  "args: --port 0 --data-root " + (work / "data").string())
+          != std::string::npos);
+
+      AND_THEN("a kill ends it, and a restart asks for the same port")
+      {
+        server.kill();
+        REQUIRE_FALSE(server.running());
+        REQUIRE(server.start(&error));
+        REQUIRE(server.awaitListening(TEST_TIMEOUT, &error)
+            == ServerProcess::Start::Listening);
+        REQUIRE(server.log().find("args: --port 4321 --data-root ")
+            != std::string::npos);
+        server.stop();
+        REQUIRE_FALSE(server.running());
+      }
+    }
+  }
+
+  GIVEN("a server that loads no device")
+  {
+    auto server = fakeServer(
+        "echo \"[StudioServer] no ANARI device could be loaded (requested"
+        " 'helide')\"; exit 1");
+    REQUIRE(server.start(&error));
+
+    THEN("the start is NoDevice, not a failure")
+    {
+      REQUIRE(server.awaitListening(TEST_TIMEOUT, &error)
+          == ServerProcess::Start::NoDevice);
+      REQUIRE_FALSE(server.running());
+    }
+  }
+
+  GIVEN("a server that exits before listening")
+  {
+    auto server = fakeServer("echo \"[StudioServer] cannot listen\"; exit 3");
+    REQUIRE(server.start(&error));
+
+    THEN("the start Failed with the exit status in the reason")
+    {
+      REQUIRE(server.awaitListening(TEST_TIMEOUT, &error)
+          == ServerProcess::Start::Failed);
+      REQUIRE(error.find("exit status 3") != std::string::npos);
+    }
+  }
+
+  GIVEN("a binary that cannot be spawned")
+  {
+    ServerProcess server({work / "no-such-server"}, work / "data", log);
+
+    THEN("start says so")
+    {
+      REQUIRE_FALSE(server.start(&error));
+      REQUIRE(error.find("no-such-server") != std::string::npos);
+    }
+  }
+
+  GIVEN("a runner without a spawned server")
+  {
+    TestSession session;
+    std::ostringstream out;
+    std::vector<Command> commands;
+    REQUIRE(parseScript(
+        "copy-fixture x.obj; kill-server; await-server", commands, &error));
+    RunnerOptions keepGoing;
+    keepGoing.keepGoing = true;
+    CommandRunner tolerant(&session, &out, keepGoing);
+
+    THEN("the server commands FAIL naming --spawn-server")
+    {
+      REQUIRE_FALSE(tolerant.run(commands));
+      const auto records = lines(out.str());
+      REQUIRE(records.size() == 3);
+      for (const auto &record : records) {
+        INFO(record);
+        REQUIRE(record.rfind("FAIL ", 0) == 0);
+        REQUIRE(record.find("--spawn-server") != std::string::npos);
+      }
+    }
+  }
+
+  std::filesystem::remove_all(work);
 }
 
 SCENARIO("the command table is the one source of the command vocabulary",

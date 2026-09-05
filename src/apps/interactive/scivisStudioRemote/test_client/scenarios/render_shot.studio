@@ -1,13 +1,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# runner: fixture fixtures/triangle.obj
-#
 # Offline shot rendering: RenderShot is a Server Task that walks the active
 # shot's frames, reporting determinate progress (current of total) and ending
 # with the frame count and the output directory; it needs a saved project, and
 # the refusal on an unsaved one is a reply, not a failed task.
 
+copy-fixture fixtures/triangle.obj
 connect
 list-roots
 import-static-dataset $dataRoot/triangle.obj Tri OBJ

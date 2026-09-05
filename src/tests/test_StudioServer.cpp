@@ -138,8 +138,12 @@ SCENARIO("ServerOptions parses the server command line", "[StudioServer]")
       REQUIRE(error.find("--port") != std::string::npos);
       REQUIRE_FALSE(parseServerOptions(
           argv({"--data-root", "/d", "--port", "70000"}), options, &error));
-      REQUIRE_FALSE(parseServerOptions(
+    }
+    THEN("port 0 asks the OS for a free port")
+    {
+      REQUIRE(parseServerOptions(
           argv({"--data-root", "/d", "--port", "0"}), options, &error));
+      REQUIRE(options.port == 0);
     }
     THEN("no data root and no project is rejected")
     {

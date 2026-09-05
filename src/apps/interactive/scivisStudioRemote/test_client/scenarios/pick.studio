@@ -1,8 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# runner: fixture fixtures/triangle.obj
-#
 # Picking: the server renders one frame with the id channel on, reads the
 # object id and depth under the pixel and answers with a flat PickReply. The
 # pixel convention on the wire is x right, y down from the top-left, in
@@ -10,9 +8,10 @@
 # refused. `hit` means an object id was there; the identity is the
 # server-minted (type, pool index) that SetOutline takes back.
 #
-# The runner copies fixtures/triangle.obj (vertices (0,0,0), (1,0,0), (0,1,0))
-# into the data root, which `list-roots` reveals as $dataRoot.
+# `copy-fixture` puts fixtures/triangle.obj (vertices (0,0,0), (1,0,0),
+# (0,1,0)) into the data root, which `list-roots` reveals as $dataRoot.
 
+copy-fixture fixtures/triangle.obj
 connect
 list-roots
 import-static-dataset $dataRoot/triangle.obj Tri OBJ

@@ -1,17 +1,15 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# runner: fixture fixtures/triangle.obj
-# runner: kill-restart-after 13
-#
-# Server loss while a Server Task of this client runs. The runner kills the
-# server (SIGKILL) once the client has printed thirteen `OK` records, that is
-# right after `await-task-progress` has seen the render under way, and starts
-# a fresh one on the same port. Lost keeps the task record as it was; the
-# reconnect's Bootstrap fails every record still open with "connection lost"
-# (the restarted server knows nothing of the render, so it replays nothing),
-# without counting it as a TaskFailed message.
+# Server loss while a Server Task of this client runs. `kill-server` takes
+# the spawned server away (SIGKILL) right after `await-task-progress` has
+# seen the render under way, and starts a fresh one on the same port. Lost
+# keeps the task record as it was; the reconnect's Bootstrap fails every
+# record still open with "connection lost" (the restarted server knows
+# nothing of the render, so it replays nothing), without counting it as a
+# TaskFailed message.
 
+copy-fixture fixtures/triangle.obj
 connect
 list-roots
 import-static-dataset $dataRoot/triangle.obj Tri OBJ
@@ -29,12 +27,14 @@ await-reply
 await-task-progress
 assert task.last.state == Running
 
-# The runner kills the server now.
+# The server goes away now, mid-render.
+kill-server
 await-lost timeout=20000
 assert state == Lost
 assert task.last.state == Running
 
-reconnect timeout=45000
+await-server timeout=30000
+reconnect timeout=10000
 assert state == Connected
 assert task.last.state == Failed
 assert task.last.message == "connection lost"

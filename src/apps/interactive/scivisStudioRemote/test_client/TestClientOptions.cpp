@@ -103,6 +103,7 @@ bool parseTestClientOptions(const std::vector<std::string> &args,
     std::string *error)
 {
   options = {};
+  bool portGiven = false;
 
   for (size_t i = 1; i < args.size(); ++i) {
     const auto &arg = args[i];
@@ -122,6 +123,19 @@ bool parseTestClientOptions(const std::vector<std::string> &args,
     if (arg == "--quiet-events") {
       options.runner.quietEvents = true;
       continue;
+    }
+    if (arg == "--require-device") {
+      options.requireDevice = true;
+      continue;
+    }
+    if (arg == "--spawn-server") {
+      // The rest of the line is the server's.
+      if (i + 1 >= args.size()) {
+        setError(error, "--spawn-server requires the server binary");
+        return false;
+      }
+      options.spawnServer.assign(args.begin() + long(i) + 1, args.end());
+      break;
     }
 
     const bool takesValue = arg == "--host" || arg == "--port"
@@ -148,6 +162,7 @@ bool parseTestClientOptions(const std::vector<std::string> &args,
             error, "--port requires an integer in 1..65535, got: " + value);
         return false;
       }
+      portGiven = true;
     } else if (arg == "--script") {
       if (!options.scriptPath.empty()) {
         setError(error, "multiple --script files were specified");
@@ -171,6 +186,16 @@ bool parseTestClientOptions(const std::vector<std::string> &args,
     setError(error, "--script and -e cannot be combined");
     return false;
   }
+  if (!options.spawnServer.empty() && portGiven) {
+    setError(error,
+        "--port and --spawn-server cannot be combined: the"
+        " spawned server's port is the one connect uses");
+    return false;
+  }
+  if (options.requireDevice && options.spawnServer.empty()) {
+    setError(error, "--require-device applies to a --spawn-server run");
+    return false;
+  }
   return true;
 }
 
@@ -181,6 +206,7 @@ std::string testClientUsage(const std::string &programName)
       << " [--host H] [--port N] [--timeout MS] [--keep-going]"
          " [--quiet-events]\n"
          "       [--script FILE | -e \"cmd; cmd\" ...]\n"
+         "       [--require-device] [--spawn-server SERVER [server args...]]\n"
          "\n"
          "Runs a script of commands against a scivisStudioServer and prints"
          " one record\n"
@@ -203,6 +229,21 @@ std::string testClientUsage(const std::string &programName)
          " non-zero\n"
          "  --quiet-events    print no EVT lines except from the dump-*"
          " commands\n"
+         "  --spawn-server SERVER [args...]\n"
+         "                    the rest of the line: start SERVER with those"
+         " arguments plus\n"
+         "                    --port 0 --data-root <work>/data in a fresh"
+         " temporary\n"
+         "                    working directory, wait for its Listening"
+         " line, run the\n"
+         "                    script against it and stop it; the directory"
+         " is removed on\n"
+         "                    success and kept (its path and the server log"
+         " on stderr) on\n"
+         "                    failure\n"
+         "  --require-device  with --spawn-server: exit 77 (ctest's skip)"
+         " instead of 1\n"
+         "                    when the server loads no ANARI device\n"
          "  -h, --help        show this help\n"
          "  --markdown        print the command and assert-value tables as"
          " Markdown (the README's) and exit\n"

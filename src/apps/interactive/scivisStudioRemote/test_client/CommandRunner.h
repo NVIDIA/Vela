@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <filesystem>
 #include <functional>
 #include <iosfwd>
 #include <optional>
@@ -32,6 +33,8 @@ struct Shot;
 
 namespace vsr::scivis_studio::test_client {
 
+struct ServerProcess;
+
 struct RunnerOptions
 {
   // Where `connect` goes when the command names no host or port.
@@ -44,6 +47,9 @@ struct RunnerOptions
   // Drop the `EVT` lines for server messages; the `dump-*` commands still
   // print theirs.
   bool quietEvents{false};
+  // Where `copy-fixture`'s relative paths resolve: the script file's
+  // directory; empty means the working directory.
+  std::filesystem::path scriptDir;
 };
 
 /*
@@ -88,11 +94,11 @@ struct SnapshotCursor
  * written. execute() finds the row, checks the prefixes and the argument
  * count against it, and runs the handler; usage FAILs, --help and the
  * README's command table all print from the same rows. The handlers are
- * grouped by file: SessionCommands.cpp (the connection and the frame
- * stream), SceneCommands.cpp (scene edits, playback, the viewport,
- * inspection, UI state, assert), RequestCommands.cpp (one request command
- * per Project Op, Remote Browse and task message) and WaitCommands.cpp (the
- * waits on tasks and replies). What `assert` can name is the table
+ * grouped by file: SessionCommands.cpp (the connection, the frame stream
+ * and the spawned server), SceneCommands.cpp (scene edits, playback, the
+ * viewport, inspection, UI state, assert), RequestCommands.cpp (one request
+ * command per Project Op, Remote Browse and task message) and WaitCommands.cpp
+ * (the waits on tasks and replies). What `assert` can name is the table
  * namedValues() returns (NamedValues.cpp), one ValueSpec per name or pattern;
  * the replica's records read through the field tables of RecordFields.h,
  * which dump-project and update-shot use too.
@@ -111,9 +117,13 @@ struct SnapshotCursor
  * prefix sends without awaiting, so several requests can be in flight (a
  * task to cancel before it runs); `await-reply` collects them.
  *
+ * The server-lifecycle commands (copy-fixture, kill-server, await-server)
+ * act on the ServerProcess the runner was given -- the one --spawn-server
+ * started -- and FAIL without one.
+ *
  * Example:
  *   TestSession session;
- *   CommandRunner runner(&session, &std::cout, options);
+ *   CommandRunner runner(&session, &std::cout, options, &server);
  *   std::vector<Command> commands;
  *   parseScript("connect; start-rendering; await-frame 3", commands);
  *   return runner.run(commands) ? 0 : 1;
@@ -177,8 +187,12 @@ struct CommandRunner
     const char *summary;
   };
 
-  CommandRunner(
-      TestSession *session, std::ostream *out, RunnerOptions options = {});
+  // `server` is the spawned server the lifecycle commands act on; null when
+  // none was.
+  CommandRunner(TestSession *session,
+      std::ostream *out,
+      RunnerOptions options = {},
+      ServerProcess *server = nullptr);
 
   // Runs the commands in order, stopping at the first FAIL unless keepGoing.
   // True iff every command printed OK.
@@ -268,6 +282,13 @@ struct CommandRunner
   Failure awaitFrameAdvance(const Command &, Deadline);
   Failure awaitWarning(const Command &, Deadline);
   Failure saveFrame(const Command &);
+
+  // The spawned server (SessionCommands.cpp)
+  Failure copyFixture(const Command &);
+  Failure killServer(const Command &);
+  Failure awaitServer(const Command &, Deadline);
+  // The FAIL of a server-lifecycle command when no server was spawned.
+  Failure noSpawnedServer() const;
 
   // Scene edits, playback, the viewport, inspection, UI state and assert
   // (SceneCommands.cpp)
@@ -400,6 +421,7 @@ struct CommandRunner
   TestSession *m_session{nullptr};
   std::ostream *m_out{nullptr};
   RunnerOptions m_options;
+  ServerProcess *m_server{nullptr};
 
   // Ids the replies minted, by variable name (lastShotId, lastTaskId, ...).
   vsr::core::FlatMap<std::string, std::string> m_variables;

@@ -1,8 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# runner: fixture fixtures/triangle.obj
-#
 # Task-status replay: a render keeps running after its client disconnects,
 # its TaskCompleted goes to a closed socket, and the next client's Bootstrap
 # carries it (between UIState and the ProjectSnapshot) so the outcome is not
@@ -10,6 +8,7 @@
 # `reconnect` waits for the whole render; the replayed end rebuilds the task
 # record the disconnect had cleared.
 
+copy-fixture fixtures/triangle.obj
 connect
 list-roots
 import-static-dataset $dataRoot/triangle.obj Tri OBJ
