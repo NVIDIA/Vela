@@ -147,6 +147,31 @@ anari::Device ANARIDeviceManager::loadDevice(const std::string &libraryName,
   return dev;
 }
 
+anari::Device ANARIDeviceManager::loadFirstAvailableDevice(std::string &libName)
+{
+  if (auto device = loadDevice(libName))
+    return device;
+
+  if (isLoadableLibrary(libName)) {
+    vsr::core::logWarning(
+        "[ANARIDeviceManager] failed to load ANARI device '%s'; trying the"
+        " other libraries",
+        libName.c_str());
+  }
+
+  for (const auto &fallback : m_libraryList) {
+    if (fallback == libName)
+      continue;
+    if (auto device = loadDevice(fallback)) {
+      libName = fallback;
+      return device;
+    }
+  }
+
+  libName.clear();
+  return nullptr;
+}
+
 const anari::Extensions *ANARIDeviceManager::loadDeviceExtensions(
     const std::string &libName)
 {

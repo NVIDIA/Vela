@@ -414,6 +414,43 @@ void ProjectContext::ensureRendererDefaults(Shot &shot)
   }
 }
 
+vsr::scene::RendererAppRef ProjectContext::bindShotRenderer(
+    Shot &shot, const std::string &library, anari::Device device)
+{
+  if (!m_ctx)
+    return {};
+
+  auto &scene = m_ctx->vsr.scene;
+  auto renderers = scene.renderersOfDevice(library);
+  if (renderers.empty())
+    renderers = scene.createStandardRenderers(library, device);
+  if (renderers.empty())
+    return {};
+
+  auto &settings = shot.renderSettings;
+  const bool hadPick = settings.rendererObjectIndex != VSR_INVALID_INDEX;
+  vsr::scene::RendererAppRef renderer;
+  if (hadPick) {
+    auto candidate =
+        scene.getObject<vsr::scene::Renderer>(settings.rendererObjectIndex);
+    if (candidate && candidate->rendererDeviceName() == library)
+      renderer = candidate;
+  }
+  if (!renderer)
+    renderer = renderers.front();
+
+  if (settings.rendererObjectIndex != renderer->index()
+      || settings.rendererSubtype != renderer->subtype().str()
+      || settings.rendererLibrary != library) {
+    settings.rendererObjectIndex = renderer->index();
+    settings.rendererSubtype = renderer->subtype().str();
+    settings.rendererLibrary = library;
+    if (hadPick)
+      m_project.markDirty();
+  }
+  return renderer;
+}
+
 LightRig *ProjectContext::createLightRig(const std::string &name)
 {
   if (!m_ctx)
@@ -430,6 +467,7 @@ LightRig *ProjectContext::createLightRig(const std::string &name)
   rig.rootNode = refFor("studio", rigRoot);
   m_project.lightRigs.push_back(std::move(rig));
   markProjectDirty();
+  applyActiveShot(); // A new rig is bound to no shot, so it starts hidden.
   return &m_project.lightRigs.back();
 }
 

@@ -48,34 +48,6 @@ constexpr std::chrono::milliseconds PAUSED_SLEEP{1};
 // Guards the pipeline against a hostile or confused SetFrameConfig.
 constexpr uint32_t MAX_FRAME_DIMENSION = 16384;
 
-// Same fallback RenderShot uses: the requested library first, then the rest
-// of the device manager's list. `libName` ends up naming what was loaded.
-anari::Device loadFirstAvailableDevice(
-    vsr::app::ANARIDeviceManager &deviceManager, std::string &libName)
-{
-  if (auto device = deviceManager.loadDevice(libName))
-    return device;
-
-  if (!libName.empty() && libName != "{none}") {
-    vsr::core::logWarning(
-        "[StudioServer] failed to load ANARI device '%s'; trying the other"
-        " libraries",
-        libName.c_str());
-  }
-
-  for (const auto &fallback : deviceManager.libraryList()) {
-    if (fallback == libName)
-      continue;
-    if (auto device = deviceManager.loadDevice(fallback)) {
-      libName = fallback;
-      return device;
-    }
-  }
-
-  libName.clear();
-  return nullptr;
-}
-
 } // namespace
 
 const char *toString(SessionState state)
@@ -205,7 +177,7 @@ bool StudioServer::loadDevice(std::string *error)
   }
 
   m_libraryName = requested;
-  m_device = loadFirstAvailableDevice(deviceManager, m_libraryName);
+  m_device = deviceManager.loadFirstAvailableDevice(m_libraryName);
   if (!m_device) {
     if (error) {
       *error =
@@ -275,44 +247,16 @@ bool StudioServer::bindActiveShotRendering(std::string *error)
     return false;
   }
 
-  // A fresh project has no renderer objects at all; like the monolith's
-  // viewport and ShotEditor, the server creates the standard set for its
-  // library and records its pick in the shot so RenderShot agrees with it.
-  auto &settings = shot->renderSettings;
-  m_renderers = scene.renderersOfDevice(m_libraryName);
-  if (m_renderers.empty())
-    m_renderers = scene.createStandardRenderers(m_libraryName, m_device);
-  if (m_renderers.empty()) {
+  // The shot's pick, or the library's first renderer (creating the standard
+  // set when the scene has none); recorded in the shot so RenderShot agrees.
+  m_renderer =
+      m_projectContext.bindShotRenderer(*shot, m_libraryName, m_device);
+  if (!m_renderer) {
     unbindRendering();
     if (error)
       *error = "ANARI library '" + m_libraryName + "' offers no renderers";
     return false;
   }
-
-  vsr::scene::RendererAppRef renderer;
-  if (settings.rendererObjectIndex != VSR_INVALID_INDEX) {
-    auto candidate =
-        scene.getObject<vsr::scene::Renderer>(settings.rendererObjectIndex);
-    if (candidate && candidate->rendererDeviceName() == m_libraryName)
-      renderer = candidate;
-  }
-  if (!renderer) {
-    renderer = m_renderers.front();
-    // Filling in a shot that never picked a renderer object (a fresh
-    // project's, or one saved before any pick) completes its defaults and
-    // leaves the dirty flag alone; overriding a real pick is an edit.
-    const bool hadPick = settings.rendererObjectIndex != VSR_INVALID_INDEX;
-    if (settings.rendererObjectIndex != renderer->index()
-        || settings.rendererSubtype != renderer->subtype().str()
-        || settings.rendererLibrary != m_libraryName) {
-      settings.rendererObjectIndex = renderer->index();
-      settings.rendererSubtype = renderer->subtype().str();
-      settings.rendererLibrary = m_libraryName;
-      if (hadPick)
-        project.markDirty();
-    }
-  }
-  m_renderer = renderer;
 
   // The shot camera is what the client orbits and what RenderShot renders
   // with; the scene's default camera is only a last resort.
@@ -452,7 +396,6 @@ void StudioServer::teardown()
   m_pipeline.clear();
   m_scenePass = nullptr;
   m_renderer = {};
-  m_renderers.clear();
   if (m_renderIndex) {
     m_ctx.anari.releaseRenderIndex(scene, m_device);
     m_renderIndex = nullptr;

@@ -1090,6 +1090,33 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   the frame path) is the server proper, which no fix-up owns; the ~800 line
   figure was a review estimate, not a requirement.
 
+- **The server reuses the studio core's renderer binding and device
+  fallback.** `loadFirstAvailableDevice` was written twice (`StudioServer.cpp`
+  and `RenderShot.cpp`, identical but for the log text) and "renderers of the
+  library, or create the standard set; the shot's pick if it is one of them,
+  else the first; write the pick back" three times (`StudioServer::
+  bindActiveShotRendering`, the monolith's `ShotEditor::
+  buildUI_rendererSelector`, and a stricter RenderShot that refused a pick
+  the loaded device did not have). The fallback is now
+  `ANARIDeviceManager::loadFirstAvailableDevice(libName)`, one warning, next
+  to the `loadDevice` it wraps; the binding is `ProjectContext::
+  bindShotRenderer(shot, library, device) -> RendererAppRef`, with the
+  server's dirty rule (filling in a shot that never picked leaves the dirty
+  flag alone; overriding a real pick is an edit). `bindActiveShotRendering`
+  is camera and pass wiring around one call and the server's `m_renderers`
+  is gone; the ShotEditor loads the device once per library as before and
+  reports the fix-up as an edit of its draft, so it still lands through
+  `updateShot`. RenderShot binds before it builds its render index, so a
+  shot whose library is not on the machine now renders with the fallback
+  device's first renderer instead of failing "Renderer object index N is
+  unavailable" after the device fallback had already picked another library.
+  `ProjectContext::createLightRig` calls `applyActiveShot()` like
+  `cloneLightRig` and `loadLightRigArchive`, so a new rig starts hidden
+  wherever it is created; the dispatcher's compensating call after
+  `CreateLightRig` is gone. Tests: `[App]` covers the fallback (missing
+  library, empty name, nothing loadable), `[SciVisStudio]` covers the four
+  bind cases and the hidden new rig.
+
 ### Spec conformance
 
 Every bullet of the spec sections named below, against the tree at

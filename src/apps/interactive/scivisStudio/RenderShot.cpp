@@ -20,36 +20,6 @@ namespace vsr::scivis_studio {
 
 namespace {
 
-anari::Device loadFirstAvailableDevice(
-    vsr::app::ANARIDeviceManager &deviceManager, std::string &libName)
-{
-  auto tryLoad = [&](const std::string &name) {
-    return deviceManager.loadDevice(name);
-  };
-
-  if (auto device = tryLoad(libName))
-    return device;
-
-  if (!libName.empty() && libName != "{none}") {
-    vsr::core::logWarning(
-        "[SciVisStudio] Failed to load ANARI device '%s'; falling back to a "
-        "default device",
-        libName.c_str());
-  }
-
-  for (const auto &fallback : deviceManager.libraryList()) {
-    if (fallback == libName)
-      continue;
-    if (auto device = tryLoad(fallback)) {
-      libName = fallback;
-      return device;
-    }
-  }
-
-  libName.clear();
-  return nullptr;
-}
-
 // Logs `error`, records it in `out` and hands `out` back as the render's
 // result; every early exit of the render.
 RenderShotResult failRender(RenderShotResult &out, std::string error)
@@ -175,9 +145,19 @@ RenderShotResult renderActiveShotToFrames(
   }
 
   auto libName = shot->renderSettings.rendererLibrary;
-  auto device = loadFirstAvailableDevice(ctx->anari, libName);
+  auto device = ctx->anari.loadFirstAvailableDevice(libName);
   if (!device)
     return failRender(out, "Failed to load an ANARI device for shot rendering");
+
+  // The shot's pick when the device that loaded has it, else the device's
+  // first renderer; the pick is recorded so the shot names what rendered.
+  auto rendererObject = projectContext.bindShotRenderer(*shot, libName, device);
+  if (!rendererObject) {
+    anari::release(device, device);
+    return failRender(
+        out, "ANARI device '" + libName + "' offers no renderers");
+  }
+  const auto rendererIndex = rendererObject->index();
 
   projectContext.applyActiveShot();
 
@@ -199,14 +179,6 @@ RenderShotResult renderActiveShotToFrames(
     }
   } renderIndexGuard{*ctx, renderIndex, device};
   renderIndex->populate();
-
-  const auto rendererIndex = shot->renderSettings.rendererObjectIndex;
-  auto rendererObject = ctx->vsr.scene.getObject(ANARI_RENDERER, rendererIndex);
-  if (!rendererObject || rendererObject->rendererDeviceName() != libName) {
-    return failRender(out,
-        "Renderer object index " + std::to_string(rendererIndex)
-            + " is unavailable for ANARI device '" + libName + "'");
-  }
 
   auto renderer = renderIndex->renderer(rendererIndex);
   if (!renderer) {

@@ -358,7 +358,6 @@ struct StudioServer
   std::string m_libraryName;
   anari::Device m_device{nullptr};
   vsr::rendering::RenderIndex *m_renderIndex{nullptr};
-  std::vector<vsr::scene::RendererAppRef> m_renderers;
   vsr::scene::RendererAppRef m_renderer;
   size_t m_cameraIndex{VSR_INVALID_INDEX};
   vsr::rendering::ImagePipeline m_pipeline;

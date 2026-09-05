@@ -171,6 +171,15 @@ struct ProjectContext
   vsr::scene::LayerNodeRef resolveDatasetRoot(Dataset &dataset);
   vsr::scene::LayerNodeRef resolveLightRigRoot(LightRig &rig);
   vsr::scene::Object *resolveShotCamera(Shot &shot);
+  // Points `shot` at a renderer of `library`: its own pick when that is one
+  // of the library's renderers, else the first of them, creating the
+  // library's standard set on `device` when the scene has none (a fresh or
+  // reopened project). Records the pick (library, index, subtype) in the
+  // shot; filling in a shot that never picked leaves the dirty flag alone,
+  // overriding a real pick is an edit. Returns the bound renderer, or null
+  // when the library offers none (the shot is then untouched).
+  vsr::scene::RendererAppRef bindShotRenderer(
+      Shot &shot, const std::string &library, anari::Device device);
   LightRig *createLightRig(const std::string &name = "");
   LightRig *cloneLightRig(const LightRigID &id);
   bool removeLightRig(const LightRigID &id);
