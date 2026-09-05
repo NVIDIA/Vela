@@ -86,37 +86,48 @@ bool isProjectRequestType(protocol::StudioMessageType type);
 std::optional<ProjectRequest> decodeProjectRequest(
     const vsr::network::Message &msg);
 
-// What the loop must know about a request before serving it, one record per
-// ProjectRequest alternative (the table in ProjectOpDispatcher.cpp). A sync op
-// is {false, true, true}; a task op {true, false, true}, since its dispatch
-// only queues and reads the Project when the task runs; RenderShot is
-// {true, true, true}, a task whose sync prelude reads the Project; Remote
-// Browse and CancelTask are all false; RequestArrayHistogram reads without
-// mutating.
-struct RequestPolicy
+// What the loop must know about a request before serving it: one kind per
+// ProjectRequest alternative (the table in ProjectOpDispatcher.cpp). Two
+// facts follow from the kind -- whether the request reads the Project or
+// Scene at dispatch, and whether it mutates them (or launches a task that
+// would) -- and the predicates below read them off it.
+enum class RequestKind
 {
-  // Answered with a TaskStartedResult and queued on the ServerTaskRunner.
-  bool launchesTask{false};
-  // Reads the Project or Scene at dispatch, so it must wait until every task
-  // the client sent before it has run.
-  bool readsProjectAtDispatch{false};
-  // Mutates the Project or Scene, or launches a task that would; the render
-  // owns both while it is pending, so the request is refused meanwhile.
-  bool mutates{false};
+  // A sync op: calls the context and replies at dispatch, so it reads the
+  // Project then and mutates it (most Project Ops).
+  SyncMutating,
+  // Reads the Project or Scene at dispatch and mutates nothing
+  // (DiscoverDatasetCandidates, RequestArrayHistogram).
+  SyncReadOnly,
+  // Answered with a TaskStartedResult and queued on the ServerTaskRunner;
+  // the dispatch only queues, the task reads and mutates the Project when
+  // it runs.
+  Task,
+  // A task whose sync prelude reads the Project (the shot render).
+  RenderShot,
+  // Touches neither Project nor Scene (Remote Browse, CancelTask).
+  Independent
 };
 
-RequestPolicy policyOf(const ProjectRequest &request);
+RequestKind kindOf(const ProjectRequest &request);
 
-// The predicates the loop asks, each read off the request's RequestPolicy.
+// The predicates the loop and the dispatcher ask, each read off the kind.
 
-// readsProjectAtDispatch: the request waits for the tasks sent before it.
+// SyncMutating, SyncReadOnly, RenderShot: the request reads the Project or
+// Scene at dispatch, so it waits until every task the client sent before it
+// has run.
 bool waitsForQueuedTasks(const ProjectRequest &request);
 
-// No flag set: the request touches neither Project nor Scene, so the loop may
+// Independent: the request touches neither Project nor Scene, so the loop may
 // serve it from behind a sync op that is waiting for a queued task --
 // otherwise a queued task could never be cancelled once any sync op followed
 // it.
 bool independentOfQueuedTasks(const ProjectRequest &request);
+
+// SyncMutating, Task, RenderShot: the request mutates the Project or Scene,
+// or launches a task that would; the render owns both while it is pending,
+// so the request is refused meanwhile (ProjectOpDispatcher::refuses).
+bool mutatesProject(const ProjectRequest &request);
 
 /*
  * Runs project requests on the loop thread against the server's
@@ -184,8 +195,8 @@ struct ProjectOpDispatcher
 
   // True when dispatch() would answer this request with "render in
   // progress": a shot render is queued or running and the request mutates
-  // (RequestPolicy::mutates). The loop asks before queueing a request behind
-  // the tasks, so a refusal never waits its turn.
+  // (mutatesProject). The loop asks before queueing a request behind the
+  // tasks, so a refusal never waits its turn.
   bool refuses(const ProjectRequest &request) const;
 
   // Serves `request`; a refused one gets its ProjectOpReply error and
@@ -196,8 +207,8 @@ struct ProjectOpDispatcher
   void runOneTask();
 
  private:
-  // One handler per alternative. The task-launching ones (RequestPolicy::
-  // launchesTask) are defined in ProjectOpDispatcherTasks.cpp, the rest in
+  // One handler per alternative. The task-launching ones (RequestKind::Task
+  // and RenderShot) are defined in ProjectOpDispatcherTasks.cpp, the rest in
   // ProjectOpDispatcher.cpp.
   // Project
   void handle(const protocol::NewProject &);

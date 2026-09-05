@@ -342,12 +342,8 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
       result.message = "dataset_0001";
       return result;
     });
-    const auto second = runner.enqueue("second", [&](const TaskControl &) {
-      TaskResult result;
-      result.ok = false;
-      result.error = "boom";
-      return result;
-    });
+    const auto second = runner.enqueue(
+        "second", [&](const TaskControl &) { return taskFailure("boom"); });
     const auto third = runner.enqueue(
         "third", [&](const TaskControl &) { return TaskResult{}; });
 
@@ -390,11 +386,11 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
         {
           REQUIRE(ranFirst);
           REQUIRE(ranFirst->taskId == first);
-          REQUIRE(ranFirst->result.ok);
+          REQUIRE(ranFirst->result.outcome == TaskOutcome::Completed);
           REQUIRE(cancelRunningError == "task already running");
           REQUIRE(ranSecond);
           REQUIRE(ranSecond->taskId == second);
-          REQUIRE_FALSE(ranSecond->result.ok);
+          REQUIRE(ranSecond->result.outcome == TaskOutcome::Failed);
           REQUIRE_FALSE(ranNothing);
           REQUIRE_FALSE(runner.running());
           REQUIRE(runner.queued() == 0);
@@ -474,9 +470,8 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
             if (frame == 3)
               REQUIRE(runner.requestCancelRunning(render));
           }
-          result.ok = frames == 200;
-          result.cancelled = !result.ok;
-          result.error = result.cancelled ? "cancelled" : "";
+          result.outcome =
+              frames == 200 ? TaskOutcome::Completed : TaskOutcome::Cancelled;
           setResults(result, RenderShotResult{frames});
           return result;
         },
@@ -502,8 +497,7 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
       THEN("it stopped at the next frame boundary and reports how far it got")
       {
         REQUIRE(ran);
-        REQUIRE_FALSE(ran->result.ok);
-        REQUIRE(ran->result.error == "cancelled");
+        REQUIRE(ran->result.outcome == TaskOutcome::Cancelled);
         REQUIRE(frames == 3);
         REQUIRE_FALSE(runner.exclusivePending());
         REQUIRE(sent.size() == 4);
@@ -524,7 +518,8 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
         REQUIRE(runner.cancel(render, &error));
         REQUIRE(runner.cancel(render, &error)); // idempotent
         REQUIRE(runner.finished().size() == 1);
-        REQUIRE(runner.finished().front().result.cancelled);
+        REQUIRE(
+            runner.finished().front().result.outcome == TaskOutcome::Cancelled);
       }
 
       AND_WHEN("the next bootstrap replays the history")
@@ -580,14 +575,15 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
     {
       const auto ran = runner.runOne();
       REQUIRE(ran);
-      REQUIRE(ran->result.ok);
+      REQUIRE(ran->result.outcome == TaskOutcome::Completed);
 
       THEN("the CancelTask dispatched after it is refused, not acknowledged")
       {
         std::string error;
         REQUIRE_FALSE(runner.cancel(import, &error));
         REQUIRE(error == "task already finished");
-        REQUIRE_FALSE(runner.finished().front().result.cancelled);
+        REQUIRE(
+            runner.finished().front().result.outcome == TaskOutcome::Completed);
         REQUIRE(sent.size() == 1);
         REQUIRE(decode<TaskCompleted>(sent.back()));
       }
@@ -601,22 +597,19 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
       REQUIRE(runner.requestCancelRunning(import));
       REQUIRE(task.cancelRequested());
       // The body saw the flag but stopped for a reason of its own; it does
-      // not report cancelled.
-      TaskResult result;
-      result.ok = false;
-      result.error = "boom";
-      return result;
+      // not report Cancelled.
+      return taskFailure("boom");
     });
 
     WHEN("it runs")
     {
       const auto ran = runner.runOne();
       REQUIRE(ran);
-      REQUIRE_FALSE(ran->result.ok);
+      REQUIRE(ran->result.outcome == TaskOutcome::Failed);
 
       THEN("its failure stands: the cancel is not acknowledged")
       {
-        REQUIRE_FALSE(runner.finished().back().result.cancelled);
+        REQUIRE(runner.finished().back().result.outcome == TaskOutcome::Failed);
         std::string error;
         REQUIRE_FALSE(runner.cancel(import, &error));
         REQUIRE(error == "task already finished");
@@ -690,13 +683,13 @@ SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
       {
         REQUIRE(ranThrower);
         REQUIRE(ranThrower->taskId == thrower);
-        REQUIRE_FALSE(ranThrower->result.ok);
+        REQUIRE(ranThrower->result.outcome == TaskOutcome::Failed);
         REQUIRE(
             ranThrower->result.error.find("stat failed") != std::string::npos);
         REQUIRE_FALSE(runner.running());
         REQUIRE(ranAfter);
         REQUIRE(ranAfter->taskId == after);
-        REQUIRE(ranAfter->result.ok);
+        REQUIRE(ranAfter->result.outcome == TaskOutcome::Completed);
 
         REQUIRE(sent.size() == 2);
         const auto failed = decode<TaskFailed>(sent[0]);

@@ -87,97 +87,110 @@ namespace {
 // Only the rows below exist: a ProjectRequest alternative without one fails
 // to compile here, so adding an alternative means adding its row.
 template <typename Request>
-constexpr RequestPolicy policyOf()
+constexpr RequestKind kindOf()
 {
   static_assert(sizeof(Request) == 0,
-      "no RequestPolicy row for this ProjectRequest alternative");
+      "no RequestKind row for this ProjectRequest alternative");
   return {};
 }
 
-#define VSR_REQUEST_POLICY(Request, launches, reads, mutates)                  \
+#define VSR_REQUEST_KIND(Request, kind)                                        \
   template <>                                                                  \
-  constexpr RequestPolicy policyOf<Request>()                                  \
+  constexpr RequestKind kindOf<Request>()                                      \
   {                                                                            \
-    return {launches, reads, mutates};                                         \
+    return RequestKind::kind;                                                  \
   }
 
 // clang-format off
-// One row per ProjectRequest alternative, in the variant's order:
-// launchesTask, readsProjectAtDispatch, mutates.
-//                                                 launches reads  mutates
+// One row per ProjectRequest alternative, in the variant's order.
 // Project
-VSR_REQUEST_POLICY(NewProject,                     false,   true,  true)
-VSR_REQUEST_POLICY(OpenProject,                    true,    false, true)
-VSR_REQUEST_POLICY(SaveProject,                    true,    false, true)
+VSR_REQUEST_KIND(NewProject,                     SyncMutating)
+VSR_REQUEST_KIND(OpenProject,                    Task)
+VSR_REQUEST_KIND(SaveProject,                    Task)
 // Datasets
-VSR_REQUEST_POLICY(ImportStaticDataset,            true,    false, true)
-VSR_REQUEST_POLICY(ImportSubtreeDataset,           true,    false, true)
-VSR_REQUEST_POLICY(ImportFileAnimationDataset,     true,    false, true)
-VSR_REQUEST_POLICY(DeclareFileAnimationDataset,    false,   true,  true)
-VSR_REQUEST_POLICY(ReimportDataset,                true,    false, true)
-VSR_REQUEST_POLICY(RenameDataset,                  false,   true,  true)
-VSR_REQUEST_POLICY(RemoveDataset,                  false,   true,  true)
-VSR_REQUEST_POLICY(LoadDataset,                    true,    false, true)
-VSR_REQUEST_POLICY(UnloadDataset,                  false,   true,  true)
-VSR_REQUEST_POLICY(RefreshDatasetAvailability,     false,   true,  true)
-VSR_REQUEST_POLICY(SaveDatasetArchive,             true,    false, true)
-VSR_REQUEST_POLICY(LoadDatasetArchive,             true,    false, true)
-VSR_REQUEST_POLICY(DiscoverDatasetCandidates,      false,   true,  false)
-VSR_REQUEST_POLICY(IncorporateDatasetCandidate,    true,    false, true)
+VSR_REQUEST_KIND(ImportStaticDataset,            Task)
+VSR_REQUEST_KIND(ImportSubtreeDataset,           Task)
+VSR_REQUEST_KIND(ImportFileAnimationDataset,     Task)
+VSR_REQUEST_KIND(DeclareFileAnimationDataset,    SyncMutating)
+VSR_REQUEST_KIND(ReimportDataset,                Task)
+VSR_REQUEST_KIND(RenameDataset,                  SyncMutating)
+VSR_REQUEST_KIND(RemoveDataset,                  SyncMutating)
+VSR_REQUEST_KIND(LoadDataset,                    Task)
+VSR_REQUEST_KIND(UnloadDataset,                  SyncMutating)
+VSR_REQUEST_KIND(RefreshDatasetAvailability,     SyncMutating)
+VSR_REQUEST_KIND(SaveDatasetArchive,             Task)
+VSR_REQUEST_KIND(LoadDatasetArchive,             Task)
+VSR_REQUEST_KIND(DiscoverDatasetCandidates,      SyncReadOnly)
+VSR_REQUEST_KIND(IncorporateDatasetCandidate,    Task)
 // Shots
-VSR_REQUEST_POLICY(CreateShot,                     false,   true,  true)
-VSR_REQUEST_POLICY(RemoveShot,                     false,   true,  true)
-VSR_REQUEST_POLICY(UpdateShot,                     false,   true,  true)
-VSR_REQUEST_POLICY(SetActiveShot,                  false,   true,  true)
-VSR_REQUEST_POLICY(SetPlaying,                     false,   true,  true)
+VSR_REQUEST_KIND(CreateShot,                     SyncMutating)
+VSR_REQUEST_KIND(RemoveShot,                     SyncMutating)
+VSR_REQUEST_KIND(UpdateShot,                     SyncMutating)
+VSR_REQUEST_KIND(SetActiveShot,                  SyncMutating)
+VSR_REQUEST_KIND(SetPlaying,                     SyncMutating)
 // Light rigs
-VSR_REQUEST_POLICY(CreateLightRig,                 false,   true,  true)
-VSR_REQUEST_POLICY(CloneLightRig,                  false,   true,  true)
-VSR_REQUEST_POLICY(RemoveLightRig,                 false,   true,  true)
-VSR_REQUEST_POLICY(RenameLightRig,                 false,   true,  true)
-VSR_REQUEST_POLICY(AddLightToRig,                  false,   true,  true)
-VSR_REQUEST_POLICY(RemoveLightFromRig,             false,   true,  true)
+VSR_REQUEST_KIND(CreateLightRig,                 SyncMutating)
+VSR_REQUEST_KIND(CloneLightRig,                  SyncMutating)
+VSR_REQUEST_KIND(RemoveLightRig,                 SyncMutating)
+VSR_REQUEST_KIND(RenameLightRig,                 SyncMutating)
+VSR_REQUEST_KIND(AddLightToRig,                  SyncMutating)
+VSR_REQUEST_KIND(RemoveLightFromRig,             SyncMutating)
 // Camera rigs
-VSR_REQUEST_POLICY(CreateCameraRig,                false,   true,  true)
-VSR_REQUEST_POLICY(RemoveCameraRig,                false,   true,  true)
-VSR_REQUEST_POLICY(RenameCameraRig,                false,   true,  true)
-VSR_REQUEST_POLICY(SaveCameraRigArchive,           false,   true,  true)
-VSR_REQUEST_POLICY(LoadCameraRigArchive,           false,   true,  true)
-VSR_REQUEST_POLICY(SaveLightRigArchive,            false,   true,  true)
-VSR_REQUEST_POLICY(LoadLightRigArchive,            false,   true,  true)
+VSR_REQUEST_KIND(CreateCameraRig,                SyncMutating)
+VSR_REQUEST_KIND(RemoveCameraRig,                SyncMutating)
+VSR_REQUEST_KIND(RenameCameraRig,                SyncMutating)
+VSR_REQUEST_KIND(SaveCameraRigArchive,           SyncMutating)
+VSR_REQUEST_KIND(LoadCameraRigArchive,           SyncMutating)
+VSR_REQUEST_KIND(SaveLightRigArchive,            SyncMutating)
+VSR_REQUEST_KIND(LoadLightRigArchive,            SyncMutating)
 // Color maps
-VSR_REQUEST_POLICY(CreateColorMap,                 false,   true,  true)
-VSR_REQUEST_POLICY(RenameColorMap,                 false,   true,  true)
-VSR_REQUEST_POLICY(RemoveColorMap,                 false,   true,  true)
+VSR_REQUEST_KIND(CreateColorMap,                 SyncMutating)
+VSR_REQUEST_KIND(RenameColorMap,                 SyncMutating)
+VSR_REQUEST_KIND(RemoveColorMap,                 SyncMutating)
 // Remote Browse, viewport and tasks
-VSR_REQUEST_POLICY(ListRoots,                      false,   false, false)
-VSR_REQUEST_POLICY(ListDirectory,                  false,   false, false)
-VSR_REQUEST_POLICY(RequestArrayHistogram,          false,   true,  false)
-VSR_REQUEST_POLICY(RenderShot,                     true,    true,  true)
-VSR_REQUEST_POLICY(CancelTask,                     false,   false, false)
+VSR_REQUEST_KIND(ListRoots,                      Independent)
+VSR_REQUEST_KIND(ListDirectory,                  Independent)
+VSR_REQUEST_KIND(RequestArrayHistogram,          SyncReadOnly)
+VSR_REQUEST_KIND(RenderShot,                     RenderShot)
+VSR_REQUEST_KIND(CancelTask,                     Independent)
 // clang-format on
 
-#undef VSR_REQUEST_POLICY
+#undef VSR_REQUEST_KIND
+
+constexpr bool readsProjectAtDispatch(RequestKind kind)
+{
+  return kind == RequestKind::SyncMutating || kind == RequestKind::SyncReadOnly
+      || kind == RequestKind::RenderShot;
+}
+
+constexpr bool mutates(RequestKind kind)
+{
+  return kind == RequestKind::SyncMutating || kind == RequestKind::Task
+      || kind == RequestKind::RenderShot;
+}
 
 } // namespace
 
-RequestPolicy policyOf(const ProjectRequest &request)
+RequestKind kindOf(const ProjectRequest &request)
 {
   return std::visit(
-      [](const auto &r) { return policyOf<std::decay_t<decltype(r)>>(); },
+      [](const auto &r) { return kindOf<std::decay_t<decltype(r)>>(); },
       request);
 }
 
 bool waitsForQueuedTasks(const ProjectRequest &request)
 {
-  return policyOf(request).readsProjectAtDispatch;
+  return readsProjectAtDispatch(kindOf(request));
 }
 
 bool independentOfQueuedTasks(const ProjectRequest &request)
 {
-  const auto policy = policyOf(request);
-  return !policy.launchesTask && !policy.readsProjectAtDispatch
-      && !policy.mutates;
+  return kindOf(request) == RequestKind::Independent;
+}
+
+bool mutatesProject(const ProjectRequest &request)
+{
+  return mutates(kindOf(request));
 }
 
 // Dispatcher /////////////////////////////////////////////////////////////////
@@ -199,7 +212,7 @@ void ProjectOpDispatcher::dispatch(const ProjectRequest &request)
 
 bool ProjectOpDispatcher::refuses(const ProjectRequest &request) const
 {
-  return renderActive() && policyOf(request).mutates;
+  return renderActive() && mutatesProject(request);
 }
 
 void ProjectOpDispatcher::runOneTask()

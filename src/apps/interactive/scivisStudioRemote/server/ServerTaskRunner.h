@@ -18,23 +18,34 @@
 
 namespace vsr::scivis_studio::server {
 
-// What a task body reports back: success or an error for the client, an
-// optional message for TaskCompleted (a created dataset's id, a render's
-// output directory), the task's results subtree when it has one (a render's
-// RenderShotResult, set with protocol::setResults()), and whether the body
-// stopped because it was asked to. Whether the Project changed is not the
-// body's to say: the ProjectContext's revision moves with every mutation.
+// How a task body ended. Completed goes out as TaskCompleted, the other two
+// as TaskFailed: Failed with the body's error, Cancelled with the error
+// "cancelled" -- the body stopped because its TaskControl reported a cancel
+// request, which decides the CancelTask's answer (see the ServerTaskRunner
+// comment).
+enum class TaskOutcome
+{
+  Completed,
+  Failed,
+  Cancelled
+};
+
+// What a task body reports back: its outcome, the error for the client when
+// it Failed, an optional message for TaskCompleted (a created dataset's id, a
+// render's output directory), and the task's results subtree when it has one
+// (a render's RenderShotResult, set with protocol::setResults()). Whether the
+// Project changed is not the body's to say: the ProjectContext's revision
+// moves with every mutation.
 struct TaskResult
 {
-  bool ok{true};
-  std::string error;
-  std::string message;
+  TaskOutcome outcome{TaskOutcome::Completed};
+  std::string error; // Failed
+  std::string message; // Completed
   protocol::SubtreePtr results;
-  // The body stopped because its TaskControl reported a cancel request
-  // (with ok=false and error="cancelled"). Decides the CancelTask's answer;
-  // see the ServerTaskRunner comment.
-  bool cancelled{false};
 };
+
+// A Failed result carrying `error`.
+TaskResult taskFailure(std::string error);
 
 /*
  * A body's handle on its own task. Progress goes out as TaskProgress:
@@ -113,12 +124,12 @@ struct RunningTask
  * as TaskFailed{"cancelled"}; for the running one the IO thread raises the
  * cancel flag (requestCancelRunning) that a body polls through its
  * TaskControl. The body reports whether it stopped for the flag
- * (TaskResult::cancelled, with error "cancelled"; the shot render does, at
- * its next frame). The CancelTask itself, dispatched once the body has
- * returned, is answered "ok" when the body reported cancelled and "task
- * already finished" otherwise: the body ignored the flag and completed
- * (every other body today), or failed for a reason of its own. A task
- * dropped from the queue leaves cancelled false (no body ran): the
+ * (TaskOutcome::Cancelled; the shot render does, at its next frame). The
+ * CancelTask itself, dispatched once the body has returned, is answered
+ * "ok" when the body reported Cancelled and "task already finished"
+ * otherwise: the body ignored the flag and Completed (every other body
+ * today), or Failed for a reason of its own. A task dropped from the queue
+ * is recorded Failed with the error "cancelled" (no body ran): the
  * CancelTask that dropped it is answered on the spot, and a later one is
  * told the task finished. An exclusive task (the shot render) makes the
  * dispatcher refuse mutating requests while it is queued or running.
@@ -134,9 +145,9 @@ struct RunningTask
  * Example:
  *   const auto taskId = runner.enqueue("import 'a.obj'", [&](auto &task) {
  *     task("importing");
- *     TaskResult result;
- *     result.ok = context.addStaticDataset(...) != nullptr;
- *     return result;
+ *     if (!context.addStaticDataset(...))
+ *       return taskFailure("import failed");
+ *     return TaskResult{};
  *   });
  *   setResults(reply, TaskStartedResult{taskId});
  *   ...
