@@ -57,8 +57,11 @@ struct RunnerOptions
  *
  * Example:
  *   cursor.markAt(session.snapshotsAtReply(id).value_or(0));
- *   session.pollUntil([&] { return cursor.passed(session.snapshotsReceived());
- * }, 5s); cursor.advance();
+ *   const auto arrived = [&] {
+ *     return cursor.passed(session.snapshotsReceived());
+ *   };
+ *   if (session.pollUntil(arrived, 5s))
+ *     cursor.advance();
  */
 struct SnapshotCursor
 {
