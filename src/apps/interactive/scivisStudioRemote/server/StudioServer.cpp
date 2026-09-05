@@ -249,6 +249,10 @@ bool StudioServer::bindActiveShotRendering(std::string *error)
 
   // The shot's pick, or the library's first renderer (creating the standard
   // set when the scene has none); recorded in the shot so RenderShot agrees.
+  // Filling in a shot that never picked a renderer object (a fresh
+  // project's, or one saved before any pick) completes its defaults and
+  // leaves the dirty flag alone; overriding a real pick is an edit.
+  const auto before = shot->renderSettings;
   m_renderer =
       m_projectContext.bindShotRenderer(*shot, m_libraryName, m_device);
   if (!m_renderer) {
@@ -256,6 +260,13 @@ bool StudioServer::bindActiveShotRendering(std::string *error)
     if (error)
       *error = "ANARI library '" + m_libraryName + "' offers no renderers";
     return false;
+  }
+  const auto &after = shot->renderSettings;
+  if (before.rendererObjectIndex != VSR_INVALID_INDEX
+      && (after.rendererObjectIndex != before.rendererObjectIndex
+          || after.rendererSubtype != before.rendererSubtype
+          || after.rendererLibrary != before.rendererLibrary)) {
+    project.markDirty();
   }
 
   // The shot camera is what the client orbits and what RenderShot renders

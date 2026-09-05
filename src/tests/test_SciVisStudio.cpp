@@ -4083,13 +4083,13 @@ SCENARIO("SciVis Studio binds a shot's renderer to a library", "[SciVisStudio]")
       settings.rendererObjectIndex = 9999;
       auto renderer = projectContext.bindShotRenderer(*shot, "helide", device);
 
-      THEN("the first renderer replaces it, and overriding a pick is an edit")
+      THEN("the first renderer replaces it; the dirty flag is the caller's")
       {
         REQUIRE(renderer);
         REQUIRE(renderer->index() == renderers.front()->index());
         REQUIRE(settings.rendererObjectIndex == renderer->index());
         REQUIRE(settings.rendererSubtype == renderer->subtype().str());
-        REQUIRE(project.dirty);
+        REQUIRE_FALSE(project.dirty);
       }
     }
   }
