@@ -81,9 +81,6 @@ class Application : public vsr::ui::imgui::Application
       const ProjectOpenOptions &options = {});
   void newProject();
   void saveDefaultLayoutFile() const;
-  // The {windows, layout, settings} tree saveProjectAs() stores; opening
-  // applies one with applyUIStateTree().
-  void saveUIStateTree(vsr::core::DataNode &root);
   void requestDirtyAction(PendingDirtyAction action);
   void requestOpenRecentProject(const std::filesystem::path &directory);
   void continueDirtyAction();
@@ -109,7 +106,8 @@ class Application : public vsr::ui::imgui::Application
 
   std::unique_ptr<ProjectLocationDialog> m_projectLocationDialog;
   std::unique_ptr<AddStaticDatasetDialog> m_addStaticDatasetDialog;
-  std::unique_ptr<AddFileAnimationDatasetDialog> m_addFileAnimationDatasetDialog;
+  std::unique_ptr<AddFileAnimationDatasetDialog>
+      m_addFileAnimationDatasetDialog;
   ConfirmationModalState m_confirmationModal;
 };
 

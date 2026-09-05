@@ -150,9 +150,13 @@ class Application
       const char *filename) const;
   void saveApplicationSettings(vsr::core::DataNode &root);
   void loadApplicationSettings(vsr::core::DataNode &root);
-  // Applies a {windows, layout, settings} tree: each window's settings, the
-  // ImGui dock layout, then the application settings. Missing children are
-  // skipped. Call between NewFrame and Render.
+  // The UI-state tree (vsr/app/UIStateTree.h): saveUIStateTree() writes each
+  // window's settings under "windows", the ImGui dock layout under "layout"
+  // and the application settings (saveApplicationSettings); it is the UI part
+  // of an application-state file and what a SciVis Studio project stores.
+  // applyUIStateTree() applies one, skipping missing children. Call both
+  // between NewFrame and Render.
+  void saveUIStateTree(vsr::core::DataNode &root);
   void applyUIStateTree(vsr::core::DataNode &root);
   void saveGlobalApplicationSettings();
   void loadGlobalApplicationSettings();

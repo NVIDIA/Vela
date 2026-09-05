@@ -30,6 +30,8 @@
 #include "vsr/ui/imgui/windows/ObjectEditor.h"
 // vsr_scene
 #include "vsr/scene/Scene.hpp"
+// vsr_app
+#include "vsr/app/UIStateTree.h"
 // vsr_core
 #include "vsr/core/Logging.hpp"
 // imgui
@@ -598,11 +600,12 @@ SubtreePtr Application::buildUIState()
 {
   SubtreePtr tree = makeSubtree();
   auto &root = tree->root();
-  auto &windows = root["windows"];
+  auto &windows = root[vsr::app::UI_STATE_WINDOWS];
   for (auto *window : m_windows)
     window->saveSettings(windows[window->name()]);
-  root["layout"] = std::string(ImGui::SaveIniSettingsToMemory());
-  auto &settings = root["settings"];
+  root[vsr::app::UI_STATE_LAYOUT] =
+      std::string(ImGui::SaveIniSettingsToMemory());
+  auto &settings = root[vsr::app::UI_STATE_SETTINGS];
   settings["fontScale"] = m_uiConfig.fontScale;
   settings["uiRounding"] = m_uiConfig.rounding;
   return tree;

@@ -9,6 +9,7 @@
 #include "ProjectSerialization.h"
 
 #include "vsr/animation/AnimationManager.hpp"
+#include "vsr/app/UIStateTree.h"
 #include "vsr/core/DataTreeMetadata.hpp"
 #include "vsr/core/Logging.hpp"
 #include "vsr/io/archives/CameraArchive.hpp"
@@ -577,12 +578,15 @@ bool stageProjectOpen(const std::filesystem::path &directory,
     }
   }
 
-  if (auto *windows = root.child("windows"))
-    stage.ui.root()["windows"] = *windows;
-  if (auto *layout = root.child("layout"))
-    stage.ui.root()["layout"] = layout->getValueAs<std::string>();
-  if (auto *settings = root.child("settings"))
-    stage.ui.root()["settings"] = *settings;
+  {
+    using namespace vsr::app;
+    if (auto *windows = root.child(UI_STATE_WINDOWS))
+      stage.ui.root()[UI_STATE_WINDOWS] = *windows;
+    if (auto *layout = root.child(UI_STATE_LAYOUT))
+      stage.ui.root()[UI_STATE_LAYOUT] = layout->getValueAs<std::string>();
+    if (auto *settings = root.child(UI_STATE_SETTINGS))
+      stage.ui.root()[UI_STATE_SETTINGS] = *settings;
+  }
 
   vsr::scene::Scene stagedScene;
   vsr::animation::AnimationManager stagedAnimations(&stagedScene);

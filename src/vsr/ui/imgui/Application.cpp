@@ -6,6 +6,7 @@
 #include "vsr/core/Timer.hpp"
 // vsr_app
 #include "vsr/app/ApplicationDump.h"
+#include "vsr/app/UIStateTree.h"
 // vsr_io
 #include "vsr/io/exporters.hpp"
 // vsr_rendering
@@ -763,22 +764,16 @@ void Application::saveApplicationState(const char *_filename)
     root.reset();
     vsr::core::writeDataTreeMetadata(root, applicationStateMetadata());
 
-    // Window state
-    auto &windows = root["windows"];
-    for (auto *w : m_windows)
-      w->saveSettings(root["windows"][w->name()]);
-
-    // ImGui window layout
+    // Window state, ImGui layout and application-owned settings
     vsr::core::logStatus("serializing UI state...");
-    root["layout"] = ImGui::SaveIniSettingsToMemory();
+    saveUIStateTree(root);
 
-    // Serialize the base Application Dump and application-owned settings
+    // Serialize the base Application Dump
     vsr::core::logStatus("serializing application session state...");
     if (!vsr::app::serialize_ApplicationDump(ctx, root)) {
       vsr::core::logError("failed to serialize application state");
       return;
     }
-    saveApplicationSettings(root);
 
     // Save to file
     vsr::core::logStatus("writing state file '%s'...", filename.c_str());
@@ -846,21 +841,32 @@ void Application::saveApplicationSettings(vsr::core::DataNode &root)
 
   ctx.anari.saveSettings(root["ANARIDeviceManager"]);
 
-  auto &settings = root["settings"];
+  auto &settings = root[vsr::app::UI_STATE_SETTINGS];
   settings["fontScale"] = m_uiConfig.fontScale;
   settings["uiRounding"] = m_uiConfig.rounding;
 }
 
+void Application::saveUIStateTree(vsr::core::DataNode &root)
+{
+  auto &windows = root[vsr::app::UI_STATE_WINDOWS];
+  windows.reset();
+  for (auto *w : m_windows)
+    w->saveSettings(windows[w->name()]);
+  root[vsr::app::UI_STATE_LAYOUT] =
+      std::string(ImGui::SaveIniSettingsToMemory());
+  saveApplicationSettings(root);
+}
+
 void Application::applyUIStateTree(vsr::core::DataNode &root)
 {
-  if (auto *windows = root.child("windows")) {
+  if (auto *windows = root.child(vsr::app::UI_STATE_WINDOWS)) {
     for (auto *w : m_windows)
       w->loadSettings((*windows)[w->name()]);
   }
 
   // ImGui applies the dock settings to the windows when they next Begin,
   // later this frame.
-  if (auto *layout = root.child("layout")) {
+  if (auto *layout = root.child(vsr::app::UI_STATE_LAYOUT)) {
     const auto ini = layout->getValueOr<std::string>("");
     if (!ini.empty())
       ImGui::LoadIniSettingsFromMemory(ini.c_str());
@@ -876,7 +882,7 @@ void Application::loadApplicationSettings(vsr::core::DataNode &root)
   if (auto *c = root.child("ANARIDeviceManager"); c != nullptr)
     ctx.anari.loadSettings(*c);
 
-  if (auto *c = root.child("settings"); c != nullptr) {
+  if (auto *c = root.child(vsr::app::UI_STATE_SETTINGS); c != nullptr) {
     auto &settings = *c;
     settings["fontScale"].getValue(ANARI_FLOAT32, &m_uiConfig.fontScale);
     settings["uiRounding"].getValue(ANARI_FLOAT32, &m_uiConfig.rounding);

@@ -8,6 +8,7 @@
 #include "LightRigIO.h"
 #include "ProjectSerialization.h"
 
+#include "vsr/app/UIStateTree.h"
 #include "vsr/core/DataTree.hpp"
 #include "vsr/core/DataTreeMetadata.hpp"
 #include "vsr/io/archives/CameraArchive.hpp"
@@ -569,15 +570,16 @@ bool buildProjectSavePlan(const ProjectSaveRequest &request,
           SCHEMA_VERSION});
   projectToNode(result.project, root["scivisStudio"], ProjectForm::Manifest);
   if (request.uiState) {
-    if (auto *windows = request.uiState->child("windows"))
-      root["windows"] = *windows;
-    if (auto *layout = request.uiState->child("layout")) {
+    using namespace vsr::app;
+    if (auto *windows = request.uiState->child(UI_STATE_WINDOWS))
+      root[UI_STATE_WINDOWS] = *windows;
+    if (auto *layout = request.uiState->child(UI_STATE_LAYOUT)) {
       const auto ini = layout->getValueOr<std::string>("");
       if (!ini.empty())
-        root["layout"] = ini;
+        root[UI_STATE_LAYOUT] = ini;
     }
-    if (auto *settings = request.uiState->child("settings"))
-      root["settings"] = *settings;
+    if (auto *settings = request.uiState->child(UI_STATE_SETTINGS))
+      root[UI_STATE_SETTINGS] = *settings;
   }
 
   plan.manifest.description = "project manifest";

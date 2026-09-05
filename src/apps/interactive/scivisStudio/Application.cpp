@@ -203,16 +203,6 @@ void Application::teardown()
   VSRApplication::teardown();
 }
 
-void Application::saveUIStateTree(vsr::core::DataNode &root)
-{
-  auto &windows = root["windows"];
-  windows.reset();
-  for (auto *w : m_windows)
-    w->saveSettings(windows[w->name()]);
-  root["layout"] = std::string(ImGui::SaveIniSettingsToMemory());
-  saveApplicationSettings(root);
-}
-
 bool Application::saveProject()
 {
   auto &project = m_projectContext.project();
