@@ -1141,10 +1141,14 @@ inline bool DataNode::loadImpl(DataReader &reader)
 
   // Sizes come off the wire unverified, so a corrupt length must not become a
   // giant allocation before the short read that would reject it: refuse any
-  // length the reader cannot possibly satisfy before allocating for it.
+  // length the reader cannot possibly satisfy before allocating for it. A
+  // reader that cannot be sized is trusted to the short read.
   auto canRead = [&](size_t numBytes) {
-    if (ok && numBytes > reader.bytesRemaining())
-      ok = false;
+    if (ok) {
+      const auto remaining = reader.bytesRemaining();
+      if (remaining && numBytes > *remaining)
+        ok = false;
+    }
     return ok;
   };
 

@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <optional>
 #include <vector>
 
 namespace vsr::core {
@@ -98,8 +99,9 @@ struct DataReader
   virtual size_t read(void *ptr, size_t size, size_t count) = 0;
 
   // Upper bound on the bytes still readable, so a caller can reject a
-  // corrupt length before allocating for it. SIZE_MAX when unknown.
-  virtual size_t bytesRemaining() const;
+  // corrupt length before allocating for it; nullopt when the source cannot
+  // be sized (the base reader, a pipe). An empty source is 0, not unknown.
+  virtual std::optional<size_t> bytesRemaining() const;
 };
 
 /*
@@ -117,7 +119,7 @@ struct BufferReader : public DataReader
       const std::vector<std::byte> &buffer, size_t offset = 0);
 
   size_t read(void *ptr, size_t size, size_t count) override;
-  size_t bytesRemaining() const override;
+  std::optional<size_t> bytesRemaining() const override;
 
   size_t position() const;
   void reset(size_t offset = 0);
@@ -141,14 +143,14 @@ struct FileReader : public DataReader
   ~FileReader();
 
   size_t read(void *ptr, size_t size, size_t count) override;
-  size_t bytesRemaining() const override;
+  std::optional<size_t> bytesRemaining() const override;
 
   bool valid() const;
   operator bool() const;
 
  private:
   std::FILE *m_file{nullptr};
-  size_t m_fileSize{0};
+  std::optional<size_t> m_fileSize; // nullopt: could not be sized
   size_t m_position{0};
 };
 

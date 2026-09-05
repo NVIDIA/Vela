@@ -11,7 +11,9 @@
 #include "vsr/core/Logging.hpp"
 // std
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -1199,6 +1201,51 @@ SCENARIO("Loaded anonymous names are claimed against the counter", "[DataTree]")
         REQUIRE(items.numChildren() == 1 + NUM_APPENDS);
         REQUIRE(items[futureName].getValueAs<int>() == 1);
       }
+    }
+  }
+}
+
+SCENARIO(
+    "A DataReader tells an empty source from an unsizeable one", "[DataTree]")
+{
+  GIVEN("an empty buffer")
+  {
+    const std::vector<std::byte> empty;
+    vsr::core::BufferReader reader(empty);
+    THEN("no bytes remain, and that is known")
+    {
+      REQUIRE(reader.bytesRemaining() == size_t(0));
+    }
+  }
+
+  GIVEN("an empty file")
+  {
+    const auto path = std::filesystem::temp_directory_path()
+        / "vsr_test_DataTree_empty_reader.bin";
+    std::fclose(std::fopen(path.string().c_str(), "wb"));
+    {
+      vsr::core::FileReader reader(path.string().c_str());
+      REQUIRE(reader.valid());
+      THEN("no bytes remain, and that is known")
+      {
+        REQUIRE(reader.bytesRemaining() == size_t(0));
+      }
+    }
+    std::filesystem::remove(path);
+  }
+
+  GIVEN("a reader that cannot be sized")
+  {
+    struct Unsized : public vsr::core::DataReader
+    {
+      size_t read(void *, size_t, size_t) override
+      {
+        return 0;
+      }
+    } reader;
+    THEN("the remaining count is unknown rather than a sentinel")
+    {
+      REQUIRE_FALSE(reader.bytesRemaining().has_value());
     }
   }
 }
