@@ -508,7 +508,7 @@ void StudioServer::refreshDatasetAvailability()
   m_nextAvailabilityCheck = now + AVAILABILITY_CHECK_PERIOD;
   // A dataset found Unavailable moves the revision; followProjectRevisions
   // sends the snapshot that tells the client.
-  m_projectContext.refreshUnloadedDatasetsAvailability();
+  m_projectContext.refreshAllUnloadedDatasetAvailability();
 }
 
 void StudioServer::applyControlState()

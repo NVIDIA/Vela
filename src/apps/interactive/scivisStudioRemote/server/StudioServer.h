@@ -310,7 +310,7 @@ struct StudioServer
   // one (the shot render) the latch is discarded first.
   void runOneTask();
   // Once a second while a session is up, stats the asset file of every
-  // Unloaded dataset (ProjectContext::refreshUnloadedDatasetsAvailability);
+  // Unloaded dataset (ProjectContext::refreshAllUnloadedDatasetAvailability);
   // one found missing is a revision, so a snapshot follows. The server owns
   // the filesystem, so no client polls for this.
   void refreshDatasetAvailability();

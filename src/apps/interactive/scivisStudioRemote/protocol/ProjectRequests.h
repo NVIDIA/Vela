@@ -169,9 +169,9 @@ struct UnloadDataset
 };
 
 // Sync: refreshUnloadedDatasetAvailability() on the dataset with this id,
-// now. The server runs the same check over every Unloaded dataset once a
-// second on its own and snapshots a change, so no client needs to ask; this
-// is the test client's way of not waiting for the tick.
+// immediately. The server runs the same check over every Unloaded dataset
+// once a second on its own and snapshots a change, so no client needs to
+// ask; this is the test client's way of not waiting for the tick.
 struct RefreshDatasetAvailability
 {
   static constexpr StudioMessageType MESSAGE_TYPE =

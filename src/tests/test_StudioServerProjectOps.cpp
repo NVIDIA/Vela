@@ -1320,6 +1320,7 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
 
       AND_WHEN("a name the project already uses is asked for")
       {
+        REQUIRE(session.waitForSnapshots(++snapshots)); // the Wing load's
         load.name = "Tri";
         const auto takenEnd =
             waitForTaskEnd(client, startedTaskId(session.request(load)));
@@ -1329,7 +1330,8 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
           REQUIRE(takenEnd);
           REQUIRE_FALSE(takenEnd->completed);
           REQUIRE(takenEnd->text.find("already uses") != std::string::npos);
-          REQUIRE(session.waitForSnapshots(snapshots));
+          REQUIRE(
+              client.count(StudioMessageType::ProjectSnapshot) == snapshots);
           REQUIRE(session.latestSnapshot().project.datasets.size() == 2);
         }
       }

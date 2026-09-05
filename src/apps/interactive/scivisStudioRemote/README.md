@@ -1399,7 +1399,7 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
     Editor sent `RefreshDatasetAvailability` once a second for the selected
     Unloaded dataset (`m_availabilityDataset`, `m_lastAvailabilityCheck`,
     an `InFlight`). The server owns the filesystem: the loop now runs
-    `ProjectContext::refreshUnloadedDatasetsAvailability()` (one `exists()`
+    `ProjectContext::refreshAllUnloadedDatasetAvailability()` (one `exists()`
     per Unloaded dataset) once a second while a session is up, and a
     dataset found missing moves the revision, so the usual
     `followProjectRevisions` snapshot carries the change to every client
@@ -1417,7 +1417,8 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
     one-shot continuation `when_writes_idle()` armed there, and the 200 ms
     `m_replaceTimer` stays only as the deadline fallback -- whichever fires
     first adopts the replacement (`adopt_replacement`) and disarms the
-    other. `writes_idle()`, the poll constant and the `mutable` on
+    other; a queue failed with its socket counts as drained too, so a
+    farewell to a client already gone does not wait out the deadline. `writes_idle()`, the poll constant and the `mutable` on
     `m_writeMutex` are gone. The two generation counters that guarded the
     same hazard (`m_socketGeneration`, IO thread only, and the client's
     atomic `m_connectGeneration`) are one atomic `m_socketGeneration`, bumped

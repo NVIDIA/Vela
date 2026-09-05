@@ -97,9 +97,10 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
   // Settles every queued write with `error`.
   void fail_pending_writes(const boost::system::error_code &error);
   // Runs `fn` once nothing is queued or on the wire: at once when that is
-  // already so, else from the completion of the last queued write. One at a
-  // time -- a later call replaces a continuation that has not run, and an
-  // empty `fn` disarms it. IO thread only.
+  // already so, else when the queue next drains (the last write's completion,
+  // or the queue failed with its socket). One at a time -- a later call
+  // replaces a continuation that has not run, and an empty `fn` disarms it.
+  // IO thread only, or after stop_messaging() has joined it.
   void when_writes_idle(std::function<void()> fn);
 
   asio::io_context m_io_context;
@@ -137,6 +138,8 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
   void start_next_write();
   void complete_write(const std::shared_ptr<PendingWrite> &pending,
       const boost::system::error_code &error);
+  // Moves the armed continuation out (caller holds m_writeMutex).
+  std::function<void()> take_idle_continuation();
   void notify_disconnected(const boost::system::error_code &reason);
 
   Message make_message(uint8_t type);

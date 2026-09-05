@@ -1441,7 +1441,7 @@ void ProjectContext::refreshUnloadedDatasetAvailability(Dataset &dataset)
     markDatasetUnavailable(dataset);
 }
 
-void ProjectContext::refreshUnloadedDatasetsAvailability()
+void ProjectContext::refreshAllUnloadedDatasetAvailability()
 {
   for (auto &dataset : m_project.datasets)
     refreshUnloadedDatasetAvailability(dataset);

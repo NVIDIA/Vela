@@ -316,11 +316,9 @@ void NetworkChannel::start_next_write()
   {
     std::lock_guard lock(m_writeMutex);
     if (m_pendingWrites.empty()) {
-      // The queue just drained: this is the moment when_writes_idle() waits
-      // for.
+      // The queue just drained: the moment when_writes_idle() waits for.
       m_writeInProgress = false;
-      onIdle = std::move(m_onWritesIdle);
-      m_onWritesIdle = nullptr;
+      onIdle = take_idle_continuation();
     } else {
       pending = m_pendingWrites.front();
     }
@@ -369,14 +367,28 @@ void NetworkChannel::start_next_write()
 void NetworkChannel::fail_pending_writes(const boost::system::error_code &error)
 {
   std::deque<std::shared_ptr<PendingWrite>> pending;
+  std::function<void()> onIdle;
   {
     std::lock_guard lock(m_writeMutex);
     pending.swap(m_pendingWrites);
     m_writeInProgress = false;
+    // Failed is drained too: a replacement need not wait out the deadline
+    // because the old socket died under its farewell.
+    onIdle = take_idle_continuation();
   }
 
   for (auto &p : pending)
     complete_write(p, error);
+  if (onIdle)
+    onIdle();
+}
+
+std::function<void()> NetworkChannel::take_idle_continuation()
+{
+  // A moved-from std::function is valid but unspecified; leave it empty.
+  auto fn = std::move(m_onWritesIdle);
+  m_onWritesIdle = nullptr;
+  return fn;
 }
 
 void NetworkChannel::when_writes_idle(std::function<void()> fn)
@@ -492,11 +504,16 @@ void NetworkServer::start_accept()
         if (m_replaceHandler)
           m_replaceHandler();
         m_replacement = socket;
+        // The deadline handler carries the generation it was armed under: one
+        // already queued when the drain adopts stands down instead of
+        // adopting a later replacement before its own drain.
+        const auto generation = m_socketGeneration.load();
         m_replaceTimer.expires_after(REPLACE_DRAIN_TIMEOUT);
-        m_replaceTimer.async_wait([this](const boost::system::error_code &e) {
-          if (!e)
-            adopt_replacement(); // the drain took too long
-        });
+        m_replaceTimer.async_wait(
+            [this, generation](const boost::system::error_code &e) {
+              if (!e && generation == m_socketGeneration.load())
+                adopt_replacement(); // the drain took too long
+            });
         when_writes_idle([this]() { adopt_replacement(); });
       });
 }
