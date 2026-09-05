@@ -1103,10 +1103,16 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   bindShotRenderer(shot, library, device) -> RendererAppRef`. The bind
   writes the pick into the `Shot` it is handed and nothing else: the
   ShotEditor hands it a draft that lands through `updateShot` (whose dirty
-  marking stays the only one on that path) and RenderShot hands it a record
-  the render restores, so the server alone keeps its rule (filling in a shot
-  that never picked leaves the dirty flag alone; overriding a real pick is
-  an edit), by comparing the settings around the call. The document asked
+  marking stays the only one on that path), so the server alone keeps its
+  rule (filling in a shot that never picked leaves the dirty flag alone;
+  overriding a real pick is an edit), by comparing the settings around the
+  call. RenderShot does not bind: it loads the device through the shared
+  fallback and then refuses a pick the loaded device does not have, as it
+  did before. Jefferson chose the refusal over rendering with a fallback
+  renderer (PR review, 2026-09-04) because a render must never rewrite the
+  shot's renderer, and the monolith's render path restores the dirty flag
+  around the render, which would have hidden such a rewrite from the user
+  until the next save. The document asked
   for the private `ensureRendererDefaults(Shot &)` to be promoted into this
   function; it stays as it was, because it does a different job (it picks a
   default *library name* for a new shot from the device manager's list,

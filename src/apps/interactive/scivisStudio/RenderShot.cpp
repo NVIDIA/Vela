@@ -149,16 +149,6 @@ RenderShotResult renderActiveShotToFrames(
   if (!device)
     return failRender(out, "Failed to load an ANARI device for shot rendering");
 
-  // The shot's pick when the device that loaded has it, else the device's
-  // first renderer; the pick is recorded so the shot names what rendered.
-  auto rendererObject = projectContext.bindShotRenderer(*shot, libName, device);
-  if (!rendererObject) {
-    anari::release(device, device);
-    return failRender(
-        out, "ANARI device '" + libName + "' offers no renderers");
-  }
-  const auto rendererIndex = rendererObject->index();
-
   projectContext.applyActiveShot();
 
   auto *renderIndex = ctx->vsr.scene.updateDelegate()
@@ -179,6 +169,16 @@ RenderShotResult renderActiveShotToFrames(
     }
   } renderIndexGuard{*ctx, renderIndex, device};
   renderIndex->populate();
+
+  // The shot's pick must be a renderer of the device that loaded. A render
+  // never rebinds the shot: a stale pick is refused, not replaced.
+  const auto rendererIndex = shot->renderSettings.rendererObjectIndex;
+  auto rendererObject = ctx->vsr.scene.getObject(ANARI_RENDERER, rendererIndex);
+  if (!rendererObject || rendererObject->rendererDeviceName() != libName) {
+    return failRender(out,
+        "Renderer object index " + std::to_string(rendererIndex)
+            + " is unavailable for ANARI device '" + libName + "'");
+  }
 
   auto renderer = renderIndex->renderer(rendererIndex);
   if (!renderer) {
