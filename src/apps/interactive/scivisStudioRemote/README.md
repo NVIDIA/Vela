@@ -439,24 +439,26 @@ naming an unknown id: a `TaskProgress` labels it with its message, which is
 how the bootstrap's replay names the task still running when a client
 reconnects; a replayed `TaskCompleted`/`TaskFailed` of a task nobody here
 launched is labelled "Task N". At `BootstrapBegin` every Queued or Running
-record is failed with "connection lost", marked `announced`; a
+record is failed with "connection lost", marked `failedByClient`; a
 `TaskCompleted`/`TaskFailed` overwrites the record in place, replayed inside
 the bracket or not (same label, the server's ending). A `TaskStarted` reply,
 and a `TaskProgress` for a record that finished, start the record over
-(label, state, progress, outcome and `render`, `generation` bumped): a
-restarted server counts ids from 1 again, so an id that already finished
-here names a new task, and the replay's progress for a task this client
-failed is the same case (the record takes the replay's description as
-label). `render` is the one field a start-over keeps, and only on a record
-this client failed at `BootstrapBegin` (`announced`): the server never
-ended that task, so a render it named may still be running and still
-refusing edits, and the editors must go on saying so. Records the
-server never mentions again stay Failed until "Clear finished" -- they were
-queued tasks the server dropped with the old session. Completion toasts
-fire once per `{generation, state}` change, replayed outcomes included; the
-client's own "connection lost" failures do not toast (the banner said it,
-which is what `announced` records) and do not count as announced, so the
-ending the replay brings for that task still does.
+(label, state, progress, outcome and `render`): a restarted server counts
+ids from 1 again, so an id that already finished here names a new task, and
+the replay's progress for a task this client failed is the same case (the
+record takes the replay's description as label). `render` is the one field
+a start-over keeps, and only on a record this client failed at
+`BootstrapBegin` (`failedByClient`): the server never ended that task, so a
+render it named may still be running and still refusing edits, and the
+editors must go on saying so. Records the server never mentions again stay
+Failed until "Clear finished" -- they were queued tasks the server dropped
+with the old session. `ProjectOps::onTaskEnded` fires once per ending that
+is news -- the record was unfinished, or the client had failed it itself --
+and the Application toasts on it; a replayed ending for a record the server
+already ended is not news (the bootstrap replays every ending it has not
+replayed before, whether or not this client saw it live), and the client's
+own "connection lost" failures are not endings (the banner said it), so the
+ending the replay brings for such a task still toasts.
 
 **UI state.** The bootstrap's `UIState` is applied in `onBootstrapComplete`
 exactly as the monolith applies a loaded project's: `windows/<name>` through
@@ -1328,6 +1330,56 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   frame (`setActiveShotFrame` lands it there before the debounced snapshot),
   and the `[StudioServer]` UpdateShot scenario checks that fields a patch
   does not name stand.
+
+- **Pass-throughs and event bookkeeping in the GUI client.** Five findings
+  in `client/`, each fixed on the branch:
+  - *The model's finders, called directly.* `ReplicaView` re-exported
+    `project::findDataset/findShot/activeShot/findColorMap`,
+    `light_rig::findLightRig` and `camera_rig::findCameraRig` as one-line
+    forwards and wrapped `dataset::displayStatus`/`toString` the same way.
+    The editors and tests call the model. What it genuinely added -- the rig
+    use counts, the entity labels ("<none>", "<missing: id>"), the
+    project-directory text and the name-sorted views -- lives in the model
+    library under `project::`, where the monolith reaches it too:
+    `ProjectContext::shotUseCount`/`cameraRigUseCount` were the same
+    `count_if` and are gone. `ReplicaView.{h,cpp}` are deleted; their
+    scenario is a `[SciVisStudio]` test of the model.
+  - *One confirmation modal.* `Application::uiConfirmation` hand-drew the
+    dirty-project question beside the `ui::confirmModal` every editor uses;
+    it now opens the popup and calls `ui::confirmModal`, and `Confirmation`
+    is `{message, onConfirm}` in an optional engaged while it shows.
+  - *A task's ending is an event.* `TaskRecord` carried `generation` and
+    `announced`, and `Application::watchTasks` rebuilt a `FlatMap<taskId,
+    {generation, state}>` every UI frame to toast each ending once.
+    `ProjectOps::onTaskEnded` fires from `handleTaskCompleted/Failed` for
+    every ending that is news (above); `failUnfinishedTasks` does not fire.
+    `generation`, `announced`, `m_announcedTasks` and `watchTasks` are gone.
+    What `announced` also recorded -- that the client, not the server,
+    failed the record -- is still what 17e6178's rule needs to keep `render`
+    across a start-over, so it stays as `TaskRecord::failedByClient`; the
+    alternative, dropping that rule, is Jefferson's call
+    (`followups/15-client-cleanup-decisions.md`).
+  - *A request is built where it is sent.* `ProjectOps` carried 44 typed
+    wrappers (about 530 lines) whose one contribution was the task label;
+    `declareFileAnimationDataset` had no caller. The two generic templates
+    and `pick()` remain; a caller fills the protocol's request struct and
+    hands it to `send()` or `sendForResult<R>()`, and a `taskLabel(const Req
+    &)` overload set over the eleven task-launching requests names the
+    record (the strings are unchanged). The document asked for designated
+    initialisers at the call sites; the project is C++17 with
+    `CMAKE_CXX_EXTENSIONS OFF`, so the fields are assigned instead (same
+    follow-up). `EditorWindow`'s six one-line forwards to `EditorContext`
+    and `EditorContext::Actions` (four `std::function<void()>` read only by
+    `ProjectWindow`, which now takes the client `Application` and calls its
+    public project actions) are gone.
+  - *One op at a time, said once.* Twenty-two `RequestHandle` members, each
+    paired with a `BeginDisabled(pending(m_x))` and an assignment, are
+    `InFlight`: the handle, `busy(ops)` while the reply is outstanding, and
+    `send()`/`sendForResult()` that refuse while busy. The viewport's pick
+    keeps a bare handle: a pick is latest-wins (`forget`, then pick again),
+    not one-at-a-time. Manual check of the toasts (start a render, cancel it,
+    start over) is recorded in the follow-up; the client suite asserts one
+    `onTaskEnded` per ending, replayed repeats included.
 
 ### Spec conformance
 
