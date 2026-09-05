@@ -10,6 +10,7 @@
 #include "Shot.h"
 // std
 #include <limits>
+#include <optional>
 
 namespace vsr::scivis_studio::test_client {
 
@@ -28,14 +29,18 @@ std::string text(size_t value)
   return std::to_string(value);
 }
 
-// The setters the Shot rows share: each false, reason left empty, when the
-// text is not a value the field holds.
-bool setBool(bool &field, const std::string &value)
+// The setters the Shot rows share, each into a patch field: false, reason
+// left empty, when the text is not a value the field holds.
+bool setBool(std::optional<bool> &field, const std::string &value)
 {
-  return parseBool(value, field);
+  bool parsed = false;
+  if (!parseBool(value, parsed))
+    return false;
+  field = parsed;
+  return true;
 }
 
-bool setPositiveInt(int &field, const std::string &value)
+bool setPositiveInt(std::optional<int> &field, const std::string &value)
 {
   long long integer = 0;
   if (!parseInteger(value, integer) || integer < 1
@@ -45,7 +50,7 @@ bool setPositiveInt(int &field, const std::string &value)
   return true;
 }
 
-bool setNonNegativeInt(int &field, const std::string &value)
+bool setNonNegativeInt(std::optional<int> &field, const std::string &value)
 {
   long long integer = 0;
   if (!parseInteger(value, integer) || integer < 0
@@ -55,7 +60,7 @@ bool setNonNegativeInt(int &field, const std::string &value)
   return true;
 }
 
-bool setPositiveFloat(float &field, const std::string &value)
+bool setPositiveFloat(std::optional<float> &field, const std::string &value)
 {
   double number = 0;
   if (!parseDouble(value, number) || number <= 0)
@@ -64,7 +69,7 @@ bool setPositiveFloat(float &field, const std::string &value)
   return true;
 }
 
-bool setPositiveU32(uint32_t &field, const std::string &value)
+bool setPositiveU32(std::optional<uint32_t> &field, const std::string &value)
 {
   unsigned long long natural = 0;
   if (!parseNonNegative(value, natural) || natural < 1
@@ -106,86 +111,86 @@ const std::vector<Field<Project>> PROJECT_FIELDS = {
         Dump::Quoted},
 };
 
-const std::vector<Field<Shot>> SHOT_FIELDS = {
+const std::vector<Field<Shot, ShotPatch>> SHOT_FIELDS = {
     {"name",
         [](const Shot &s) { return s.name; },
-        [](Shot &s, const std::string &v, std::string &) {
-          s.name = v;
+        [](ShotPatch &p, const std::string &v, std::string &) {
+          p.name = v;
           return true;
         },
         Dump::Quoted},
     {"frameCount",
         [](const Shot &s) { return std::to_string(s.frameCount); },
-        [](Shot &s, const std::string &v, std::string &) {
-          return setPositiveInt(s.frameCount, v);
+        [](ShotPatch &p, const std::string &v, std::string &) {
+          return setPositiveInt(p.frameCount, v);
         }},
     {"fps",
         [](const Shot &s) { return numberText(s.fps); },
-        [](Shot &s, const std::string &v, std::string &) {
-          return setPositiveFloat(s.fps, v);
+        [](ShotPatch &p, const std::string &v, std::string &) {
+          return setPositiveFloat(p.fps, v);
         }},
     {"currentFrame",
         [](const Shot &s) { return std::to_string(s.currentFrame); },
-        [](Shot &s, const std::string &v, std::string &) {
-          return setNonNegativeInt(s.currentFrame, v);
+        [](ShotPatch &p, const std::string &v, std::string &) {
+          return setNonNegativeInt(p.currentFrame, v);
         }},
     {"loop",
         [](const Shot &s) { return text(s.loop); },
-        [](Shot &s, const std::string &v, std::string &) {
-          return setBool(s.loop, v);
+        [](ShotPatch &p, const std::string &v, std::string &) {
+          return setBool(p.loop, v);
         }},
     // Playback state, which SetPlaying changes: readable, and refused as an
     // edit by name rather than as read-only.
     {"playing",
         [](const Shot &s) { return text(s.playing); },
-        [](Shot &, const std::string &, std::string &error) {
+        [](ShotPatch &, const std::string &, std::string &error) {
           error = "playing is playback state (SetPlaying), not a Shot edit";
           return false;
         },
         Dump::Omit},
     {"lightRigId",
         [](const Shot &s) { return s.lightRigId; },
-        [](Shot &s, const std::string &v, std::string &) {
-          s.lightRigId = v;
+        [](ShotPatch &p, const std::string &v, std::string &) {
+          p.lightRigId = v;
           return true;
         }},
     {"cameraRigId",
         [](const Shot &s) { return s.cameraRigId; },
-        [](Shot &s, const std::string &v, std::string &) {
-          s.cameraRigId = v;
+        [](ShotPatch &p, const std::string &v, std::string &) {
+          p.cameraRigId = v;
           return true;
         }},
     {"bindings", [](const Shot &s) { return text(s.datasetBindings.size()); }},
     {"camera", [](const Shot &s) { return objectRefText(s.camera); }},
     {"renderSettings.width",
         [](const Shot &s) { return std::to_string(s.renderSettings.width); },
-        [](Shot &s, const std::string &v, std::string &) {
-          return setPositiveU32(s.renderSettings.width, v);
+        [](ShotPatch &p, const std::string &v, std::string &) {
+          return setPositiveU32(p.renderSettings.width, v);
         },
         Dump::Omit},
     {"renderSettings.height",
         [](const Shot &s) { return std::to_string(s.renderSettings.height); },
-        [](Shot &s, const std::string &v, std::string &) {
-          return setPositiveU32(s.renderSettings.height, v);
+        [](ShotPatch &p, const std::string &v, std::string &) {
+          return setPositiveU32(p.renderSettings.height, v);
         },
         Dump::Omit},
     {"renderSettings.samples",
         [](const Shot &s) { return std::to_string(s.renderSettings.samples); },
-        [](Shot &s, const std::string &v, std::string &) {
-          return setPositiveU32(s.renderSettings.samples, v);
+        [](ShotPatch &p, const std::string &v, std::string &) {
+          return setPositiveU32(p.renderSettings.samples, v);
         },
         Dump::Omit},
     {"renderSettings.rendererLibrary",
         [](const Shot &s) { return s.renderSettings.rendererLibrary; },
-        [](Shot &s, const std::string &v, std::string &) {
-          s.renderSettings.rendererLibrary = v;
+        [](ShotPatch &p, const std::string &v, std::string &) {
+          p.renderSettings.rendererLibrary = v;
           return true;
         },
         Dump::Omit},
     {"renderSettings.rendererSubtype",
         [](const Shot &s) { return s.renderSettings.rendererSubtype; },
-        [](Shot &s, const std::string &v, std::string &) {
-          s.renderSettings.rendererSubtype = v;
+        [](ShotPatch &p, const std::string &v, std::string &) {
+          p.renderSettings.rendererSubtype = v;
           return true;
         },
         Dump::Omit},
@@ -196,12 +201,12 @@ const std::vector<Field<Shot>> SHOT_FIELDS = {
           return index == VSR_INVALID_INDEX ? std::string("none")
                                             : std::to_string(index);
         },
-        [](Shot &s, const std::string &v, std::string &) {
+        [](ShotPatch &p, const std::string &v, std::string &) {
           unsigned long long natural = 0;
           if (v == "none")
-            s.renderSettings.rendererObjectIndex = VSR_INVALID_INDEX;
+            p.renderSettings.rendererObjectIndex = VSR_INVALID_INDEX;
           else if (parseNonNegative(v, natural))
-            s.renderSettings.rendererObjectIndex = size_t(natural);
+            p.renderSettings.rendererObjectIndex = size_t(natural);
           else
             return false;
           return true;
@@ -209,8 +214,8 @@ const std::vector<Field<Shot>> SHOT_FIELDS = {
         Dump::Omit},
     {"renderSettings.outputFilePrefix",
         [](const Shot &s) { return s.renderSettings.outputFilePrefix; },
-        [](Shot &s, const std::string &v, std::string &) {
-          s.renderSettings.outputFilePrefix = v;
+        [](ShotPatch &p, const std::string &v, std::string &) {
+          p.renderSettings.outputFilePrefix = v;
           return true;
         },
         Dump::Omit},
@@ -276,7 +281,7 @@ std::optional<std::string> shotFieldText(
   return text(binding->enabled);
 }
 
-bool setShotField(Shot &shot,
+bool setShotField(ShotPatch &patch,
     const std::string &field,
     const std::string &value,
     std::string &error)
@@ -290,7 +295,7 @@ bool setShotField(Shot &shot,
     bool enabled = false;
     if (!parseBool(value, enabled))
       return badValue();
-    shot::setDatasetBinding(shot, datasetId, enabled);
+    patch.datasetBindings.push_back({datasetId, enabled});
     return true;
   }
   const auto *row = findField(SHOT_FIELDS, field);
@@ -301,7 +306,7 @@ bool setShotField(Shot &shot,
     return false;
   }
   error.clear();
-  if (row->set(shot, value, error))
+  if (row->set(patch, value, error))
     return true;
   return error.empty() ? badValue() : false;
 }

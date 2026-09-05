@@ -143,9 +143,10 @@ outside Studio's set is **rejected with an error**, never silently ignored.
   `ProjectSnapshot`. Failed ops produce no snapshot. The snapshot carries the
   Project in the model's *Full* serialization form (`projectToNode(...,
   ProjectForm::Full)`: the manifest's fields plus every runtime field inline
-  under its entity), and `UpdateShot` nests a `Shot` the same way, so the
-  on-disk manifest, the Project Replica and the shot edits share one
-  serializer and cannot drift (`PROTOCOL_VERSION` 4).
+  under its entity), so the on-disk manifest and the Project Replica share
+  one serializer and cannot drift (`PROTOCOL_VERSION` 4). A shot edit is an
+  `UpdateShot{shotId, patch}` whose `ShotPatch` carries only the fields to
+  change, under the Shot's field names (`PROTOCOL_VERSION` 6).
 - **The snapshot is the commit marker.** For one logical mutation the server
   may push scene messages first (object creations, layer snapshots); the
   trailing `ProjectSnapshot` means "this mutation is now fully visible" — one
@@ -168,8 +169,10 @@ outside Studio's set is **rejected with an error**, never silently ignored.
   `RefreshDatasetAvailability` (sync); `LoadDataset`, dataset-archive
   save/load, `IncorporateDatasetCandidate` (tasks);
   `DiscoverDatasetCandidates` (sync, reply carries the candidate list).
-- **Shot**: `CreateShot`, `RemoveShot`, `UpdateShot` (whole serialized `Shot`,
-  replaced after server validation), `SetActiveShot` (all sync;
+- **Shot**: `CreateShot`, `RemoveShot`, `UpdateShot` (a `ShotPatch` of the
+  fields to change, applied to the server's `Shot` and validated as a whole;
+  each client control commits the one field it edits, so no client keeps a
+  draft), `SetActiveShot` (all sync;
   `SetActiveShot` stays separate because it alone triggers
   `applyActiveShot()` side effects).
 - **Rig**: create/clone/remove/rename light rig, add/remove light in rig,

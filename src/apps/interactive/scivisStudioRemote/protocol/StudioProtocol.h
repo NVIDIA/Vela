@@ -27,7 +27,9 @@ bool parsePort(const std::string &text, uint16_t &port);
 // 5: a SceneObjectRef is one object-reference leaf; TaskCompleted/TaskFailed
 //    carry a results subtree (RenderShotResult) instead of framesCompleted;
 //    ImportSubtreeDataset is its own request.
-constexpr int PROTOCOL_VERSION = 5;
+// 6: UpdateShot carries {shotId, patch}, a ShotPatch of the fields to change,
+//    instead of the whole Shot.
+constexpr int PROTOCOL_VERSION = 6;
 
 /*
  * Complete v1 message set of the SciVis Studio client-server protocol, as one

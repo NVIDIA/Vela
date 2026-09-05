@@ -58,6 +58,16 @@ template <typename T>
 bool readOptionalChild(
     const vsr::core::DataNode &parent, const char *name, T &out);
 
+// A field that may be unset (a patch's): written only when engaged, read as
+// engaged exactly when present (mistyped is malformed, and `out` is reset).
+template <typename T>
+void writeChild(vsr::core::DataNode &parent,
+    const char *name,
+    const std::optional<T> &value);
+template <typename T>
+bool readOptionalChild(
+    const vsr::core::DataNode &parent, const char *name, std::optional<T> &out);
+
 // Enums //////////////////////////////////////////////////////////////////////
 
 // Strict inverse of a toString(E) over the contiguous enumerators
@@ -190,6 +200,29 @@ inline bool readOptionalChild(
     const vsr::core::DataNode &parent, const char *name, T &out)
 {
   return !hasChild(parent, name) || readChild(parent, name, out);
+}
+
+template <typename T>
+inline void writeChild(vsr::core::DataNode &parent,
+    const char *name,
+    const std::optional<T> &value)
+{
+  if (value)
+    writeChild(parent, name, *value);
+}
+
+template <typename T>
+inline bool readOptionalChild(
+    const vsr::core::DataNode &parent, const char *name, std::optional<T> &out)
+{
+  out.reset();
+  if (!hasChild(parent, name))
+    return true;
+  T value{};
+  if (!readChild(parent, name, value))
+    return false;
+  out = std::move(value);
+  return true;
 }
 
 template <typename E>

@@ -875,12 +875,12 @@ SCENARIO("StudioServer serves project, shot, rig and color map ops",
       THEN("UpdateShot normalizes fields and rejects unknown rigs")
       {
         auto project = session.latestSnapshot().project;
+        const auto before = *project::findShot(project, created->shotId);
         UpdateShot update;
-        update.shot = *project::findShot(project, created->shotId);
-        update.shot.name = "Renamed";
-        update.shot.frameCount = 0;
-        update.shot.currentFrame = 7;
-        update.shot.playing = true;
+        update.shotId = created->shotId;
+        update.patch.name = "Renamed";
+        update.patch.frameCount = 0;
+        update.patch.currentFrame = 7;
         reply = session.request(update);
         REQUIRE(reply.ok);
         REQUIRE(session.waitForSnapshots(++snapshots));
@@ -891,12 +891,25 @@ SCENARIO("StudioServer serves project, shot, rig and color map ops",
         REQUIRE(shot->frameCount == 1);
         REQUIRE(shot->currentFrame == 0);
         REQUIRE_FALSE(shot->playing);
+        // The fields the patch did not carry stand.
+        REQUIRE(shot->fps == before.fps);
+        REQUIRE(shot->loop == before.loop);
+        REQUIRE(shot->renderSettings.width == before.renderSettings.width);
 
-        update.shot = *shot;
-        update.shot.lightRigId = "lightRig_9999";
+        update = UpdateShot{};
+        update.shotId = created->shotId;
+        update.patch.lightRigId = "lightRig_9999";
         reply = session.request(update);
         REQUIRE_FALSE(reply.ok);
         REQUIRE(reply.error == "light rig not found");
+        REQUIRE(client.count(StudioMessageType::ProjectSnapshot) == snapshots);
+
+        update.shotId = "shot_9999";
+        update.patch = ShotPatch{};
+        update.patch.name = "x";
+        reply = session.request(update);
+        REQUIRE_FALSE(reply.ok);
+        REQUIRE(reply.error == "shot not found");
         REQUIRE(client.count(StudioMessageType::ProjectSnapshot) == snapshots);
       }
 

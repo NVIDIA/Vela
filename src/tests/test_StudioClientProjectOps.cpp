@@ -413,8 +413,6 @@ SCENARIO("ProjectOps decodes typed results for the callback", "[StudioClient]")
       auto &ops = f.ops();
       const auto ignore = [](const ProjectOpReply &) {};
       const auto ignoreR = [](const ProjectOpReply &, const auto &) {};
-      Shot shot;
-      shot.id = "shot_0001";
       SceneNodeRef node;
       node.layerName = "studio";
       node.nodeIndex = 7;
@@ -446,7 +444,7 @@ SCENARIO("ProjectOps decodes typed results for the callback", "[StudioClient]")
       expect(StudioMessageType::IncorporateDatasetCandidate, ops.incorporateDatasetCandidate("/d/c.vsr", "c", "c", ignoreR));
       expect(StudioMessageType::CreateShot, ops.createShot("s", ignoreR));
       expect(StudioMessageType::RemoveShot, ops.removeShot("shot_0001", ignore));
-      expect(StudioMessageType::UpdateShot, ops.updateShot(shot, ignore));
+      expect(StudioMessageType::UpdateShot, ops.updateShot("shot_0001", ShotPatch{}, ignore));
       expect(StudioMessageType::SetActiveShot, ops.setActiveShot("shot_0001", ignore));
       expect(StudioMessageType::CreateLightRig, ops.createLightRig("l", ignoreR));
       expect(StudioMessageType::CloneLightRig, ops.cloneLightRig("lightrig_0001", ignoreR));

@@ -172,7 +172,7 @@ anything reaches the wire.
 | `start-rendering` | session | ask the server to stream frames |
 | `stop-rendering` | session | pause the stream |
 | `unload-dataset <id>` | request | sync |
-| `update-shot <id> <field>=<value>...` | request | sync: the replica's Shot with the edits applied is sent whole; fields name, frameCount, fps, loop, currentFrame, lightRigId, cameraRigId, renderSettings.*, binding.<datasetId>=on\|off |
+| `update-shot <id> <field>=<value>...` | request | sync: a patch of the named fields alone (the id must be in the replica); fields name, frameCount, fps, loop, currentFrame, lightRigId, cameraRigId, renderSettings.*, binding.<datasetId>=on\|off |
 | `viewport-settings <key>=<value>...` | session | edit the remembered ViewportSettings and send the whole struct (unset keys keep their last value); keys highlightSelection, outlinePrimitives, showWorldBounds, edgeInvert, worldBoundsColor=r,g,b,a, worldBoundsWidth, visualizeAOV, depthVisualMinimum, depthVisualMaximum |
 
 ### Session, rendering and scene edits
@@ -242,8 +242,10 @@ runs `await-snapshot` before asserting on the replica. A failed op sends no
 snapshot; some "failed" ops still mutate (an import that leaves an
 `ImportFailed` record) and do.
 
-`update-shot ID FIELD=VALUE...` sends the replica's Shot with the edits
-applied, whole; the fields are `name`, `frameCount`, `fps`, `loop`,
+`update-shot ID FIELD=VALUE...` sends an `UpdateShot` whose patch carries
+exactly the named fields (the id must name a shot of the replica; every
+other field of the server's Shot stands); the fields are `name`,
+`frameCount`, `fps`, `loop`,
 `currentFrame`, `lightRigId`, `cameraRigId`,
 `renderSettings.{width,height,samples,rendererLibrary,rendererSubtype,rendererObjectIndex,outputFilePrefix}`
 and `binding.<datasetId>=on|off` (`playing` is refused: it belongs to

@@ -52,11 +52,6 @@ Timeline::Timeline(vsr::ui::imgui::Application *app, EditorContext *context)
 
 Timeline::~Timeline() = default;
 
-void Timeline::onProjectReplaced()
-{
-  m_draftStale = true;
-}
-
 // Shown time /////////////////////////////////////////////////////////////////
 
 int Timeline::shownFrame(const Shot &shot) const
@@ -74,43 +69,14 @@ int Timeline::shownFrame(const Shot &shot) const
   return shot.currentFrame;
 }
 
-// Draft //////////////////////////////////////////////////////////////////////
-
-void Timeline::syncDraft(const Shot &shot)
-{
-  const bool switched = !m_draft || m_draft->id != shot.id;
-  const bool refresh =
-      m_draftStale && !pending(m_pendingUpdate) && !ImGui::IsAnyItemActive();
-  if (switched || refresh) {
-    m_draft = shot;
-    m_draftStale = false;
-  }
-}
-
-void Timeline::sendDraft(int currentFrame)
-{
-  if (!m_draft || !canSend())
-    return;
-  Shot shot = *m_draft;
-  shot.frameCount = std::max(1, shot.frameCount);
-  shot.fps = std::max(1.f, shot.fps);
-  // The server replaces its copy wholesale. While paused, the frame shown (a
-  // scrub included) rides along so an fps or loop edit does not also jump in
-  // time; while playing, Time in Motion is the server's alone, so the
-  // replica's resting frame goes (the header frame would seek the server
-  // back by the wire's latency) and the server keeps its own anyway.
-  const int frame = shot.playing ? shot.currentFrame : currentFrame;
-  shot.currentFrame = std::clamp(frame, 0, shot.frameCount - 1);
-  *m_draft = shot;
-  m_pendingUpdate =
-      ops().updateShot(shot, [this](const protocol::ProjectOpReply &reply) {
-        if (!reply.ok)
-          reportError(reply.error);
-        m_draftStale = true;
-      });
-}
-
 // Transport //////////////////////////////////////////////////////////////////
+
+void Timeline::commit(const Shot &shot, const ShotPatch &patch)
+{
+  if (!canSend())
+    return;
+  m_pendingUpdate = ops().updateShot(shot.id, patch, errorReporter());
+}
 
 void Timeline::setPlaying(const Shot &shot, bool playing)
 {
@@ -165,13 +131,11 @@ void Timeline::buildEditorUI(const Project &project)
 {
   const Shot *shot = replica::activeShot(project);
   if (!shot) {
-    m_draft.reset();
     m_dragFrame.reset();
     m_scrubbedFrame.reset();
     ImGui::TextDisabled("No active shot");
     return;
   }
-  syncDraft(*shot);
 
   // The replica caught up with the scrub, or long since should have.
   if (m_scrubbedFrame
@@ -226,9 +190,13 @@ void Timeline::buildUI_transport(const Shot &shot, int shownFrame)
     ImGui::EndDisabled();
 
     ImGui::SameLine();
-    ImGui::BeginDisabled(pending(m_pendingUpdate) || !m_draft);
-    if (m_draft && ImGui::Checkbox("Loop", &m_draft->loop))
-      sendDraft(shownFrame);
+    ImGui::BeginDisabled(pending(m_pendingUpdate));
+    bool loop = shot.loop;
+    if (ImGui::Checkbox("Loop", &loop)) {
+      ShotPatch patch;
+      patch.loop = loop;
+      commit(shot, patch);
+    }
 
     // Frame counter: typed values commit once, on leaving the field (or
     // Enter), like the Frames and FPS fields; the +/- steps commit on release.
@@ -241,21 +209,7 @@ void Timeline::buildUI_transport(const Shot &shot, int shownFrame)
     ImGui::TableNextColumn();
     ImGui::Text("%d / %d", shownFrame, lastFrameOf(shot));
 
-    // Frame count and fps //
-    ImGui::TableNextColumn();
-    if (m_draft) {
-      ImGui::SetNextItemWidth(120.f * uiScale);
-      ImGui::InputInt("Frames", &m_draft->frameCount, 1, 10);
-      if (ImGui::IsItemDeactivatedAfterEdit())
-        sendDraft(shownFrame);
-    }
-    ImGui::TableNextColumn();
-    if (m_draft) {
-      ImGui::SetNextItemWidth(90.f * uiScale);
-      ImGui::InputFloat("FPS", &m_draft->fps, 0.f, 0.f, "%.1f");
-      if (ImGui::IsItemDeactivatedAfterEdit())
-        sendDraft(shownFrame);
-    }
+    buildUI_clock(shot);
     ImGui::EndDisabled();
 
     ImGui::PopStyleVar();
@@ -263,6 +217,32 @@ void Timeline::buildUI_transport(const Shot &shot, int shownFrame)
   }
 
   ImGui::PopStyleVar();
+}
+
+// Frame count and fps: each control shows the replica's value this UI frame
+// (ImGui holds an edit in progress itself) and commits a patch of its field
+// alone, so the frame time rests on, a scrub included, is never in it.
+void Timeline::buildUI_clock(const Shot &shot)
+{
+  const float uiScale = ImGui::GetIO().FontGlobalScale;
+  ImGui::TableNextColumn();
+  int frameCount = shot.frameCount;
+  ImGui::SetNextItemWidth(120.f * uiScale);
+  ImGui::InputInt("Frames", &frameCount, 1, 10);
+  if (ImGui::IsItemDeactivatedAfterEdit()) {
+    ShotPatch patch;
+    patch.frameCount = frameCount;
+    commit(shot, patch);
+  }
+  ImGui::TableNextColumn();
+  float fps = shot.fps;
+  ImGui::SetNextItemWidth(90.f * uiScale);
+  ImGui::InputFloat("FPS", &fps, 0.f, 0.f, "%.1f");
+  if (ImGui::IsItemDeactivatedAfterEdit()) {
+    ShotPatch patch;
+    patch.fps = fps;
+    commit(shot, patch);
+  }
 }
 
 void Timeline::buildUI_ruler(const Shot &shot, int shownFrame)

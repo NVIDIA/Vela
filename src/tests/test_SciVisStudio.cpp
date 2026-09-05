@@ -5,6 +5,7 @@
 
 #include "CameraRig.h"
 #include "ColorMaps.h"
+#include "DataNodeFields.h"
 #include "DatasetIO.h"
 #include "LightRig.h"
 #include "ProjectContext.h"
@@ -5416,6 +5417,196 @@ SCENARIO("SciVis Studio shot ops validate and replace the record on their own",
         REQUIRE_FALSE(activeChanged);
         REQUIRE(project.shots.size() == 2);
       }
+    }
+  }
+}
+
+SCENARIO("SciVis Studio shot patches edit the fields they carry and no other",
+    "[SciVisStudio]")
+{
+  Project project;
+  Shot shot;
+  shot.id = "shot_0001";
+  shot.name = "first";
+  shot.frameCount = 48;
+  shot.fps = 30.f;
+  shot.currentFrame = 7;
+  shot.playing = true;
+  shot.camera = {ANARI_CAMERA, 3};
+  shot.renderSettings.width = 640;
+  shot.renderSettings.outputFilePrefix = "out_";
+  shot.datasetBindings = {{"dataset_0001", true}, {"dataset_0002", false}};
+  project.shots = {shot};
+  project.activeShotId = shot.id;
+  project.datasets.resize(2);
+  project.datasets[0].id = "dataset_0001";
+  project.datasets[1].id = "dataset_0002";
+  std::string error;
+
+  GIVEN("a patch of a few fields")
+  {
+    ShotPatch patch;
+    patch.fps = 24.f;
+    patch.loop = false;
+    patch.renderSettings.samples = 4;
+    patch.datasetBindings = {{"dataset_0002", true}};
+
+    WHEN("it is applied to a copy")
+    {
+      Shot edited = shot;
+      shot::applyPatch(edited, patch);
+
+      THEN("the patched fields change and every other one stands")
+      {
+        REQUIRE(edited.fps == 24.f);
+        REQUIRE_FALSE(edited.loop);
+        REQUIRE(edited.renderSettings.samples == 4);
+        REQUIRE(shot::findDatasetBinding(edited, "dataset_0002")->enabled);
+        REQUIRE(shot::findDatasetBinding(edited, "dataset_0001")->enabled);
+        REQUIRE(edited.name == "first");
+        REQUIRE(edited.frameCount == 48);
+        REQUIRE(edited.currentFrame == 7);
+        REQUIRE(edited.playing);
+        REQUIRE(edited.camera.objectIndex == 3);
+        REQUIRE(edited.renderSettings.width == 640);
+        REQUIRE(edited.renderSettings.outputFilePrefix == "out_");
+      }
+    }
+
+    WHEN("an empty patch is applied")
+    {
+      Shot edited = shot;
+      shot::applyPatch(edited, ShotPatch{});
+
+      THEN("nothing changes")
+      {
+        REQUIRE(edited.fps == 30.f);
+        REQUIRE(edited.datasetBindings.size() == 2);
+      }
+    }
+
+    WHEN("a binding of a dataset the shot has no binding for is patched")
+    {
+      Shot edited = shot;
+      ShotPatch bind;
+      bind.datasetBindings = {{"dataset_0009", false}};
+      shot::applyPatch(edited, bind);
+
+      THEN("the binding is added")
+      {
+        REQUIRE(edited.datasetBindings.size() == 3);
+        REQUIRE_FALSE(
+            shot::findDatasetBinding(edited, "dataset_0009")->enabled);
+      }
+    }
+
+    WHEN("it goes through the shot op")
+    {
+      patch.frameCount = 0; // clamped by the validation
+      REQUIRE(shot::updateShot(project, nullptr, shot.id, patch, &error));
+
+      THEN("the record is the validated patched copy")
+      {
+        const auto *stored = project::findShot(project, shot.id);
+        REQUIRE(stored->fps == 24.f);
+        REQUIRE(stored->frameCount == 1);
+        REQUIRE(stored->currentFrame == 0);
+        REQUIRE(stored->name == "first");
+        REQUIRE(stored->camera.objectIndex == 3);
+      }
+    }
+
+    WHEN("the op names a shot the project does not have")
+    {
+      REQUIRE_FALSE(
+          shot::updateShot(project, nullptr, "shot_9999", patch, &error));
+
+      THEN("it is refused and the record is untouched")
+      {
+        REQUIRE(error == "shot not found");
+        REQUIRE(project::findShot(project, shot.id)->fps == 30.f);
+      }
+    }
+
+    WHEN("the op's patch names a rig the project does not have")
+    {
+      patch.cameraRigId = "cameraRig_9999";
+      REQUIRE_FALSE(shot::updateShot(project, nullptr, shot.id, patch, &error));
+
+      THEN("it is refused with the validation's reason")
+      {
+        REQUIRE(error == "camera rig not found");
+        REQUIRE(project::findShot(project, shot.id)->fps == 30.f);
+      }
+    }
+  }
+
+  GIVEN("a patch round-tripped through a DataNode")
+  {
+    ShotPatch patch;
+    patch.name = "Intro";
+    patch.currentFrame = 3;
+    patch.cameraRigId = "cameraRig_0001";
+    patch.renderSettings.rendererLibrary = "helide";
+    patch.renderSettings.rendererObjectIndex = 2;
+    patch.datasetBindings = {{"dataset_0001", false}};
+
+    THEN("only the engaged fields are written and they read back engaged")
+    {
+      vsr::core::DataTree tree;
+      toNode(patch, tree.root());
+      REQUIRE(tree.root().child("name"));
+      REQUIRE_FALSE(tree.root().child("fps"));
+      REQUIRE_FALSE(tree.root().child("loop"));
+      const auto *render = tree.root().child("renderSettings");
+      REQUIRE(render);
+      REQUIRE(render->child("rendererLibrary"));
+      REQUIRE_FALSE(render->child("width"));
+
+      ShotPatch out;
+      REQUIRE(fromNode(tree.root(), out));
+      REQUIRE(out.name == "Intro");
+      REQUIRE(out.currentFrame == 3);
+      REQUIRE(out.cameraRigId == "cameraRig_0001");
+      REQUIRE_FALSE(out.fps);
+      REQUIRE_FALSE(out.loop);
+      REQUIRE_FALSE(out.frameCount);
+      REQUIRE_FALSE(out.lightRigId);
+      REQUIRE(out.renderSettings.rendererLibrary == "helide");
+      REQUIRE(out.renderSettings.rendererObjectIndex == 2);
+      REQUIRE_FALSE(out.renderSettings.width);
+      REQUIRE(out.datasetBindings.size() == 1);
+      REQUIRE(out.datasetBindings[0].datasetId == "dataset_0001");
+      REQUIRE_FALSE(out.datasetBindings[0].enabled);
+    }
+
+    THEN("an empty patch writes no child and reads back empty")
+    {
+      vsr::core::DataTree tree;
+      toNode(ShotPatch{}, tree.root());
+      REQUIRE(tree.root().numChildren() == 0);
+      ShotPatch out;
+      out.fps = 1.f;
+      REQUIRE(fromNode(tree.root(), out));
+      REQUIRE_FALSE(out.fps);
+    }
+
+    THEN("a mistyped field is rejected and the output left alone")
+    {
+      vsr::core::DataTree tree;
+      writeChild(tree.root(), "fps", std::string("fast"));
+      ShotPatch out;
+      out.loop = true;
+      REQUIRE_FALSE(fromNode(tree.root(), out));
+      REQUIRE(out.loop == true);
+
+      vsr::core::DataTree badRender;
+      writeChild(badRender.root()["renderSettings"], "width", -1);
+      REQUIRE_FALSE(fromNode(badRender.root(), out));
+
+      vsr::core::DataTree badBinding;
+      writeChild(badBinding.root()["datasetBindings"]["0"], "enabled", true);
+      REQUIRE_FALSE(fromNode(badBinding.root(), out));
     }
   }
 }

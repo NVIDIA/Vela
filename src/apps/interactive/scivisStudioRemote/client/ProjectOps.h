@@ -230,9 +230,10 @@ struct ProjectOps
   RequestHandle createShot(const std::string &name,
       ResultCallback<protocol::ShotCreatedResult> callback);
   RequestHandle removeShot(const ShotID &shotId, ReplyCallback callback);
-  // The whole Shot; the server validates and replaces its copy (never
-  // honouring `playing`).
-  RequestHandle updateShot(const Shot &shot, ReplyCallback callback);
+  // The patch's engaged fields; the server applies them to its copy and
+  // validates the result (`playing` is setPlaying's).
+  RequestHandle updateShot(
+      const ShotID &shotId, const ShotPatch &patch, ReplyCallback callback);
   RequestHandle setActiveShot(const ShotID &shotId, ReplyCallback callback);
 
   // Light rigs (40..45, 51..52) //////////////////////////////////////////////

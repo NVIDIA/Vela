@@ -115,4 +115,18 @@ bool updateShot(Project &project,
   return true;
 }
 
+bool updateShot(Project &project,
+    const vsr::scene::Scene *scene,
+    const ShotID &id,
+    const ShotPatch &patch,
+    std::string *error)
+{
+  const auto *existing = project::findShot(project, id);
+  if (!existing)
+    return fail("shot not found", error);
+  Shot shot = *existing;
+  applyPatch(shot, patch);
+  return updateShot(project, scene, shot, error);
+}
+
 } // namespace vsr::scivis_studio::shot

@@ -210,9 +210,9 @@ void CameraRigEditor::buildUI_rigActions(
 
   ImGui::BeginDisabled(!shot || activeShotUsesRig);
   if (ImGui::Button("Use for Active Shot") && shot) {
-    Shot updated = *shot;
-    updated.cameraRigId = rig.id;
-    m_pendingOp = ops().updateShot(updated, errorReporter());
+    ShotPatch patch;
+    patch.cameraRigId = rig.id;
+    m_pendingOp = ops().updateShot(shot->id, patch, errorReporter());
   }
   ImGui::EndDisabled();
 

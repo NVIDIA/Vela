@@ -41,6 +41,15 @@ bool updateShot(Project &project,
     const Shot &incoming,
     std::string *error = nullptr);
 
+// The same, for a patch of the shot `id` names: the stored Shot with the
+// patch applied (shot::applyPatch) goes through the validation above.
+// Refuses an unknown id ("shot not found").
+bool updateShot(Project &project,
+    const vsr::scene::Scene *scene,
+    const ShotID &id,
+    const ShotPatch &patch,
+    std::string *error = nullptr);
+
 // The shot's camera object: the one its id names ("<id>_camera"), whose ref
 // is written back to `shot.camera`, else whatever `shot.camera` already
 // refers to. Null when neither exists.

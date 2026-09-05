@@ -371,9 +371,10 @@ const std::vector<CommandRunner::CommandSpec> &CommandRunner::commands()
           "sync"},
       {"update-shot", "<id> <field>=<value>...", 2, -1, K::Request,
           &CommandRunner::updateShot,
-          "sync: the replica's Shot with the edits applied is sent whole;"
-          " fields name, frameCount, fps, loop, currentFrame, lightRigId,"
-          " cameraRigId, renderSettings.*, binding.<datasetId>=on|off"},
+          "sync: a patch of the named fields alone (the id must be in the"
+          " replica); fields name, frameCount, fps, loop, currentFrame,"
+          " lightRigId, cameraRigId, renderSettings.*,"
+          " binding.<datasetId>=on|off"},
       {"viewport-settings", "<key>=<value>...", 0, -1, K::Session,
           &CommandRunner::viewportSettings,
           "edit the remembered ViewportSettings and send the whole struct"

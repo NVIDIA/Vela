@@ -24,6 +24,15 @@ applies nothing optimistically; the reply and the following Project Snapshot
 are the truth.
 _Avoid_: RPC call, command
 
+**Shot Patch**:
+The fields of one Shot an edit changes and nothing else (`ShotPatch`, a
+model type: every field optional, bindings as the datasets to set), what
+`UpdateShot{shotId, patch}` carries. The server applies it to its stored Shot
+and validates the result as a whole; a client control commits a patch of
+the one field it edits, so no client holds a draft Shot and two windows
+editing the same shot never overwrite each other's fields.
+_Avoid_: shot delta, whole-Shot update, draft
+
 **Project Snapshot**:
 The whole serialized Project, pushed after every confirmed mutation from any
 source. It replaces the client's Project Replica wholesale and is the commit

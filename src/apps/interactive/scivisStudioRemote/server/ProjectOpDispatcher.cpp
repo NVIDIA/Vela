@@ -337,7 +337,7 @@ void ProjectOpDispatcher::handle(const RemoveShot &req)
 void ProjectOpDispatcher::handle(const UpdateShot &req)
 {
   std::string error;
-  if (!context().updateShot(req.shot, &error)) {
+  if (!context().updateShot(req.shotId, req.patch, &error)) {
     fail(req.requestId, error);
     return;
   }

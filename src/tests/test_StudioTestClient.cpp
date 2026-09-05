@@ -510,12 +510,12 @@ void ProjectOpsServer::onMessage(const Message &msg)
   }
   case StudioMessageType::UpdateShot: {
     const auto req = *decode<UpdateShot>(msg);
-    auto *shot = project::findShot(project, req.shot.id);
+    auto *shot = project::findShot(project, req.shotId);
     if (!shot) {
       replyError(req.requestId, "shot not found");
       return;
     }
-    *shot = req.shot;
+    shot::applyPatch(*shot, req.patch);
     replyOk(req.requestId);
     sendSnapshot();
     return;
@@ -1727,7 +1727,7 @@ SCENARIO("the test client drives project ops against a fake server",
             " fps=30 loop=off binding.dataset_0009=on"));
       }
 
-      THEN("the expanded ids and the whole edited Shot reached the wire")
+      THEN("the expanded ids and a patch of the edited fields reached the wire")
       {
         const auto removes = server.requests<RemoveShot>();
         REQUIRE(removes.size() == 2);
@@ -1735,13 +1735,18 @@ SCENARIO("the test client drives project ops against a fake server",
         REQUIRE(removes[1].shotId == "shot_0002");
         const auto updates = server.requests<UpdateShot>();
         REQUIRE(updates.size() == 1);
-        REQUIRE(updates[0].shot.id == "shot_0002");
-        REQUIRE(updates[0].shot.name == "Intro Cut");
-        REQUIRE(updates[0].shot.frameCount == 10);
-        REQUIRE(updates[0].shot.fps == 30.f);
-        REQUIRE_FALSE(updates[0].shot.loop);
-        REQUIRE(updates[0].shot.datasetBindings.size() == 1);
-        REQUIRE(updates[0].shot.datasetBindings[0].datasetId == "dataset_0009");
+        REQUIRE(updates[0].shotId == "shot_0002");
+        const auto &patch = updates[0].patch;
+        REQUIRE(patch.name == "Intro Cut");
+        REQUIRE(patch.frameCount == 10);
+        REQUIRE(patch.fps == 30.f);
+        REQUIRE(patch.loop == false);
+        REQUIRE_FALSE(patch.currentFrame); // not named, so not in the patch
+        REQUIRE_FALSE(patch.lightRigId);
+        REQUIRE_FALSE(patch.renderSettings.width);
+        REQUIRE(patch.datasetBindings.size() == 1);
+        REQUIRE(patch.datasetBindings[0].datasetId == "dataset_0009");
+        REQUIRE(patch.datasetBindings[0].enabled);
         const auto imports = server.requests<ImportStaticDataset>();
         REQUIRE(imports.size() == 2);
         REQUIRE(imports[0].importerType == vsr::io::ImporterType::OBJ);

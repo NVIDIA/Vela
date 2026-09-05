@@ -199,8 +199,8 @@ latch slots (latest-wins); `RequestArrayHistogram` is a sync Project Op. See
   but nothing is committed, and a pending scrub commit is dropped once the
   shot plays. An `UpdateShot` landing while the shot plays (a Loop, Frames or
   FPS edit from the Timeline) keeps the frame in motion: the server ignores
-  the incoming `currentFrame` as it ignores `playing`, and the Timeline sends
-  the replica's resting frame rather than the last header's.
+  an incoming `currentFrame` as it ignores `playing`, and the Timeline's
+  patch never carries one anyway.
 - **`TimeAdvanceWarning`.** A `FileBinding` that cannot load a frame reports
   `{frame, message}` to its `AnimationManager`, which records it against the
   clock frame being applied (the shot frame the Timeline shows; a binding
@@ -271,13 +271,13 @@ pending request retires), and with a bare `Error{"malformed ..."}` otherwise.
 The client core covers the second case too: a bare `Error` that names the
 type of a pending request fails the oldest pending request of that type, so
 no control stays greyed until the connection is lost. `PROTOCOL_VERSION` is
-5: 2 when `TaskFailed` gained `framesCompleted` (optional on the wire), 3
+6: 2 when `TaskFailed` gained `framesCompleted` (optional on the wire), 3
 when `Disconnect` gained a reason, 4 when `UpdateShot` and `ProjectSnapshot`
 moved to the model's one Shot and Project serialization, 5 when a
 `SceneObjectRef` became one object-reference leaf, the task endings gained a
 `results` subtree (`RenderShotResult` replacing `framesCompleted`) and
-`ImportSubtreeDataset` split from `ImportStaticDataset` (PR review fix-ups
-below).
+`ImportSubtreeDataset` split from `ImportStaticDataset`, 6 when `UpdateShot`
+became a `ShotPatch` of the fields to change (PR review fix-ups below).
 
 ### Shot rendering
 
@@ -393,8 +393,9 @@ The client has no `AnimationManager`. The **Timeline** window
 without tracks: Play/Pause sends the `SetPlaying` project op and the button
 follows the replica alone; Stop is `SetPlaying(false)` then `SetTime 0`;
 dragging or clicking the ruler and the frame field send `SetTime`, at most
-one per UI frame with the latest value; Loop, Frames and FPS travel as
-`UpdateShot`. The frame shown is the drag while scrubbing, the last frame
+one per UI frame with the latest value; Loop, Frames and FPS each travel as
+an `UpdateShot` patch of that one field. The frame shown is the drag while
+scrubbing, the last frame
 header's frame while the shot plays (Time in Motion), and the replica's
 `currentFrame` otherwise (Time at Rest). Space toggles playback while the
 Timeline is focused. A `TimeAdvanceWarning` becomes a toast and a Log line,
@@ -532,9 +533,9 @@ reason. Nothing is silently open.
   Update, Delete, pose editor and inline frame/name/interpolation edits). The
   client shows these read-only with a tooltip saying so. Candidates for the
   next version bump: `RenameLightNode{lightRigId, lightNode, name}`,
-  `CloneCameraRig{cameraRigId}`, and an `UpdateCameraRig{rig}` whole-value
-  replace mirroring `UpdateShot`. `UpdateShot` covers every Shot field except
-  `playing`, which stays with `SetPlaying`.
+  `CloneCameraRig{cameraRigId}`, and an `UpdateCameraRig{cameraRigId,
+  patch}` mirroring `UpdateShot`. `UpdateShot`'s patch covers every Shot
+  field except `playing`, which stays with `SetPlaying`.
 - **Naming a loaded Dataset Archive** -- *deferred.* `LoadDatasetArchive`
   carries no name, so the Add Static Dataset dialog applies a typed name with
   a follow-up `RenameDataset` once the snapshot after the load shows exactly
@@ -1284,6 +1285,41 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   of the same name means; the client's `Ready` is its side of the server's
   `Established`, sharing a name only where both sides wait for the same
   thing.
+- **A shot edit is a patch, not a whole-Shot replace.** `UpdateShot`
+  carried the whole `Shot`, so the client kept two three-way merge machines:
+  the Shot Editor's `m_draft`/`m_draftBase`/`m_draftStale` with an
+  `applyEdits()` that field-diffed every Shot member to rebase the user's
+  edits onto the latest replica, and the Timeline's own
+  `m_draft`/`m_draftStale`/`syncDraft`/`sendDraft` with its own reasoning
+  about which `currentFrame` to send along; every new Shot field had to be
+  added to both. `UpdateShot` is now `{requestId, shotId, patch}` where
+  `patch` is the model's `ShotPatch` (`Shot.h`): every field
+  `std::optional`, `renderSettings` a nested patch of the same shape, and
+  `datasetBindings` the bindings to *set* (`shot::setDatasetBinding` per
+  entry; nothing removes a binding, so no whole-list replace is needed). The
+  server's `ProjectContext::updateShot(id, patch)` (over
+  `shot::updateShot`'s patch overload) applies it to the stored Shot and runs
+  the one validation the whole-Shot form always ran, so clamps, rig checks
+  and the renderer/library check are unchanged; the whole-Shot `updateShot`
+  stays for the monolith's editors. Each client control now reads the
+  replica's value for the UI frame and commits a patch of its field alone
+  (the renderer pick is one patch of its three fields); `applyEdits`, both
+  drafts and `Timeline::onProjectReplaced` are gone, the whole editor is
+  still greyed while its one update is pending, and a snapshot landing
+  mid-edit cannot yank a text or number edit because ImGui holds the edit
+  in progress itself. The patch design was preferred over field-scoped ops
+  (`SetShotPlayback`, `SetShotRigs`, ...) because one message with optional
+  fields is what the test client's `f=v` syntax already spelled and what a
+  three-field renderer pick needs; the message keeps its name and type (38)
+  since the op is still "update this shot". The test client's `update-shot`
+  writes each `f=v` into the patch (`Field<Shot, ShotPatch>` rows) and sends
+  only those; `playing` stays refused by name. `PROTOCOL_VERSION` 6. The
+  two-window case the review asked about (an FPS edit in the Shot Editor
+  while the Timeline scrubs) is settled by construction: the FPS patch
+  carries no `currentFrame`, the server's Shot already holds the scrubbed
+  frame (`setActiveShotFrame` lands it there before the debounced snapshot),
+  and the `[StudioServer]` UpdateShot scenario checks that fields a patch
+  does not name stand.
 
 ### Spec conformance
 
@@ -1299,7 +1335,7 @@ decisions, `M7-n`).
 | Session: `Hello`, `Ping`/`Pong`, `Disconnect{reason?}`, `Shutdown`, `BootstrapBegin`/`End` | implemented | `protocol/SessionMessages.h`, `server/StudioServer.cpp` | `Error` (2) is the bare error the spec's "rejected with an error" needs; `Disconnect.reason` (v3) is the server's farewell to an evicted client |
 | Project: `NewProject`, `OpenProject`, `SaveProject(dir?, uiState)` | implemented | `server/ProjectOpDispatcher.cpp`, `server/ProjectOpDispatcherTasks.cpp` | plus `UIState` server-to-client (107), sent in every bootstrap and by `OpenProject`'s body |
 | Dataset ops (imports, declare, reimport, rename/remove/unload/refresh, load, archive save/load, incorporate, discover) | implemented | `ProjectOpDispatcher.cpp` (sync), `ProjectOpDispatcherTasks.cpp` (tasks), types 23..35 | task/sync split as listed |
-| Shot: `CreateShot`, `RemoveShot`, `UpdateShot`, `SetActiveShot` | implemented | types 36..39 | `UpdateShot` never honours `playing` |
+| Shot: `CreateShot`, `RemoveShot`, `UpdateShot`, `SetActiveShot` | implemented | types 36..39 | `UpdateShot` carries a `ShotPatch` (v6) and has no `playing` field |
 | Rig: light rig create/clone/remove/rename, add/remove light, camera rig create/remove/rename, archives | implemented | types 40..52 | |
 | Color map: `CreateColorMap` both halves atomically, `RenameColorMap`, `RemoveColorMap`; values optimistic parameter edits | **partial** | types 53..55, `ColorMapCreatedResult` | the samples are Array data, not parameters, so no optimistic edit reaches them; see "Color map objects" (deferred) |
 | Remote Browse: `ListRoots`, `ListDirectory` | implemented | `server/RemoteBrowse.cpp` | |

@@ -385,10 +385,12 @@ RequestHandle ProjectOps::removeShot(
   return send(std::move(req), std::move(callback));
 }
 
-RequestHandle ProjectOps::updateShot(const Shot &shot, ReplyCallback callback)
+RequestHandle ProjectOps::updateShot(
+    const ShotID &shotId, const ShotPatch &patch, ReplyCallback callback)
 {
   UpdateShot req;
-  req.shot = shot;
+  req.shotId = shotId;
+  req.patch = patch;
   return send(std::move(req), std::move(callback));
 }
 

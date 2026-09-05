@@ -82,6 +82,10 @@ struct ProjectContext
   // the animation manager. Each marks the project dirty when it changes it.
   bool removeShot(const ShotID &id, std::string *error = nullptr);
   bool updateShot(const Shot &shot, std::string *error = nullptr);
+  // The patch form: the stored Shot with `patch` applied goes through the
+  // same validation (shot::updateShot's patch overload).
+  bool updateShot(
+      const ShotID &id, const ShotPatch &patch, std::string *error = nullptr);
   bool setActiveShot(const ShotID &id, std::string *error = nullptr);
   // Playback as whole operations. setPlaying accepts the active shot only,
   // starts or stops the manager and writes shot.playing. setActiveShotFrame
@@ -238,6 +242,9 @@ struct ProjectContext
   // An op changed the Project: dirty for the save, revised for the mirror.
   void markProjectDirty();
   void markActiveShotRevised();
+  // Both updateShot forms landed a validated Shot: dirty, and when it is the
+  // active shot, revised, re-synced and re-applied.
+  void onShotUpdated(const ShotID &id);
   // The dataset's asset is missing or unreadable: Unavailable, and a
   // revision when it was not known to be already.
   void markDatasetUnavailable(Dataset &dataset);

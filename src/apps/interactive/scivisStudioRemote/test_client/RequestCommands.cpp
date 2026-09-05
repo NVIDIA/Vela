@@ -214,14 +214,14 @@ CommandRunner::Failure CommandRunner::updateShot(
   if (!current)
     return error;
   UpdateShot request;
-  request.shot = *current;
+  request.shotId = current->id;
   for (size_t i = 1; i < command.args.size(); ++i) {
     const auto &edit = command.args[i];
     const auto eq = edit.find('=');
     if (eq == std::string::npos || eq == 0)
       return "not a <field>=<value> edit: " + edit;
     if (!setShotField(
-            request.shot, edit.substr(0, eq), edit.substr(eq + 1), error))
+            request.patch, edit.substr(0, eq), edit.substr(eq + 1), error))
       return error;
   }
   return sendRequest(std::move(request), deadline, modifiers);

@@ -23,9 +23,11 @@ namespace vsr::scivis_studio::client {
  *
  * Play/Pause is the SetPlaying project op; Stop is SetPlaying(false)
  * followed by SetTime 0; scrubbing and the frame field send SetTime, at most
- * once per UI frame with the latest value; Loop, frame count and fps travel
- * as UpdateShot with the whole shot. Disabled without an active shot or a
- * connection that can send.
+ * once per UI frame with the latest value; Loop, frame count and fps each
+ * travel as UpdateShot with a patch of that one field, read off the replica
+ * as the control commits, so the Shot Editor's fields and the frame time
+ * rests on are never in it. Disabled without an active shot or a connection
+ * that can send.
  *
  * Example:
  *   auto *timeline = new Timeline(this, &m_editorContext);
@@ -36,29 +38,24 @@ struct Timeline : public EditorWindow
   Timeline(vsr::ui::imgui::Application *app, EditorContext *context);
   ~Timeline() override;
 
-  void onProjectReplaced() override;
-
  private:
   using Clock = std::chrono::steady_clock;
 
   void buildEditorUI(const Project &project) override;
   void buildUI_transport(const Shot &shot, int shownFrame);
+  void buildUI_clock(const Shot &shot);
   void buildUI_ruler(const Shot &shot, int shownFrame);
 
   // What the scrubber and counter display this UI frame.
   int shownFrame(const Shot &shot) const;
-  void syncDraft(const Shot &shot);
-  void sendDraft(int currentFrame);
+  // Sends the patch for `shot`; the reply reports a refusal.
+  void commit(const Shot &shot, const ShotPatch &patch);
   void setPlaying(const Shot &shot, bool playing);
   void stop(const Shot &shot);
   // Coalesced: the latest request of a UI frame goes out at its end.
   void requestTime(int frame);
   void flushTime(const Shot &shot);
 
-  // Loop, frame count and fps edits in progress; the rest of the Shot is
-  // copied fresh from the replica when an edit commits.
-  std::optional<Shot> m_draft;
-  bool m_draftStale{true};
   RequestHandle m_pendingUpdate;
   RequestHandle m_pendingPlaying;
 

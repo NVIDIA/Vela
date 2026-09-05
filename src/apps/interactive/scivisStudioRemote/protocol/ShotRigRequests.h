@@ -26,7 +26,8 @@ namespace vsr::scivis_studio::protocol {
  * Example:
  *   UpdateShot req;
  *   req.requestId = 7;
- *   req.shot = project.shots[0];
+ *   req.shotId = project.shots[0].id;
+ *   req.patch.fps = 30.f;
  *   send(encode(req));
  */
 
@@ -48,13 +49,16 @@ struct RemoveShot
   vsr::scivis_studio::ShotID shotId;
 };
 
-// The whole Shot; the server validates and replaces its copy.
+// The fields of one shot to change (Shot.h's ShotPatch): the server applies
+// them to its copy and validates the result, so two editors of the same shot
+// only ever touch the fields each one edits. `playing` is SetPlaying's.
 struct UpdateShot
 {
   static constexpr StudioMessageType MESSAGE_TYPE =
       StudioMessageType::UpdateShot;
   uint64_t requestId{0};
-  vsr::scivis_studio::Shot shot;
+  vsr::scivis_studio::ShotID shotId;
+  vsr::scivis_studio::ShotPatch patch;
 };
 
 struct SetActiveShot
@@ -240,8 +244,9 @@ struct ColorMapCreatedResult
 
 // Every payload is a fields() description (PayloadCommon.h): requestId and
 // the id, name, path and nested-ref fields are all required; name may be "".
-// UpdateShot nests the model's Shot in its Full form (Shot.h): every field
-// including the runtime camera ref, bindings as the manifest's ordered list.
+// UpdateShot nests the model's ShotPatch (Shot.h) under "patch": its engaged
+// fields only, under the Shot's names, so a patch of nothing is an empty
+// (still present) child.
 
 // Inlined definitions ////////////////////////////////////////////////////////
 
@@ -263,7 +268,8 @@ template <typename V>
 void fields(V &v, UpdateShot &p)
 {
   v.required("requestId", p.requestId);
-  v.child("shot", p.shot);
+  v.required("shotId", p.shotId);
+  v.child("patch", p.patch);
 }
 
 template <typename V>

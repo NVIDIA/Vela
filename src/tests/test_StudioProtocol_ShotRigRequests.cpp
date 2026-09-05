@@ -14,6 +14,7 @@ using namespace vsr::scivis_studio::protocol;
 using vsr::scivis_studio::SceneNodeRef;
 using vsr::scivis_studio::SceneObjectRef;
 using vsr::scivis_studio::Shot;
+using vsr::scivis_studio::ShotPatch;
 
 namespace {
 
@@ -140,17 +141,16 @@ SCENARIO("Shot requests", "[StudioProtocol]")
     }
   }
 
-  GIVEN("an UpdateShot with a fully populated Shot")
+  GIVEN("the model's Shot codec, as ProjectSnapshot nests it")
   {
-    UpdateShot update;
-    update.requestId = 21;
-    update.shot = makeShot();
+    const Shot shot = makeShot();
 
-    THEN("every field round-trips")
+    THEN("every field round-trips through a DataNode")
     {
-      const auto out = roundTrip(update);
-      REQUIRE(out.requestId == 21);
-      const Shot &s = out.shot;
+      vsr::core::DataTree tree;
+      toNode(shot, tree.root());
+      Shot s;
+      REQUIRE(fromNode(tree.root(), s));
       REQUIRE(s.id == "shot-2");
       REQUIRE(s.name == "Fly-through");
       REQUIRE(s.frameCount == 240);
@@ -183,7 +183,7 @@ SCENARIO("Shot requests", "[StudioProtocol]")
     THEN("dataset bindings travel as the manifest's ordered list")
     {
       vsr::core::DataTree tree;
-      toNode(update.shot, tree.root());
+      toNode(shot, tree.root());
       const auto *bindings = tree.root().child("datasetBindings");
       REQUIRE(bindings);
       REQUIRE(bindings->numChildren() == 2);
@@ -197,11 +197,9 @@ SCENARIO("Shot requests", "[StudioProtocol]")
     THEN("the wire form is the manifest form plus the camera ref")
     {
       vsr::core::DataTree wire;
-      toNode(update.shot, wire.root());
+      toNode(shot, wire.root());
       vsr::core::DataTree manifest;
-      toNode(update.shot,
-          manifest.root(),
-          vsr::scivis_studio::ProjectForm::Manifest);
+      toNode(shot, manifest.root(), vsr::scivis_studio::ProjectForm::Manifest);
       REQUIRE(wire.root().child("camera"));
       REQUIRE_FALSE(manifest.root().child("camera"));
       REQUIRE(wire.root().numChildren() == manifest.root().numChildren() + 1);
@@ -218,11 +216,12 @@ SCENARIO("Shot requests", "[StudioProtocol]")
 
     THEN("a default Shot with an id round-trips to its defaults")
     {
-      Shot shot;
-      shot.id = "shot-0";
-      UpdateShot req;
-      req.shot = shot;
-      const auto out = roundTrip(req).shot;
+      Shot in;
+      in.id = "shot-0";
+      vsr::core::DataTree tree;
+      toNode(in, tree.root());
+      Shot out;
+      REQUIRE(fromNode(tree.root(), out));
       REQUIRE(out.id == "shot-0");
       REQUIRE(out.name.empty());
       REQUIRE(out.frameCount == 120);
@@ -247,15 +246,9 @@ SCENARIO("Shot requests", "[StudioProtocol]")
     THEN("a Shot without an id is rejected")
     {
       vsr::core::DataTree tree;
-      writeChild(tree.root(), "requestId", uint64_t(1));
-      writeChild(tree.root()["shot"], "name", std::string("nameless"));
-      UpdateShot out;
+      writeChild(tree.root(), "name", std::string("nameless"));
+      Shot out;
       REQUIRE_FALSE(fromNode(tree.root(), out));
-    }
-
-    THEN("a missing shot subtree is rejected")
-    {
-      requireRejectsRequestIdOnly<UpdateShot>();
     }
 
     THEN("a mistyped optional field is rejected")
@@ -270,6 +263,146 @@ SCENARIO("Shot requests", "[StudioProtocol]")
       writeChild(badCamera.root(), "id", std::string("shot-1"));
       badCamera.root()["camera"] = std::string("ANARI_CAMERA");
       REQUIRE_FALSE(fromNode(badCamera.root(), out));
+    }
+  }
+
+  GIVEN("an UpdateShot patching every field")
+  {
+    UpdateShot update;
+    update.requestId = 21;
+    update.shotId = "shot-2";
+    ShotPatch &patch = update.patch;
+    patch.name = "Fly-through";
+    patch.frameCount = 240;
+    patch.fps = 30.f;
+    patch.currentFrame = 17;
+    patch.loop = false;
+    patch.lightRigId = "lightrig-1";
+    patch.cameraRigId = "camerarig-3";
+    patch.renderSettings.width = 1920;
+    patch.renderSettings.height = 1080;
+    patch.renderSettings.samples = 512;
+    patch.renderSettings.rendererLibrary = "visrtx";
+    patch.renderSettings.rendererObjectIndex = 2;
+    patch.renderSettings.rendererSubtype = "scivis";
+    patch.renderSettings.outputFilePrefix = "out/frame_";
+    patch.datasetBindings = {{"dataset-1", true}, {"dataset-4", false}};
+
+    THEN("every field round-trips engaged")
+    {
+      const auto out = roundTrip(update);
+      REQUIRE(out.requestId == 21);
+      REQUIRE(out.shotId == "shot-2");
+      const ShotPatch &p = out.patch;
+      REQUIRE(p.name == "Fly-through");
+      REQUIRE(p.frameCount == 240);
+      REQUIRE(p.fps == 30.f);
+      REQUIRE(p.currentFrame == 17);
+      REQUIRE(p.loop == false);
+      REQUIRE(p.lightRigId == "lightrig-1");
+      REQUIRE(p.cameraRigId == "camerarig-3");
+      REQUIRE(p.renderSettings.width == 1920);
+      REQUIRE(p.renderSettings.height == 1080);
+      REQUIRE(p.renderSettings.samples == 512);
+      REQUIRE(p.renderSettings.rendererLibrary == "visrtx");
+      REQUIRE(p.renderSettings.rendererObjectIndex == 2);
+      REQUIRE(p.renderSettings.rendererSubtype == "scivis");
+      REQUIRE(p.renderSettings.outputFilePrefix == "out/frame_");
+      REQUIRE(p.datasetBindings.size() == 2);
+      REQUIRE(p.datasetBindings[0].datasetId == "dataset-1");
+      REQUIRE(p.datasetBindings[0].enabled);
+      REQUIRE(p.datasetBindings[1].datasetId == "dataset-4");
+      REQUIRE_FALSE(p.datasetBindings[1].enabled);
+    }
+
+    THEN("the patch travels under the Shot's field names")
+    {
+      vsr::core::DataTree tree;
+      toNode(update, tree.root());
+      const auto *node = tree.root().child("patch");
+      REQUIRE(node);
+      REQUIRE(node->child("fps"));
+      REQUIRE(node->child("renderSettings"));
+      REQUIRE(node->child("renderSettings")->child("samples"));
+      const auto *bindings = node->child("datasetBindings");
+      REQUIRE(bindings);
+      REQUIRE(bindings->numChildren() == 2);
+      REQUIRE(
+          bindings->child(1)->child("datasetId")->getValueOr<std::string>("")
+          == "dataset-4");
+      REQUIRE_FALSE(node->child("id"));
+      REQUIRE_FALSE(node->child("playing"));
+    }
+  }
+
+  GIVEN("an UpdateShot of one field")
+  {
+    UpdateShot update;
+    update.requestId = 22;
+    update.shotId = "shot-0";
+    update.patch.fps = 25.f;
+
+    THEN("only that field is written and the rest read back unset")
+    {
+      vsr::core::DataTree tree;
+      toNode(update, tree.root());
+      const auto *node = tree.root().child("patch");
+      REQUIRE(node);
+      REQUIRE(node->numChildren() == 1);
+      REQUIRE(node->child("fps"));
+
+      const auto out = roundTrip(update);
+      REQUIRE(out.shotId == "shot-0");
+      REQUIRE(out.patch.fps == 25.f);
+      REQUIRE_FALSE(out.patch.name);
+      REQUIRE_FALSE(out.patch.frameCount);
+      REQUIRE_FALSE(out.patch.currentFrame);
+      REQUIRE_FALSE(out.patch.loop);
+      REQUIRE_FALSE(out.patch.lightRigId);
+      REQUIRE_FALSE(out.patch.cameraRigId);
+      REQUIRE_FALSE(out.patch.renderSettings.width);
+      REQUIRE_FALSE(out.patch.renderSettings.rendererLibrary);
+      REQUIRE_FALSE(out.patch.renderSettings.rendererObjectIndex);
+      REQUIRE(out.patch.datasetBindings.empty());
+    }
+
+    THEN("an empty patch round-trips as a no-op")
+    {
+      UpdateShot empty;
+      empty.requestId = 23;
+      empty.shotId = "shot-0";
+      const auto out = roundTrip(empty);
+      REQUIRE(out.shotId == "shot-0");
+      REQUIRE_FALSE(out.patch.fps);
+      REQUIRE(out.patch.datasetBindings.empty());
+    }
+
+    THEN("a missing shotId or patch is rejected")
+    {
+      requireRejectsRequestIdOnly<UpdateShot>();
+
+      vsr::core::DataTree tree;
+      writeChild(tree.root(), "requestId", uint64_t(1));
+      writeChild(tree.root(), "shotId", std::string("shot-0"));
+      UpdateShot out;
+      REQUIRE_FALSE(fromNode(tree.root(), out));
+    }
+
+    THEN("a mistyped patch field is rejected")
+    {
+      vsr::core::DataTree tree;
+      writeChild(tree.root(), "requestId", uint64_t(1));
+      writeChild(tree.root(), "shotId", std::string("shot-0"));
+      writeChild(tree.root()["patch"], "fps", std::string("fast"));
+      UpdateShot out;
+      REQUIRE_FALSE(fromNode(tree.root(), out));
+
+      vsr::core::DataTree binding;
+      writeChild(binding.root(), "requestId", uint64_t(1));
+      writeChild(binding.root(), "shotId", std::string("shot-0"));
+      writeChild(
+          binding.root()["patch"]["datasetBindings"]["0"], "enabled", true);
+      REQUIRE_FALSE(fromNode(binding.root(), out));
     }
   }
 }

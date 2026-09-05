@@ -934,13 +934,28 @@ bool ProjectContext::updateShot(const Shot &incoming, std::string *error)
   if (!shot::updateShot(
           m_project, m_ctx ? &m_ctx->vsr.scene : nullptr, incoming, error))
     return false;
+  onShotUpdated(incoming.id);
+  return true;
+}
+
+bool ProjectContext::updateShot(
+    const ShotID &id, const ShotPatch &patch, std::string *error)
+{
+  if (!shot::updateShot(
+          m_project, m_ctx ? &m_ctx->vsr.scene : nullptr, id, patch, error))
+    return false;
+  onShotUpdated(id);
+  return true;
+}
+
+void ProjectContext::onShotUpdated(const ShotID &id)
+{
   markProjectDirty();
-  if (incoming.id == m_project.activeShotId) {
+  if (id == m_project.activeShotId) {
     markActiveShotRevised();
     syncAnimationManagerToActiveShot();
     applyActiveShot();
   }
-  return true;
 }
 
 bool ProjectContext::setActiveShot(const ShotID &id, std::string *error)

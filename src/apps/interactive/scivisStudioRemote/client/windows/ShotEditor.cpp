@@ -61,56 +61,16 @@ std::vector<std::string> rendererLibraries(
   return libraries;
 }
 
-bool sameBindings(
-    const std::vector<DatasetBinding> &a, const std::vector<DatasetBinding> &b)
+// A size field: edited as an int, committed on deactivation as at least 1.
+// True with `out` set when the field just committed.
+bool inputSize(const char *label, uint32_t current, uint32_t &out)
 {
-  return std::equal(a.begin(),
-      a.end(),
-      b.begin(),
-      b.end(),
-      [](const DatasetBinding &x, const DatasetBinding &y) {
-        return x.datasetId == y.datasetId && x.enabled == y.enabled;
-      });
-}
-
-// Copies into `target` every field of `draft` that differs from `base`, the
-// replica shot the draft was taken from: the user's edits and nothing else.
-void applyEdits(const Shot &base, const Shot &draft, Shot &target)
-{
-  const auto carry = [&](auto member) {
-    if (draft.*member != base.*member)
-      target.*member = draft.*member;
-  };
-  carry(&Shot::name);
-  carry(&Shot::frameCount);
-  carry(&Shot::fps);
-  carry(&Shot::loop);
-  carry(&Shot::lightRigId);
-  carry(&Shot::cameraRigId);
-  const auto carryRender = [&](auto member) {
-    if (draft.renderSettings.*member != base.renderSettings.*member)
-      target.renderSettings.*member = draft.renderSettings.*member;
-  };
-  carryRender(&ShotRenderSettings::width);
-  carryRender(&ShotRenderSettings::height);
-  carryRender(&ShotRenderSettings::samples);
-  carryRender(&ShotRenderSettings::outputFilePrefix);
-  // The renderer pick is one edit across three fields.
-  if (draft.renderSettings.rendererLibrary
-          != base.renderSettings.rendererLibrary
-      || draft.renderSettings.rendererObjectIndex
-          != base.renderSettings.rendererObjectIndex
-      || draft.renderSettings.rendererSubtype
-          != base.renderSettings.rendererSubtype) {
-    target.renderSettings.rendererLibrary =
-        draft.renderSettings.rendererLibrary;
-    target.renderSettings.rendererObjectIndex =
-        draft.renderSettings.rendererObjectIndex;
-    target.renderSettings.rendererSubtype =
-        draft.renderSettings.rendererSubtype;
-  }
-  if (!sameBindings(draft.datasetBindings, base.datasetBindings))
-    target.datasetBindings = draft.datasetBindings;
+  int value = int(current);
+  ImGui::InputInt(label, &value);
+  if (!ImGui::IsItemDeactivatedAfterEdit())
+    return false;
+  out = uint32_t(std::max(1, value));
+  return true;
 }
 
 } // namespace
@@ -121,117 +81,103 @@ ShotEditor::ShotEditor(vsr::ui::imgui::Application *app, EditorContext *context)
 
 ShotEditor::~ShotEditor() = default;
 
-void ShotEditor::onProjectReplaced()
+void ShotEditor::commit(const Shot &shot, const ShotPatch &patch)
 {
-  m_draftStale = true;
-}
-
-// Draft //////////////////////////////////////////////////////////////////////
-
-void ShotEditor::syncDraft(const Project &project)
-{
-  const Shot *shot = replica::activeShot(project);
-  if (!shot) {
-    m_draft.reset();
+  if (!canSend())
     return;
-  }
-  const bool switched = !m_draft || m_draft->id != shot->id;
-  // A stale draft waits for the in-flight update and for the user to let go
-  // of whatever control they are on, so a refresh never yanks an edit away.
-  const bool refresh =
-      m_draftStale && !pending(m_pendingUpdate) && !ImGui::IsAnyItemActive();
-  if (switched || refresh) {
-    m_draft = *shot;
-    m_draftBase = *shot;
-    m_draftStale = false;
-  }
-}
-
-void ShotEditor::sendDraft()
-{
-  if (!m_draft || !canSend())
-    return;
-
-  // Rebase on the replica as it is now: another editor's UpdateShot may have
-  // landed since the draft was taken, and a whole-Shot replace built from
-  // the stale copy would undo it. The user's own edits win over both.
-  const Project *current = project();
-  const Shot *latest =
-      current ? replica::findShot(*current, m_draft->id) : nullptr;
-  Shot shot = latest ? *latest : m_draftBase;
-  applyEdits(m_draftBase, *m_draft, shot);
-  shot::clampToValidRanges(shot); // what the server will apply anyway
-  *m_draft = shot;
-  m_draftBase = shot;
-
-  m_pendingUpdate =
-      ops().updateShot(shot, [this](const protocol::ProjectOpReply &reply) {
-        if (!reply.ok)
-          reportError(reply.error);
-        // Success brings a snapshot; failure must snap the draft back.
-        m_draftStale = true;
-      });
+  m_pendingUpdate = ops().updateShot(shot.id, patch, errorReporter());
 }
 
 // UI /////////////////////////////////////////////////////////////////////////
 
 void ShotEditor::buildEditorUI(const Project &project)
 {
-  syncDraft(project);
-  if (!m_draft) {
+  const Shot *shot = replica::activeShot(project);
+  if (!shot) {
     ImGui::TextDisabled("No active shot");
     return;
   }
-  Shot &shot = *m_draft;
 
   ImGui::BeginDisabled(pending(m_pendingUpdate));
 
-  ImGui::InputText("Name", &shot.name);
-  if (ImGui::IsItemDeactivatedAfterEdit())
-    sendDraft();
+  // Each control edits a copy of its field for this UI frame and commits a
+  // patch of that field alone; ImGui holds a text or number edit in progress
+  // itself, so a snapshot landing meanwhile does not yank it away.
+  std::string name = shot->name;
+  ImGui::InputText("Name", &name);
+  if (ImGui::IsItemDeactivatedAfterEdit()) {
+    ShotPatch patch;
+    patch.name = name;
+    commit(*shot, patch);
+  }
 
-  ImGui::InputInt("Frame count", &shot.frameCount);
-  if (ImGui::IsItemDeactivatedAfterEdit())
-    sendDraft();
-  ImGui::InputFloat("FPS", &shot.fps);
-  if (ImGui::IsItemDeactivatedAfterEdit())
-    sendDraft();
-  if (ImGui::Checkbox("Loop", &shot.loop))
-    sendDraft();
+  buildUI_playback(*shot);
 
   ImGui::SeparatorText("Render");
-  int width = int(shot.renderSettings.width);
-  int height = int(shot.renderSettings.height);
-  int samples = int(shot.renderSettings.samples);
-  if (ImGui::InputInt("Width", &width))
-    shot.renderSettings.width = uint32_t(std::max(1, width));
-  if (ImGui::IsItemDeactivatedAfterEdit())
-    sendDraft();
-  if (ImGui::InputInt("Height", &height))
-    shot.renderSettings.height = uint32_t(std::max(1, height));
-  if (ImGui::IsItemDeactivatedAfterEdit())
-    sendDraft();
-  if (ImGui::InputInt("Samples", &samples))
-    shot.renderSettings.samples = uint32_t(std::max(1, samples));
-  if (ImGui::IsItemDeactivatedAfterEdit())
-    sendDraft();
+  buildUI_renderSettings(*shot);
+  buildUI_deviceSelector(*shot);
+  buildUI_rendererSelector(*shot);
 
-  buildUI_deviceSelector();
-  buildUI_rendererSelector();
+  std::string prefix = shot->renderSettings.outputFilePrefix;
+  ImGui::InputText("Output prefix", &prefix);
+  if (ImGui::IsItemDeactivatedAfterEdit()) {
+    ShotPatch patch;
+    patch.renderSettings.outputFilePrefix = prefix;
+    commit(*shot, patch);
+  }
 
-  ImGui::InputText("Output prefix", &shot.renderSettings.outputFilePrefix);
-  if (ImGui::IsItemDeactivatedAfterEdit())
-    sendDraft();
+  buildUI_lightRigSelector(project, *shot);
+  buildUI_cameraRigSelector(project, *shot);
 
-  buildUI_lightRigSelector(project);
-  buildUI_cameraRigSelector(project);
+  ImGui::Text("Output: renders/%s/", shot->id.c_str());
+  buildUI_render(project, *shot);
 
-  ImGui::Text("Output: renders/%s/", shot.id.c_str());
-  buildUI_render(project, shot);
-
-  buildUI_datasets(project);
+  buildUI_datasets(project, *shot);
 
   ImGui::EndDisabled();
+}
+
+void ShotEditor::buildUI_playback(const Shot &shot)
+{
+  int frameCount = shot.frameCount;
+  ImGui::InputInt("Frame count", &frameCount);
+  if (ImGui::IsItemDeactivatedAfterEdit()) {
+    ShotPatch patch;
+    patch.frameCount = frameCount;
+    commit(shot, patch);
+  }
+  float fps = shot.fps;
+  ImGui::InputFloat("FPS", &fps);
+  if (ImGui::IsItemDeactivatedAfterEdit()) {
+    ShotPatch patch;
+    patch.fps = fps;
+    commit(shot, patch);
+  }
+  bool loop = shot.loop;
+  if (ImGui::Checkbox("Loop", &loop)) {
+    ShotPatch patch;
+    patch.loop = loop;
+    commit(shot, patch);
+  }
+}
+
+void ShotEditor::buildUI_renderSettings(const Shot &shot)
+{
+  const auto &settings = shot.renderSettings;
+  ShotPatch patch;
+  uint32_t size = 0;
+  if (inputSize("Width", settings.width, size)) {
+    patch.renderSettings.width = size;
+    commit(shot, patch);
+  }
+  if (inputSize("Height", settings.height, size)) {
+    patch.renderSettings.height = size;
+    commit(shot, patch);
+  }
+  if (inputSize("Samples", settings.samples, size)) {
+    patch.renderSettings.samples = size;
+    commit(shot, patch);
+  }
 }
 
 void ShotEditor::buildUI_render(const Project &project, const Shot &shot)
@@ -285,9 +231,9 @@ void ShotEditor::buildPopups(const Project &project)
     m_shotToRender.clear();
 }
 
-void ShotEditor::buildUI_deviceSelector()
+void ShotEditor::buildUI_deviceSelector(const Shot &shot)
 {
-  auto &settings = m_draft->renderSettings;
+  const auto &settings = shot.renderSettings;
   const auto &scene = appContext()->vsr.scene;
   const auto libraries = rendererLibraries(scene, settings.rendererLibrary);
   const std::string preview = settings.rendererLibrary.empty()
@@ -301,10 +247,13 @@ void ShotEditor::buildUI_deviceSelector()
   for (const auto &library : libraries) {
     const bool selected = settings.rendererLibrary == library;
     if (ImGui::Selectable(library.c_str(), selected) && !selected) {
-      settings.rendererLibrary = library;
-      settings.rendererObjectIndex = VSR_INVALID_INDEX;
-      settings.rendererSubtype = "default";
-      sendDraft();
+      // A device pick is one edit across the three renderer fields: the
+      // renderer of the old device cannot stand for the new one.
+      ShotPatch patch;
+      patch.renderSettings.rendererLibrary = library;
+      patch.renderSettings.rendererObjectIndex = VSR_INVALID_INDEX;
+      patch.renderSettings.rendererSubtype = "default";
+      commit(shot, patch);
     }
     if (selected)
       ImGui::SetItemDefaultFocus();
@@ -312,9 +261,9 @@ void ShotEditor::buildUI_deviceSelector()
   ImGui::EndCombo();
 }
 
-void ShotEditor::buildUI_rendererSelector()
+void ShotEditor::buildUI_rendererSelector(const Shot &shot)
 {
-  auto &settings = m_draft->renderSettings;
+  const auto &settings = shot.renderSettings;
   auto &scene = appContext()->vsr.scene;
   const auto renderers = settings.rendererLibrary.empty()
       ? std::vector<vsr::scene::RendererAppRef>{}
@@ -339,9 +288,10 @@ void ShotEditor::buildUI_rendererSelector()
       const bool selected = renderer->index() == settings.rendererObjectIndex;
       const auto label = rendererLabel(*renderer);
       if (ImGui::Selectable(label.c_str(), selected) && !selected) {
-        settings.rendererObjectIndex = renderer->index();
-        settings.rendererSubtype = renderer->subtype().str();
-        sendDraft();
+        ShotPatch patch;
+        patch.renderSettings.rendererObjectIndex = renderer->index();
+        patch.renderSettings.rendererSubtype = renderer->subtype().str();
+        commit(shot, patch);
       }
       if (selected)
         ImGui::SetItemDefaultFocus();
@@ -351,26 +301,27 @@ void ShotEditor::buildUI_rendererSelector()
   ImGui::EndDisabled();
 }
 
-void ShotEditor::buildUI_lightRigSelector(const Project &project)
+void ShotEditor::buildUI_lightRigSelector(
+    const Project &project, const Shot &shot)
 {
-  Shot &shot = *m_draft;
   const std::string preview = shot.lightRigId.empty()
       ? std::string{"None"}
       : replica::lightRigLabel(project, shot.lightRigId);
 
   if (!ImGui::BeginCombo("Light Rig", preview.c_str()))
     return;
+  const auto pick = [&](const LightRigID &id) {
+    ShotPatch patch;
+    patch.lightRigId = id;
+    commit(shot, patch);
+  };
   const bool noneSelected = shot.lightRigId.empty();
-  if (ImGui::Selectable("None", noneSelected) && !noneSelected) {
-    shot.lightRigId.clear();
-    sendDraft();
-  }
+  if (ImGui::Selectable("None", noneSelected) && !noneSelected)
+    pick({});
   for (const LightRig *rig : replica::sortedLightRigs(project)) {
     const bool selected = shot.lightRigId == rig->id;
-    if (ImGui::Selectable(rig->name.c_str(), selected) && !selected) {
-      shot.lightRigId = rig->id;
-      sendDraft();
-    }
+    if (ImGui::Selectable(rig->name.c_str(), selected) && !selected)
+      pick(rig->id);
     if (selected)
       ImGui::SetItemDefaultFocus();
   }
@@ -380,26 +331,27 @@ void ShotEditor::buildUI_lightRigSelector(const Project &project)
   ImGui::EndCombo();
 }
 
-void ShotEditor::buildUI_cameraRigSelector(const Project &project)
+void ShotEditor::buildUI_cameraRigSelector(
+    const Project &project, const Shot &shot)
 {
-  Shot &shot = *m_draft;
   const std::string preview = shot.cameraRigId.empty()
       ? std::string{"None"}
       : replica::cameraRigLabel(project, shot.cameraRigId);
 
   if (!ImGui::BeginCombo("Camera Rig", preview.c_str()))
     return;
+  const auto pick = [&](const CameraRigID &id) {
+    ShotPatch patch;
+    patch.cameraRigId = id;
+    commit(shot, patch);
+  };
   const bool noneSelected = shot.cameraRigId.empty();
-  if (ImGui::Selectable("None", noneSelected) && !noneSelected) {
-    shot.cameraRigId.clear();
-    sendDraft();
-  }
+  if (ImGui::Selectable("None", noneSelected) && !noneSelected)
+    pick({});
   for (const CameraRig *rig : replica::sortedCameraRigs(project)) {
     const bool selected = shot.cameraRigId == rig->id;
-    if (ImGui::Selectable(rig->name.c_str(), selected) && !selected) {
-      shot.cameraRigId = rig->id;
-      sendDraft();
-    }
+    if (ImGui::Selectable(rig->name.c_str(), selected) && !selected)
+      pick(rig->id);
     if (selected)
       ImGui::SetItemDefaultFocus();
   }
@@ -409,19 +361,20 @@ void ShotEditor::buildUI_cameraRigSelector(const Project &project)
   ImGui::EndCombo();
 }
 
-void ShotEditor::buildUI_datasets(const Project &project)
+void ShotEditor::buildUI_datasets(const Project &project, const Shot &shot)
 {
   ImGui::SeparatorText("Datasets");
   if (project.datasets.empty())
     ImGui::TextDisabled("No datasets");
   for (const auto &dataset : project.datasets) {
     bool enabled = true;
-    if (const auto *binding = shot::findDatasetBinding(*m_draft, dataset.id))
+    if (const auto *binding = shot::findDatasetBinding(shot, dataset.id))
       enabled = binding->enabled;
     ImGui::PushID(dataset.id.c_str());
     if (ImGui::Checkbox(dataset.name.c_str(), &enabled)) {
-      shot::setDatasetBinding(*m_draft, dataset.id, enabled);
-      sendDraft();
+      ShotPatch patch;
+      patch.datasetBindings.push_back({dataset.id, enabled});
+      commit(shot, patch);
     }
     ImGui::PopID();
   }

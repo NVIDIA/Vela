@@ -35,8 +35,8 @@ set-active-shot shot_0001
 await-snapshot
 assert project.activeShot == shot_0001
 
-# update-shot sends the whole Shot with the named fields changed; the server
-# normalizes and the snapshot carries what it kept.
+# update-shot sends a patch of the named fields alone; the server applies it
+# to its Shot, normalizes, and the snapshot carries what it kept.
 update-shot $lastShotId name="Intro Cut" frameCount=48 fps=30 loop=off currentFrame=7 renderSettings.width=320 renderSettings.height=200
 await-snapshot
 assert shot.$lastShotId.name == "Intro Cut"

@@ -286,11 +286,11 @@ ShotID RenderSession::prepareSavedShot(const std::filesystem::path &projectDir,
   const auto *active = project::activeShot(snapshot->project);
   REQUIRE(active);
   UpdateShot update;
-  update.shot = *active;
-  update.shot.frameCount = frameCount;
-  update.shot.renderSettings.width = width;
-  update.shot.renderSettings.height = height;
-  update.shot.renderSettings.samples = 1;
+  update.shotId = active->id;
+  update.patch.frameCount = frameCount;
+  update.patch.renderSettings.width = width;
+  update.patch.renderSettings.height = height;
+  update.patch.renderSettings.samples = 1;
   REQUIRE(request(update).ok);
 
   SaveProject save;
@@ -359,11 +359,11 @@ SCENARIO(
       auto snapshot = client.lastDecoded<ProjectSnapshot>();
       REQUIRE(snapshot);
       UpdateShot update;
-      update.shot = *project::activeShot(snapshot->project);
-      update.shot.frameCount = 2;
-      update.shot.renderSettings.width = 32;
-      update.shot.renderSettings.height = 24;
-      update.shot.renderSettings.samples = 1;
+      update.shotId = project::activeShot(snapshot->project)->id;
+      update.patch.frameCount = 2;
+      update.patch.renderSettings.width = 32;
+      update.patch.renderSettings.height = 24;
+      update.patch.renderSettings.samples = 1;
       REQUIRE(session.request(update).ok);
 
       SaveProject save;

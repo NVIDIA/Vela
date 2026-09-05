@@ -320,23 +320,15 @@ const Shot &activeReplicaShot(Client &client)
   return *shot;
 }
 
-// Sends UpdateShot with `edit` applied to the replica's copy of `shotId` and
-// waits for its reply and snapshot.
-void updateShot(Client &client,
-    int &replaced,
-    const ShotID &shotId,
-    const std::function<void(Shot &)> &edit)
+// Sends UpdateShot with `patch` for `shotId` and waits for its reply and
+// snapshot.
+void updateShot(
+    Client &client, int &replaced, const ShotID &shotId, const ShotPatch &patch)
 {
-  const auto *project = client.connection.project();
-  REQUIRE(project);
-  const auto *replica = project::findShot(*project, shotId);
-  REQUIRE(replica);
-  Shot shot = *replica;
-  edit(shot);
   std::vector<ProjectOpReply> replies;
   const int snapshots = replaced;
   client.connection.projectOps().updateShot(
-      shot, [&](const ProjectOpReply &r) { replies.push_back(r); });
+      shotId, patch, [&](const ProjectOpReply &r) { replies.push_back(r); });
   REQUIRE(pollUntil(
       client.connection, [&] { return replies.size() == 1; }, E2E_TIMEOUT));
   REQUIRE(replies[0].ok);
@@ -344,10 +336,31 @@ void updateShot(Client &client,
 }
 
 // updateShot() on the replica's active shot.
-void updateActiveShot(
-    Client &client, int &replaced, const std::function<void(Shot &)> &edit)
+void updateActiveShot(Client &client, int &replaced, const ShotPatch &patch)
 {
-  updateShot(client, replaced, activeReplicaShot(client).id, edit);
+  updateShot(client, replaced, activeReplicaShot(client).id, patch);
+}
+
+// A patch of the shot's clock: frame count, fps and loop.
+ShotPatch clockPatch(int frameCount, float fps, bool loop)
+{
+  ShotPatch patch;
+  patch.frameCount = frameCount;
+  patch.fps = fps;
+  patch.loop = loop;
+  return patch;
+}
+
+// A patch of a tiny render: `frameCount` frames of width x height at one
+// sample.
+ShotPatch renderPatch(int frameCount, uint32_t width, uint32_t height)
+{
+  ShotPatch patch;
+  patch.frameCount = frameCount;
+  patch.renderSettings.width = width;
+  patch.renderSettings.height = height;
+  patch.renderSettings.samples = 1;
+  return patch;
 }
 
 // Sends SetPlaying for the active shot; the reply must be ok.
@@ -892,11 +905,7 @@ SCENARIO("scivisStudioServer and the client core play the active shot",
 
     // An fps ceiling well below the loop rate: a skipped header could only
     // come from the tick catching up, never from wire pacing.
-    updateActiveShot(client, replaced, [](Shot &shot) {
-      shot.frameCount = 12;
-      shot.fps = 30.f;
-      shot.loop = true;
-    });
+    updateActiveShot(client, replaced, clockPatch(12, 30.f, true));
     REQUIRE(activeReplicaShot(client).frameCount == 12);
     REQUIRE_FALSE(activeReplicaShot(client).playing);
 
@@ -1006,11 +1015,7 @@ SCENARIO("scivisStudioServer and the client core play the active shot",
               {
                 client.connection.startRendering();
                 REQUIRE(waitForFrames(client, 1));
-                updateActiveShot(client, replaced, [](Shot &shot) {
-                  shot.frameCount = 5;
-                  shot.fps = 30.f;
-                  shot.loop = false;
-                });
+                updateActiveShot(client, replaced, clockPatch(5, 30.f, false));
                 REQUIRE(activeReplicaShot(client).currentFrame == 3);
                 // Two snapshots follow: the SetPlaying's (playing=true) and
                 // the auto-stop's, ~70 ms later. One poll can deliver both,
@@ -1233,12 +1238,7 @@ SCENARIO("scivisStudioServer and the client core render shots and recover",
     // Shot A renders three tiny frames; shot B, which CreateShot makes
     // active, is what the render must switch away from.
     const ShotID shotA = activeReplicaShot(client).id;
-    updateActiveShot(client, replaced, [](Shot &shot) {
-      shot.frameCount = 3;
-      shot.renderSettings.width = 32;
-      shot.renderSettings.height = 24;
-      shot.renderSettings.samples = 1;
-    });
+    updateActiveShot(client, replaced, renderPatch(3, 32, 24));
     std::optional<ShotID> shotB;
     ops.createShot({},
         [&](const ProjectOpReply &r,
@@ -1325,11 +1325,7 @@ SCENARIO("scivisStudioServer and the client core render shots and recover",
             "the running one at a frame boundary")
         {
           // Large enough that helide takes a second or more over 400 frames.
-          updateShot(client, replaced, shotA, [](Shot &shot) {
-            shot.frameCount = 400;
-            shot.renderSettings.width = 512;
-            shot.renderSettings.height = 384;
-          });
+          updateShot(client, replaced, shotA, renderPatch(400, 512, 384));
           saveInPlace(client);
           uint64_t first = 0;
           renderShot(client, shotA, first);

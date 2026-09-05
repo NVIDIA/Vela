@@ -155,10 +155,10 @@ ProjectOpReply PlaybackSession::request(R req)
 void PlaybackSession::setClock(int frameCount, float fps, bool loop)
 {
   UpdateShot update;
-  update.shot = initialShot;
-  update.shot.frameCount = frameCount;
-  update.shot.fps = fps;
-  update.shot.loop = loop;
+  update.shotId = initialShot.id;
+  update.patch.frameCount = frameCount;
+  update.patch.fps = fps;
+  update.patch.loop = loop;
   const size_t snapshots = client.count(StudioMessageType::ProjectSnapshot);
   REQUIRE(request(update).ok);
   REQUIRE(waitForSnapshots(snapshots + 1));
