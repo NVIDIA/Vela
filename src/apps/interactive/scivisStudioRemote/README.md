@@ -1458,6 +1458,46 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   (`followups/17-ui-state-header-home.md`). `[AnimationManager]` observes
   the callback; `[StudioServer]`'s warning scenario and `[SciVisStudio]`'s
   UI-state persistence scenarios pass unchanged.
+- **Three boundaries made explicit; one outcome an enum.**
+  *`deserialize_Layer`* appended densely, after a warning, when a node
+  recorded with `LayerNodeNumbering::Preserved` found its slot taken. For
+  the Scene Archive that was harmless; on the wire (`TransferLayer`,
+  `TransferScene`, its only `Preserved` callers) a renumbered node silently
+  broke every later protocol node reference while the contract says "same
+  index on both sides". It returns `bool` now and refuses the whole layer,
+  leaving it empty, when a slot cannot be honoured (two nodes recording one
+  index, or a dense node having taken it); `deserialize_SceneArchive`
+  carries the refusal, `StructuredMessage::execute()` returns `bool` so the
+  seven messages can say whether they were applied, and the client and the
+  test client answer a scene push the mirror could not take through their
+  existing `replyError` (the test client also stamps the event
+  `malformed=true`). No wire change, so no `PROTOCOL_VERSION` bump.
+  *`DataReader::bytesRemaining`* returned `SIZE_MAX` for "unknown", and
+  `FileReader` read an empty file as unsizeable (`m_fileSize == 0` meant
+  both); it returns `std::optional<size_t>`, nullopt only for a source that
+  cannot be sized, and `DataNode::read` trusts an unsized reader to the
+  short read as before. *`AnariSceneRenderPass::render`*'s synchronous
+  branch re-implemented render, wait, copy and composite beside the
+  asynchronous tail; one tail now, the mode deciding only whether this call
+  renders and waits before the common copy or starts the next frame after
+  it. Against `main`, synchronous mode composites this call's own render and
+  leaves no render in flight after composite (`main` composited the previous
+  call's frame and started another); `vsrRender`, `vsrOffline`,
+  `renderAnimationSequence`, `RenderShot` and the server's frame loop are
+  the callers, and the branch already behaved so before this round. The
+  first-frame fill, dead on `main` and here because `startFirstFrame`
+  cleared the flag it tested, now covers the first asynchronous call.
+  *`RenderShotResult`* carried `completed`/`cancelled`/`error`, eight
+  states for three, and `scivisStudioRenderShot` consulted its SIGINT flag
+  to tell them apart; it carries `enum class Outcome { Completed, Cancelled,
+  Failed }`, the CLI switches on it ("Done", "Canceled after N of M frames",
+  "Render failed: <why>"), the server's task maps it to `TaskOutcome`, and
+  the header says `ShotStateGuard` logs a restore that fails rather than
+  throwing over it. The protocol's `RenderShotResult` (frames completed) is
+  a distinct type and untouched. `[ComponentSerialization]` gains the slot
+  collision, `[DataTree]` the three readers' answers; on a saved shot the
+  CLI's complete, Ctrl-C and refused-renderer runs each report their outcome
+  and exit code.
 
 ### Spec conformance
 
