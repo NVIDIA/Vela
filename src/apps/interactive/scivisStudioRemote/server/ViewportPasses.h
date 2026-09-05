@@ -14,6 +14,7 @@
 // anari
 #include <anari/anari_cpp.hpp>
 // std
+#include <atomic>
 #include <cstdint>
 #include <optional>
 
@@ -149,7 +150,10 @@ struct ViewportPasses
   protocol::ViewportSettings m_settings;
   uint32_t m_outlineIdentity{~0u}; // packed, regardless of highlightSelection
   bool m_primitiveIdSupported{false};
-  bool m_idChannelEnabled{false};
+  // Written on the loop thread with the pass; atomic because the server
+  // tests poll it while frames stream, the one read of this object that
+  // does not wait for the loop to pause.
+  std::atomic<bool> m_idChannelEnabled{false};
 
   bool m_pickArmed{false};
   vsr::math::int2 m_pickPixel{0, 0};

@@ -1055,8 +1055,9 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   `task_replay` scenario caught the restart cutting the new client off),
   and the accept that follows ends the session. The test-only
   `idChannelEnabled` atomic mirror, synced at four sites, is gone; tests
-  read `viewport().idChannelEnabled()` under the same rule as
-  `appContext()`. The client-visible handshake is unchanged and every suite
+  read `viewport().idChannelEnabled()` (the flag itself became atomic in the
+  test-fixture round below, since those polls run while frames stream). The
+  client-visible handshake is unchanged and every suite
   and scenario passes, with `Connected`/`Rendering` read as
   `Established`/`streaming()`. `StudioServer.cpp` 1393 -> 1327 lines; the
   document's ~800 target waits on 08 (`onMessage`) and 09 (the renderer
@@ -1498,6 +1499,53 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   collision, `[DataTree]` the three readers' answers; on a saved shot the
   CLI's complete, Ctrl-C and refused-renderer runs each report their outcome
   and exit code.
+- **One fixture each for the test server, the client core, the scratch
+  directory and the payload round trip; no blind sleeps.** Five suites each
+  spelled out the same server start (`port = 0`, `library = "helide"`,
+  `start`, a `ServerLoop`, connect, Hello, BootstrapEnd, Established) with
+  their own `request<R>()`, `nextRequestId`, `TaskEnd`, `waitForTaskEnd` and
+  `startedTaskId`, and had drifted (`RenderSession` passed a 30 s timeout,
+  the rest the default). `StudioServerTestHelpers.h` holds them once:
+  `testServerOptions()`, `RunningServer` (start + loop, never `REQUIRE`s so
+  a restart may build one off the test thread; `finished()` says whether
+  `run()` returned) and `ServerSession` (a `RunningServer` with one
+  bootstrapped `TestClient`, `request<R>()`, `waitForTaskEnd`,
+  `waitForSnapshots`, `latestSnapshot`, one timeout for every wait; the
+  bootstrap's messages stay recorded until the caller clears them).
+  `TaskEnd` gained `framesCompleted` and the end-of-task wait,
+  `indexOfReply` and `indexOfCompletedFrom` sit on `TestClient`. The
+  per-file structs keep only what is theirs; `ViewportSession` seeds its
+  histogram arrays in `beforeLoop` and finds them by name once Established
+  and not streaming (the `appContext()` read rule). The remote helpers'
+  `RunningServer`, which added a transform node no suite but one test-client
+  scenario addressed, became `tempRootServerOptions()` plus that scenario's
+  own `beforeLoop`. The two fake-server fixtures and the end-to-end `Client`
+  derive from one `MirroredClient` (mirror, `ServerConnection`, bootstrap
+  count, error list, `connect(port)`, `waitConnectedAndBootstrapped`).
+  Every scratch directory is a `ScopedFixtureDirectory` (`TestDirectories.h`,
+  hoisted from the USD fixtures: `std::random_device` name, retried until
+  `create_directory` says this process made it, removed by the destructor),
+  which also retires the fixed `vsr_studio_data_roots_test` name and the
+  `ServerProcess` scenario's `remove_all` a failed `REQUIRE` skipped;
+  `writeTriangleObj()` spells the one-triangle OBJ once. The protocol
+  suites' two `roundTrip<T>` and their tree-level siblings, plus thirty
+  inline `decode<T>(encode(x))` pairs, go through
+  `StudioProtocolTestHelpers.h` (`roundTrip`, `roundTripTree(payload,
+  into)`); payload structs have no `operator==`, so the field-by-field
+  assertions stay. Twelve negative assertions that slept a fixed span and
+  read a counter once use `staysFalse(changed, span)` (checks the whole
+  span, fails at the first change; spans unchanged, named `ERROR_BURST` and
+  `PAST_SCRUB_COMMIT` after the server's 250 ms scrub window); the
+  test-client restarter's 500 ms head start, which no predicate on the
+  session can express, is `settle()` with the reason beside it. The six
+  `waitFor(viewport().idChannelEnabled())` polls in the viewport suite run
+  while frames stream, which the `appContext()` rule forbids for a plain
+  `bool`; of the two options 07's review left open (restructure the polls
+  around `StopRendering`, or one atomic inside `ViewportPasses`)
+  `m_idChannelEnabled` is `std::atomic<bool>`, two lines of server code, so
+  the suite's assertions keep their meaning
+  (`followups/19-fixture-decisions.md`). Every `test_Studio*` suite,
+  `[Network]` and all 25 scenarios pass with the same names and counts.
 
 ### Spec conformance
 
@@ -1606,6 +1654,13 @@ in the mirror and a corner miss, `setOutline` and a `DEPTH`
 `setViewportSettings` with frames still arriving, and
 `requestArrayHistogram` summing a scalar array's bins to its element count
 and refusing the mesh's vector array.
+
+The suites share their fixtures: `NetworkTestHelpers.h` (`waitFor`,
+`pollUntil`, `staysFalse`, `LOOPBACK`), `TestDirectories.h`
+(`ScopedFixtureDirectory`), `StudioServerTestHelpers.h` (`TestClient`,
+`RunningServer`, `ServerSession`), `StudioRemoteTestHelpers.h`
+(`helideAvailable`, `fastTimings`, `MirroredClient`), `StudioFakeServer.h`
+and `StudioProtocolTestHelpers.h` (`roundTrip`, `roundTripTree`).
 
 End to end, `ctest -R StudioScenario` runs each scenario script under
 [`test_client/scenarios/`](test_client/scenarios) against a freshly launched
