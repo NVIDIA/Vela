@@ -1427,6 +1427,37 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
     window, which the continuation does not make redundant
     (`followups/16-network-stop-cleanup.md`). `[Network]` passes unchanged,
     the M7 farewell-before-close scenario included.
+- **Remote-only state out of the shared vsr code.** Four places where the
+  remote feature bolted state or flags onto shared code instead of using
+  the seam that existed. *`AnimationManager`'s load-failure mailbox* (a
+  256-entry `std::vector<LoadFailure>`, `MAX_LOAD_FAILURES`, an overflow
+  latch and a "collected by nobody" warning, drained only by the server) is
+  a third push callback beside `TimeChanged` and `PlaybackStopped`:
+  `setLoadFailureCallback(int clockFrame, std::string message)`. The
+  manager still converts a binding's file index to the clock frame at its
+  boundary; `Playback` takes the slot in its constructor, gives it back in
+  its destructor, and its `onLoadFailure` sends the `TimeAdvanceWarning`
+  while a session is up (the flag `applyTime`/`tick` last saw, so a
+  `SetTime` sharing a batch with `Hello` still seeks silently). The
+  monolith sets no callback and a report there is dropped (the binding logs
+  it regardless). *`LayerTree`'s two flags* (`m_enableAddRemove`, four
+  checks; the remote `m_readOnly`, 22) are one `enum class EditMode { Full,
+  NoLayerAddRemove, ReadOnly }`; the context menu's mutating items come
+  from `buildUI_mutatingMenuItems()`, which `ReadOnly` does not call, the
+  clipboard shortcuts from `buildUI_clipboardShortcuts()` likewise, and the
+  belt-and-braces inner checks inside disabled scopes are gone. One visible
+  change: "delete selected" sits after "load VSR Archive" and before the
+  save/export items now rather than last. *`saveUIStateTree`* moved from the
+  monolith to `vsr::ui::imgui::Application`, beside `applyUIStateTree`, and
+  `saveApplicationState` calls it (a state file's windows/layout/settings
+  children now precede the Application Dump's rather than bracket it).
+  *The three child names* are `UI_STATE_WINDOWS/LAYOUT/SETTINGS` in
+  `vsr/app/UIStateTree.h` -- in `vsr_app` rather than beside
+  `applyUIStateTree` as the review suggested, because the model library
+  the manifest reader and writer live in links no UI library
+  (`followups/17-ui-state-header-home.md`). `[AnimationManager]` observes
+  the callback; `[StudioServer]`'s warning scenario and `[SciVisStudio]`'s
+  UI-state persistence scenarios pass unchanged.
 
 ### Spec conformance
 

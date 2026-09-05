@@ -62,8 +62,8 @@ from creation replies and scene pushes.
 
 Layer structure is server-push-only: there is **no client layer-edit message
 in the protocol at all**. The server pushes whole-layer `TransferLayer`
-snapshots; the client's `LayerTree` ships as a read-only inspector (a
-read-only mode lands in `vsr_ui_imgui`, see the implementation plan).
+snapshots; the client's `LayerTree` ships as a read-only inspector
+(`LayerTree::EditMode::ReadOnly` in `vsr_ui_imgui`).
 
 Echo suppression is by origin: the server's push delegate is disabled while it
 applies a client message — the same trick the demo client's
