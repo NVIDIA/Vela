@@ -5729,3 +5729,105 @@ SCENARIO("SciVis Studio color maps pair a record with a scene array",
     }
   }
 }
+
+SCENARIO(
+    "SciVis Studio project lookups, labels and sorted views", "[SciVisStudio]")
+{
+  GIVEN("a project with datasets, shots, rigs and color maps")
+  {
+    Project project;
+    Dataset d1;
+    d1.id = "dataset_0001";
+    d1.name = "pressure";
+    d1.status = DatasetStatus::Available;
+    d1.residency = DatasetResidency::Unloaded;
+    d1.sourceKind = DatasetSourceKind::FileAnimation;
+    Dataset d2;
+    d2.id = "dataset_0002";
+    d2.name = "Density";
+    d2.status = DatasetStatus::ImportFailed;
+    project.datasets = {d1, d2};
+
+    Shot s1;
+    s1.id = "shot_0001";
+    s1.name = "b shot";
+    s1.lightRigId = "lightrig_0001";
+    s1.cameraRigId = "camerarig_0001";
+    Shot s2;
+    s2.id = "shot_0002";
+    s2.name = "A shot";
+    s2.lightRigId = "lightrig_0001";
+    s2.cameraRigId = "camerarig_0002"; // not in the project
+    project.shots = {s1, s2};
+    project.activeShotId = "shot_0002";
+
+    LightRig rig;
+    rig.id = "lightrig_0001";
+    rig.name = "Default";
+    project.lightRigs = {rig};
+    CameraRig cam;
+    cam.id = "camerarig_0001";
+    cam.name = "Orbit";
+    project.cameraRigs = {cam};
+    ColorMapRecord map;
+    map.id = "colormap_0001";
+    map.name = "viridis";
+    project.colorMaps = {map};
+
+    THEN("lookups find entities by id and the active shot")
+    {
+      REQUIRE(project::findDataset(project, "dataset_0002")
+          == &project.datasets[1]);
+      REQUIRE(project::findDataset(project, "nope") == nullptr);
+      REQUIRE(project::findShot(project, "shot_0001") == &project.shots[0]);
+      REQUIRE(project::activeShot(project) == &project.shots[1]);
+      REQUIRE(light_rig::findLightRig(project, "lightrig_0001")
+          == &project.lightRigs[0]);
+      REQUIRE(camera_rig::findCameraRig(project, "camerarig_0001")
+          == &project.cameraRigs[0]);
+      REQUIRE(project::findColorMap(project, "colormap_0001")
+          == &project.colorMaps[0]);
+      REQUIRE(project::findColorMap(project, "colormap_0002") == nullptr);
+      REQUIRE(project::lightRigUseCount(project, "lightrig_0001") == 2);
+      REQUIRE(project::cameraRigUseCount(project, "camerarig_0001") == 1);
+      REQUIRE(project::cameraRigUseCount(project, "camerarig_0002") == 1);
+    }
+
+    THEN("display strings name entities and mark gaps")
+    {
+      REQUIRE(std::string(dataset::displayStatus(d1)) == "Unloaded");
+      REQUIRE(std::string(dataset::displayStatus(d2)) == "Import Failed");
+      REQUIRE(std::string(dataset::toString(d1.sourceKind))
+          == dataset::toString(DatasetSourceKind::FileAnimation));
+      REQUIRE(std::string(dataset::toString(d1.residency))
+          == dataset::toString(DatasetResidency::Unloaded));
+      REQUIRE(project::projectDirectoryText(project) == "{unsaved}");
+      project.projectDirectory = "/data/run7";
+      REQUIRE(project::projectDirectoryText(project) == "/data/run7");
+      REQUIRE(project::lightRigLabel(project, "lightrig_0001") == "Default");
+      REQUIRE(project::lightRigLabel(project, "") == "<none>");
+      REQUIRE(project::cameraRigLabel(project, "camerarig_0002")
+          == "<missing: camerarig_0002>");
+      REQUIRE(project::datasetLabel(project, "dataset_0001") == "pressure");
+      REQUIRE(project::shotLabel(project, "shot_0002") == "A shot");
+      REQUIRE(project::colorMapLabel(project, "colormap_0001") == "viridis");
+    }
+
+    THEN("sorted views order by name case-insensitively")
+    {
+      const auto datasets = project::sortedDatasets(project);
+      REQUIRE(datasets.size() == 2);
+      REQUIRE(datasets[0]->name == "Density");
+      REQUIRE(datasets[1]->name == "pressure");
+      const auto shots = project::sortedShots(project);
+      REQUIRE(shots[0]->id == "shot_0002");
+      REQUIRE(shots[1]->id == "shot_0001");
+      REQUIRE(project::sortedLightRigs(project).size() == 1);
+      REQUIRE(project::sortedCameraRigs(project).size() == 1);
+      REQUIRE(project::sortedColorMaps(project).size() == 1);
+      // The collections themselves are untouched.
+      REQUIRE(project.datasets[0].id == "dataset_0001");
+      REQUIRE(project.shots[0].id == "shot_0001");
+    }
+  }
+}

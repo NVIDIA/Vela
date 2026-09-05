@@ -393,7 +393,7 @@ void LightRigEditor::buildUI()
 
   ImGui::SameLine();
   if (ImGui::Button("Remove Rig")) {
-    if (m_projectContext->shotUseCount(rig.id) > 0) {
+    if (project::lightRigUseCount(project, rig.id) > 0) {
       m_pendingDeleteRig = rig.id;
       ImGui::OpenPopup("Delete Light Rig?");
     } else {
@@ -406,8 +406,9 @@ void LightRigEditor::buildUI()
   if (ImGui::BeginPopupModal(
           "Delete Light Rig?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
     auto *pending = light_rig::findLightRig(project, m_pendingDeleteRig);
-    const int useCount = m_projectContext->shotUseCount(m_pendingDeleteRig);
-    ImGui::Text("Delete '%s' and clear %d shot reference%s?",
+    const size_t useCount =
+        project::lightRigUseCount(project, m_pendingDeleteRig);
+    ImGui::Text("Delete '%s' and clear %zu shot reference%s?",
         pending ? pending->name.c_str() : m_pendingDeleteRig.c_str(),
         useCount,
         useCount == 1 ? "" : "s");

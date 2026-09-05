@@ -4,8 +4,6 @@
 #include "ProjectWindow.h"
 // scivisStudioClient
 #include "UICommon.h"
-// vsr_scivis_studio_client_core
-#include "ReplicaView.h"
 // vsr_scivis_studio_model
 #include "Project.h"
 // imgui
@@ -43,7 +41,7 @@ void ProjectWindow::buildEditorUI(const Project &project)
 
   ImGui::Text("Name: %s", project.name.c_str());
   ImGui::TextWrapped(
-      "Path: %s", replica::projectDirectoryText(project).c_str());
+      "Path: %s", project::projectDirectoryText(project).c_str());
   ImGui::Text("Status: %s", project.dirty ? "dirty" : "clean");
 
   ImGui::SeparatorText("Datasets");
@@ -56,7 +54,7 @@ void ProjectWindow::buildEditorUI(const Project &project)
           ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
     }
     ImGui::BulletText(
-        "%s  [%s]", dataset.name.c_str(), replica::datasetStatusText(dataset));
+        "%s  [%s]", dataset.name.c_str(), dataset::displayStatus(dataset));
     if (unloaded)
       ImGui::PopStyleColor();
   }
@@ -113,7 +111,7 @@ void ProjectWindow::buildUI_shots(const Project &project)
 
 void ProjectWindow::buildPopups(const Project &project)
 {
-  const Shot *shot = replica::findShot(project, m_shotToRemove);
+  const Shot *shot = project::findShot(project, m_shotToRemove);
   const auto choice = ui::confirmModal(REMOVE_SHOT_POPUP,
       "Remove shot '" + (shot ? shot->name : m_shotToRemove) + "'?",
       "Remove",

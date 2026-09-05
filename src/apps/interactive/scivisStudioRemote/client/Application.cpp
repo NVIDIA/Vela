@@ -17,7 +17,6 @@
 #include "windows/Timeline.h"
 // vsr_scivis_studio_client_core
 #include "ProjectOps.h"
-#include "ReplicaView.h"
 // vsr_scivis_studio_protocol
 #include "FrameCodec.h"
 // vsr_scivis_studio_model
@@ -638,7 +637,7 @@ void Application::onTimeAdvanceWarning(const TimeAdvanceWarning &warning)
 {
   const Project *project = m_connection->project();
   const std::string shot =
-      project ? replica::shotLabel(*project, warning.shotId) : warning.shotId;
+      project ? project::shotLabel(*project, warning.shotId) : warning.shotId;
   m_statusOverlay.pushToast("Frame " + std::to_string(warning.frame) + " of "
           + shot + " failed to load: " + warning.message,
       true);

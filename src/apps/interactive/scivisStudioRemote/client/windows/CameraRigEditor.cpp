@@ -4,8 +4,6 @@
 #include "CameraRigEditor.h"
 // scivisStudioClient
 #include "UICommon.h"
-// vsr_scivis_studio_client_core
-#include "ReplicaView.h"
 // vsr_scivis_studio_model
 #include "Project.h"
 // vsr_ui_imgui
@@ -83,7 +81,7 @@ void CameraRigEditor::onProjectReplaced()
 const CameraRig *CameraRigEditor::resolveSelection(const Project &project)
 {
   if (!m_selectOnArrival.empty()
-      && replica::findCameraRig(project, m_selectOnArrival)) {
+      && camera_rig::findCameraRig(project, m_selectOnArrival)) {
     m_selected = m_selectOnArrival;
     m_selectOnArrival.clear();
     m_selectedKeyframe = -1;
@@ -92,7 +90,7 @@ const CameraRig *CameraRigEditor::resolveSelection(const Project &project)
     m_selected.clear();
     return nullptr;
   }
-  const CameraRig *rig = replica::findCameraRig(project, m_selected);
+  const CameraRig *rig = camera_rig::findCameraRig(project, m_selected);
   if (!rig) {
     rig = &project.cameraRigs.front();
     m_selected = rig->id;
@@ -103,12 +101,12 @@ const CameraRig *CameraRigEditor::resolveSelection(const Project &project)
 
 void CameraRigEditor::syncSelectionToActiveShot(const Project &project)
 {
-  const Shot *shot = replica::activeShot(project);
+  const Shot *shot = project::activeShot(project);
   const auto activeShotId = shot ? shot->id : ShotID{};
   if (activeShotId == m_lastActiveShotId)
     return;
   m_lastActiveShotId = activeShotId;
-  if (shot && replica::findCameraRig(project, shot->cameraRigId)) {
+  if (shot && camera_rig::findCameraRig(project, shot->cameraRigId)) {
     m_selected = shot->cameraRigId;
     m_selectedKeyframe = -1;
   }
@@ -141,7 +139,7 @@ void CameraRigEditor::buildEditorUI(const Project &project)
     }
     ImGui::EndCombo();
   }
-  rig = replica::findCameraRig(project, m_selected);
+  rig = camera_rig::findCameraRig(project, m_selected);
   if (!rig)
     return;
 
@@ -203,7 +201,7 @@ void CameraRigEditor::buildUI_nameField(const CameraRig &rig)
 void CameraRigEditor::buildUI_rigActions(
     const Project &project, const CameraRig &rig)
 {
-  const Shot *shot = replica::activeShot(project);
+  const Shot *shot = project::activeShot(project);
   const bool activeShotUsesRig = shot && shot->cameraRigId == rig.id;
 
   ImGui::BeginDisabled(pending(m_pendingOp));
@@ -235,7 +233,7 @@ void CameraRigEditor::buildUI_rigActions(
 
   ImGui::SameLine();
   if (ImGui::Button("Remove Rig")) {
-    if (replica::cameraRigUseCount(project, rig.id) > 0) {
+    if (project::cameraRigUseCount(project, rig.id) > 0) {
       m_rigToRemove = rig.id;
       ImGui::OpenPopup(REMOVE_POPUP);
     } else {
@@ -322,8 +320,8 @@ void CameraRigEditor::buildPopups(const Project &project)
 
 void CameraRigEditor::buildUI_removeConfirmation(const Project &project)
 {
-  const CameraRig *rig = replica::findCameraRig(project, m_rigToRemove);
-  const size_t useCount = replica::cameraRigUseCount(project, m_rigToRemove);
+  const CameraRig *rig = camera_rig::findCameraRig(project, m_rigToRemove);
+  const size_t useCount = project::cameraRigUseCount(project, m_rigToRemove);
   const auto choice = ui::confirmModal(REMOVE_POPUP,
       "Delete '" + (rig ? rig->name : m_rigToRemove) + "' and clear "
           + std::to_string(useCount) + " shot reference"

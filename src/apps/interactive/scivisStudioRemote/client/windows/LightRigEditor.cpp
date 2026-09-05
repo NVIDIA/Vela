@@ -4,8 +4,6 @@
 #include "LightRigEditor.h"
 // scivisStudioClient
 #include "UICommon.h"
-// vsr_scivis_studio_client_core
-#include "ReplicaView.h"
 // vsr_scivis_studio_model
 #include "Project.h"
 // vsr_ui_imgui
@@ -66,7 +64,7 @@ void LightRigEditor::onProjectReplaced()
 const LightRig *LightRigEditor::resolveSelection(const Project &project)
 {
   if (!m_selectOnArrival.empty()) {
-    if (replica::findLightRig(project, m_selectOnArrival)) {
+    if (light_rig::findLightRig(project, m_selectOnArrival)) {
       m_selected = m_selectOnArrival;
       m_selectOnArrival.clear();
     }
@@ -75,7 +73,7 @@ const LightRig *LightRigEditor::resolveSelection(const Project &project)
     m_selected.clear();
     return nullptr;
   }
-  const LightRig *rig = replica::findLightRig(project, m_selected);
+  const LightRig *rig = light_rig::findLightRig(project, m_selected);
   if (!rig) {
     rig = &project.lightRigs.front();
     m_selected = rig->id;
@@ -85,7 +83,7 @@ const LightRig *LightRigEditor::resolveSelection(const Project &project)
 
 void LightRigEditor::syncSelectionToActiveShot(const Project &project)
 {
-  const Shot *shot = replica::activeShot(project);
+  const Shot *shot = project::activeShot(project);
   const auto activeShotId = shot ? shot->id : ShotID{};
   const auto activeRigId = shot ? shot->lightRigId : LightRigID{};
   if (activeShotId == m_lastActiveShotId
@@ -93,7 +91,7 @@ void LightRigEditor::syncSelectionToActiveShot(const Project &project)
     return;
   m_lastActiveShotId = activeShotId;
   m_lastActiveShotLightRigId = activeRigId;
-  if (shot && replica::findLightRig(project, shot->lightRigId))
+  if (shot && light_rig::findLightRig(project, shot->lightRigId))
     m_selected = shot->lightRigId;
 }
 
@@ -146,7 +144,7 @@ void LightRigEditor::buildEditorUI(const Project &project)
     }
     ImGui::EndCombo();
   }
-  rig = replica::findLightRig(project, m_selected);
+  rig = light_rig::findLightRig(project, m_selected);
   if (!rig)
     return;
 
@@ -208,7 +206,7 @@ void LightRigEditor::buildUI_nameField(const LightRig &rig)
 void LightRigEditor::buildUI_rigActions(
     const Project &project, const LightRig &rig)
 {
-  const Shot *shot = replica::activeShot(project);
+  const Shot *shot = project::activeShot(project);
   const bool activeShotUsesRig = shot && shot->lightRigId == rig.id;
 
   ImGui::BeginDisabled(pending(m_pendingOp));
@@ -240,7 +238,7 @@ void LightRigEditor::buildUI_rigActions(
 
   ImGui::SameLine();
   if (ImGui::Button("Remove Rig")) {
-    if (replica::lightRigUseCount(project, rig.id) > 0) {
+    if (project::lightRigUseCount(project, rig.id) > 0) {
       m_rigToRemove = rig.id;
       ImGui::OpenPopup(REMOVE_POPUP);
     } else {
@@ -358,8 +356,8 @@ void LightRigEditor::buildPopups(const Project &project)
 
 void LightRigEditor::buildUI_removeConfirmation(const Project &project)
 {
-  const LightRig *rig = replica::findLightRig(project, m_rigToRemove);
-  const size_t useCount = replica::lightRigUseCount(project, m_rigToRemove);
+  const LightRig *rig = light_rig::findLightRig(project, m_rigToRemove);
+  const size_t useCount = project::lightRigUseCount(project, m_rigToRemove);
   const auto choice = ui::confirmModal(REMOVE_POPUP,
       "Delete '" + (rig ? rig->name : m_rigToRemove) + "' and clear "
           + std::to_string(useCount) + " shot reference"

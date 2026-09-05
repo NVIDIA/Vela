@@ -564,20 +564,6 @@ bool ProjectContext::removeLightFromRig(
   return true;
 }
 
-int ProjectContext::shotUseCount(const LightRigID &id) const
-{
-  return static_cast<int>(std::count_if(m_project.shots.begin(),
-      m_project.shots.end(),
-      [&](const Shot &shot) { return shot.lightRigId == id; }));
-}
-
-int ProjectContext::cameraRigUseCount(const CameraRigID &id) const
-{
-  return static_cast<int>(std::count_if(m_project.shots.begin(),
-      m_project.shots.end(),
-      [&](const Shot &shot) { return shot.cameraRigId == id; }));
-}
-
 CameraRig *ProjectContext::activeShotCameraRig()
 {
   auto *shot = project::activeShot(m_project);

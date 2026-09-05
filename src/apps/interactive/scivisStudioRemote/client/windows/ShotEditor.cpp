@@ -4,8 +4,6 @@
 #include "ShotEditor.h"
 // scivisStudioClient
 #include "UICommon.h"
-// vsr_scivis_studio_client_core
-#include "ReplicaView.h"
 // vsr_scivis_studio_model
 #include "Project.h"
 // vsr_ui_imgui
@@ -92,7 +90,7 @@ void ShotEditor::commit(const Shot &shot, const ShotPatch &patch)
 
 void ShotEditor::buildEditorUI(const Project &project)
 {
-  const Shot *shot = replica::activeShot(project);
+  const Shot *shot = project::activeShot(project);
   if (!shot) {
     ImGui::TextDisabled("No active shot");
     return;
@@ -198,7 +196,7 @@ void ShotEditor::buildPopups(const Project &project)
 {
   if (m_shotToRender.empty())
     return;
-  const Shot *shot = replica::findShot(project, m_shotToRender);
+  const Shot *shot = project::findShot(project, m_shotToRender);
   if (!shot) {
     m_shotToRender.clear(); // gone with a snapshot
     return;
@@ -307,7 +305,7 @@ void ShotEditor::buildUI_lightRigSelector(
 {
   const std::string preview = shot.lightRigId.empty()
       ? std::string{"None"}
-      : replica::lightRigLabel(project, shot.lightRigId);
+      : project::lightRigLabel(project, shot.lightRigId);
 
   if (!ImGui::BeginCombo("Light Rig", preview.c_str()))
     return;
@@ -319,7 +317,7 @@ void ShotEditor::buildUI_lightRigSelector(
   const bool noneSelected = shot.lightRigId.empty();
   if (ImGui::Selectable("None", noneSelected) && !noneSelected)
     pick({});
-  for (const LightRig *rig : replica::sortedLightRigs(project)) {
+  for (const LightRig *rig : project::sortedLightRigs(project)) {
     const bool selected = shot.lightRigId == rig->id;
     if (ImGui::Selectable(rig->name.c_str(), selected) && !selected)
       pick(rig->id);
@@ -327,7 +325,7 @@ void ShotEditor::buildUI_lightRigSelector(
       ImGui::SetItemDefaultFocus();
   }
   if (!shot.lightRigId.empty()
-      && !replica::findLightRig(project, shot.lightRigId))
+      && !light_rig::findLightRig(project, shot.lightRigId))
     ImGui::TextDisabled("%s", preview.c_str());
   ImGui::EndCombo();
 }
@@ -337,7 +335,7 @@ void ShotEditor::buildUI_cameraRigSelector(
 {
   const std::string preview = shot.cameraRigId.empty()
       ? std::string{"None"}
-      : replica::cameraRigLabel(project, shot.cameraRigId);
+      : project::cameraRigLabel(project, shot.cameraRigId);
 
   if (!ImGui::BeginCombo("Camera Rig", preview.c_str()))
     return;
@@ -349,7 +347,7 @@ void ShotEditor::buildUI_cameraRigSelector(
   const bool noneSelected = shot.cameraRigId.empty();
   if (ImGui::Selectable("None", noneSelected) && !noneSelected)
     pick({});
-  for (const CameraRig *rig : replica::sortedCameraRigs(project)) {
+  for (const CameraRig *rig : project::sortedCameraRigs(project)) {
     const bool selected = shot.cameraRigId == rig->id;
     if (ImGui::Selectable(rig->name.c_str(), selected) && !selected)
       pick(rig->id);
@@ -357,7 +355,7 @@ void ShotEditor::buildUI_cameraRigSelector(
       ImGui::SetItemDefaultFocus();
   }
   if (!shot.cameraRigId.empty()
-      && !replica::findCameraRig(project, shot.cameraRigId))
+      && !camera_rig::findCameraRig(project, shot.cameraRigId))
     ImGui::TextDisabled("%s", preview.c_str());
   ImGui::EndCombo();
 }

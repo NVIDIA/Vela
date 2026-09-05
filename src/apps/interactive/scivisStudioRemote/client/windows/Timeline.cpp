@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "Timeline.h"
-#include "ReplicaView.h"
 // vsr_scivis_studio_model
 #include "Project.h"
 // vsr_ui_imgui
@@ -129,7 +128,7 @@ void Timeline::flushTime(const Shot &shot)
 
 void Timeline::buildEditorUI(const Project &project)
 {
-  const Shot *shot = replica::activeShot(project);
+  const Shot *shot = project::activeShot(project);
   if (!shot) {
     m_dragFrame.reset();
     m_scrubbedFrame.reset();

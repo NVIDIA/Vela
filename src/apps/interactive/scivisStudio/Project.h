@@ -61,6 +61,33 @@ ColorMapRecord *findColorMap(Project &project, const ColorMapID &id);
 const ColorMapRecord *findColorMap(
     const Project &project, const ColorMapID &id);
 
+// Shots referencing the rig: the confirm-before-delete gate.
+size_t lightRigUseCount(const Project &project, const LightRigID &id);
+size_t cameraRigUseCount(const Project &project, const CameraRigID &id);
+
+// Display strings ////////////////////////////////////////////////////////////
+
+// The directory, or "{unsaved}" for a project never saved.
+std::string projectDirectoryText(const Project &project);
+// The entity's name; "<none>" for an empty id, "<missing: id>" for an id the
+// project does not hold.
+std::string datasetLabel(const Project &project, const DatasetID &id);
+std::string shotLabel(const Project &project, const ShotID &id);
+std::string lightRigLabel(const Project &project, const LightRigID &id);
+std::string cameraRigLabel(const Project &project, const CameraRigID &id);
+std::string colorMapLabel(const Project &project, const ColorMapID &id);
+
+// Sorted views ///////////////////////////////////////////////////////////////
+
+// By name, case-insensitively, ties broken by id; the collections
+// themselves keep their order. The pointers die with the next change to
+// the collection.
+std::vector<const Dataset *> sortedDatasets(const Project &project);
+std::vector<const Shot *> sortedShots(const Project &project);
+std::vector<const LightRig *> sortedLightRigs(const Project &project);
+std::vector<const CameraRig *> sortedCameraRigs(const Project &project);
+std::vector<const ColorMapRecord *> sortedColorMaps(const Project &project);
+
 } // namespace project
 
 // Inlined definitions ////////////////////////////////////////////////////////

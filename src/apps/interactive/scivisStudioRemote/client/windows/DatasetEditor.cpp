@@ -4,8 +4,6 @@
 #include "DatasetEditor.h"
 // scivisStudioClient
 #include "UICommon.h"
-// vsr_scivis_studio_client_core
-#include "ReplicaView.h"
 // vsr_scivis_studio_model
 #include "Project.h"
 // vsr_ui_imgui
@@ -62,7 +60,7 @@ const Dataset *DatasetEditor::resolveSelection(const Project &project)
     m_selected.clear();
     return nullptr;
   }
-  const Dataset *dataset = replica::findDataset(project, m_selected);
+  const Dataset *dataset = project::findDataset(project, m_selected);
   if (!dataset) {
     dataset = &project.datasets.front();
     m_selected = dataset->id;
@@ -113,7 +111,7 @@ void DatasetEditor::buildEditorUI(const Project &project)
     }
     ImGui::EndCombo();
   }
-  dataset = replica::findDataset(project, m_selected);
+  dataset = project::findDataset(project, m_selected);
   if (!dataset)
     return;
 
@@ -193,9 +191,9 @@ void DatasetEditor::buildUI_details(const Dataset &dataset)
 {
   const bool unloaded = dataset.residency == DatasetResidency::Unloaded;
   ImGui::Text("ID: %s", dataset.id.c_str());
-  ImGui::Text("Status: %s", replica::datasetStatusText(dataset));
-  ImGui::Text("Residency: %s", replica::datasetResidencyText(dataset));
-  ImGui::Text("Source kind: %s", replica::datasetSourceKindText(dataset));
+  ImGui::Text("Status: %s", dataset::displayStatus(dataset));
+  ImGui::Text("Residency: %s", dataset::toString(dataset.residency));
+  ImGui::Text("Source kind: %s", dataset::toString(dataset.sourceKind));
   ImGui::Text("Importer: %s", dataset.importerType.c_str());
   ImGui::TextWrapped("Source: %s", dataset.source.sourcePath.c_str());
   if (dataset.sourceKind == DatasetSourceKind::FileAnimation) {
@@ -359,7 +357,7 @@ void DatasetEditor::buildUI_discoveryReview()
 
 void DatasetEditor::buildUI_removeConfirmation(const Project &project)
 {
-  const Dataset *dataset = replica::findDataset(project, m_datasetToRemove);
+  const Dataset *dataset = project::findDataset(project, m_datasetToRemove);
   const auto choice = ui::confirmModal(REMOVE_POPUP,
       "Remove '" + (dataset ? dataset->name : m_datasetToRemove)
           + "' from the inventory and every shot?",

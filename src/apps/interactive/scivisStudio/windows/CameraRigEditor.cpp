@@ -224,7 +224,7 @@ void CameraRigEditor::buildUI_rigControls()
 
   ImGui::SameLine();
   if (ImGui::Button("Remove Rig")) {
-    if (m_projectContext->cameraRigUseCount(cameraRig.id) > 0) {
+    if (project::cameraRigUseCount(project, cameraRig.id) > 0) {
       m_pendingDeleteRig = cameraRig.id;
       ImGui::OpenPopup("Delete Camera Rig?");
     } else {
@@ -237,9 +237,9 @@ void CameraRigEditor::buildUI_rigControls()
   if (ImGui::BeginPopupModal(
           "Delete Camera Rig?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
     auto *pending = camera_rig::findCameraRig(project, m_pendingDeleteRig);
-    const int useCount =
-        m_projectContext->cameraRigUseCount(m_pendingDeleteRig);
-    ImGui::Text("Delete '%s' and clear %d shot reference%s?",
+    const size_t useCount =
+        project::cameraRigUseCount(project, m_pendingDeleteRig);
+    ImGui::Text("Delete '%s' and clear %zu shot reference%s?",
         pending ? pending->name.c_str() : m_pendingDeleteRig.c_str(),
         useCount,
         useCount == 1 ? "" : "s");

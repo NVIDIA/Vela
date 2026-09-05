@@ -8,7 +8,6 @@
 // vsr_scivis_studio_client_core
 #include "ArchiveRenameFollowUp.h"
 #include "ProjectOps.h"
-#include "ReplicaView.h"
 #include "ServerConnection.h"
 // vsr_scivis_studio_protocol
 #include "BrowseMessages.h"
@@ -783,8 +782,8 @@ SCENARIO("ServerConnection applies snapshots outside the bootstrap",
         const Project *project = f.connection.project();
         REQUIRE(project);
         REQUIRE(project->name == "renamed project");
-        REQUIRE(replica::activeShot(*project));
-        REQUIRE(replica::activeShot(*project)->id == "shot_0002");
+        REQUIRE(project::activeShot(*project));
+        REQUIRE(project::activeShot(*project)->id == "shot_0002");
         REQUIRE_FALSE(f.connection.bootstrapping());
         REQUIRE(f.bootstraps == 1);
       }
@@ -1514,107 +1513,6 @@ SCENARIO("ProjectOps decodes Remote Browse results", "[StudioClient]")
         REQUIRE_FALSE(listing);
         REQUIRE(error == "path is outside the server's Data Roots");
       }
-    }
-  }
-}
-
-SCENARIO("ReplicaView reads the Project Replica", "[StudioClient]")
-{
-  GIVEN("a project with datasets, shots, rigs and color maps")
-  {
-    Project project;
-    Dataset d1;
-    d1.id = "dataset_0001";
-    d1.name = "pressure";
-    d1.status = DatasetStatus::Available;
-    d1.residency = DatasetResidency::Unloaded;
-    d1.sourceKind = DatasetSourceKind::FileAnimation;
-    Dataset d2;
-    d2.id = "dataset_0002";
-    d2.name = "Density";
-    d2.status = DatasetStatus::ImportFailed;
-    project.datasets = {d1, d2};
-
-    Shot s1;
-    s1.id = "shot_0001";
-    s1.name = "b shot";
-    s1.lightRigId = "lightrig_0001";
-    s1.cameraRigId = "camerarig_0001";
-    Shot s2;
-    s2.id = "shot_0002";
-    s2.name = "A shot";
-    s2.lightRigId = "lightrig_0001";
-    s2.cameraRigId = "camerarig_0002"; // not in the project
-    project.shots = {s1, s2};
-    project.activeShotId = "shot_0002";
-
-    LightRig rig;
-    rig.id = "lightrig_0001";
-    rig.name = "Default";
-    project.lightRigs = {rig};
-    CameraRig cam;
-    cam.id = "camerarig_0001";
-    cam.name = "Orbit";
-    project.cameraRigs = {cam};
-    ColorMapRecord map;
-    map.id = "colormap_0001";
-    map.name = "viridis";
-    project.colorMaps = {map};
-
-    THEN("lookups find entities by id and the active shot")
-    {
-      REQUIRE(replica::findDataset(project, "dataset_0002")
-          == &project.datasets[1]);
-      REQUIRE(replica::findDataset(project, "nope") == nullptr);
-      REQUIRE(replica::findShot(project, "shot_0001") == &project.shots[0]);
-      REQUIRE(replica::activeShot(project) == &project.shots[1]);
-      REQUIRE(replica::findLightRig(project, "lightrig_0001")
-          == &project.lightRigs[0]);
-      REQUIRE(replica::findCameraRig(project, "camerarig_0001")
-          == &project.cameraRigs[0]);
-      REQUIRE(replica::findColorMap(project, "colormap_0001")
-          == &project.colorMaps[0]);
-      REQUIRE(replica::findColorMap(project, "colormap_0002") == nullptr);
-      REQUIRE(replica::lightRigUseCount(project, "lightrig_0001") == 2);
-      REQUIRE(replica::cameraRigUseCount(project, "camerarig_0001") == 1);
-      REQUIRE(replica::cameraRigUseCount(project, "camerarig_0002") == 1);
-    }
-
-    THEN("display strings reuse the model's names and mark gaps")
-    {
-      REQUIRE(std::string(replica::datasetStatusText(d1)) == "Unloaded");
-      REQUIRE(std::string(replica::datasetStatusText(d2)) == "Import Failed");
-      REQUIRE(std::string(replica::datasetSourceKindText(d1))
-          == dataset::toString(DatasetSourceKind::FileAnimation));
-      REQUIRE(std::string(replica::datasetResidencyText(d1))
-          == dataset::toString(DatasetResidency::Unloaded));
-      REQUIRE(replica::projectDirectoryText(project) == "{unsaved}");
-      project.projectDirectory = "/data/run7";
-      REQUIRE(replica::projectDirectoryText(project) == "/data/run7");
-      REQUIRE(replica::lightRigLabel(project, "lightrig_0001") == "Default");
-      REQUIRE(replica::lightRigLabel(project, "") == "<none>");
-      REQUIRE(replica::cameraRigLabel(project, "camerarig_0002")
-          == "<missing: camerarig_0002>");
-      REQUIRE(replica::datasetLabel(project, "dataset_0001") == "pressure");
-      REQUIRE(replica::shotLabel(project, "shot_0002") == "A shot");
-      REQUIRE(replica::colorMapLabel(project, "colormap_0001") == "viridis");
-    }
-
-    THEN("sorted views order by name case-insensitively")
-    {
-      const auto datasets = replica::sortedDatasets(project);
-      REQUIRE(datasets.size() == 2);
-      REQUIRE(datasets[0]->name == "Density");
-      REQUIRE(datasets[1]->name == "pressure");
-      const auto shots = replica::sortedShots(project);
-      REQUIRE(shots[0]->id == "shot_0002");
-      REQUIRE(shots[1]->id == "shot_0001");
-      REQUIRE(replica::sortedLightRigs(project).size() == 1);
-      REQUIRE(replica::sortedCameraRigs(project).size() == 1);
-      REQUIRE(replica::sortedColorMaps(project).size() == 1);
-      // The collections themselves are untouched.
-      REQUIRE(project.datasets[0].id == "dataset_0001");
-      REQUIRE(project.shots[0].id == "shot_0001");
     }
   }
 }

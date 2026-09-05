@@ -199,10 +199,8 @@ struct ProjectContext
   vsr::scene::LayerNodeRef addLightToRig(
       LightRig &rig, const std::string &subtype);
   bool removeLightFromRig(LightRig &rig, vsr::scene::LayerNodeRef lightNode);
-  int shotUseCount(const LightRigID &id) const;
   CameraRig *createCameraRig(const std::string &name = "");
   bool removeCameraRig(const CameraRigID &id);
-  int cameraRigUseCount(const CameraRigID &id) const;
   CameraRig *activeShotCameraRig();
 
   // Color maps (ColorMaps.h pairs the record with its scene Array): create

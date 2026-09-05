@@ -8,7 +8,6 @@ add_library(vsr_scivis_studio_client_core OBJECT
   ArchiveRenameFollowUp.cpp
   MirrorUpdateDelegate.cpp
   ProjectOps.cpp
-  ReplicaView.cpp
   ServerConnection.cpp
 )
 
