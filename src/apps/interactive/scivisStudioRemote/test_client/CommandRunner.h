@@ -170,7 +170,7 @@ struct CommandRunner
       std::vector<Event> &)>;
   // How a wait ended: with what it waited for, at the deadline, with the link
   // Lost meanwhile, or with an Error nobody expected.
-  enum class Wait
+  enum class WaitEnd
   {
     Done,
     TimedOut,
@@ -288,6 +288,11 @@ struct CommandRunner
   // fields, and turns `ok` into the OK/FAIL the expect-fail prefix asks for.
   Failure awaitReply(
       uint64_t requestId, Deadline, Modifiers, const Describe &describe);
+  // A Describe over one decoded Result: FAILs an ok reply that carries no
+  // `name`, otherwise hands the Result to `describe(self, result, event,
+  // following)`, which fills the record and the variables.
+  template <typename Result, typename F>
+  static Describe withResult(const char *name, F describe);
   // A Describe that reads one string id out of a Result, prints it as
   // `key=` and stores it in the named variable.
   template <typename Result>
@@ -317,21 +322,21 @@ struct CommandRunner
 
   // Polls, printing events as they come, until `done` holds, the deadline
   // passes, the link goes Lost (unless LossEnds::Nothing) or an Error arrives.
-  Wait pumpUntil(const std::function<bool()> &done,
+  WaitEnd pumpUntil(const std::function<bool()> &done,
       Deadline deadline,
       LossEnds lossEnds = LossEnds::Wait);
   // Polls until an event `accept`s (that event is returned in `matched`) or
   // `done` holds; an Error that `accept` does not take ends the wait as
-  // Wait::Error. `accept` sees each event before it is printed and may add
+  // WaitEnd::Error. `accept` sees each event before it is printed and may add
   // fields to it (a reply's decoded results).
-  Wait pumpUntilEvent(const std::function<bool(Event &)> &accept,
+  WaitEnd pumpUntilEvent(const std::function<bool(Event &)> &accept,
       Deadline deadline,
       Event *matched = nullptr,
       LossEnds lossEnds = LossEnds::Wait,
       const std::function<bool()> &done = {});
   // The FAIL reason of a wait that ended without `awaited`.
   std::string waitFailure(
-      Wait wait, const std::string &awaited, Deadline deadline) const;
+      WaitEnd wait, const std::string &awaited, Deadline deadline) const;
   // The FAIL of a command that needs the link, when it is not Connected.
   Failure notConnected() const;
   // Prints whatever events are already queued without waiting; the reason
@@ -477,21 +482,34 @@ inline CommandRunner::Failure CommandRunner::sendRequest(
   return awaitReply(request.requestId, deadline, modifiers, describe);
 }
 
+template <typename Result, typename F>
+inline CommandRunner::Describe CommandRunner::withResult(
+    const char *name, F describe)
+{
+  return [name, describe = std::move(describe)](CommandRunner &self,
+             const protocol::ProjectOpReply &reply,
+             Event &event,
+             std::vector<Event> &following) -> Failure {
+    const auto result = protocol::results<Result>(reply);
+    if (!result)
+      return std::string("the reply carries no ") + name;
+    describe(self, *result, event, following);
+    return {};
+  };
+}
+
 template <typename Result>
 inline CommandRunner::Describe CommandRunner::createdResult(
     std::string Result::*id, const char *key, const char *variable)
 {
-  return [id, key, variable](CommandRunner &self,
-             const protocol::ProjectOpReply &reply,
-             Event &event,
-             std::vector<Event> &) -> Failure {
-    const auto result = protocol::results<Result>(reply);
-    if (!result)
-      return std::string("the reply carries no ") + key + " result";
-    event.fields.emplace_back(key, (*result).*id);
-    self.m_variables[variable] = (*result).*id;
-    return {};
-  };
+  return withResult<Result>(key,
+      [id, key, variable](CommandRunner &self,
+          const Result &result,
+          Event &event,
+          std::vector<Event> &) {
+        event.fields.emplace_back(key, result.*id);
+        self.m_variables[variable] = result.*id;
+      });
 }
 
 } // namespace vsr::scivis_studio::test_client

@@ -38,7 +38,7 @@ CommandRunner::Failure CommandRunner::awaitTask(
     return task && task->finished();
   };
   const auto wait = pumpUntil(ended, deadline);
-  if (wait != Wait::Done) {
+  if (wait != WaitEnd::Done) {
     return waitFailure(
         wait, "the end of task " + std::to_string(taskId), deadline);
   }
@@ -85,7 +85,7 @@ CommandRunner::Failure CommandRunner::awaitTaskProgress(
         return task && (task->progressReports > 0 || task->finished());
       },
       deadline);
-  if (wait != Wait::Done)
+  if (wait != WaitEnd::Done)
     return waitFailure(wait, "progress of task " + idText, deadline);
   const auto &task = *m_session->task(*id);
   if (task.progressReports == 0) {
@@ -103,7 +103,7 @@ CommandRunner::Failure CommandRunner::awaitSnapshot(
   const auto wait =
       pumpUntil([&] { return m_session->snapshotsReceived() > m_snapshotMark; },
           deadline);
-  if (wait != Wait::Done)
+  if (wait != WaitEnd::Done)
     return waitFailure(wait, "ProjectSnapshot", deadline);
   // One snapshot per await: two that land in the same poll (a SetPlaying's
   // and the auto-stop's, say) are awaited one at a time, the second at once.
@@ -174,7 +174,7 @@ CommandRunner::Failure CommandRunner::awaitReply(uint64_t requestId,
           return false;
         },
         deadline);
-    if (wait != Wait::Done)
+    if (wait != WaitEnd::Done)
       return waitFailure(wait, "the reply to request " + idText, deadline);
     if (!reply)
       return "the reply to request " + idText + " did not decode";

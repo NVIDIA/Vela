@@ -273,7 +273,7 @@ CommandRunner::Failure CommandRunner::pick(
         return false;
       },
       deadline);
-  if (wait != Wait::Done)
+  if (wait != WaitEnd::Done)
     return waitFailure(wait, "the PickReply to request " + idText, deadline);
   if (!reply)
     return "the PickReply to request " + idText + " did not decode";

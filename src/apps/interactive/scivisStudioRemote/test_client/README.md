@@ -177,7 +177,12 @@ component: `set-param camera 1 fovy float32 0.9`, `set-param camera 1
 position float32_vec3 1 2 3`, `... note string "two words"`, `... flag bool
 true`. Where a command takes an object as `TYPE INDEX`, the one-token
 `TYPE:INDEX` spelling `$lastObjectRef` expands to is accepted as well
-(`set-outline`, `request-array-histogram`). `sleep`'s MS, like every
+(`set-outline`, `request-array-histogram`). `find-object` looks every array
+kind up in the mirror's one `array` pool. `reconnect` retries refused
+attempts until its deadline, since a server being restarted refuses at
+once. `set-ui-state` composes: a key set again is overwritten, the others
+stay; after `set-ui-state none`, `save-project` sends no tree and the server
+keeps the one the project opened with. `sleep`'s MS, like every
 `timeout=MS`, must fit a deadline. `save-frame` writes relative to the
 working directory.
 
