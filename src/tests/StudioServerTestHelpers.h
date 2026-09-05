@@ -3,6 +3,7 @@
 
 #pragma once
 
+// tests
 #include "NetworkTestHelpers.h"
 // catch
 #include "catch.hpp"
@@ -121,14 +122,7 @@ struct ServerLoop
 // Options for an in-process test server: the helide device, a port the OS
 // picks, and the given Data Roots (none by default).
 inline vsr::scivis_studio::server::ServerOptions testServerOptions(
-    std::vector<std::filesystem::path> dataRoots = {})
-{
-  vsr::scivis_studio::server::ServerOptions options;
-  options.port = 0;
-  options.library = "helide";
-  options.dataRoots = std::move(dataRoots);
-  return options;
-}
+    std::vector<std::filesystem::path> dataRoots = {});
 
 // A StudioServer started on `options` and run on its own loop thread.
 // Stopping it is what a client sees as the server going away: run() tears
@@ -164,15 +158,7 @@ struct RunningServer
 // bootstrap's messages recorded.
 inline void bootstrapClient(TestClient &client,
     uint16_t port,
-    std::chrono::milliseconds timeout = std::chrono::seconds(5))
-{
-  using vsr::scivis_studio::protocol::Hello;
-  using vsr::scivis_studio::protocol::StudioMessageType;
-  client.connect(port);
-  REQUIRE(client.waitForCount(StudioMessageType::Hello, 1, timeout));
-  client.send(Hello{});
-  REQUIRE(client.waitForCount(StudioMessageType::BootstrapEnd, 1, timeout));
-}
+    std::chrono::milliseconds timeout = std::chrono::seconds(5));
 
 // A RunningServer with one TestClient through the handshake and the server
 // Established; the bootstrap's messages stay recorded until the caller
@@ -201,6 +187,36 @@ struct ServerSession : RunningServer
 
 // The task id a TaskStarted reply names; fails the test on any other reply.
 inline uint64_t startedTaskId(
+    const vsr::scivis_studio::protocol::ProjectOpReply &reply);
+
+// Writes the one-triangle OBJ (corners at the origin, (1, 0, 0) and
+// (0, 1, 0) in the z = 0 plane) the server suites import.
+inline void writeTriangleObj(const std::filesystem::path &file);
+
+// Inlined definitions ////////////////////////////////////////////////////////
+
+inline vsr::scivis_studio::server::ServerOptions testServerOptions(
+    std::vector<std::filesystem::path> dataRoots)
+{
+  vsr::scivis_studio::server::ServerOptions options;
+  options.port = 0;
+  options.library = "helide";
+  options.dataRoots = std::move(dataRoots);
+  return options;
+}
+
+inline void bootstrapClient(
+    TestClient &client, uint16_t port, std::chrono::milliseconds timeout)
+{
+  using vsr::scivis_studio::protocol::Hello;
+  using vsr::scivis_studio::protocol::StudioMessageType;
+  client.connect(port);
+  REQUIRE(client.waitForCount(StudioMessageType::Hello, 1, timeout));
+  client.send(Hello{});
+  REQUIRE(client.waitForCount(StudioMessageType::BootstrapEnd, 1, timeout));
+}
+
+inline uint64_t startedTaskId(
     const vsr::scivis_studio::protocol::ProjectOpReply &reply)
 {
   using vsr::scivis_studio::protocol::TaskStartedResult;
@@ -212,14 +228,10 @@ inline uint64_t startedTaskId(
   return started->taskId;
 }
 
-// Writes the one-triangle OBJ (corners at the origin, (1, 0, 0) and
-// (0, 1, 0) in the z = 0 plane) the server suites import.
 inline void writeTriangleObj(const std::filesystem::path &file)
 {
   std::ofstream(file) << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
 }
-
-// Inlined definitions ////////////////////////////////////////////////////////
 
 inline TestClient::TestClient()
 {

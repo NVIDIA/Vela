@@ -17,7 +17,7 @@
  *
  * Example:
  *   ScopedFixtureDirectory scratch("vsr_studio_e2e_");
- *   writeTriangleObj(scratch.path / "triangle.obj");
+ *   std::ofstream(scratch.path / "notes.txt") << "gone with the test\n";
  */
 struct ScopedFixtureDirectory
 {

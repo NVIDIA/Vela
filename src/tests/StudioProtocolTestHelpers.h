@@ -12,6 +12,8 @@
 #include "vsr/network/NetworkChannel.hpp"
 // vsr_core
 #include "vsr/core/DataTree.hpp"
+// std
+#include <cstdint>
 
 /*
  * Round trips for the Studio payload tests. Payload structs have no

@@ -3,13 +3,13 @@
 
 #pragma once
 
+// tests
 #include "NetworkTestHelpers.h"
 #include "StudioServerTestHelpers.h"
 // vsr_scivis_studio_client_core
 #include "ServerConnection.h"
 // vsr_scivis_studio_server_core
 #include "ServerOptions.h"
-#include "StudioServer.h"
 // vsr_scene
 #include "vsr/scene/Scene.hpp"
 // anari
@@ -32,7 +32,7 @@
  *   if (!helideAvailable())
  *     return;
  *   RunningServer server(tempRootServerOptions());
- *   MirroredClient client;
+ *   MirroredClient client(fastTimings(200ms, 2s, 30s), 10s);
  *   client.connect(server.port());
  *   REQUIRE(client.waitConnectedAndBootstrapped());
  */
@@ -75,12 +75,7 @@ inline vsr::scivis_studio::client::ConnectionTimings fastTimings(
 // is its Data Root, since their scratch directories live there. A nonzero
 // `port` restarts a server where a client last saw one.
 inline vsr::scivis_studio::server::ServerOptions tempRootServerOptions(
-    uint16_t port = 0)
-{
-  auto options = testServerOptions({std::filesystem::temp_directory_path()});
-  options.port = port;
-  return options;
-}
+    uint16_t port = 0);
 
 // The client core on a mirror Scene, counting bootstraps and collecting the
 // server's errors, with the wait every session test opens on. Fixtures that
@@ -104,6 +99,16 @@ struct MirroredClient
   std::vector<std::string> errors;
   std::chrono::milliseconds timeout;
 };
+
+// Inlined definitions ////////////////////////////////////////////////////////
+
+inline vsr::scivis_studio::server::ServerOptions tempRootServerOptions(
+    uint16_t port)
+{
+  auto options = testServerOptions({std::filesystem::temp_directory_path()});
+  options.port = port;
+  return options;
+}
 
 inline MirroredClient::MirroredClient(
     const vsr::scivis_studio::client::ConnectionTimings &timings,

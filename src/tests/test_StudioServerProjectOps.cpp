@@ -37,7 +37,6 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
-#include <memory>
 #include <optional>
 #include <string>
 #include <system_error>

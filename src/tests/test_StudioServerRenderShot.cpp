@@ -111,19 +111,6 @@ size_t indexOfFrom(TestClient &client, StudioMessageType type, size_t from)
   return SIZE_MAX;
 }
 
-size_t indexOfReply(TestClient &client, uint64_t requestId)
-{
-  const auto messages = client.messages();
-  for (size_t i = 0; i < messages.size(); ++i) {
-    if (messages[i].header.type != uint8_t(StudioMessageType::ProjectOpReply))
-      continue;
-    const auto reply = decode<ProjectOpReply>(messages[i]);
-    if (reply && reply->requestId == requestId)
-      return i;
-  }
-  return SIZE_MAX;
-}
-
 size_t indexOfTaskEnd(TestClient &client, uint64_t taskId)
 {
   const auto messages = client.messages();
