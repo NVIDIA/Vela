@@ -1569,7 +1569,13 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   dropped mid-task, the runner's own FAILs); the milestone-6/7 happy path it
   re-ran with scripted replies is owned by the `StudioScenario` scripts
   against a real server (`followups/20-test-client-suite-decisions.md`
-  lists the drops and the record-text checks that went with them). The five
+  lists the drops and the record-text checks that went with them). At
+  Jefferson's direction the four wire and value checks a script cannot make
+  stayed on the fake, in one WHEN: the served `request-array-histogram`
+  (the only success path of the `histogram.*` values), `viewport-settings`
+  composition and its bare re-send, the `set-outline` spellings and their
+  identity encodings, and `set-ui-state` composition into the saved tree.
+  The five
   `[StudioRemote]` scenarios, each a `WHEN -> THEN -> AND_THEN x 4-6` chain
   with one leaf, are one linear `THEN` each with `INFO` step markers and
   shared step helpers (`waitForLost`, `requestOk`, `completeTask`,

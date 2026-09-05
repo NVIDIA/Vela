@@ -55,13 +55,17 @@
  * ProjectOpReply before CreateShot's own and a stray PickReply before a
  * Pick's; snapshots held back (`deferSnapshots`) or delayed
  * (`snapshotDelay`); a SetTime that is always answered with a
- * TimeAdvanceWarning; a RequestArrayHistogram refused as not scalar; a
- * RenderShot (which needs a saved project) that reports frame 1 of
- * frameCount and then holds, refusing CreateShot with "render in progress"
- * until a CancelTask naming it ends it as TaskFailed "cancelled" with
- * framesCompleted 1; and a task-status replay at every bootstrap of the ends
- * sent since the last one, as the real server does. The happy path of the
- * command surface runs against a real server in the StudioScenario scripts.
+ * TimeAdvanceWarning; a RenderShot (which needs a saved project) that
+ * reports frame 1 of frameCount and then holds, refusing CreateShot with
+ * "render in progress" until a CancelTask naming it ends it as TaskFailed
+ * "cancelled" with framesCompleted 1; and a task-status replay at every
+ * bootstrap of the ends sent since the last one, as the real server does.
+ * The happy path of the command surface runs against a real server in the
+ * StudioScenario scripts. What a script cannot observe is what the client
+ * put on the wire, so the fake also records SetOutline and ViewportSettings
+ * without answering, and bins array 0 (three fixed bins) while refusing
+ * every other array as not scalar, for the tests that read the composed
+ * requests back through `requests<T>()`.
  */
 struct FakeProjectServer
 {
@@ -553,11 +557,22 @@ inline void FakeProjectServer::onRequest(const Message &msg)
     send(encode(reply));
     return;
   }
+  case StudioMessageType::SetOutline:
+  case StudioMessageType::ViewportSettings:
+    return; // logged for requests<T>(), nothing to answer
   case StudioMessageType::RequestArrayHistogram: {
     const auto req = *decode<RequestArrayHistogram>(msg);
-    replyError(req.requestId,
-        "array " + std::to_string(req.array.objectIndex)
-            + " element type ANARI_FLOAT32_VEC3 is not scalar");
+    if (req.array.type != ANARI_ARRAY || req.array.objectIndex != 0) {
+      replyError(req.requestId,
+          "array " + std::to_string(req.array.objectIndex)
+              + " element type ANARI_FLOAT32_VEC3 is not scalar");
+      return;
+    }
+    ArrayHistogramResult result;
+    result.bins = {1, 2, 3};
+    result.minValue = 0.f;
+    result.maxValue = 1.f;
+    reply(req.requestId, result);
     return;
   }
 

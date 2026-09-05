@@ -284,6 +284,89 @@ SCENARIO("the test client drives project ops against a fake server",
       }
     }
 
+    WHEN(
+        "a script composes its outline, viewport and UI-state edits and bins"
+        " an array")
+    {
+      // What a scenario script cannot observe: the request each spelling puts
+      // on the wire, and that a later edit is composed onto the remembered
+      // struct rather than sent alone. The histogram is the one success path
+      // of the histogram.* assert values.
+      const auto result = runScript(session,
+          "connect " + endpoint + "\n"
+          "set-outline surface 4\n"
+          "set-outline volume:2\n"
+          "set-outline none\n"
+          "set-outline\n"
+          "viewport-settings visualizeAOV=depth depthVisualMinimum=0"
+          " depthVisualMaximum=10\n"
+          "viewport-settings showWorldBounds=on worldBoundsWidth=2"
+          " worldBoundsColor=1,0,0,1\n"
+          "viewport-settings\n"
+          "set-ui-state layout=abc theme=dark\n"
+          "set-ui-state theme=light\n"
+          "save-project /data/p1\n"
+          "await-task\n"
+          "await-snapshot\n"
+          "request-array-histogram array 0 3\n"
+          "assert histogram.bins == 3\n"
+          "assert histogram.total == 6\n"
+          "assert histogram.min == 0\n"
+          "assert histogram.max == 1\n"
+          "assert errors.received == 0\n"
+          "disconnect\n");
+      for (const auto &f : failLines(result.records))
+        WARN(f);
+      REQUIRE(result.ok);
+
+      THEN("the wire carries the encoded identities and the composed structs")
+      {
+        REQUIRE(hasLine(result.records,
+            "EVT ProjectOpReply requestId=2 ok=true error=\"\" bins=3 min=0"
+            " max=1 nonFinite=0"));
+        const auto outlines = server.requests<SetOutline>();
+        REQUIRE(outlines.size() == 4);
+        REQUIRE(outlines[0].objectIdentity);
+        REQUIRE(outlines[0].objectIdentity->type == ANARI_SURFACE);
+        REQUIRE(outlines[0].objectIdentity->objectIndex == 4);
+        REQUIRE(outlines[1].objectIdentity);
+        REQUIRE(outlines[1].objectIdentity->type == ANARI_VOLUME);
+        REQUIRE(outlines[1].objectIdentity->objectIndex == 2);
+        REQUIRE_FALSE(outlines[2].objectIdentity);
+        REQUIRE_FALSE(outlines[3].objectIdentity);
+        const auto settings = server.requests<ViewportSettings>();
+        REQUIRE(settings.size() == 3);
+        REQUIRE(settings[0].visualizeAOV == vsr::rendering::AOVType::DEPTH);
+        REQUIRE(settings[0].depthVisualMaximum == 10.f);
+        REQUIRE_FALSE(settings[0].showWorldBounds);
+        REQUIRE(settings[0].highlightSelection); // the default, sent whole
+        REQUIRE(settings[1].visualizeAOV == vsr::rendering::AOVType::DEPTH);
+        REQUIRE(settings[1].depthVisualMaximum == 10.f);
+        REQUIRE(settings[1].showWorldBounds);
+        REQUIRE(settings[1].worldBoundsWidth == 2);
+        REQUIRE(settings[1].worldBoundsColor.x == 1.f);
+        REQUIRE(settings[1].worldBoundsColor.y == 0.f);
+        REQUIRE(settings[1].worldBoundsColor.w == 1.f);
+        // The bare call re-sends the remembered struct.
+        REQUIRE(settings[2].showWorldBounds);
+        REQUIRE(settings[2].visualizeAOV == vsr::rendering::AOVType::DEPTH);
+        const auto saves = server.requests<SaveProject>();
+        REQUIRE(saves.size() == 1);
+        REQUIRE(saves[0].uiState);
+        const auto *windows = saves[0].uiState->root().child("windows");
+        REQUIRE(windows);
+        REQUIRE(windows->numChildren() == 2);
+        REQUIRE(windows->child("layout")->getValueAs<std::string>() == "abc");
+        REQUIRE(windows->child("theme")->getValueAs<std::string>() == "light");
+        REQUIRE(saves[0].uiState->root().child("layout") == nullptr);
+        const auto histograms = server.requests<RequestArrayHistogram>();
+        REQUIRE(histograms.size() == 1);
+        REQUIRE(histograms[0].array.type == ANARI_ARRAY);
+        REQUIRE(histograms[0].array.objectIndex == 0);
+        REQUIRE(histograms[0].binCount == 3);
+      }
+    }
+
     WHEN("a script misuses the playback, pick and viewport commands")
     {
       const auto result = runScript(session,
