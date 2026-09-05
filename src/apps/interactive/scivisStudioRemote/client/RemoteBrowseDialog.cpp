@@ -152,6 +152,10 @@ void RemoteBrowseDialog::navigateTo(const std::filesystem::path &directory)
   m_requestedDirectory = normalized(directory);
   ListDirectory list;
   list.directory = m_requestedDirectory;
+  // Latest wins: the entries stay clickable while a listing is out, so a
+  // navigation supersedes the one before it rather than being refused; the
+  // older reply is told apart by its id below and dropped.
+  m_pendingList.clear();
   m_pendingList.sendForResult<ListDirectoryResult>(m_context->ops(),
       std::move(list),
       [this](const ProjectOpReply &reply,
