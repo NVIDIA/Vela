@@ -14,6 +14,7 @@
 #include "AnyText.h"
 #include "CommandRunner.h"
 #include "CommandText.h"
+#include "RecordFields.h"
 // vsr_scivis_studio_protocol
 #include "ShotRigRequests.h"
 #include "TaskMessages.h"
@@ -48,87 +49,6 @@ std::optional<std::string> takeOption(
   auto value = args.back().substr(prefix.size());
   args.pop_back();
   return value;
-}
-
-// Applies one `field=value` edit of update-shot to a Shot; false with the
-// reason on an unknown field or a value the field cannot hold.
-bool applyShotField(Shot &shot,
-    const std::string &field,
-    const std::string &value,
-    std::string &error)
-{
-  const auto badValue = [&] {
-    error = "not a valid " + field + ": " + value;
-    return false;
-  };
-  long long integer = 0;
-  unsigned long long natural = 0;
-  double number = 0;
-  bool flag = false;
-  auto &rs = shot.renderSettings;
-
-  if (field == "name")
-    shot.name = value;
-  else if (field == "frameCount") {
-    if (!parseInteger(value, integer) || integer < 1
-        || integer > std::numeric_limits<int>::max())
-      return badValue();
-    shot.frameCount = int(integer);
-  } else if (field == "fps") {
-    if (!parseDouble(value, number) || number <= 0)
-      return badValue();
-    shot.fps = float(number);
-  } else if (field == "currentFrame") {
-    if (!parseInteger(value, integer) || integer < 0
-        || integer > std::numeric_limits<int>::max())
-      return badValue();
-    shot.currentFrame = int(integer);
-  } else if (field == "loop") {
-    if (!parseBool(value, flag))
-      return badValue();
-    shot.loop = flag;
-  } else if (field == "playing") {
-    error = "playing is playback state (SetPlaying), not a Shot edit";
-    return false;
-  } else if (field == "lightRigId")
-    shot.lightRigId = value;
-  else if (field == "cameraRigId")
-    shot.cameraRigId = value;
-  else if (field == "renderSettings.width" || field == "renderSettings.height"
-      || field == "renderSettings.samples") {
-    if (!parseNonNegative(value, natural) || natural < 1
-        || natural > std::numeric_limits<uint32_t>::max())
-      return badValue();
-    (field == "renderSettings.width"           ? rs.width
-            : field == "renderSettings.height" ? rs.height
-                                               : rs.samples) =
-        uint32_t(natural);
-  } else if (field == "renderSettings.rendererLibrary")
-    rs.rendererLibrary = value;
-  else if (field == "renderSettings.rendererSubtype")
-    rs.rendererSubtype = value;
-  else if (field == "renderSettings.outputFilePrefix")
-    rs.outputFilePrefix = value;
-  else if (field == "renderSettings.rendererObjectIndex") {
-    if (value == "none")
-      rs.rendererObjectIndex = VSR_INVALID_INDEX;
-    else if (parseNonNegative(value, natural))
-      rs.rendererObjectIndex = size_t(natural);
-    else
-      return badValue();
-  } else if (field.rfind("binding.", 0) == 0 && field.size() > 8) {
-    if (!parseBool(value, flag))
-      return badValue();
-    shot::setDatasetBinding(shot, field.substr(8), flag);
-  } else {
-    error = "unknown Shot field '" + field
-        + "'; valid: name, frameCount, fps, currentFrame, loop, lightRigId,"
-          " cameraRigId, renderSettings.{width,height,samples,rendererLibrary,"
-          "rendererSubtype,rendererObjectIndex,outputFilePrefix},"
-          " binding.<datasetId>";
-    return false;
-  }
-  return true;
 }
 
 } // namespace
@@ -300,7 +220,7 @@ CommandRunner::Failure CommandRunner::updateShot(
     const auto eq = edit.find('=');
     if (eq == std::string::npos || eq == 0)
       return "not a <field>=<value> edit: " + edit;
-    if (!applyShotField(
+    if (!setShotField(
             request.shot, edit.substr(0, eq), edit.substr(eq + 1), error))
       return error;
   }

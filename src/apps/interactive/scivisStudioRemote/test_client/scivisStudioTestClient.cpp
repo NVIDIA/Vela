@@ -64,7 +64,8 @@ int main(int argc, const char **argv)
     return 0;
   }
   if (options.showMarkdown) {
-    std::cout << testClientCommandTable();
+    std::cout << testClientCommandTable() << '\n'
+              << testClientAssertValueTable();
     return 0;
   }
 

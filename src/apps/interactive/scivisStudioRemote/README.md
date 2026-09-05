@@ -1167,6 +1167,49 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   `NamedValues.cpp`, and the runner-free `AnyText.{h,cpp}` (the ANARI `Any`
   <-> token codec) and `CommandText.{h,cpp}` (record spellings and the
   shared argument parsers). No wire or record-stream change.
+- **Field tables for the replica's records; a typed Event; one snapshot
+  cursor; shared text helpers.** `namedValue()` was a 355-line chain of
+  `if (name == "...")` and nested `if (field == "...")`, and every Shot and
+  Dataset field was spelled three times (`applyShotField`, `dumpProject`,
+  `namedValue`) plus `assertNames()` plus the README. `test_client/
+  RecordFields.{h,cpp}` now holds one `Field<T>` table per replica record
+  (`SHOT_FIELDS`, `DATASET_FIELDS`, `LIGHT_RIG_FIELDS`, `CAMERA_RIG_FIELDS`,
+  `COLOR_MAP_FIELDS`, `PROJECT_FIELDS`): name, `get`, `set` (null when
+  read-only) and how `dump-project` prints it (`Dump::Plain`, `Quoted`, or
+  `Omit` for a value only `assert` reads). `dump-project` iterates the
+  table, `assert <collection>.<id>.<field>` looks up `get`, `update-shot`
+  looks up `set` (`binding.<datasetId>` stays the one parametric Shot
+  field, folded in by `shotFieldText`/`setShotField`), and the field lists
+  in the documentation come from the table. What `assert` can name is a
+  second table, `CommandRunner::namedValues()` in `NamedValues.cpp`: one
+  `ValueSpec` per name or pattern (`shot.<id>.<field>`; the text before
+  the first `<` is the prefix it matches, an exact row wins) with its
+  summary and resolver; the session-side records (`TASK_FIELDS`,
+  `FRAME_FIELDS`, `PICK_FIELDS`, `HISTOGRAM_FIELDS`) are file-local tables
+  there. `--help` lists the rows, `scivisStudioTestClient --markdown` prints
+  the assert-value table after the command table, and the test client
+  README carries both, checked by the `[StudioTestClient]` suite. Since
+  the tables are the union of what the three readers used to spell,
+  `assert` gained `lightRig.<id>.rootNode`, `cameraRig.<id>.keyframes` and
+  `shot.<id>.renderSettings.rendererObjectIndex`. `Event` carries a typed
+  identity -- `std::optional<StudioMessageType> type`, `requestId`,
+  `taskId` -- so `awaitReply`, `pick` and the session commands match on
+  `event.type == ProjectOpReply && event.requestId == id` instead of on the
+  name and a scan of the fields for `requestId`'s text; `field(key)` reads
+  a value where one is wanted (a Frame's `frame`, an Error's `message`).
+  The `size_t m_snapshotMark` assigned from six places is a
+  `SnapshotCursor` with `markAt(count)`, `advance()` and `passed(count)`,
+  and the session answers `snapshotsAtTaskEnd(taskId)` beside
+  `snapshotsAtReply(requestId)`, so the runner reads one concept one way.
+  `TestSession.cpp`'s copies of `quotedText`, `numberText`,
+  `shortTypeName`, `boolText` and `objectText` are gone in favour of
+  `CommandText.h` and `AnyText.h` (the shared quoting helper is
+  `quotedText`: an unqualified `quoted(text)` is `std::quoted` by ADL
+  wherever `<iomanip>` is reachable); `objectText`'s `ANARI_CAMERA 0`
+  spelling becomes `camera:0` in the one FAIL that used it. The record
+  stream of `all_m5.studio` is byte-identical before and after up to wire
+  timing (temp paths, mtimes, Frame arrival, which poll batch a snapshot
+  lands in); every scenario passes unchanged.
 
 ### Spec conformance
 

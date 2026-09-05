@@ -47,8 +47,10 @@ bool parseTestClientOptions(const std::vector<std::string> &args,
 // kind) and the assert value names.
 std::string testClientUsage(const std::string &programName);
 
-// The command vocabulary as one Markdown table, sorted by name: the table
-// test_client/README.md carries, so a test can check the two agree.
+// The command vocabulary as one Markdown table, sorted by name, and the
+// assert values as another: the tables test_client/README.md carries, so a
+// test can check the two agree.
 std::string testClientCommandTable();
+std::string testClientAssertValueTable();
 
 } // namespace vsr::scivis_studio::test_client

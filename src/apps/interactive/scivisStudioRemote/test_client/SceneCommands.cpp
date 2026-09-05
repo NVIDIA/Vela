@@ -14,6 +14,7 @@
 #include "AnyText.h"
 #include "CommandRunner.h"
 #include "CommandText.h"
+#include "RecordFields.h"
 // vsr_scivis_studio_protocol
 #include "FrameCodec.h"
 // vsr_scivis_studio_model
@@ -422,44 +423,27 @@ CommandRunner::Failure CommandRunner::dumpProject(const Command &)
   const auto *project = m_session->project();
   if (!project)
     return "no Project Replica";
-  printRecord("EVT Project name=" + quotedText(project->name)
-      + " activeShot=" + project->activeShotId
-      + " shots=" + std::to_string(project->shots.size())
-      + " datasets=" + std::to_string(project->datasets.size())
-      + " lightRigs=" + std::to_string(project->lightRigs.size())
-      + " cameraRigs=" + std::to_string(project->cameraRigs.size())
-      + " colorMaps=" + std::to_string(project->colorMaps.size())
-      + " dirty=" + boolText(project->dirty)
-      + " directory=" + quotedText(project->projectDirectory.generic_string()));
+  // Each record's line is its field table; a Shot adds whether it is the
+  // active one, which is the project's to say.
+  printRecord("EVT Project" + dumpFields(PROJECT_FIELDS, *project));
   for (const auto &shot : project->shots) {
-    printRecord("EVT Shot id=" + shot.id + " name=" + quotedText(shot.name)
-        + " frameCount=" + std::to_string(shot.frameCount)
-        + " fps=" + numberText(shot.fps) + " currentFrame="
-        + std::to_string(shot.currentFrame) + " loop=" + boolText(shot.loop)
-        + " lightRigId=" + shot.lightRigId + " cameraRigId=" + shot.cameraRigId
-        + " bindings=" + std::to_string(shot.datasetBindings.size())
-        + " camera=" + objectRefText(shot.camera)
+    printRecord("EVT Shot id=" + shot.id + dumpFields(SHOT_FIELDS, shot)
         + " active=" + boolText(shot.id == project->activeShotId));
   }
   for (const auto &dataset : project->datasets) {
-    printRecord("EVT Dataset id=" + dataset.id
-        + " name=" + quotedText(dataset.name)
-        + " status=" + dataset::toString(dataset.status)
-        + " residency=" + dataset::toString(dataset.residency)
-        + " sourceKind=" + dataset::toString(dataset.sourceKind)
-        + " importerType=" + dataset.importerType + " rootNode="
-        + nodeText(dataset.rootNode) + " dirty=" + boolText(dataset.dirty));
+    printRecord(
+        "EVT Dataset id=" + dataset.id + dumpFields(DATASET_FIELDS, dataset));
   }
-  for (const auto &rig : project->lightRigs) {
-    printRecord("EVT LightRig id=" + rig.id + " name=" + quotedText(rig.name)
-        + " rootNode=" + nodeText(rig.rootNode));
-  }
+  for (const auto &rig : project->lightRigs)
+    printRecord(
+        "EVT LightRig id=" + rig.id + dumpFields(LIGHT_RIG_FIELDS, rig));
   for (const auto &rig : project->cameraRigs) {
-    printRecord("EVT CameraRig id=" + rig.id + " name=" + quotedText(rig.name)
-        + " keyframes=" + std::to_string(rig.keyframes.size()));
+    printRecord(
+        "EVT CameraRig id=" + rig.id + dumpFields(CAMERA_RIG_FIELDS, rig));
   }
   for (const auto &map : project->colorMaps)
-    printRecord("EVT ColorMap id=" + map.id + " name=" + quotedText(map.name));
+    printRecord(
+        "EVT ColorMap id=" + map.id + dumpFields(COLOR_MAP_FIELDS, map));
   return {};
 }
 

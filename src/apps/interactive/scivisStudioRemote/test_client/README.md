@@ -316,29 +316,41 @@ bytes are exactly two hex digits each.
 | value | is |
 |-------|----|
 | `state` | `NeverConnected`, `Connected`, `Lost` or `Disconnected` |
-| `scene.objects`, `scene.layers`, `scene.cameras`, `scene.renderers` | counts in the Structural Mirror |
-| `project.name`, `project.directory`, `project.activeShot`, `project.dirty` | Project Replica fields (FAIL before the first snapshot) |
-| `project.shots`, `project.datasets`, `project.lightRigs`, `project.cameraRigs`, `project.colorMaps` | collection sizes in the replica |
-| `shot.<id>.<field>` | `name`, `frameCount`, `fps`, `currentFrame`, `loop`, `playing`, `lightRigId`, `cameraRigId`, `camera` (`type:index`), `bindings` (count), `binding.<datasetId>` (`true`/`false`; FAIL when unbound), `renderSettings.{width,height,samples,rendererLibrary,rendererSubtype,outputFilePrefix}`; an unknown id is a FAIL; `shot.active.<field>` names the active shot |
-| `dataset.<id>.<field>` | `name`, `status` (`Available`, `Unavailable`, `Importing`, `ImportFailed`), `residency` (`Loaded`, `Unloaded`), `sourceKind`, `importerType`, `sourcePath`, `dirty`, `declared`, `rootNode` |
-| `lightRig.<id>.name`, `cameraRig.<id>.name`, `colorMap.<id>.name` | names in the replica |
-| `tasks.completed`, `tasks.failed` | `TaskCompleted` / `TaskFailed` messages received since the session object was made, across reconnects, the ones a Bootstrap replays included (so an end heard live and then replayed counts twice). The "connection lost" failures a `BootstrapBegin` declares (below) are not messages and do not count |
+| `scene.objects` | objects of every type in the Structural Mirror |
+| `scene.layers` | layers in the mirror |
+| `scene.cameras` | cameras in the mirror |
+| `scene.renderers` | renderers in the mirror |
+| `project.<field>` | a Project Replica field (FAIL before the first snapshot): `name`, `activeShot`, `shots`, `datasets`, `lightRigs`, `cameraRigs`, `colorMaps`, `dirty`, `directory`; the collections are their sizes |
+| `shot.<id>.<field>` | a Shot in the replica (`active` names the active shot; an unknown id is a FAIL): `name`, `frameCount`, `fps`, `currentFrame`, `loop`, `playing`, `lightRigId`, `cameraRigId`, `bindings`, `camera`, `renderSettings.width`, `renderSettings.height`, `renderSettings.samples`, `renderSettings.rendererLibrary`, `renderSettings.rendererSubtype`, `renderSettings.rendererObjectIndex`, `renderSettings.outputFilePrefix`, `binding.<datasetId>` (`true`/`false`; FAIL when unbound); `camera` reads `type:index`, `bindings` is a count |
+| `dataset.<id>.<field>` | a Dataset in the replica (an unknown id is a FAIL): `name`, `status`, `residency`, `sourceKind`, `importerType`, `sourcePath`, `rootNode`, `dirty`, `declared`; `status` reads `Available`, `Unavailable`, `Importing` or `ImportFailed`, `residency` `Loaded` or `Unloaded`, `rootNode` `layer:node` |
+| `lightRig.<id>.<field>` | a LightRig in the replica: `name`, `rootNode` |
+| `cameraRig.<id>.<field>` | a CameraRig in the replica: `name`, `keyframes`; `keyframes` is a count |
+| `colorMap.<id>.<field>` | a ColorMap record in the replica: `name` |
+| `tasks.completed` | `TaskCompleted` messages received since the session object was made, across reconnects, the ones a Bootstrap replays included (so an end heard live and then replayed counts twice). The "connection lost" failures a `BootstrapBegin` declares are not messages and do not count |
+| `tasks.failed` | `TaskFailed` messages received, counted like `tasks.completed` |
 | `tasks.replayed` | task messages (progress or end) the newest Bootstrap carried between its Begin and End: the server's task-status replay of what ended since the previous Bootstrap, and the running task's status. 0 again at every `BootstrapBegin` |
-| `task.<id>.<field>`, `task.last.<field>` | a task record (`last` is `$lastTaskId`; FAIL when nothing has been heard of the id): `state` (`Queued` from the launching reply, `Running` from the first `TaskProgress`, `Completed`, `Failed`), `message` (the completion message or the failure's error), `framesCompleted`, `current`, `total` (the newest progress; 0 when indeterminate) |
-| `uiState.present`, `uiState.<key>` | the newest `UIState` tree the server sent (a Bootstrap's, or the one that follows an `open-project`): whether there is one, and the string leaf `windows/<key>` in it, as `set-ui-state` writes it (FAIL when there is no tree or no such leaf). `disconnect` forgets the tree |
-| `replies.failed`, `replies.pending`, `lastReplyError` | replies with `ok=false`, `no-wait` requests awaiting collection, and the error text of the newest failed reply |
+| `task.<id>.<field>` | a task record (`last` is `$lastTaskId`; FAIL when nothing has been heard of the id): `state`, `message`, `framesCompleted`, `current`, `total`; `state` is `Queued` from the launching reply, `Running` from the first `TaskProgress`, then `Completed` or `Failed`; `message` the completion message or the failure's error; `current` and `total` the newest progress (0 when indeterminate) |
+| `uiState.present` | whether the server has sent a `UIState` tree (a Bootstrap's, or the one that follows an `open-project`); `disconnect` forgets it |
+| `uiState.<key>` | the string leaf `windows/<key>` of the newest `UIState` tree, as `set-ui-state` writes it (FAIL when there is no tree or no such leaf) |
+| `replies.failed` | replies with `ok=false` |
+| `replies.pending` | `no-wait` requests awaiting collection |
 | `snapshots.received` | Project Snapshots applied, the Bootstrap's included |
 | `browse.entries` | entries of the last `list-directory` (0 after a refused one) |
-| `var.<name>` | a variable's value (see [Variables](#variables)) |
-| `frame.width`, `frame.height`, `frame.encoding`, `frame.shotId`, `frame.frame` | header of the newest frame (FAIL before the first frame); encodings read `Raw`, `TurboJpeg` |
+| `var.<name>` | a variable's value (see [Variables](#variables)); `$name` in this position would expand to a value name |
+| `frame.<field>` | the header of the newest frame (FAIL before the first frame): `width`, `height`, `encoding`, `shotId`, `frame`; encodings read `Raw`, `TurboJpeg` |
 | `frames.received` | frames consumed so far (frames superseded before they were read are not counted) |
-| `frames.advanced`, `frames.maxStep` | consumed frames whose header `frame` differed from the previous one's, and the largest forward step between two consecutive headers. A step backwards (a loop wrap to 0, a scrub back) is time moving on purpose, not a skip, and does not count; a forward scrub does. Frames are latest-wins, so a client slower than the stream can see steps the server never took |
-| `warnings.received`, `lastWarning` | `TimeAdvanceWarning`s received and the message of the newest one |
-| `pick.hit`, `pick.worldPosition`, `pick.objectType`, `pick.objectIndex` | the last `PickReply` (FAIL before one): `true`/`false`, `"x y z"`, and the identity (`surface`/`volume` and the pool index, or `none`) |
-| `histogram.bins`, `histogram.min`, `histogram.max`, `histogram.total`, `histogram.nonFinite` | the last ok `request-array-histogram`: the bin count, value range, sum of all bins and the NaN/inf elements left out of them (FAIL when the last request was refused or none was made) |
-| `frameConfig.width`, `frameConfig.height` | the last FrameConfig the server acknowledged |
+| `frames.advanced` | consumed frames whose header `frame` differed from the previous one's. A step backwards (a loop wrap to 0, a scrub back) is time moving on purpose, not a skip, and does not count; a forward scrub does |
+| `frames.maxStep` | the largest forward step between two consecutive headers. Frames are latest-wins, so a client slower than the stream can see steps the server never took |
+| `frameConfig.width` | the width of the last FrameConfig the server acknowledged |
+| `frameConfig.height` | the height of the last FrameConfig the server acknowledged |
 | `param.<type>.<index>.<name>` | a mirror parameter's value: strings verbatim, bools `true`/`false`, numbers space-separated per component (`"1 2 3"`), object references `type:index`; a missing parameter is a FAIL |
-| `errors.received`, `lastError` | Error messages received and the text of the newest one |
+| `errors.received` | Error messages received |
+| `lastError` | the text of the newest Error |
+| `lastReplyError` | the error text of the newest failed reply |
+| `warnings.received` | `TimeAdvanceWarning`s received |
+| `lastWarning` | the message of the newest `TimeAdvanceWarning` (empty before one) |
+| `pick.<field>` | the last `PickReply` (FAIL before one): `hit`, `worldPosition`, `objectType`, `objectIndex`; `hit` `true`/`false`, `worldPosition` `"x y z"`, and the identity (`surface`/`volume` and the pool index, or `none`) |
+| `histogram.<field>` | the last ok `request-array-histogram` (FAIL when the last request was refused or none was made): `bins`, `min`, `max`, `total`, `nonFinite`; `bins` the bin count, `min` and `max` the value range, `total` the sum of all bins, `nonFinite` the NaN/inf elements left out of them |
 
 ### Task records across a session
 
@@ -495,10 +507,14 @@ whole protocol:
    in the file of its area (`SessionCommands.cpp`, `SceneCommands.cpp`,
    `RequestCommands.cpp`, `WaitCommands.cpp`) or, for a request of a shape
    the table already knows (`idRequest<R>`, `nameRequest<R>`, ...), the
-   shape bound to the request type and a `Describe` for its results. Named
-   values go into `namedValue()` and `assertNames()` (`NamedValues.cpp`).
-   Regenerate the command table above with `scivisStudioTestClient
-   --markdown`; the `[StudioTestClient]` suite checks this file carries it.
+   shape bound to the request type and a `Describe` for its results. A named
+   value is one row of the value table in `NamedValues.cpp`
+   (`namedValues()`: name or pattern, summary, resolver); a field of a
+   replica record is one row of its table in `RecordFields.cpp`, which
+   `assert`, `dump-project` and `update-shot` all read. Regenerate the
+   command table and the assert-value table above with
+   `scivisStudioTestClient --markdown`; the `[StudioTestClient]` suite checks
+   this file carries both.
 2. Cover the command in `src/tests/test_StudioTestClient.cpp`, which runs
    scripts against an in-process `StudioServer`.
 3. Add `scenarios/<name>.studio` (self-contained, commented) and an

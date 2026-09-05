@@ -89,7 +89,10 @@ struct SnapshotCursor
  * stream), SceneCommands.cpp (scene edits, playback, the viewport,
  * inspection, UI state, assert), RequestCommands.cpp (one request command
  * per Project Op, Remote Browse and task message) and WaitCommands.cpp (the
- * waits on tasks and replies); NamedValues.cpp holds what `assert` can name.
+ * waits on tasks and replies). What `assert` can name is the table
+ * namedValues() returns (NamedValues.cpp), one ValueSpec per name or pattern;
+ * the replica's records read through the field tables of RecordFields.h,
+ * which dump-project and update-shot use too.
  *
  * Waiting commands take a trailing `timeout=<ms>` and FAIL as soon as the
  * connection is Lost. An Error the server sends while any command but
@@ -178,13 +181,31 @@ struct CommandRunner
   // True iff every command printed OK.
   bool run(const std::vector<Command> &commands);
 
+  // One value `assert` can name: a name (`state`) or a pattern whose text
+  // before its first `<` is the prefix it matches (`shot.<id>.<field>`), what
+  // it is (the --help and README text) and how the runner reads it.
+  struct ValueSpec
+  {
+    // The value's text; empty with the reason when it is unknown or not
+    // available yet (no frame, no replica, ...). `rest` is what follows the
+    // pattern's prefix in `name`.
+    using Resolve = std::optional<std::string> (*)(CommandRunner &,
+        const std::string &name,
+        const std::string &rest,
+        std::string &error);
+
+    const char *name;
+    std::string summary;
+    Resolve resolve;
+  };
+
   // Every command, sorted by name.
   static const std::vector<CommandSpec> &commands();
   // The row of that command; null when there is none.
   static const CommandSpec *findCommand(const std::string &name);
-  // Every value `assert` can name, as documented in --help; the pattern
-  // param.<type>.<index>.<name> is listed as written.
-  static const std::vector<std::string> &assertNames();
+  // Every value `assert` can name, in the order --help and the README list
+  // them.
+  static const std::vector<ValueSpec> &namedValues();
 
  private:
   // Decodes an ok reply's results for the record stream: appends the result
@@ -342,8 +363,9 @@ struct CommandRunner
   std::optional<uint64_t> taskIdArgument(
       const std::vector<std::string> &args, std::string &error) const;
 
-  // The current text of a named value; empty with the reason when it is
-  // unknown or not available yet (no frame, no replica, ...).
+  // The current text of a named value: its namedValues() row resolved;
+  // empty with the reason when there is no row or the value is not available
+  // yet.
   std::optional<std::string> namedValue(
       const std::string &name, std::string &error);
 

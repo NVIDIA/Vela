@@ -1074,8 +1074,8 @@ SCENARIO("the test client parses its command line", "[StudioTestClient]")
                "--keep-going",
                "--quiet-events"})
         REQUIRE(usage.find(flag) != std::string::npos);
-      for (const auto &name : CommandRunner::assertNames())
-        REQUIRE(usage.find(name) != std::string::npos);
+      for (const auto &spec : CommandRunner::namedValues())
+        REQUIRE(usage.find(spec.name) != std::string::npos);
       for (const auto &spec : CommandRunner::commands())
         REQUIRE(usage.find(std::string("  ") + spec.name) != std::string::npos);
     }
@@ -1107,7 +1107,9 @@ SCENARIO("the command table is the one source of the command vocabulary",
       REQUIRE(CommandRunner::findCommand("no-such-command") == nullptr);
     }
 
-    THEN("the README's command table is the one --markdown prints")
+    THEN(
+        "the README's command and assert-value tables are the ones"
+        " --markdown prints")
     {
       const auto readme = std::filesystem::path(__FILE__).parent_path() / ".."
           / "apps" / "interactive" / "scivisStudioRemote" / "test_client"
@@ -1118,6 +1120,28 @@ SCENARIO("the command table is the one source of the command vocabulary",
       const auto table = testClientCommandTable();
       REQUIRE(table.find("| command | kind | does |") == 0);
       REQUIRE(text.find(table) != std::string::npos);
+      const auto values = testClientAssertValueTable();
+      REQUIRE(values.find("| value | is |") == 0);
+      REQUIRE(text.find(values) != std::string::npos);
+    }
+  }
+
+  GIVEN("the runner's value table")
+  {
+    const auto &values = CommandRunner::namedValues();
+
+    THEN("every row has a distinct name, a summary and a resolver")
+    {
+      REQUIRE(values.size() > 30);
+      for (size_t i = 0; i < values.size(); ++i) {
+        const auto &spec = values[i];
+        INFO(spec.name);
+        REQUIRE(std::string(spec.name).size() > 0);
+        REQUIRE(spec.summary.size() > 0);
+        REQUIRE(spec.resolve != nullptr);
+        for (size_t j = 0; j < i; ++j)
+          REQUIRE(std::string(values[j].name) != spec.name);
+      }
     }
   }
 }

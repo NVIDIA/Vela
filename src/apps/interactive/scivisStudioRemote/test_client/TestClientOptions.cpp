@@ -204,8 +204,8 @@ std::string testClientUsage(const std::string &programName)
          "  --quiet-events    print no EVT lines except from the dump-*"
          " commands\n"
          "  -h, --help        show this help\n"
-         "  --markdown        print the command table as Markdown (the"
-         " README's) and exit\n"
+         "  --markdown        print the command and assert-value tables as"
+         " Markdown (the README's) and exit\n"
          "\n"
          "Waiting commands take a trailing timeout=MS and FAIL as soon as"
          " the\n"
@@ -232,8 +232,8 @@ std::string testClientUsage(const std::string &programName)
   appendCommandHelp(out, CommandRunner::Kind::Wait);
   out << "\n"
          "assert values:\n ";
-  for (const auto &name : CommandRunner::assertNames())
-    out << ' ' << name;
+  for (const auto &spec : CommandRunner::namedValues())
+    out << ' ' << spec.name;
   out << '\n';
   return out.str();
 }
@@ -246,6 +246,18 @@ std::string testClientCommandTable()
   for (const auto &spec : CommandRunner::commands()) {
     out << "| `" << escapedCell(commandLine(spec)) << "` | "
         << kindText(spec.kind) << " | " << escapedCell(spec.summary) << " |\n";
+  }
+  return out.str();
+}
+
+std::string testClientAssertValueTable()
+{
+  std::ostringstream out;
+  out << "| value | is |\n"
+         "|-------|----|\n";
+  for (const auto &spec : CommandRunner::namedValues()) {
+    out << "| `" << escapedCell(spec.name) << "` | "
+        << escapedCell(spec.summary) << " |\n";
   }
   return out.str();
 }

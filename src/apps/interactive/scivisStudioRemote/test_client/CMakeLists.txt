@@ -10,6 +10,7 @@ add_library(vsr_scivis_studio_test_client_core OBJECT
   CommandRunner.cpp
   CommandText.cpp
   NamedValues.cpp
+  RecordFields.cpp
   RequestCommands.cpp
   SceneCommands.cpp
   Script.cpp
