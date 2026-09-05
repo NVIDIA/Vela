@@ -194,8 +194,8 @@ struct StudioServer
   // - The session event queue: in arrival order, none dropped, so the loop
   //   replays what happened to the connections in the order it happened.
   // - The Control-State Latch proper: one value per input, latest-wins;
-  //   frame config, encoding and the rendering flag simply keep the newest
-  //   value.
+  //   frame config, the encodings offered and the rendering flag simply keep
+  //   the newest value.
   // - The edit drain queue: scene edits in arrival order, none dropped,
   //   because coalescing them would leave the mirror and the scene
   //   disagreeing. It is a queue, not a latch, and is drained in one go.
@@ -207,7 +207,7 @@ struct StudioServer
   {
     std::vector<SessionEvent> events;
     std::optional<protocol::SetFrameConfig> frameConfig;
-    std::optional<protocol::FrameEncoding> encoding;
+    std::optional<protocol::SetEncodings> encodings;
     std::optional<bool> rendering;
     std::vector<SceneEdit> edits;
     std::vector<ProjectRequest> requests;
@@ -217,6 +217,10 @@ struct StudioServer
     std::optional<protocol::Pick> pick;
     std::optional<protocol::SetOutline> outline;
     std::optional<protocol::ViewportSettings> viewportSettings;
+
+    // Anything a session would apply is here (everything but the session
+    // events).
+    bool hasInput() const;
   };
 
   // What belongs to the one client session and goes with it: reset whole
@@ -258,6 +262,16 @@ struct StudioServer
   void onMessage(const vsr::network::Message &msg);
   void onHello(const vsr::network::Message &msg);
   void latchSessionEvent(SessionEvent event);
+  // Decodes `msg` as a T; empty after replying "malformed T payload".
+  template <typename T>
+  std::optional<T> decodeOrRefuse(const vsr::network::Message &msg);
+  // Decodes `msg` as a T into its latch slot, latest-wins.
+  template <typename T>
+  void latch(
+      const vsr::network::Message &msg, std::optional<T> ControlState::*slot);
+  // Decodes `msg` as a T onto the edit drain queue.
+  template <typename T>
+  void latchEdit(const vsr::network::Message &msg);
   void requestClose(
       const std::string &reason, vsr::network::MessageFuture farewell = {});
   void replyError(const std::string &text);

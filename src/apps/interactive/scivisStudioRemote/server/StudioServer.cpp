@@ -560,11 +560,7 @@ void StudioServer::applyControlState()
 
   const bool bootstrapping = m_state == SessionState::Bootstrapping;
   if (!bootstrapping && !sessionEstablished()) {
-    const bool dropped = control.frameConfig || control.encoding
-        || control.rendering || !control.edits.empty()
-        || !control.requests.empty() || control.time || control.pick
-        || control.outline || control.viewportSettings;
-    if (dropped) {
+    if (control.hasInput()) {
       vsr::core::logWarning(
           "[StudioServer] control messages dropped: no session (%s)",
           toString(m_state));
@@ -572,10 +568,13 @@ void StudioServer::applyControlState()
     return;
   }
 
-  if (control.encoding && *control.encoding != m_session.encoding) {
-    m_session.encoding = *control.encoding;
-    vsr::core::logStatus(
-        "[StudioServer] frame encoding: %s", toString(m_session.encoding));
+  if (control.encodings) {
+    const auto encoding = negotiateFrameEncoding(control.encodings->supported);
+    if (encoding != m_session.encoding) {
+      m_session.encoding = encoding;
+      vsr::core::logStatus(
+          "[StudioServer] frame encoding: %s", toString(m_session.encoding));
+    }
   }
 
   if (control.frameConfig) {
@@ -612,6 +611,12 @@ void StudioServer::applyControlState()
 
   if (control.rendering)
     setStreaming(*control.rendering);
+}
+
+bool StudioServer::ControlState::hasInput() const
+{
+  return frameConfig || encodings || rendering || !edits.empty()
+      || !requests.empty() || time || pick || outline || viewportSettings;
 }
 
 bool StudioServer::socketClosedInBatch(
@@ -1140,11 +1145,11 @@ void StudioServer::onMessage(const Message &msg)
     requestShutdown();
     return;
   case StudioMessageType::SetFrameConfig: {
-    const auto config = decode<SetFrameConfig>(msg);
-    if (!config) {
-      replyError("malformed SetFrameConfig payload");
+    // The one input checked before it is latched: a hostile size is refused
+    // here, not applied to the pipeline.
+    const auto config = decodeOrRefuse<SetFrameConfig>(msg);
+    if (!config)
       return;
-    }
     if (config->width == 0 || config->height == 0
         || config->width > MAX_FRAME_DIMENSION
         || config->height > MAX_FRAME_DIMENSION) {
@@ -1157,94 +1162,38 @@ void StudioServer::onMessage(const Message &msg)
     m_control.frameConfig = *config;
     return;
   }
-  case StudioMessageType::SetEncodings: {
-    const auto encodings = decode<SetEncodings>(msg);
-    if (!encodings) {
-      replyError("malformed SetEncodings payload");
-      return;
-    }
-    std::lock_guard lock(m_controlMutex);
-    m_control.encoding = negotiateFrameEncoding(encodings->supported);
+  case StudioMessageType::SetEncodings:
+    latch(msg, &ControlState::encodings);
     return;
-  }
   case StudioMessageType::StartRendering:
   case StudioMessageType::StopRendering: {
     std::lock_guard lock(m_controlMutex);
     m_control.rendering = *type == StudioMessageType::StartRendering;
     return;
   }
-  case StudioMessageType::SetObjectParameter: {
-    auto edit = decode<SetObjectParameter>(msg);
-    if (!edit) {
-      replyError("malformed SetObjectParameter payload");
-      return;
-    }
-    std::lock_guard lock(m_controlMutex);
-    m_control.edits.emplace_back(std::move(*edit));
+  case StudioMessageType::SetObjectParameter:
+    latchEdit<SetObjectParameter>(msg);
     return;
-  }
-  case StudioMessageType::RemoveObjectParameter: {
-    auto edit = decode<RemoveObjectParameter>(msg);
-    if (!edit) {
-      replyError("malformed RemoveObjectParameter payload");
-      return;
-    }
-    std::lock_guard lock(m_controlMutex);
-    m_control.edits.emplace_back(std::move(*edit));
+  case StudioMessageType::RemoveObjectParameter:
+    latchEdit<RemoveObjectParameter>(msg);
     return;
-  }
-  case StudioMessageType::SetNodeTransform: {
-    auto edit = decode<SetNodeTransform>(msg);
-    if (!edit) {
-      replyError("malformed SetNodeTransform payload");
-      return;
-    }
-    std::lock_guard lock(m_controlMutex);
-    m_control.edits.emplace_back(std::move(*edit));
+  case StudioMessageType::SetNodeTransform:
+    latchEdit<SetNodeTransform>(msg);
     return;
-  }
-  case StudioMessageType::SetTime: {
+  case StudioMessageType::SetTime:
     // The scrub: optimistic and latest-wins, so a latch slot.
-    const auto time = decode<SetTime>(msg);
-    if (!time) {
-      replyError("malformed SetTime payload");
-      return;
-    }
-    std::lock_guard lock(m_controlMutex);
-    m_control.time = *time;
+    latch(msg, &ControlState::time);
     return;
-  }
   // Viewport: latest-wins slots
-  case StudioMessageType::Pick: {
-    const auto pick = decode<Pick>(msg);
-    if (!pick) {
-      replyError("malformed Pick payload");
-      return;
-    }
-    std::lock_guard lock(m_controlMutex);
-    m_control.pick = *pick;
+  case StudioMessageType::Pick:
+    latch(msg, &ControlState::pick);
     return;
-  }
-  case StudioMessageType::SetOutline: {
-    const auto outline = decode<SetOutline>(msg);
-    if (!outline) {
-      replyError("malformed SetOutline payload");
-      return;
-    }
-    std::lock_guard lock(m_controlMutex);
-    m_control.outline = *outline;
+  case StudioMessageType::SetOutline:
+    latch(msg, &ControlState::outline);
     return;
-  }
-  case StudioMessageType::ViewportSettings: {
-    const auto settings = decode<ViewportSettings>(msg);
-    if (!settings) {
-      replyError("malformed ViewportSettings payload");
-      return;
-    }
-    std::lock_guard lock(m_controlMutex);
-    m_control.viewportSettings = *settings;
+  case StudioMessageType::ViewportSettings:
+    latch(msg, &ControlState::viewportSettings);
     return;
-  }
   default:
     break;
   }
@@ -1302,6 +1251,40 @@ void StudioServer::latchSessionEvent(SessionEvent event)
 {
   std::lock_guard lock(m_controlMutex);
   m_control.events.push_back(std::move(event));
+}
+
+// The three templates below are private and instantiated only here.
+
+template <typename T>
+std::optional<T> StudioServer::decodeOrRefuse(const Message &msg)
+{
+  auto payload = decode<T>(msg);
+  if (!payload) {
+    replyError(
+        "malformed " + std::string(toString(T::MESSAGE_TYPE)) + " payload");
+  }
+  return payload;
+}
+
+template <typename T>
+void StudioServer::latch(
+    const Message &msg, std::optional<T> ControlState::*slot)
+{
+  auto payload = decodeOrRefuse<T>(msg);
+  if (!payload)
+    return;
+  std::lock_guard lock(m_controlMutex);
+  m_control.*slot = std::move(*payload);
+}
+
+template <typename T>
+void StudioServer::latchEdit(const Message &msg)
+{
+  auto edit = decodeOrRefuse<T>(msg);
+  if (!edit)
+    return;
+  std::lock_guard lock(m_controlMutex);
+  m_control.edits.emplace_back(std::move(*edit));
 }
 
 void StudioServer::requestClose(
