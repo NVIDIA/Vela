@@ -372,9 +372,7 @@ SCENARIO("StudioServer runs a viewer-parity session", "[StudioServer]")
           AND_THEN("StopRendering pauses and an edit reaches the server scene")
           {
             client.send(StopRendering{});
-            REQUIRE(waitFor([&] {
-              return server.sessionState() == SessionState::Established;
-            }));
+            REQUIRE(waitFor([&] { return !server.streaming(); }));
 
             SetObjectParameter edit;
             edit.object = cameraRef;

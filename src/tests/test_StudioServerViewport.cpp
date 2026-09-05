@@ -272,6 +272,7 @@ SCENARIO("StudioServer picks against its frames", "[StudioServer]")
   GIVEN("a paused session looking at the triangle")
   {
     REQUIRE(session.server->sessionState() == SessionState::Established);
+    REQUIRE_FALSE(session.server->streaming());
 
     THEN("a pick at the centre renders one frame and hits the surface")
     {

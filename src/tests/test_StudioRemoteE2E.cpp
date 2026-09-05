@@ -236,9 +236,7 @@ void pauseServer(Client &client, RunningServer &server)
   client.connection.stopRendering();
   REQUIRE(pollUntil(
       client.connection,
-      [&] {
-        return server.server->sessionState() == SessionState::Established;
-      },
+      [&] { return !server.server->streaming(); },
       E2E_TIMEOUT));
 }
 
@@ -796,10 +794,7 @@ SCENARIO("scivisStudioServer and the client core run a session end to end",
             client.connection.stopRendering();
             REQUIRE(pollUntil(
                 client.connection,
-                [&] {
-                  return server->server->sessionState()
-                      == SessionState::Established;
-                },
+                [&] { return !server->server->streaming(); },
                 E2E_TIMEOUT));
 
             const auto cameraIndex = shot->camera.objectIndex;
