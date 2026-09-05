@@ -1546,6 +1546,38 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   the suite's assertions keep their meaning
   (`followups/19-fixture-decisions.md`). Every `test_Studio*` suite,
   `[Network]` and all 25 scenarios pass with the same names and counts.
+- **One fake Studio server; the test-client suite in four files; flat
+  end-to-end scenarios.** `test_StudioTestClient.cpp` (2624 lines) carried
+  two more fakes: `ScriptedServer` re-implemented `FakeStudioServer`
+  behaviour by behaviour, and `ProjectOpsServer` repeated its channel
+  construction and Hello/Ping handling. `FakeStudioServer` gained
+  `farewell(msg, closeDelay)` (flush, then close off the IO thread, as the
+  server refuses a Hello or evicts a session), an `onHello` hook that runs
+  once the built-in bootstrap went out or was held, and `dropConnection()`;
+  `ScriptedServer` is gone and the project fake is `FakeProjectServer` in
+  `StudioFakeProjectServer.h`, owning a `FakeStudioServer` it installs
+  itself on as `onRequest`. The suite is `test_StudioTestClientScript.cpp`
+  (parser, options, command table, the `ServerProcess` scenario),
+  `test_StudioTestClientConnection.cpp` (failure paths over the fake),
+  `test_StudioTestClientProjectOps.cpp` (the project fake) and
+  `test_StudioTestClientServer.cpp` (the milestone-3 surface against a
+  `RunningServer`), over `StudioTestClientTestHelpers.h` (`runScript`, the
+  record-line helpers, `keepGoing()`); same tag, same eleven test cases.
+  The project fake keeps only what a real server cannot be made to produce
+  (a lagging snapshot, a stray reply, a warning for every scrub, a render
+  that holds and refuses an edit until cancelled, a reused task id, a link
+  dropped mid-task, the runner's own FAILs); the milestone-6/7 happy path it
+  re-ran with scripted replies is owned by the `StudioScenario` scripts
+  against a real server (`followups/20-test-client-suite-decisions.md`
+  lists the drops and the record-text checks that went with them). The five
+  `[StudioRemote]` scenarios, each a `WHEN -> THEN -> AND_THEN x 4-6` chain
+  with one leaf, are one linear `THEN` each with `INFO` step markers and
+  shared step helpers (`waitForLost`, `requestOk`, `completeTask`,
+  `openProject`); the first booted two servers for its sibling `THEN` and
+  boots one. Of the test files the branch adds, `test_StudioRemoteE2E.cpp`
+  (1453, accepted), `test_StudioClientProjectOps.cpp` (1859) and
+  `test_StudioServerProjectOps.cpp` (1567) still exceed 1000 lines; the
+  last two were outside this round's items.
 
 ### Spec conformance
 
@@ -1629,9 +1661,13 @@ against a fake server), `"[StudioServer]"` (server against a raw
 `test_StudioServerProjectOps.cpp` the project ops, Remote Browse, Server
 Tasks and Data Roots, in `test_StudioServerViewport.cpp` picking, the
 viewport passes and the array histogram), `"[StudioRemote]"` (server and client core in one
-process) and `"[StudioTestClient]"` (the test client's script runner against
-an in-process server). Those that render use `helide` and skip when it
-cannot be loaded. The new `ProjectContext` operations are covered by
+process) and `"[StudioTestClient]"` (the test client's script runner: its
+parser and options in `test_StudioTestClientScript.cpp`, its failure paths
+over `FakeStudioServer` in `test_StudioTestClientConnection.cpp`, the paths
+only `FakeProjectServer` can produce in
+`test_StudioTestClientProjectOps.cpp`, and the milestone-3 surface against
+an in-process server in `test_StudioTestClientServer.cpp`). Those that
+render use `helide` and skip when it cannot be loaded. The new `ProjectContext` operations are covered by
 `"[SciVisStudio]"`.
 
 `"[StudioRemote]"` (`src/tests/test_StudioRemoteE2E.cpp`) also drives the
@@ -1660,7 +1696,10 @@ The suites share their fixtures: `NetworkTestHelpers.h` (`waitFor`,
 (`ScopedFixtureDirectory`), `StudioServerTestHelpers.h` (`TestClient`,
 `RunningServer`, `ServerSession`), `StudioRemoteTestHelpers.h`
 (`helideAvailable`, `fastTimings`, `MirroredClient`), `StudioFakeServer.h`
-and `StudioProtocolTestHelpers.h` (`roundTrip`, `roundTripTree`).
+(`FakeStudioServer`: bootstrap, `farewell`, `onHello`, `onRequest`),
+`StudioFakeProjectServer.h` (`FakeProjectServer`),
+`StudioTestClientTestHelpers.h` (`runScript`, the record-line helpers) and
+`StudioProtocolTestHelpers.h` (`roundTrip`, `roundTripTree`).
 
 End to end, `ctest -R StudioScenario` runs each scenario script under
 [`test_client/scenarios/`](test_client/scenarios) against a freshly launched
