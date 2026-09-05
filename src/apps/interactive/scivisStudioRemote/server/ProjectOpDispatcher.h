@@ -20,6 +20,7 @@
 // vsr_network
 #include "vsr/network/Message.hpp"
 // std
+#include <filesystem>
 #include <functional>
 #include <optional>
 #include <string>
@@ -255,8 +256,18 @@ struct ProjectOpDispatcher
 
   // Sends `reply` after flushing scene pushes.
   void finish(const protocol::ProjectOpReply &reply);
+  // The ok reply to `req`, carrying `results` when the op has some.
+  template <typename Req>
+  void ok(const Req &req);
+  template <typename Req, typename Results>
+  void ok(const Req &req, const Results &results);
   // An error reply.
   void fail(uint64_t requestId, const std::string &error);
+  // Resolves `path` against the Data Roots; empty after failing `req` with
+  // the reason.
+  template <typename Req>
+  std::optional<std::filesystem::path> resolveOrFail(
+      const Req &req, const std::filesystem::path &path);
   // Queues `body` (exclusive: the shot render) and answers with its task id.
   void startTask(uint64_t requestId,
       std::string description,
@@ -271,5 +282,32 @@ struct ProjectOpDispatcher
 
   Host m_host;
 };
+
+// Inlined definitions ////////////////////////////////////////////////////////
+
+template <typename Req>
+inline void ProjectOpDispatcher::ok(const Req &req)
+{
+  finish(protocol::makeOkReply(req.requestId));
+}
+
+template <typename Req, typename Results>
+inline void ProjectOpDispatcher::ok(const Req &req, const Results &results)
+{
+  auto reply = protocol::makeOkReply(req.requestId);
+  protocol::setResults(reply, results);
+  finish(reply);
+}
+
+template <typename Req>
+inline std::optional<std::filesystem::path> ProjectOpDispatcher::resolveOrFail(
+    const Req &req, const std::filesystem::path &path)
+{
+  std::string error;
+  auto resolved = m_host.dataRoots->resolve(path, &error);
+  if (!resolved)
+    fail(req.requestId, error);
+  return resolved;
+}
 
 } // namespace vsr::scivis_studio::server

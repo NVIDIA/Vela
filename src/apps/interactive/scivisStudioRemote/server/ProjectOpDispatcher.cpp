@@ -250,7 +250,7 @@ void ProjectOpDispatcher::handle(const NewProject &req)
 {
   context().createUnsavedProject();
   *m_host.uiState = nullptr;
-  finish(makeOkReply(req.requestId));
+  ok(req);
 }
 
 // Datasets ///////////////////////////////////////////////////////////////////
@@ -269,9 +269,7 @@ void ProjectOpDispatcher::handle(const DeclareFileAnimationDataset &req)
     fail(req.requestId, "dataset could not be declared");
     return;
   }
-  auto reply = makeOkReply(req.requestId);
-  setResults(reply, DatasetCreatedResult{dataset->id});
-  finish(reply);
+  ok(req, DatasetCreatedResult{dataset->id});
 }
 
 void ProjectOpDispatcher::handle(const RenameDataset &req)
@@ -281,7 +279,7 @@ void ProjectOpDispatcher::handle(const RenameDataset &req)
     fail(req.requestId, error);
     return;
   }
-  finish(makeOkReply(req.requestId));
+  ok(req);
 }
 
 void ProjectOpDispatcher::handle(const RemoveDataset &req)
@@ -291,7 +289,7 @@ void ProjectOpDispatcher::handle(const RemoveDataset &req)
     fail(req.requestId, error);
     return;
   }
-  finish(makeOkReply(req.requestId));
+  ok(req);
 }
 
 void ProjectOpDispatcher::handle(const UnloadDataset &req)
@@ -301,7 +299,7 @@ void ProjectOpDispatcher::handle(const UnloadDataset &req)
     fail(req.requestId, error);
     return;
   }
-  finish(makeOkReply(req.requestId));
+  ok(req);
 }
 
 void ProjectOpDispatcher::handle(const RefreshDatasetAvailability &req)
@@ -312,7 +310,7 @@ void ProjectOpDispatcher::handle(const RefreshDatasetAvailability &req)
     return;
   }
   context().refreshUnloadedDatasetAvailability(*dataset);
-  finish(makeOkReply(req.requestId));
+  ok(req);
 }
 
 void ProjectOpDispatcher::handle(const DiscoverDatasetCandidates &req)
@@ -320,9 +318,7 @@ void ProjectOpDispatcher::handle(const DiscoverDatasetCandidates &req)
   DiscoverDatasetCandidatesResult candidates;
   for (const auto &candidate : context().discoverDatasetCandidates())
     candidates.candidates.push_back({candidate.file, candidate.proposedName});
-  auto reply = makeOkReply(req.requestId);
-  setResults(reply, candidates);
-  finish(reply);
+  ok(req, candidates);
 }
 
 // Shots //////////////////////////////////////////////////////////////////////
@@ -333,9 +329,7 @@ void ProjectOpDispatcher::handle(const CreateShot &req)
     fail(req.requestId, "shot could not be created");
     return;
   }
-  auto reply = makeOkReply(req.requestId);
-  setResults(reply, ShotCreatedResult{project().shots.back().id});
-  finish(reply);
+  ok(req, ShotCreatedResult{project().shots.back().id});
 }
 
 void ProjectOpDispatcher::handle(const RemoveShot &req)
@@ -345,7 +339,7 @@ void ProjectOpDispatcher::handle(const RemoveShot &req)
     fail(req.requestId, error);
     return;
   }
-  finish(makeOkReply(req.requestId));
+  ok(req);
 }
 
 void ProjectOpDispatcher::handle(const UpdateShot &req)
@@ -355,7 +349,7 @@ void ProjectOpDispatcher::handle(const UpdateShot &req)
     fail(req.requestId, error);
     return;
   }
-  finish(makeOkReply(req.requestId));
+  ok(req);
 }
 
 void ProjectOpDispatcher::handle(const SetActiveShot &req)
@@ -365,7 +359,7 @@ void ProjectOpDispatcher::handle(const SetActiveShot &req)
     fail(req.requestId, error);
     return;
   }
-  finish(makeOkReply(req.requestId));
+  ok(req);
 }
 
 // Play/pause is a confirmed mutation: the reply says it took, the snapshot
@@ -378,7 +372,7 @@ void ProjectOpDispatcher::handle(const SetPlaying &req)
     fail(req.requestId, error);
     return;
   }
-  finish(makeOkReply(req.requestId));
+  ok(req);
 }
 
 // Light rigs /////////////////////////////////////////////////////////////////
@@ -392,9 +386,7 @@ void ProjectOpDispatcher::handle(const CreateLightRig &req)
   }
   // A new rig is bound to no shot: hide it like every other unbound rig.
   context().applyActiveShot();
-  auto reply = makeOkReply(req.requestId);
-  setResults(reply, LightRigCreatedResult{rig->id});
-  finish(reply);
+  ok(req, LightRigCreatedResult{rig->id});
 }
 
 void ProjectOpDispatcher::handle(const CloneLightRig &req)
@@ -408,9 +400,7 @@ void ProjectOpDispatcher::handle(const CloneLightRig &req)
     fail(req.requestId, "light rig could not be cloned");
     return;
   }
-  auto reply = makeOkReply(req.requestId);
-  setResults(reply, LightRigCreatedResult{clone->id});
-  finish(reply);
+  ok(req, LightRigCreatedResult{clone->id});
 }
 
 void ProjectOpDispatcher::handle(const RemoveLightRig &req)
@@ -419,7 +409,7 @@ void ProjectOpDispatcher::handle(const RemoveLightRig &req)
     fail(req.requestId, "light rig not found");
     return;
   }
-  finish(makeOkReply(req.requestId));
+  ok(req);
 }
 
 void ProjectOpDispatcher::handle(const RenameLightRig &req)
@@ -429,7 +419,7 @@ void ProjectOpDispatcher::handle(const RenameLightRig &req)
     fail(req.requestId, error);
     return;
   }
-  finish(makeOkReply(req.requestId));
+  ok(req);
 }
 
 void ProjectOpDispatcher::handle(const AddLightToRig &req)
@@ -448,9 +438,7 @@ void ProjectOpDispatcher::handle(const AddLightToRig &req)
     fail(req.requestId, "light rig has no scene node");
     return;
   }
-  auto reply = makeOkReply(req.requestId);
-  setResults(reply, LightAddedResult{context().refFor("studio", node)});
-  finish(reply);
+  ok(req, LightAddedResult{context().refFor("studio", node)});
 }
 
 void ProjectOpDispatcher::handle(const RemoveLightFromRig &req)
@@ -465,40 +453,34 @@ void ProjectOpDispatcher::handle(const RemoveLightFromRig &req)
     fail(req.requestId, "node is not a light of that rig");
     return;
   }
-  finish(makeOkReply(req.requestId));
+  ok(req);
 }
 
 void ProjectOpDispatcher::handle(const SaveLightRigArchive &req)
 {
-  std::string error;
-  const auto file = m_host.dataRoots->resolve(req.file, &error);
-  if (!file) {
-    fail(req.requestId, error);
+  const auto file = resolveOrFail(req, req.file);
+  if (!file)
     return;
-  }
+  std::string error;
   if (!context().saveLightRigArchive(req.lightRigId, *file, &error)) {
     fail(req.requestId, error);
     return;
   }
-  finish(makeOkReply(req.requestId));
+  ok(req);
 }
 
 void ProjectOpDispatcher::handle(const LoadLightRigArchive &req)
 {
-  std::string error;
-  const auto file = m_host.dataRoots->resolve(req.file, &error);
-  if (!file) {
-    fail(req.requestId, error);
+  const auto file = resolveOrFail(req, req.file);
+  if (!file)
     return;
-  }
+  std::string error;
   auto *rig = context().loadLightRigArchive(*file, &error);
   if (!rig) {
     fail(req.requestId, error);
     return;
   }
-  auto reply = makeOkReply(req.requestId);
-  setResults(reply, LightRigCreatedResult{rig->id});
-  finish(reply);
+  ok(req, LightRigCreatedResult{rig->id});
 }
 
 // Camera rigs ////////////////////////////////////////////////////////////////
@@ -510,9 +492,7 @@ void ProjectOpDispatcher::handle(const CreateCameraRig &req)
     fail(req.requestId, "camera rig could not be created");
     return;
   }
-  auto reply = makeOkReply(req.requestId);
-  setResults(reply, CameraRigCreatedResult{rig->id});
-  finish(reply);
+  ok(req, CameraRigCreatedResult{rig->id});
 }
 
 void ProjectOpDispatcher::handle(const RemoveCameraRig &req)
@@ -521,7 +501,7 @@ void ProjectOpDispatcher::handle(const RemoveCameraRig &req)
     fail(req.requestId, "camera rig not found");
     return;
   }
-  finish(makeOkReply(req.requestId));
+  ok(req);
 }
 
 void ProjectOpDispatcher::handle(const RenameCameraRig &req)
@@ -531,40 +511,34 @@ void ProjectOpDispatcher::handle(const RenameCameraRig &req)
     fail(req.requestId, error);
     return;
   }
-  finish(makeOkReply(req.requestId));
+  ok(req);
 }
 
 void ProjectOpDispatcher::handle(const SaveCameraRigArchive &req)
 {
-  std::string error;
-  const auto file = m_host.dataRoots->resolve(req.file, &error);
-  if (!file) {
-    fail(req.requestId, error);
+  const auto file = resolveOrFail(req, req.file);
+  if (!file)
     return;
-  }
+  std::string error;
   if (!context().saveCameraRigArchive(req.cameraRigId, *file, &error)) {
     fail(req.requestId, error);
     return;
   }
-  finish(makeOkReply(req.requestId));
+  ok(req);
 }
 
 void ProjectOpDispatcher::handle(const LoadCameraRigArchive &req)
 {
-  std::string error;
-  const auto file = m_host.dataRoots->resolve(req.file, &error);
-  if (!file) {
-    fail(req.requestId, error);
+  const auto file = resolveOrFail(req, req.file);
+  if (!file)
     return;
-  }
+  std::string error;
   auto *rig = context().loadCameraRigArchive(*file, &error);
   if (!rig) {
     fail(req.requestId, error);
     return;
   }
-  auto reply = makeOkReply(req.requestId);
-  setResults(reply, CameraRigCreatedResult{rig->id});
-  finish(reply);
+  ok(req, CameraRigCreatedResult{rig->id});
 }
 
 // Color maps /////////////////////////////////////////////////////////////////
@@ -580,9 +554,7 @@ void ProjectOpDispatcher::handle(const CreateColorMap &req)
   result.colorMapId = record->id;
   if (auto array = context().resolveColorMapArray(record->id))
     result.object = {array->type(), array.index()};
-  auto reply = makeOkReply(req.requestId);
-  setResults(reply, result);
-  finish(reply);
+  ok(req, result);
 }
 
 void ProjectOpDispatcher::handle(const RenameColorMap &req)
@@ -592,7 +564,7 @@ void ProjectOpDispatcher::handle(const RenameColorMap &req)
     fail(req.requestId, error);
     return;
   }
-  finish(makeOkReply(req.requestId));
+  ok(req);
 }
 
 void ProjectOpDispatcher::handle(const RemoveColorMap &req)
@@ -602,16 +574,14 @@ void ProjectOpDispatcher::handle(const RemoveColorMap &req)
     fail(req.requestId, error);
     return;
   }
-  finish(makeOkReply(req.requestId));
+  ok(req);
 }
 
 // Remote Browse and tasks ////////////////////////////////////////////////////
 
 void ProjectOpDispatcher::handle(const ListRoots &req)
 {
-  auto reply = makeOkReply(req.requestId);
-  setResults(reply, listRoots(*m_host.dataRoots));
-  finish(reply);
+  ok(req, listRoots(*m_host.dataRoots));
 }
 
 void ProjectOpDispatcher::handle(const ListDirectory &req)
@@ -622,9 +592,7 @@ void ProjectOpDispatcher::handle(const ListDirectory &req)
     fail(req.requestId, error);
     return;
   }
-  auto reply = makeOkReply(req.requestId);
-  setResults(reply, listing);
-  finish(reply);
+  ok(req, listing);
 }
 
 void ProjectOpDispatcher::handle(const CancelTask &req)
@@ -634,7 +602,7 @@ void ProjectOpDispatcher::handle(const CancelTask &req)
     fail(req.requestId, error);
     return;
   }
-  finish(makeOkReply(req.requestId));
+  ok(req);
 }
 
 // Viewport ///////////////////////////////////////////////////////////////////
@@ -659,9 +627,7 @@ void ProjectOpDispatcher::handle(const RequestArrayHistogram &req)
     fail(req.requestId, error);
     return;
   }
-  auto reply = makeOkReply(req.requestId);
-  setResults(reply, result);
-  finish(reply);
+  ok(req, result);
 }
 
 } // namespace vsr::scivis_studio::server

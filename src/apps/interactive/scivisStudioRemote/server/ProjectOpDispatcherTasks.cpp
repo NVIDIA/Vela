@@ -95,12 +95,9 @@ TaskResult ProjectOpDispatcher::runTaskBody(
 
 void ProjectOpDispatcher::handle(const OpenProject &req)
 {
-  std::string error;
-  const auto directory = m_host.dataRoots->resolve(req.directory, &error);
-  if (!directory) {
-    fail(req.requestId, error);
+  const auto directory = resolveOrFail(req, req.directory);
+  if (!directory)
     return;
-  }
 
   startTask(req.requestId,
       "open project '" + directory->string() + "'",
@@ -131,12 +128,9 @@ void ProjectOpDispatcher::handle(const SaveProject &req)
   // when the task runs, since an OpenProject queued ahead may change it.
   std::optional<std::filesystem::path> named;
   if (req.directory) {
-    std::string error;
-    named = m_host.dataRoots->resolve(*req.directory, &error);
-    if (!named) {
-      fail(req.requestId, error);
+    named = resolveOrFail(req, *req.directory);
+    if (!named)
       return;
-    }
   }
 
   startTask(req.requestId,
@@ -175,12 +169,9 @@ void ProjectOpDispatcher::handle(const SaveProject &req)
 
 void ProjectOpDispatcher::handle(const ImportStaticDataset &req)
 {
-  std::string error;
-  const auto source = m_host.dataRoots->resolve(req.sourcePath, &error);
-  if (!source) {
-    fail(req.requestId, error);
+  const auto source = resolveOrFail(req, req.sourcePath);
+  if (!source)
     return;
-  }
 
   startTask(req.requestId,
       "import '" + source->string() + "'",
@@ -195,12 +186,9 @@ void ProjectOpDispatcher::handle(const ImportStaticDataset &req)
 
 void ProjectOpDispatcher::handle(const ImportSubtreeDataset &req)
 {
-  std::string error;
-  const auto source = m_host.dataRoots->resolve(req.sourcePath, &error);
-  if (!source) {
-    fail(req.requestId, error);
+  const auto source = resolveOrFail(req, req.sourcePath);
+  if (!source)
     return;
-  }
 
   startTask(req.requestId,
       "import subtree '" + source->string() + "'",
@@ -221,12 +209,9 @@ void ProjectOpDispatcher::handle(const ImportFileAnimationDataset &req)
   }
   std::vector<std::filesystem::path> sources;
   for (const auto &path : req.sourcePaths) {
-    std::string error;
-    const auto source = m_host.dataRoots->resolve(path, &error);
-    if (!source) {
-      fail(req.requestId, error);
+    const auto source = resolveOrFail(req, path);
+    if (!source)
       return;
-    }
     sources.push_back(*source);
   }
 
@@ -280,12 +265,9 @@ void ProjectOpDispatcher::handle(const LoadDataset &req)
 
 void ProjectOpDispatcher::handle(const SaveDatasetArchive &req)
 {
-  std::string error;
-  const auto file = m_host.dataRoots->resolve(req.file, &error);
-  if (!file) {
-    fail(req.requestId, error);
+  const auto file = resolveOrFail(req, req.file);
+  if (!file)
     return;
-  }
   startTask(req.requestId,
       "save dataset '" + req.datasetId + "' to '" + file->string() + "'",
       [this, id = req.datasetId, file = *file](const TaskControl &progress) {
@@ -303,12 +285,9 @@ void ProjectOpDispatcher::handle(const SaveDatasetArchive &req)
 
 void ProjectOpDispatcher::handle(const LoadDatasetArchive &req)
 {
-  std::string error;
-  const auto file = m_host.dataRoots->resolve(req.file, &error);
-  if (!file) {
-    fail(req.requestId, error);
+  const auto file = resolveOrFail(req, req.file);
+  if (!file)
     return;
-  }
   startTask(req.requestId,
       "load dataset archive '" + file->string() + "'",
       [this, file = *file](const TaskControl &progress) {
@@ -323,12 +302,9 @@ void ProjectOpDispatcher::handle(const LoadDatasetArchive &req)
 
 void ProjectOpDispatcher::handle(const IncorporateDatasetCandidate &req)
 {
-  std::string error;
-  const auto file = m_host.dataRoots->resolve(req.file, &error);
-  if (!file) {
-    fail(req.requestId, error);
+  const auto file = resolveOrFail(req, req.file);
+  if (!file)
     return;
-  }
   // The candidate keeps the path as discovered: incorporate compares it with
   // the project's datasets directory to tell a managed file from a rename.
   const DatasetCandidate candidate{req.file, req.proposedName};
