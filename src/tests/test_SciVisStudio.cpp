@@ -2676,7 +2676,7 @@ SCENARIO("SciVis Studio dataset lifecycle workflows preserve asset semantics",
   REQUIRE_FALSE(std::filesystem::exists(root / "datasets" / "Renamed.vsr"));
   REQUIRE(std::filesystem::exists(root / "datasets" / "generic.vsr"));
 
-  auto *loaded = projectContext.loadDatasetArchive(savedArchive, &error);
+  auto *loaded = projectContext.loadDatasetArchive(savedArchive, {}, &error);
   REQUIRE(loaded);
   REQUIRE(loaded->id != originalId);
   REQUIRE(loaded->dirty);
@@ -2728,7 +2728,8 @@ SCENARIO("SciVis Studio treats the file-animation pair as one dataset asset",
 
   // Dataset Archive Load incorporates the pair with a fresh identity...
   std::string error;
-  auto *incorporated = projectContext.loadDatasetArchive(archiveFile, &error);
+  auto *incorporated =
+      projectContext.loadDatasetArchive(archiveFile, {}, &error);
   REQUIRE(incorporated);
   REQUIRE(incorporated->sourceFiles.size() == 2);
   REQUIRE(incorporated->sourceFiles[0].resolvedPath
@@ -2738,7 +2739,8 @@ SCENARIO("SciVis Studio treats the file-animation pair as one dataset asset",
   // ...and fails cleanly without the sibling.
   std::filesystem::remove(archiveDir / "Archived.sources");
   const auto datasetCount = project.datasets.size();
-  REQUIRE(projectContext.loadDatasetArchive(archiveFile, &error) == nullptr);
+  REQUIRE(
+      projectContext.loadDatasetArchive(archiveFile, {}, &error) == nullptr);
   REQUIRE(error.find("Source List File") != std::string::npos);
   REQUIRE(project.datasets.size() == datasetCount);
 

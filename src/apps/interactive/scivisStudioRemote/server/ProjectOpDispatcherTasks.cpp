@@ -290,12 +290,12 @@ void ProjectOpDispatcher::handle(const LoadDatasetArchive &req)
     return;
   startTask(req.requestId,
       "load dataset archive '" + file->string() + "'",
-      [this, file = *file](const TaskControl &progress) {
+      [this, file = *file, name = req.name](const TaskControl &progress) {
         return runTaskBody([&] {
           progress("loading");
           std::string error;
           return datasetResult(
-              context().loadDatasetArchive(file, &error), error);
+              context().loadDatasetArchive(file, name, &error), error);
         });
       });
 }

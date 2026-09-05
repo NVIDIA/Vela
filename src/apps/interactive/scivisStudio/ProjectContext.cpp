@@ -1600,10 +1600,11 @@ Dataset *ProjectContext::loadDatasetArchiveImpl(
   return &record;
 }
 
-Dataset *ProjectContext::loadDatasetArchive(
-    const std::filesystem::path &file, std::string *error)
+Dataset *ProjectContext::loadDatasetArchive(const std::filesystem::path &file,
+    const std::string &name,
+    std::string *error)
 {
-  return loadDatasetArchiveImpl(file, {}, false, error);
+  return loadDatasetArchiveImpl(file, name, false, error);
 }
 
 std::vector<DatasetCandidate> ProjectContext::discoverDatasetCandidates() const

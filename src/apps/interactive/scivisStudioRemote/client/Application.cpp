@@ -695,7 +695,6 @@ void Application::onProjectReplaced()
 {
   for (auto *editor : m_editors)
     editor->onProjectReplaced();
-  m_addStaticDatasetDialog->onProjectReplaced();
   if (m_connection->bootstrapping())
     return;
   resolveActiveShotCamera();

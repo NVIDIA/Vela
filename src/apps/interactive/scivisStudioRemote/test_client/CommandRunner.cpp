@@ -216,10 +216,10 @@ const std::vector<CommandRunner::CommandSpec> &CommandRunner::commands()
       {"load-dataset", "<id>", 1, 1, K::Request,
           idRequest<LoadDataset>(&LoadDataset::datasetId, taskStarted()),
           "task: load an unloaded dataset"},
-      {"load-dataset-archive", "<file>", 1, 1, K::Request,
-          loadArchiveRequest<LoadDatasetArchive>(
-              taskStarted(TaskMessage::DatasetId)),
-          "task: import a Dataset Archive"},
+      {"load-dataset-archive", "<file> [name]", 1, 2, K::Request,
+          &CommandRunner::loadDatasetArchive,
+          "task: import a Dataset Archive; the dataset takes NAME, or the"
+          " archive's own when none is given"},
       {"load-light-rig-archive", "<file>", 1, 1, K::Request,
           loadArchiveRequest<LoadLightRigArchive>(lightRigCreated),
           "sync; lightRigId="},

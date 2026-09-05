@@ -164,6 +164,19 @@ CommandRunner::Failure CommandRunner::removeDataset(
   return sendRequest(std::move(request), deadline, modifiers);
 }
 
+CommandRunner::Failure CommandRunner::loadDatasetArchive(
+    const Command &command, Deadline deadline, Modifiers modifiers)
+{
+  LoadDatasetArchive request;
+  request.file = command.args[0];
+  if (command.args.size() > 1)
+    request.name = command.args[1];
+  return sendRequest(std::move(request),
+      deadline,
+      modifiers,
+      taskStarted(TaskMessage::DatasetId));
+}
+
 CommandRunner::Failure CommandRunner::discoverDatasetCandidates(
     const Command &, Deadline deadline, Modifiers modifiers)
 {

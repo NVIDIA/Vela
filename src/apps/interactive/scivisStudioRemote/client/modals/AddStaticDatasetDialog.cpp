@@ -4,14 +4,11 @@
 #include "AddStaticDatasetDialog.h"
 // scivisStudioClient
 #include "UICommon.h"
-// vsr_scivis_studio_model
-#include "Project.h"
 // vsr_ui_imgui
 #include "vsr/ui/imgui/vsr_ui_imgui.h"
 // imgui
 #include <imgui.h>
 // std
-#include <algorithm>
 #include <array>
 #include <optional>
 
@@ -90,14 +87,6 @@ void AddStaticDatasetDialog::reset()
   m_pending = {};
 }
 
-void AddStaticDatasetDialog::onProjectReplaced()
-{
-  const Project *project = m_context->project();
-  if (!project || !m_archiveRename.armed() || !m_context->canSend())
-    return;
-  m_archiveRename.apply(*project, m_context->ops(), m_context->errorReporter());
-}
-
 void AddStaticDatasetDialog::submit()
 {
   if (m_sourcePath.empty()) {
@@ -107,13 +96,9 @@ void AddStaticDatasetDialog::submit()
   const auto &choice = SOURCES[m_selectedSource];
   const std::filesystem::path sourcePath(m_sourcePath);
   const std::string name = m_name;
-  // Copied now: a snapshot arriving before the reply replaces the replica,
-  // so the callback must not reach back into it.
-  const auto idsBefore =
-      ArchiveRenameFollowUp::datasetIds(m_context->project());
 
-  auto onReply = [this, choice, name, idsBefore](const ProjectOpReply &reply,
-                     const std::optional<TaskStartedResult> &started) {
+  auto onReply = [this](const ProjectOpReply &reply,
+                     const std::optional<TaskStartedResult> &) {
     if (reply.requestId != m_pending.handle.requestId)
       return;
     m_pending.clear();
@@ -121,8 +106,6 @@ void AddStaticDatasetDialog::submit()
       m_error = reply.error;
       return;
     }
-    if (!choice.importer && !choice.subtree && !name.empty() && started)
-      m_archiveRename.arm(started->taskId, idsBefore, name);
     reset();
     hide();
   };
@@ -142,6 +125,7 @@ void AddStaticDatasetDialog::submit()
     m_pending.sendForResult<TaskStartedResult>(ops, std::move(import), onReply);
   } else {
     LoadDatasetArchive load;
+    load.name = name;
     load.file = sourcePath;
     m_pending.sendForResult<TaskStartedResult>(ops, std::move(load), onReply);
   }

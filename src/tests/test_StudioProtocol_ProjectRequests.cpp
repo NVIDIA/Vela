@@ -424,9 +424,11 @@ SCENARIO("Dataset archive and candidate request payloads", "[StudioProtocol]")
     LoadDatasetArchive req;
     req.requestId = 71;
     req.file = std::filesystem::path("/archives/wing.vsr");
+    req.name = "Wing";
     const auto out = roundTrip(req);
     REQUIRE(out.requestId == 71);
     REQUIRE(out.file == req.file);
+    REQUIRE(out.name == "Wing");
   }
 
   GIVEN("DiscoverDatasetCandidates")

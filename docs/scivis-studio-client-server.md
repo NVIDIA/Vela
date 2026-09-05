@@ -167,7 +167,9 @@ outside Studio's set is **rejected with an error**, never silently ignored.
   creation (sync — stats nothing, ADR 0023); `ReimportDataset` (task);
   `RenameDataset`, `RemoveDataset(keepAssetFile)`, `UnloadDataset`,
   `RefreshDatasetAvailability` (sync); `LoadDataset`, dataset-archive
-  save/load, `IncorporateDatasetCandidate` (tasks);
+  save/load (`LoadDatasetArchive{file, name}`, the name the dataset takes,
+  empty for the archive's own; `PROTOCOL_VERSION` 7),
+  `IncorporateDatasetCandidate` (tasks);
   `DiscoverDatasetCandidates` (sync, reply carries the candidate list).
 - **Shot**: `CreateShot`, `RemoveShot`, `UpdateShot` (a `ShotPatch` of the
   fields to change, applied to the server's `Shot` and validated as a whole;

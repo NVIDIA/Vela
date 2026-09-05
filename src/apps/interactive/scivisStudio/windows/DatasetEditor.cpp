@@ -52,7 +52,7 @@ void DatasetEditor::pollPendingFileIO()
 
   std::string error;
   if (request == PendingFileIO::Load) {
-    if (m_projectContext->loadDatasetArchive(filename, &error)) {
+    if (m_projectContext->loadDatasetArchive(filename, {}, &error)) {
       m_selectedDataset =
           static_cast<int>(m_projectContext->project().datasets.size()) - 1;
     } else

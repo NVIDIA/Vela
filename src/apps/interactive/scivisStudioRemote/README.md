@@ -538,12 +538,12 @@ reason. Nothing is silently open.
   `CloneCameraRig{cameraRigId}`, and an `UpdateCameraRig{cameraRigId,
   patch}` mirroring `UpdateShot`. `UpdateShot`'s patch covers every Shot
   field except `playing`, which stays with `SetPlaying`.
-- **Naming a loaded Dataset Archive** -- *deferred.* `LoadDatasetArchive`
-  carries no name, so the Add Static Dataset dialog applies a typed name with
-  a follow-up `RenameDataset` once the snapshot after the load shows exactly
-  one new dataset id (`client/ArchiveRenameFollowUp`). A `name` field is a
-  wire change; it rides the next version bump together with the rig ops
-  above.
+- **Naming a loaded Dataset Archive** -- *fixed* in the PR review fix-ups.
+  `LoadDatasetArchive` carried no name, so the Add Static Dataset dialog
+  applied a typed name with a follow-up `RenameDataset` once the snapshot
+  after the load showed exactly one new dataset id
+  (`client/ArchiveRenameFollowUp`). The request now carries `name`
+  (`PROTOCOL_VERSION` 7) and the follow-up is gone.
 - **Renderer libraries in the Shot Editor** -- *deferred.* The client offers
   the device names of the Renderer objects in the Structural Mirror (plus the
   shot's current value); the server's loadable-library list is not in the
@@ -1380,6 +1380,21 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
     not one-at-a-time. Manual check of the toasts (start a render, cancel it,
     start over) is recorded in the follow-up; the client suite asserts one
     `onTaskEnded` per ending, replayed repeats included.
+
+- **Protocol fields instead of client heuristics.** Three places where a
+  guess or a poll stood in for a field or a callback:
+  - *A loaded archive's name rides the request.* `LoadDatasetArchive` gains
+    `name` (optional on the wire; empty keeps the archive's own name,
+    de-duplicated as before), which `ProjectContext::loadDatasetArchive`
+    passes to the same `loadDatasetArchiveImpl` that
+    `incorporateDatasetCandidate` already named its dataset through -- so a
+    typed name is validated (format, uniqueness) before the archive is read
+    and the task fails without touching the project, rather than renamed
+    after the load. `client/ArchiveRenameFollowUp.{h,cpp}`, the dialog's
+    `onProjectReplaced` hook and their `[StudioClient]` scenario are gone;
+    the `[StudioServer]` task scenario loads an archive under a requested
+    name (and refuses a taken one), and `datasets.studio` does the same
+    through `load-dataset-archive <file> [name]`. `PROTOCOL_VERSION` 7.
 
 ### Spec conformance
 

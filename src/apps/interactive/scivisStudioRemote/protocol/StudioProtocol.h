@@ -29,7 +29,9 @@ bool parsePort(const std::string &text, uint16_t &port);
 //    ImportSubtreeDataset is its own request.
 // 6: UpdateShot carries {shotId, patch}, a ShotPatch of the fields to change,
 //    instead of the whole Shot.
-constexpr int PROTOCOL_VERSION = 6;
+// 7: LoadDatasetArchive carries the name the loaded dataset takes (empty
+//    keeps the archive's own).
+constexpr int PROTOCOL_VERSION = 7;
 
 /*
  * Complete v1 message set of the SciVis Studio client-server protocol, as one

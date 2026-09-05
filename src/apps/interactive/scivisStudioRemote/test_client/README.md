@@ -130,7 +130,7 @@ anything reaches the wire.
 | `list-roots` | request | one EVT DataRoot path= per Data Root; the first is $dataRoot |
 | `load-camera-rig-archive <file>` | request | sync; cameraRigId= |
 | `load-dataset <id>` | request | task: load an unloaded dataset |
-| `load-dataset-archive <file>` | request | task: import a Dataset Archive |
+| `load-dataset-archive <file> [name]` | request | task: import a Dataset Archive; the dataset takes NAME, or the archive's own when none is given |
 | `load-light-rig-archive <file>` | request | sync; lightRigId= |
 | `new-project` | request | sync: an unsaved empty project replaces the current one |
 | `open-project <directory>` | request | task: open the project stored in DIR |

@@ -189,13 +189,15 @@ struct SaveDatasetArchive
   std::filesystem::path file;
 };
 
-// Task: loadDatasetArchive().
+// Task: loadDatasetArchive(). The dataset takes `name`; empty keeps the
+// name stored in the archive (de-duplicated against the project's).
 struct LoadDatasetArchive
 {
   static constexpr StudioMessageType MESSAGE_TYPE =
       StudioMessageType::LoadDatasetArchive;
   uint64_t requestId{0};
   std::filesystem::path file;
+  std::string name;
 };
 
 // Sync: discoverDatasetCandidates(); the reply's results decode to
@@ -381,6 +383,7 @@ void fields(V &v, LoadDatasetArchive &r)
 {
   v.required("requestId", r.requestId);
   v.required("file", r.file);
+  v.optional("name", r.name);
 }
 
 template <typename V>

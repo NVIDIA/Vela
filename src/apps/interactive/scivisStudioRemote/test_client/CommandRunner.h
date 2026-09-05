@@ -316,6 +316,7 @@ struct CommandRunner
   Failure importFileAnimationDataset(const Command &, Deadline, Modifiers);
   Failure declareFileAnimationDataset(const Command &, Deadline, Modifiers);
   Failure removeDataset(const Command &, Deadline, Modifiers);
+  Failure loadDatasetArchive(const Command &, Deadline, Modifiers);
   Failure discoverDatasetCandidates(const Command &, Deadline, Modifiers);
   Failure incorporateDatasetCandidate(const Command &, Deadline, Modifiers);
   Failure updateShot(const Command &, Deadline, Modifiers);

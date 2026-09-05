@@ -139,8 +139,11 @@ struct ProjectContext
   bool saveDatasetArchive(const DatasetID &id,
       const std::filesystem::path &file,
       std::string *error = nullptr);
-  Dataset *loadDatasetArchive(
-      const std::filesystem::path &file, std::string *error = nullptr);
+  // The loaded dataset takes `name`; empty keeps the archive's own name,
+  // de-duplicated against the project's datasets.
+  Dataset *loadDatasetArchive(const std::filesystem::path &file,
+      const std::string &name = {},
+      std::string *error = nullptr);
   std::vector<DatasetCandidate> discoverDatasetCandidates() const;
   Dataset *incorporateDatasetCandidate(const DatasetCandidate &candidate,
       const std::string &name,

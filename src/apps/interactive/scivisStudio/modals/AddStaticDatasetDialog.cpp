@@ -112,8 +112,9 @@ void AddStaticDatasetDialog::buildUI()
   ImGui::SameLine();
   const auto sourceChoice = SOURCES[m_selectedSource];
   const bool importSource = sourceChoice.importer.has_value();
-  const char *actionLabel =
-      importSource ? "Import" : (sourceChoice.subtree ? "Load Subtree" : "Load Archive");
+  const char *actionLabel = importSource
+      ? "Import"
+      : (sourceChoice.subtree ? "Load Subtree" : "Load Archive");
   const char *progressLabel = importSource
       ? "Importing Dataset..."
       : (sourceChoice.subtree ? "Loading Layer Subtree Archive..."
@@ -141,7 +142,7 @@ void AddStaticDatasetDialog::buildUI()
             }
           } else {
             std::string error;
-            auto *dataset = ctx->loadDatasetArchive(sourcePath, &error);
+            auto *dataset = ctx->loadDatasetArchive(sourcePath, {}, &error);
             if (!dataset) {
               vsr::core::logWarning(
                   "[SciVisStudio] Failed to load Dataset Archive: %s",

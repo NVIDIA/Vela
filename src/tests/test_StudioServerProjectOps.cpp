@@ -1287,6 +1287,54 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
       }
     }
 
+    WHEN("its Dataset Archive is loaded back under a name of the request's")
+    {
+      REQUIRE(session.waitForSnapshots(++snapshots));
+      SaveDatasetArchive save;
+      save.datasetId = end->text;
+      save.file = data.root / "tri.vsr";
+      const auto saveEnd =
+          waitForTaskEnd(client, startedTaskId(session.request(save)));
+      REQUIRE(saveEnd);
+      REQUIRE(saveEnd->completed);
+
+      LoadDatasetArchive load;
+      load.file = save.file;
+      load.name = "Wing";
+      const auto loadEnd =
+          waitForTaskEnd(client, startedTaskId(session.request(load)));
+      REQUIRE(loadEnd);
+
+      THEN("the loaded dataset carries that name, not the archive's")
+      {
+        REQUIRE(loadEnd->completed);
+        REQUIRE(session.waitForSnapshots(++snapshots));
+        const auto project = session.latestSnapshot().project;
+        REQUIRE(project.datasets.size() == 2);
+        const auto *wing = findDatasetNamed(project, "Wing");
+        REQUIRE(wing);
+        REQUIRE(wing->id == loadEnd->text);
+        REQUIRE(wing->status == DatasetStatus::Available);
+        REQUIRE(findDatasetNamed(project, "Tri"));
+      }
+
+      AND_WHEN("a name the project already uses is asked for")
+      {
+        load.name = "Tri";
+        const auto takenEnd =
+            waitForTaskEnd(client, startedTaskId(session.request(load)));
+
+        THEN("the task fails and the project gains no dataset")
+        {
+          REQUIRE(takenEnd);
+          REQUIRE_FALSE(takenEnd->completed);
+          REQUIRE(takenEnd->text.find("already uses") != std::string::npos);
+          REQUIRE(session.waitForSnapshots(snapshots));
+          REQUIRE(session.latestSnapshot().project.datasets.size() == 2);
+        }
+      }
+    }
+
     WHEN("a path outside the roots is named")
     {
       REQUIRE(session.waitForSnapshots(++snapshots));
