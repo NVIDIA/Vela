@@ -31,9 +31,9 @@ namespace {
 // A render's ending as the task's. (The model's RenderShotResult, not the
 // protocol's results subtree of the same name.)
 using RenderEnding = scivis_studio::RenderShotResult::Outcome;
-TaskOutcome taskOutcome(RenderEnding rendered)
+TaskOutcome taskOutcome(RenderEnding ending)
 {
-  switch (rendered) {
+  switch (ending) {
   case RenderEnding::Completed:
     return TaskOutcome::Completed;
   case RenderEnding::Cancelled:

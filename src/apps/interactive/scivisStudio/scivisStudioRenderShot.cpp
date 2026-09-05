@@ -110,5 +110,5 @@ int main(int argc, const char **argv)
     std::cerr << "Render failed: " << result.error << '\n';
     return 1;
   }
-  return 1;
+  return 1; // every Outcome returned above; keeps -Wreturn-type quiet
 }
