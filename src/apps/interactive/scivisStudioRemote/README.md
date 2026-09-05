@@ -1058,6 +1058,37 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   `Established`/`streaming()`. `StudioServer.cpp` 1393 -> 1327 lines; the
   document's ~800 target waits on 08 (`onMessage`) and 09 (the renderer
   binding).
+- **Dispatch and latch cleanups in the server.** `onMessage` latched nine
+  inputs through nine copies of decode, refuse-if-malformed, lock, assign;
+  three private templates do it once (`decodeOrRefuse<T>`,
+  `latch(msg, &ControlState::slot)`, `latchEdit<T>`), `SetEncodings` latches
+  the message and the loop negotiates the encoding when it applies it, and
+  the hand-enumerated "was anything dropped" expression is
+  `ControlState::hasInput()`. `RequestPolicy`'s three bools, of whose eight
+  combinations five occurred, are one `RequestKind` (`SyncMutating`,
+  `SyncReadOnly`, `Task`, `RenderShot`, `Independent`), one row per
+  alternative in the same compile-time-complete table;
+  `waitsForQueuedTasks`, `independentOfQueuedTasks` and `mutatesProject`
+  read off the kind, and a temporary `static_assert` checked them equal to
+  the old three predicates for every alternative before the old table went.
+  `TaskResult` said "cancelled" three ways (`ok == false`, `error ==
+  "cancelled"`, `cancelled == true`); it carries `TaskOutcome` (`Completed`,
+  `Failed`, `Cancelled`) and `taskFailure(error)` builds a failure, so the
+  wire string is written once and `cancel()` and `endingOf()` read one
+  field. RenderShot's two loop concerns left the dispatcher `Host`:
+  `shutdownRequested` is `ServerTaskRunner::stopAll()`, an atomic every
+  `TaskControl::cancelRequested()` ORs in, called from `requestShutdown()`;
+  `dropLatchedInputs` and the `LatchGuard` inside the render body are gone
+  because `runOne()` hands the ending back recorded but unsent and the
+  loop's `runOneTask()` discards the latch after an exclusive task, then
+  `sendEnding()`s -- the guarantee 53c99ac made ("discard however the body
+  leaves") now holds by construction, since the body cannot send its own
+  ending. The handlers' resolve-or-fail blocks and ok replies are
+  `resolveOrFail(req, path)` and `ok(req[, results])`. `StudioServer.cpp`
+  1327 -> 1321 lines: the latch collapse paid for the `runOneTask()` the
+  loop gained, and the remaining bulk (`bootstrap`, `followProjectRevisions`,
+  the frame path) is the server proper, which no fix-up owns; the ~800 line
+  figure was a review estimate, not a requirement.
 
 ### Spec conformance
 
