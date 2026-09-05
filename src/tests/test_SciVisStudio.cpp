@@ -3586,16 +3586,11 @@ SCENARIO("SciVis Studio shot rendering restores the scene when a frame throws",
   shot->renderSettings.width = 8;
   shot->renderSettings.height = 8;
   shot->renderSettings.samples = 1;
-  // A fresh project has no renderer objects; pick one the way the server's
-  // bind does, so the render reaches its frame loop.
+  // A fresh project has no renderer objects; bind one so the render reaches
+  // its frame loop.
   auto device = appContext.anari.loadDevice("helide");
   REQUIRE(device);
-  const auto renderers =
-      appContext.vsr.scene.createStandardRenderers("helide", device);
-  REQUIRE_FALSE(renderers.empty());
-  shot->renderSettings.rendererLibrary = "helide";
-  shot->renderSettings.rendererObjectIndex = renderers.front()->index();
-  shot->renderSettings.rendererSubtype = renderers.front()->subtype().str();
+  REQUIRE(projectContext.bindShotRenderer(*shot, "helide", device));
   const auto delegates = appContext.vsr.scene.updateDelegate().size();
 
   GIVEN("A frame hook that throws on the second frame")
@@ -3976,6 +3971,130 @@ SCENARIO(
   projectContext.applyActiveShot();
   REQUIRE_FALSE((*defaultRoot)->isEnabled());
   REQUIRE_FALSE((*secondRoot)->isEnabled());
+}
+
+SCENARIO("SciVis Studio a new light rig starts hidden", "[SciVisStudio]")
+{
+  vsr::app::Context appContext;
+  ProjectContext projectContext(&appContext);
+  projectContext.createUnsavedProject();
+
+  auto &project = projectContext.project();
+  auto *defaultRig =
+      light_rig::findLightRig(project, project.shots.front().lightRigId);
+  REQUIRE(defaultRig != nullptr);
+  auto defaultRoot = projectContext.resolveLightRigRoot(*defaultRig);
+  REQUIRE(defaultRoot);
+
+  WHEN("a light rig is created")
+  {
+    auto *rig = projectContext.createLightRig("Fill");
+    REQUIRE(rig != nullptr);
+    auto root = projectContext.resolveLightRigRoot(*rig);
+    REQUIRE(root);
+
+    THEN("it is hidden like every rig the active shot does not use")
+    {
+      REQUIRE_FALSE((*root)->isEnabled());
+      REQUIRE((*defaultRoot)->isEnabled());
+    }
+  }
+}
+
+SCENARIO("SciVis Studio binds a shot's renderer to a library", "[SciVisStudio]")
+{
+  vsr::app::Context appContext;
+  auto device = appContext.anari.loadDevice("helide");
+  if (!device) {
+    WARN("helide ANARI library unavailable, skipping the renderer bind test");
+    return;
+  }
+
+  ProjectContext projectContext(&appContext);
+  projectContext.createUnsavedProject();
+  auto &project = projectContext.project();
+  auto &scene = appContext.vsr.scene;
+  auto *shot = project::activeShot(project);
+  REQUIRE(shot != nullptr);
+  auto &settings = shot->renderSettings;
+  REQUIRE(settings.rendererObjectIndex == VSR_INVALID_INDEX);
+  REQUIRE(scene.renderersOfDevice("helide").empty());
+
+  GIVEN("a shot that never picked a renderer")
+  {
+    WHEN("it is bound to helide")
+    {
+      auto renderer = projectContext.bindShotRenderer(*shot, "helide", device);
+
+      THEN(
+          "the standard renderers exist, the first is recorded, the project"
+          " stays clean")
+      {
+        REQUIRE(renderer);
+        const auto renderers = scene.renderersOfDevice("helide");
+        REQUIRE_FALSE(renderers.empty());
+        REQUIRE(renderer->index() == renderers.front()->index());
+        REQUIRE(settings.rendererLibrary == "helide");
+        REQUIRE(settings.rendererObjectIndex == renderer->index());
+        REQUIRE(settings.rendererSubtype == renderer->subtype().str());
+        REQUIRE_FALSE(project.dirty);
+      }
+    }
+
+    WHEN("it is bound without a device while the scene has no renderers")
+    {
+      auto renderer = projectContext.bindShotRenderer(*shot, "helide", nullptr);
+
+      THEN("nothing binds and the shot is untouched")
+      {
+        REQUIRE_FALSE(renderer);
+        REQUIRE(settings.rendererObjectIndex == VSR_INVALID_INDEX);
+        REQUIRE(scene.renderersOfDevice("helide").empty());
+        REQUIRE_FALSE(project.dirty);
+      }
+    }
+  }
+
+  GIVEN("helide's renderers, and a shot that picked one of them")
+  {
+    const auto renderers = scene.createStandardRenderers("helide", device);
+    REQUIRE_FALSE(renderers.empty());
+    const auto pick = renderers.back();
+    settings.rendererLibrary = "helide";
+    settings.rendererObjectIndex = pick->index();
+    settings.rendererSubtype = pick->subtype().str();
+
+    WHEN("it is bound to helide")
+    {
+      auto renderer = projectContext.bindShotRenderer(*shot, "helide", device);
+
+      THEN("the pick stands, no renderers are added, the project stays clean")
+      {
+        REQUIRE(renderer);
+        REQUIRE(renderer->index() == pick->index());
+        REQUIRE(settings.rendererObjectIndex == pick->index());
+        REQUIRE(scene.renderersOfDevice("helide").size() == renderers.size());
+        REQUIRE_FALSE(project.dirty);
+      }
+    }
+
+    WHEN("its pick names no helide renderer")
+    {
+      settings.rendererObjectIndex = 9999;
+      auto renderer = projectContext.bindShotRenderer(*shot, "helide", device);
+
+      THEN("the first renderer replaces it, and overriding a pick is an edit")
+      {
+        REQUIRE(renderer);
+        REQUIRE(renderer->index() == renderers.front()->index());
+        REQUIRE(settings.rendererObjectIndex == renderer->index());
+        REQUIRE(settings.rendererSubtype == renderer->subtype().str());
+        REQUIRE(project.dirty);
+      }
+    }
+  }
+
+  anari::release(device, device);
 }
 
 SCENARIO(

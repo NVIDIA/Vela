@@ -376,8 +376,6 @@ void ProjectOpDispatcher::handle(const CreateLightRig &req)
     fail(req.requestId, "light rig could not be created");
     return;
   }
-  // A new rig is bound to no shot: hide it like every other unbound rig.
-  context().applyActiveShot();
   ok(req, LightRigCreatedResult{rig->id});
 }
 

@@ -4,6 +4,7 @@
 // catch
 #include "catch.hpp"
 // vsr
+#include "vsr/app/ANARIDeviceManager.h"
 #include "vsr/app/ApplicationDump.h"
 #include "vsr/app/Context.h"
 #include "vsr/app/LegacyApplicationContext.h"
@@ -14,6 +15,66 @@
 #include <string>
 #include <variant>
 #include <vector>
+
+SCENARIO(
+    "The ANARI device manager falls back through its library list", "[App]")
+{
+  vsr::app::ANARIDeviceManager manager;
+
+  GIVEN("a list whose first entry is not a library")
+  {
+    manager.setLibraryList({"no_such_anari_library", "helide", "{none}"});
+
+    WHEN("the missing library is requested")
+    {
+      std::string library = "no_such_anari_library";
+      auto device = manager.loadFirstAvailableDevice(library);
+      if (!device) {
+        WARN("helide ANARI library unavailable, skipping the fallback test");
+        return;
+      }
+
+      THEN("the next loadable entry is loaded and named")
+      {
+        REQUIRE(library == "helide");
+      }
+      anari::release(device, device);
+    }
+
+    WHEN("no library is requested")
+    {
+      std::string library;
+      auto device = manager.loadFirstAvailableDevice(library);
+      if (!device) {
+        WARN("helide ANARI library unavailable, skipping the fallback test");
+        return;
+      }
+
+      THEN("the first loadable entry is loaded and named")
+      {
+        REQUIRE(library == "helide");
+      }
+      anari::release(device, device);
+    }
+  }
+
+  GIVEN("a list with nothing loadable")
+  {
+    manager.setLibraryList({"no_such_anari_library", "{none}"});
+
+    WHEN("a device is requested")
+    {
+      std::string library = "no_such_anari_library";
+      auto device = manager.loadFirstAvailableDevice(library);
+
+      THEN("there is none and the name is cleared")
+      {
+        REQUIRE(device == nullptr);
+        REQUIRE(library.empty());
+      }
+    }
+  }
+}
 
 SCENARIO("Application Dumps embed required Archives without owning the root",
     "[App]")

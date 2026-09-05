@@ -106,41 +106,34 @@ bool ShotEditor::buildUI_rendererSelector(Shot &shot)
   auto &settings = shot.renderSettings;
   bool edited = false;
   std::vector<vsr::scene::RendererAppRef> renderers;
+  vsr::scene::RendererAppRef currentRenderer;
 
   if (ctx && ctx->anari.isLoadableLibrary(settings.rendererLibrary)) {
     auto &scene = ctx->vsr.scene;
-    renderers = scene.renderersOfDevice(settings.rendererLibrary);
-    if (renderers.empty()
+    // A library the scene has no renderers for gets its device loaded once,
+    // so the bind can create the standard set; a library that fails to load
+    // is not retried every frame.
+    anari::Device device = nullptr;
+    if (scene.renderersOfDevice(settings.rendererLibrary).empty()
         && m_rendererLoadAttemptedLibrary != settings.rendererLibrary) {
       m_rendererLoadAttemptedLibrary = settings.rendererLibrary;
-      if (auto device = ctx->anari.loadDevice(settings.rendererLibrary)) {
-        renderers =
-            scene.createStandardRenderers(settings.rendererLibrary, device);
-        anari::release(device, device);
-      } else {
+      device = ctx->anari.loadDevice(settings.rendererLibrary);
+      if (!device) {
         vsr::core::logWarning(
             "[SciVisStudio] failed to load ANARI device '%s' for shot "
             "renderer selection",
             settings.rendererLibrary.c_str());
       }
     }
-  }
-
-  vsr::scene::RendererAppRef currentRenderer;
-  if (ctx && settings.rendererObjectIndex != VSR_INVALID_INDEX) {
-    auto renderer = ctx->vsr.scene.getObject<vsr::scene::Renderer>(
-        settings.rendererObjectIndex);
-    if (renderer && renderer->rendererDeviceName() == settings.rendererLibrary)
-      currentRenderer = renderer;
-  }
-
-  if (!currentRenderer && !renderers.empty()) {
-    currentRenderer = renderers.front();
-    if (settings.rendererObjectIndex != currentRenderer->index()
-        || settings.rendererSubtype != currentRenderer->subtype().str()) {
-      settings.rendererObjectIndex = currentRenderer->index();
-      settings.rendererSubtype = currentRenderer->subtype().str();
-      edited = true;
+    const auto before = settings;
+    currentRenderer = m_projectContext->bindShotRenderer(
+        shot, settings.rendererLibrary, device);
+    if (device)
+      anari::release(device, device);
+    if (currentRenderer) {
+      renderers = scene.renderersOfDevice(settings.rendererLibrary);
+      edited = settings.rendererObjectIndex != before.rendererObjectIndex
+          || settings.rendererSubtype != before.rendererSubtype;
     }
   }
 
