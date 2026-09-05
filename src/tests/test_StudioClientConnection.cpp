@@ -43,28 +43,25 @@ Message makeFrame(int frame)
   return encodeFrame(header, pixels.data(), pixels.size());
 }
 
-struct Fixture
+// A MirroredClient on a fake server, recording every state transition and
+// mirror replacement.
+struct Fixture : MirroredClient
 {
   Fixture(int helloVersion = PROTOCOL_VERSION,
       ConnectionTimings timings = fastTimings());
 
   void connect();
-  bool waitConnectedAndBootstrapped(int expectedBootstraps = 1);
   bool mirrorHasGeometry() const;
 
   vsr::scene::Scene source;
-  vsr::scene::Scene mirror;
   FakeStudioServer server;
-  ServerConnection connection;
   std::vector<ConnectionState> transitions;
   int mirrorReplaces{0};
   bool mirrorPopulatedAtReplace{false};
-  int bootstraps{0};
-  std::vector<std::string> errors;
 };
 
 Fixture::Fixture(int helloVersion, ConnectionTimings timings)
-    : server(helloVersion), connection(&mirror, timings)
+    : MirroredClient(timings), server(helloVersion)
 {
   populateFakeScene(source);
   server.bootstrap = makeFakeBootstrap(source);
@@ -75,22 +72,11 @@ Fixture::Fixture(int helloVersion, ConnectionTimings timings)
     mirrorReplaces++;
     mirrorPopulatedAtReplace = mirror.numberOfObjects(ANARI_GEOMETRY) != 0;
   };
-  connection.onBootstrapComplete = [this]() { bootstraps++; };
-  connection.onServerError = [this](
-                                 const std::string &m) { errors.push_back(m); };
 }
 
 void Fixture::connect()
 {
-  connection.connect("127.0.0.1", server.port());
-}
-
-bool Fixture::waitConnectedAndBootstrapped(int expectedBootstraps)
-{
-  return pollUntil(connection, [&] {
-    return connection.state() == ConnectionState::Connected
-        && bootstraps == expectedBootstraps;
-  });
+  MirroredClient::connect(server.port());
 }
 
 bool Fixture::mirrorHasGeometry() const

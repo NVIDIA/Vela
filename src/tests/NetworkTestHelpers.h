@@ -18,6 +18,9 @@
  *   REQUIRE(pollUntil(connection, [&] { return bootstraps == 1; }));
  */
 
+// Every test endpoint listens on the loopback interface.
+inline constexpr const char *LOOPBACK = "127.0.0.1";
+
 // Spins until `done` holds or the deadline passes; false on timeout.
 inline bool waitFor(const std::function<bool()> &done,
     std::chrono::milliseconds timeout = std::chrono::seconds(5))

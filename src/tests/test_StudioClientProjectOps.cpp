@@ -61,30 +61,28 @@ std::optional<uint64_t> requestIdOf(const Message &msg)
   return id;
 }
 
-struct Fixture
+// A MirroredClient on a fake server that records every request it is sent
+// and every task ending the client reports.
+struct Fixture : MirroredClient
 {
   Fixture(ConnectionTimings timings = fastTimings());
   ~Fixture();
 
   void connect();
-  bool waitConnectedAndBootstrapped(int expectedBootstraps = 1);
   // Polls until the server has seen `n` requests of any type.
   bool waitForRequests(size_t n);
   std::vector<SeenRequest> requests();
   ProjectOps &ops();
 
   vsr::scene::Scene source;
-  vsr::scene::Scene mirror;
   FakeStudioServer server;
-  ServerConnection connection;
-  int bootstraps{0};
   int projectReplaced{0};
   std::vector<TaskRecord> ended; // every onTaskEnded, in order
   std::mutex mutex;
   std::vector<SeenRequest> seen;
 };
 
-Fixture::Fixture(ConnectionTimings timings) : connection(&mirror, timings)
+Fixture::Fixture(ConnectionTimings timings) : MirroredClient(timings)
 {
   populateFakeScene(source);
   server.bootstrap = makeFakeBootstrap(source);
@@ -96,7 +94,6 @@ Fixture::Fixture(ConnectionTimings timings) : connection(&mirror, timings)
     std::lock_guard lock(mutex);
     seen.push_back(std::move(request));
   };
-  connection.onBootstrapComplete = [this]() { bootstraps++; };
   connection.onProjectReplaced = [this]() { projectReplaced++; };
   connection.projectOps().onTaskEnded = [this](const TaskRecord &task) {
     ended.push_back(task);
@@ -113,15 +110,7 @@ Fixture::~Fixture()
 
 void Fixture::connect()
 {
-  connection.connect("127.0.0.1", server.port());
-}
-
-bool Fixture::waitConnectedAndBootstrapped(int expectedBootstraps)
-{
-  return pollUntil(connection, [&] {
-    return connection.state() == ConnectionState::Connected
-        && bootstraps == expectedBootstraps;
-  });
+  MirroredClient::connect(server.port());
 }
 
 bool Fixture::waitForRequests(size_t n)

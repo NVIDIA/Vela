@@ -127,46 +127,27 @@ void StructureCounter::signalLayerStructureUpdated(const vsr::scene::Layer *)
 }
 
 // The client core on a mirror that counts structural mutations.
-struct Client
+struct Client : MirroredClient
 {
   Client();
   ~Client();
 
-  bool waitConnectedAndBootstrapped(int expectedBootstraps);
   // Polls until a Frame is taken; false on timeout.
   bool waitForFrame(vsr::network::Message &frame);
   // The replica and the mirror agree with the given server after a bootstrap.
   void requireMirrorsServer(RunningServer &server);
 
-  vsr::scene::Scene mirror;
   StructureCounter *counter{nullptr};
-  ServerConnection connection;
-  int bootstraps{0};
-  std::vector<std::string> errors;
 };
 
-Client::Client() : connection(&mirror, e2eTimings())
+Client::Client() : MirroredClient(e2eTimings(), E2E_TIMEOUT)
 {
   counter = mirror.updateDelegate().emplace<StructureCounter>();
-  connection.onBootstrapComplete = [this]() { bootstraps++; };
-  connection.onServerError = [this](
-                                 const std::string &m) { errors.push_back(m); };
 }
 
 Client::~Client()
 {
   mirror.updateDelegate().erase(counter);
-}
-
-bool Client::waitConnectedAndBootstrapped(int expectedBootstraps)
-{
-  return pollUntil(
-      connection,
-      [&] {
-        return connection.state() == ConnectionState::Connected
-            && bootstraps == expectedBootstraps;
-      },
-      E2E_TIMEOUT);
 }
 
 bool Client::waitForFrame(vsr::network::Message &frame)
@@ -506,7 +487,7 @@ SCENARIO("scivisStudioServer and the client core run the project layer",
     Client client;
     int replaced = 0;
     client.connection.onProjectReplaced = [&] { replaced++; };
-    client.connection.connect("127.0.0.1", server->port());
+    client.connect(server->port());
     REQUIRE(client.waitConnectedAndBootstrapped(1));
     REQUIRE(replaced == 1); // the bootstrap's snapshot
     auto &ops = client.connection.projectOps();
@@ -744,7 +725,7 @@ SCENARIO("scivisStudioServer and the client core run a session end to end",
 
     WHEN("the client connects")
     {
-      client.connection.connect("127.0.0.1", port);
+      client.connect(port);
       REQUIRE(client.waitConnectedAndBootstrapped(1));
 
       THEN("the bootstrap leaves mirror and replica equal to the server's")
@@ -893,7 +874,7 @@ SCENARIO("scivisStudioServer and the client core play the active shot",
     Client client;
     int replaced = 0;
     client.connection.onProjectReplaced = [&] { replaced++; };
-    client.connection.connect("127.0.0.1", server->port());
+    client.connect(server->port());
     REQUIRE(client.waitConnectedAndBootstrapped(1));
     REQUIRE(replaced == 1);
     const ShotID shotId = activeReplicaShot(client).id;
@@ -1077,7 +1058,7 @@ SCENARIO("scivisStudioServer and the client core pick, outline and bin",
         });
     REQUIRE(server->started);
     Client client;
-    client.connection.connect("127.0.0.1", server->port());
+    client.connect(server->port());
     REQUIRE(client.waitConnectedAndBootstrapped(1));
     importMesh(client, mesh);
     REQUIRE(pollUntil(
@@ -1230,7 +1211,7 @@ SCENARIO("scivisStudioServer and the client core render shots and recover",
     client.connection.onUIState = [&](const SubtreePtr &tree) {
       uiStates.push_back(tree);
     };
-    client.connection.connect("127.0.0.1", port);
+    client.connect(port);
     REQUIRE(client.waitConnectedAndBootstrapped(1));
     REQUIRE(uiStates.size() == 1); // every bootstrap carries one, null here
     REQUIRE_FALSE(uiStates[0]);
@@ -1429,7 +1410,7 @@ SCENARIO("scivisStudioServer and the client core render shots and recover",
             // A second connection replaces this one; the server says why
             // before closing the socket.
             {
-              vsr::network::NetworkClient intruder("127.0.0.1", port);
+              vsr::network::NetworkClient intruder(LOOPBACK, port);
               REQUIRE(pollUntil(
                   client.connection,
                   [&] {

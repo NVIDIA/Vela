@@ -243,7 +243,7 @@ inline TestClient::~TestClient()
 
 inline void TestClient::connect(uint16_t port)
 {
-  channel->connect("127.0.0.1", port);
+  channel->connect(LOOPBACK, port);
 }
 
 template <typename T>

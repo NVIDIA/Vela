@@ -36,7 +36,7 @@
  *   FakeStudioServer server;
  *   server.bootstrap = makeFakeBootstrap(source);
  *   server.onRequest = [&](const Message &msg) { ... server.send(reply); };
- *   connection.connect("127.0.0.1", server.port());
+ *   connection.connect(LOOPBACK, server.port());
  */
 
 inline constexpr const char *FAKE_LAYER_NAME = "extra";

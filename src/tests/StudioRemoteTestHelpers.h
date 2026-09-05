@@ -10,25 +10,31 @@
 // vsr_scivis_studio_server_core
 #include "ServerOptions.h"
 #include "StudioServer.h"
+// vsr_scene
+#include "vsr/scene/Scene.hpp"
 // anari
 #include <anari/anari_cpp.hpp>
 // std
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <string>
+#include <vector>
 
 /*
  * Helpers shared by the Studio remote tests (client core, server, end to
  * end, test client): whether a real ANARI device is available, connection
- * timings short enough to exercise every liveness timer inside a test, and
- * the options of the RunningServer the client-core suites talk to.
+ * timings short enough to exercise every liveness timer inside a test, the
+ * options of the RunningServer the client-core suites talk to, and the
+ * client core on a mirror Scene those suites drive.
  *
  * Example:
  *   if (!helideAvailable())
  *     return;
  *   RunningServer server(tempRootServerOptions());
- *   ServerConnection connection(&mirror, fastTimings());
- *   connection.connect(LOOPBACK, server.port());
+ *   MirroredClient client;
+ *   client.connect(server.port());
+ *   REQUIRE(client.waitConnectedAndBootstrapped());
  */
 
 // The session tests need a real device; absent builds skip rather than fail.
@@ -74,4 +80,54 @@ inline vsr::scivis_studio::server::ServerOptions tempRootServerOptions(
   auto options = testServerOptions({std::filesystem::temp_directory_path()});
   options.port = port;
   return options;
+}
+
+// The client core on a mirror Scene, counting bootstraps and collecting the
+// server's errors, with the wait every session test opens on. Fixtures that
+// need more (a fake server, a structure counter) derive from it. `timeout`
+// bounds the bootstrap wait; a real server's is longer than a fake one's.
+struct MirroredClient
+{
+  explicit MirroredClient(
+      const vsr::scivis_studio::client::ConnectionTimings &timings =
+          fastTimings(),
+      std::chrono::milliseconds timeout = std::chrono::seconds(5));
+
+  void connect(uint16_t port);
+  // Polls until the connection is Connected and `expectedBootstraps` have
+  // completed; false on timeout.
+  bool waitConnectedAndBootstrapped(int expectedBootstraps = 1);
+
+  vsr::scene::Scene mirror;
+  vsr::scivis_studio::client::ServerConnection connection;
+  int bootstraps{0};
+  std::vector<std::string> errors;
+  std::chrono::milliseconds timeout;
+};
+
+inline MirroredClient::MirroredClient(
+    const vsr::scivis_studio::client::ConnectionTimings &timings,
+    std::chrono::milliseconds timeout)
+    : connection(&mirror, timings), timeout(timeout)
+{
+  connection.onBootstrapComplete = [this]() { bootstraps++; };
+  connection.onServerError = [this](
+                                 const std::string &m) { errors.push_back(m); };
+}
+
+inline void MirroredClient::connect(uint16_t port)
+{
+  connection.connect(LOOPBACK, port);
+}
+
+inline bool MirroredClient::waitConnectedAndBootstrapped(int expectedBootstraps)
+{
+  using vsr::scivis_studio::client::ConnectionState;
+  return pollUntil(
+      connection,
+      [&] {
+        return connection.state() == ConnectionState::Connected
+            && bootstraps == expectedBootstraps;
+      },
+      timeout);
 }
