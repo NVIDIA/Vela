@@ -13,7 +13,9 @@ namespace vsr::scivis_studio::test_client {
 /*
  * Command line of scivisStudioTestClient. The script comes from --script,
  * from one or more -e "cmd; cmd" (in order), or from stdin when neither is
- * given; everything else configures the CommandRunner.
+ * given; everything else configures the CommandRunner. --help and --markdown
+ * print the command vocabulary from CommandRunner::commands(), the first as
+ * the usage text, the second as the README's command table.
  *
  * Example:
  *   TestClientOptions options;
@@ -31,16 +33,22 @@ struct TestClientOptions
   // Every -e argument, in command-line order.
   std::vector<std::string> inlineScripts;
   bool showHelp{false};
+  bool showMarkdown{false};
 };
 
 // args[0] is the program name. False with the reason on an unknown flag or a
-// missing or malformed value. --help short-circuits: showHelp is set and the
-// rest is not validated.
+// missing or malformed value. --help and --markdown short-circuit: the flag is
+// set and the rest is not validated.
 bool parseTestClientOptions(const std::vector<std::string> &args,
     TestClientOptions &options,
     std::string *error = nullptr);
 
-// Flags, the command vocabulary and the assert value names.
+// Flags, the command vocabulary (from CommandRunner::commands(), grouped by
+// kind) and the assert value names.
 std::string testClientUsage(const std::string &programName);
+
+// The command vocabulary as one Markdown table, sorted by name: the table
+// test_client/README.md carries, so a test can check the two agree.
+std::string testClientCommandTable();
 
 } // namespace vsr::scivis_studio::test_client

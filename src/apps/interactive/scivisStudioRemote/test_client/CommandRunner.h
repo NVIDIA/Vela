@@ -23,6 +23,7 @@
 #include <iosfwd>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace vsr::scivis_studio {
@@ -52,24 +53,22 @@ struct RunnerOptions
  * as the session consumes it. Every line is one record, so a shell script or
  * a reader can grep the output.
  *
- * The command vocabulary is the server surface through milestone 7: session
- * (connect, disconnect, shutdown, ping, expect-pong, await-lost, reconnect,
- * sleep, expect-error, send-raw), rendering (set-frame-config, set-encodings,
- * start-rendering, stop-rendering, await-frame, save-frame), scene edits
- * (set-param, remove-param, set-node-transform), one request command per
- * Project Op, Remote Browse and task message (new-project, create-shot,
- * list-directory, cancel-task, set-playing, request-array-histogram,
- * render-shot, ...), the waits that go with them (await-task,
- * await-task-progress, await-snapshot, await-reply), playback and the
- * viewport (set-time, await-frame-at, await-frame-advance, await-warning,
- * pick, set-outline, viewport-settings), the UI state round trip
- * (set-ui-state, dump-ui-state), inspection (dump-scene, dump-layers,
- * dump-project, dump-frame, find-object) and `assert <value> <op> <rhs>` over
- * the named values assertNames() lists.
+ * The command vocabulary is the table commands() returns: one CommandSpec
+ * per command with its name, usage, arity and kind, the one place those are
+ * written. execute() finds the row, checks the prefixes and the argument
+ * count against it, and runs the handler; usage FAILs, --help and the
+ * README's command table all print from the same rows. The handlers are
+ * grouped by file: SessionCommands.cpp (the connection and the frame
+ * stream), SceneCommands.cpp (scene edits, playback, the viewport,
+ * inspection, UI state, assert), RequestCommands.cpp (one request command
+ * per Project Op, Remote Browse and task message) and WaitCommands.cpp (the
+ * waits on tasks and replies); NamedValues.cpp holds what `assert` can name.
+ *
  * Waiting commands take a trailing `timeout=<ms>` and FAIL as soon as the
  * connection is Lost. An Error the server sends while any command but
- * expect-error runs FAILs that command: only Project Ops carry request ids, so
- * for everything else the command in flight is the best attribution there is.
+ * expect-error runs FAILs that command: only Project Ops carry request ids,
+ * so for everything else the command in flight is the best attribution there
+ * is.
  *
  * A request command mints a request id, sends, awaits the ProjectOpReply with
  * that id and prints it with the decoded result fields; `ok=false` is a FAIL
@@ -88,6 +87,63 @@ struct RunnerOptions
  */
 struct CommandRunner
 {
+  // Why a command FAILed; empty when it is OK.
+  using Failure = std::optional<std::string>;
+  using Deadline = std::chrono::milliseconds;
+
+  // The prefixes a command was written with: `expect-fail` makes the refused
+  // outcome the OK one, `no-wait` sends without awaiting the reply.
+  struct Modifiers
+  {
+    bool expectFail{false};
+    bool noWait{false};
+  };
+
+  // What a command is, which decides the prefixes it takes: a Request takes
+  // both, a Wait (on a task or a reply, whose outcome can be a failure) takes
+  // expect-fail, a Session command takes none.
+  enum class Kind
+  {
+    Session,
+    Request,
+    Wait
+  };
+
+  // A handler as the table holds it: a member of one of three shapes, each
+  // taking only what it uses, or a request shape bound to its request type.
+  struct Run
+  {
+    using Fn = std::function<Failure(
+        CommandRunner &, const Command &, Deadline, Modifiers)>;
+
+    Run(Failure (CommandRunner::*handler)(const Command &));
+    Run(Failure (CommandRunner::*handler)(const Command &, Deadline));
+    Run(Failure (CommandRunner::*handler)(
+        const Command &, Deadline, Modifiers));
+    Run(Fn fn);
+
+    Fn fn;
+  };
+
+  // One row of the command table: the one place a command's name, usage and
+  // arity are written. execute() checks the argument count and the prefixes
+  // against the row before the handler runs, so a handler sees only the
+  // arities its usage admits.
+  struct CommandSpec
+  {
+    const char *name;
+    // The arguments as --help shows them: `<required>`, `[optional]`, `...`
+    // for a list.
+    const char *usage;
+    int minArgs;
+    // -1 for no upper bound.
+    int maxArgs;
+    Kind kind;
+    Run run;
+    // What the command does, in one line: the --help and README text.
+    const char *summary;
+  };
+
   CommandRunner(
       TestSession *session, std::ostream *out, RunnerOptions options = {});
 
@@ -95,22 +151,23 @@ struct CommandRunner
   // True iff every command printed OK.
   bool run(const std::vector<Command> &commands);
 
+  // Every command, sorted by name.
+  static const std::vector<CommandSpec> &commands();
+  // The row of that command; null when there is none.
+  static const CommandSpec *findCommand(const std::string &name);
   // Every value `assert` can name, as documented in --help; the pattern
   // param.<type>.<index>.<name> is listed as written.
   static const std::vector<std::string> &assertNames();
-  // One line per command for --help.
-  static const std::vector<std::string> &commandHelp();
 
  private:
-  // Why a command FAILed; empty when it is OK.
-  using Failure = std::optional<std::string>;
-  using Deadline = std::chrono::milliseconds;
   // Decodes an ok reply's results for the record stream: appends the result
   // fields to the reply's Event, adds the records that follow it (one per
-  // directory entry, say), remembers minted ids in variables, and FAILs a
-  // reply that lacks the results its request promised.
-  using Describe = std::function<Failure(
-      const protocol::ProjectOpReply &, Event &, std::vector<Event> &)>;
+  // directory entry, say), remembers minted ids in the runner's variables,
+  // and FAILs a reply that lacks the results its request promised.
+  using Describe = std::function<Failure(CommandRunner &,
+      const protocol::ProjectOpReply &,
+      Event &,
+      std::vector<Event> &)>;
   // How a wait ended: with what it waited for, at the deadline, with the link
   // Lost meanwhile, or with an Error nobody expected.
   enum class Wait
@@ -126,11 +183,21 @@ struct CommandRunner
     Wait,
     Nothing
   };
+  // What a task's completion message carries, remembered per task id at the
+  // launch reply so await-task knows which variable the message fills.
+  enum class TaskMessage
+  {
+    Other,
+    DatasetId
+  };
 
   // One command: its events, then its OK or FAIL record. True on OK.
   bool runCommand(const Command &command);
   Failure execute(Command command);
+  // The FAIL of a command whose arguments do not fit its row's usage.
+  static std::string usageError(const Command &command);
 
+  // The connection and the frame stream (SessionCommands.cpp)
   Failure connect(const Command &, Deadline);
   Failure disconnect(const Command &);
   Failure shutdown(const Command &, Deadline);
@@ -146,18 +213,21 @@ struct CommandRunner
   Failure startRendering(const Command &);
   Failure stopRendering(const Command &);
   Failure awaitFrame(const Command &, Deadline);
-  Failure saveFrame(const Command &);
   Failure awaitFrameAt(const Command &, Deadline);
   Failure awaitFrameAdvance(const Command &, Deadline);
   Failure awaitWarning(const Command &, Deadline);
+  Failure saveFrame(const Command &);
+
+  // Scene edits, playback, the viewport, inspection, UI state and assert
+  // (SceneCommands.cpp)
+  Failure setParam(const Command &);
+  Failure removeParam(const Command &);
+  Failure setNodeTransform(const Command &);
   Failure setTime(const Command &);
   Failure pick(const Command &, Deadline);
   Failure setOutline(const Command &);
   Failure viewportSettings(const Command &);
   Failure findObject(const Command &);
-  Failure setParam(const Command &);
-  Failure removeParam(const Command &);
-  Failure setNodeTransform(const Command &);
   Failure dumpScene(const Command &);
   Failure dumpLayers(const Command &);
   Failure dumpProject(const Command &);
@@ -166,78 +236,66 @@ struct CommandRunner
   Failure dumpUIState(const Command &);
   Failure assertValue(const Command &);
 
-  // Request commands, waits and prefixes (the milestone-5 surface)
-  Failure executeRequest(const Command &, Deadline, bool &handled);
-  Failure openProject(const Command &, Deadline);
-  Failure saveProject(const Command &, Deadline);
-  Failure importStaticDataset(const Command &, Deadline);
-  Failure importFileAnimationDataset(const Command &, Deadline);
-  Failure declareFileAnimationDataset(const Command &, Deadline);
-  Failure removeDataset(const Command &, Deadline);
-  Failure discoverDatasetCandidates(const Command &, Deadline);
-  Failure incorporateDatasetCandidate(const Command &, Deadline);
-  Failure updateShot(const Command &, Deadline);
-  Failure setPlaying(const Command &, Deadline);
-  Failure requestArrayHistogram(const Command &, Deadline);
-  Failure addLight(const Command &, Deadline);
-  Failure removeLight(const Command &, Deadline);
-  Failure listRoots(const Command &, Deadline);
-  Failure listDirectory(const Command &, Deadline);
-  Failure renderShot(const Command &, Deadline);
-  Failure cancelTask(const Command &, Deadline);
-  Failure awaitTask(const Command &, Deadline);
+  // The request commands with arguments of their own (RequestCommands.cpp);
+  // the rest are request shapes bound in the table.
+  Failure openProject(const Command &, Deadline, Modifiers);
+  Failure saveProject(const Command &, Deadline, Modifiers);
+  Failure importStaticDataset(const Command &, Deadline, Modifiers);
+  Failure importFileAnimationDataset(const Command &, Deadline, Modifiers);
+  Failure declareFileAnimationDataset(const Command &, Deadline, Modifiers);
+  Failure removeDataset(const Command &, Deadline, Modifiers);
+  Failure discoverDatasetCandidates(const Command &, Deadline, Modifiers);
+  Failure incorporateDatasetCandidate(const Command &, Deadline, Modifiers);
+  Failure updateShot(const Command &, Deadline, Modifiers);
+  Failure setPlaying(const Command &, Deadline, Modifiers);
+  Failure requestArrayHistogram(const Command &, Deadline, Modifiers);
+  Failure addLight(const Command &, Deadline, Modifiers);
+  Failure removeLight(const Command &, Deadline, Modifiers);
+  Failure createColorMap(const Command &, Deadline, Modifiers);
+  Failure listRoots(const Command &, Deadline, Modifiers);
+  Failure listDirectory(const Command &, Deadline, Modifiers);
+  Failure renderShot(const Command &, Deadline, Modifiers);
+  Failure cancelTask(const Command &, Deadline, Modifiers);
+
+  // The waits (WaitCommands.cpp)
+  Failure awaitTask(const Command &, Deadline, Modifiers);
   Failure awaitTaskProgress(const Command &, Deadline);
   Failure awaitSnapshot(const Command &, Deadline);
-  Failure awaitReply(const Command &, Deadline);
+  Failure awaitReply(const Command &, Deadline, Modifiers);
 
-  // The recurring request shapes: {}, {name}, {id}, {id, newName},
-  // {id, file} and {file}, each from the command's arguments.
+  // The recurring request shapes as table rows: {}, {name}, {id},
+  // {id, newName}, {id, file} and {file}, each filled from the command's
+  // arguments, whose count the row's arity has already checked.
   template <typename R>
-  Failure bareRequest(const Command &, Deadline, const Describe & = {});
+  static Run bareRequest(Describe describe = {});
   template <typename R>
-  Failure nameRequest(
-      const Command &, Deadline, std::string R::*name, const Describe & = {});
+  static Run nameRequest(std::string R::*name, Describe describe = {});
   template <typename R>
-  Failure idRequest(const Command &,
-      Deadline,
-      std::string R::*id,
-      const char *idName,
-      const Describe & = {});
+  static Run idRequest(std::string R::*id, Describe describe = {});
   template <typename R>
-  Failure renameRequest(
-      const Command &, Deadline, std::string R::*id, const char *idName);
+  static Run renameRequest(std::string R::*id);
   template <typename R>
-  Failure saveArchiveRequest(const Command &,
-      Deadline,
-      std::string R::*id,
-      const char *idName,
-      const Describe & = {});
+  static Run saveArchiveRequest(std::string R::*id, Describe describe = {});
   template <typename R>
-  Failure loadArchiveRequest(const Command &, Deadline, const Describe &);
+  static Run loadArchiveRequest(Describe describe);
 
   // Mints the request id, sends, and either awaits the reply (see
   // awaitReply(uint64_t)) or, under `no-wait`, parks the Describe for a
   // later await-reply.
   template <typename R>
-  Failure sendRequest(R request, Deadline, const Describe & = {});
+  Failure sendRequest(R request, Deadline, Modifiers, const Describe & = {});
   // Waits for the ProjectOpReply with that id, prints it with `describe`'s
   // fields, and turns `ok` into the OK/FAIL the expect-fail prefix asks for.
-  Failure awaitReply(uint64_t requestId, Deadline, const Describe &describe);
+  Failure awaitReply(
+      uint64_t requestId, Deadline, Modifiers, const Describe &describe);
   // A Describe that reads one string id out of a Result, prints it as
   // `key=` and stores it in the named variable.
   template <typename Result>
-  Describe createdResult(
+  static Describe createdResult(
       std::string Result::*id, const char *key, const char *variable);
-  // What a task's completion message carries, remembered per task id at the
-  // launch reply so await-task knows which variable the message fills.
-  enum class TaskMessage
-  {
-    Other,
-    DatasetId
-  };
   // The Describe of every task-launching request: `taskId=`, $lastTaskId,
   // and the kind of message the task will complete with.
-  Describe taskStarted(TaskMessage message = TaskMessage::Other);
+  static Describe taskStarted(TaskMessage message = TaskMessage::Other);
   // The value a `$name` expands to; empty when there is no such variable.
   std::optional<std::string> variable(const std::string &name) const;
   // The replica's Shot with that id (`active` names the active shot), or
@@ -274,6 +332,8 @@ struct CommandRunner
   // The FAIL reason of a wait that ended without `awaited`.
   std::string waitFailure(
       Wait wait, const std::string &awaited, Deadline deadline) const;
+  // The FAIL of a command that needs the link, when it is not Connected.
+  Failure notConnected() const;
   // Prints whatever events are already queued without waiting; the reason
   // when one of them was an Error, which fails the command that drained it.
   Failure drainEvents();
@@ -284,9 +344,6 @@ struct CommandRunner
   std::ostream *m_out{nullptr};
   RunnerOptions m_options;
 
-  // The prefixes of the command being executed.
-  bool m_expectFail{false};
-  bool m_noWait{false};
   // Ids the replies minted, by variable name (lastShotId, lastTaskId, ...).
   vsr::core::FlatMap<std::string, std::string> m_variables;
   // What each launched task's completion message will carry, by task id; a
@@ -316,5 +373,125 @@ struct CommandRunner
   // set-ui-state and after `set-ui-state none`, when save-project sends none.
   protocol::SubtreePtr m_uiStateToSave;
 };
+
+// Inlined definitions ////////////////////////////////////////////////////////
+
+template <typename R>
+inline CommandRunner::Run CommandRunner::bareRequest(Describe describe)
+{
+  return Run::Fn([describe = std::move(describe)](CommandRunner &self,
+                     const Command &,
+                     Deadline deadline,
+                     Modifiers modifiers) {
+    return self.sendRequest(R{}, deadline, modifiers, describe);
+  });
+}
+
+template <typename R>
+inline CommandRunner::Run CommandRunner::nameRequest(
+    std::string R::*name, Describe describe)
+{
+  return Run::Fn([name, describe = std::move(describe)](CommandRunner &self,
+                     const Command &command,
+                     Deadline deadline,
+                     Modifiers modifiers) {
+    R request;
+    if (!command.args.empty())
+      request.*name = command.args[0];
+    return self.sendRequest(std::move(request), deadline, modifiers, describe);
+  });
+}
+
+template <typename R>
+inline CommandRunner::Run CommandRunner::idRequest(
+    std::string R::*id, Describe describe)
+{
+  return Run::Fn([id, describe = std::move(describe)](CommandRunner &self,
+                     const Command &command,
+                     Deadline deadline,
+                     Modifiers modifiers) {
+    R request;
+    request.*id = command.args[0];
+    return self.sendRequest(std::move(request), deadline, modifiers, describe);
+  });
+}
+
+template <typename R>
+inline CommandRunner::Run CommandRunner::renameRequest(std::string R::*id)
+{
+  return Run::Fn([id](CommandRunner &self,
+                     const Command &command,
+                     Deadline deadline,
+                     Modifiers modifiers) {
+    R request;
+    request.*id = command.args[0];
+    request.newName = command.args[1];
+    return self.sendRequest(std::move(request), deadline, modifiers);
+  });
+}
+
+template <typename R>
+inline CommandRunner::Run CommandRunner::saveArchiveRequest(
+    std::string R::*id, Describe describe)
+{
+  return Run::Fn([id, describe = std::move(describe)](CommandRunner &self,
+                     const Command &command,
+                     Deadline deadline,
+                     Modifiers modifiers) {
+    R request;
+    request.*id = command.args[0];
+    request.file = command.args[1];
+    return self.sendRequest(std::move(request), deadline, modifiers, describe);
+  });
+}
+
+template <typename R>
+inline CommandRunner::Run CommandRunner::loadArchiveRequest(Describe describe)
+{
+  return Run::Fn([describe = std::move(describe)](CommandRunner &self,
+                     const Command &command,
+                     Deadline deadline,
+                     Modifiers modifiers) {
+    R request;
+    request.file = command.args[0];
+    return self.sendRequest(std::move(request), deadline, modifiers, describe);
+  });
+}
+
+template <typename R>
+inline CommandRunner::Failure CommandRunner::sendRequest(
+    R request, Deadline deadline, Modifiers modifiers, const Describe &describe)
+{
+  request.requestId = m_session->nextRequestId();
+  m_variables["lastRequestId"] = std::to_string(request.requestId);
+  // Until the reply is collected (at once, or by await-reply under no-wait)
+  // the best mark is the count as the request goes out.
+  m_snapshotMark = m_session->snapshotsReceived();
+  std::string error;
+  if (!m_session->send(request, &error))
+    return error;
+  if (modifiers.noWait) {
+    m_pendingReplies.emplace_back(request.requestId, describe);
+    return drainEvents();
+  }
+  return awaitReply(request.requestId, deadline, modifiers, describe);
+}
+
+template <typename Result>
+inline CommandRunner::Describe CommandRunner::createdResult(
+    std::string Result::*id, const char *key, const char *variable)
+{
+  return [id, key, variable](CommandRunner &self,
+             const protocol::ProjectOpReply &reply,
+             Event &event,
+             std::vector<Event> &) -> Failure {
+    const auto result = protocol::results<Result>(reply);
+    if (!result)
+      return std::string("the reply carries no ") + key + " result";
+    event.fields.emplace_back(key, (*result).*id);
+    self.m_variables[variable] = (*result).*id;
+    return {};
+  };
+}
 
 } // namespace vsr::scivis_studio::test_client

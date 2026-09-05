@@ -23,6 +23,7 @@ measurement beyond deadlines.
 ```
 scivisStudioTestClient [--host H] [--port N] [--timeout MS] [--keep-going]
                        [--quiet-events] [--script FILE | -e "cmd; cmd" ...]
+scivisStudioTestClient --help | --markdown
 ```
 
 | flag | meaning |
@@ -33,6 +34,7 @@ scivisStudioTestClient [--host H] [--port N] [--timeout MS] [--keep-going]
 | `--timeout MS` | deadline of every waiting command unless it carries `timeout=MS` (5000) |
 | `--keep-going` | continue after a FAIL; the exit status is still non-zero |
 | `--quiet-events` | print no `EVT` lines except those of the `dump-*` commands |
+| `--markdown` | print the [command table](#commands) as Markdown and exit |
 
 Without `--script` or `-e` the script is read from stdin. Exit status: 0 iff
 every command printed `OK`; 1 when any FAILed; 2 for a bad command line or a
@@ -56,80 +58,156 @@ under [Variables](#variables). In the value position of `assert`, write
 ## Commands
 
 The vocabulary is the server surface through milestone 7: the session,
-rendering and scene-edit commands below, one request command per Project
-Op, Remote Browse and task message, the playback, picking and viewport
-commands, the offline render and the UI state round trip, and the waits
-that go with them. An
-`Error` the server sends while any command but `expect-error` runs FAILs that
-command with the Error's text (only Project Ops carry request ids, so for
+rendering and scene-edit commands, one request command per Project Op, Remote
+Browse and task message, the playback, picking and viewport commands, the
+offline render and the UI state round trip, and the waits that go with them.
+The table below is generated from the runner's command table
+(`scivisStudioTestClient --markdown` prints it; a test checks this file
+carries it verbatim), so the names, arguments and one-line summaries here are
+the ones `--help` and the `usage:` FAILs print. `<required>` and `[optional]`
+arguments, `...` for a list; a `kind` of `request` means the command sends
+one request and awaits its reply (`sync` when the reply ends the op, `task`
+when it launches a Server Task), `wait` a wait on a task or a reply.
+
+An `Error` the server sends while any command but `expect-error` runs FAILs
+that command with the Error's text (only Project Ops carry request ids, so for
 everything else the command in flight is the attribution); a waiting command
-also FAILs as soon as the connection is Lost, naming the loss, rather than
-at its deadline. Write the Errors a script provokes as expectations
-(`send-raw 60` then `expect-error`), and let the reply of a fire-and-forget
-command settle (`sleep`) before the next one if its Error is to land on it.
+also FAILs as soon as the connection is Lost, naming the loss, rather than at
+its deadline. Write the Errors a script provokes as expectations (`send-raw
+60` then `expect-error`), and let the reply of a fire-and-forget command
+settle (`sleep`) before the next one if its Error is to land on it.
+
+The prefixes: `expect-fail <command>` makes the refused outcome the OK one
+(`ok=false` for a request, `TaskFailed` for `await-task`), and applies to
+`request` and `wait` commands; `no-wait <request>` sends without awaiting the
+reply and applies to `request` commands only. Either on a `session` command
+is a FAIL. A command that takes no argument FAILs when given one, and every
+argument count outside the usage FAILs as `usage: <command> <usage>` before
+anything reaches the wire.
+
+| command | kind | does |
+|---------|------|------|
+| `add-light <lightRigId> [subtype]` | request | sync; adds a light to the rig (SUBTYPE defaults to directional); the reply carries lightNode=LAYER:NODE |
+| `assert <value> <op> <rhs>` | session | compare a named value (the assert values below); OP in == != < <= > >= contains; RHS a literal, or @NAME for another named value |
+| `await-frame [count]` | session | wait for COUNT (default 1) further frames |
+| `await-frame-advance [count]` | session | wait for COUNT (default 1) further frames whose header frame differs from the previous frame's |
+| `await-frame-at <frame>` | session | wait for a Frame whose header says frame == FRAME; the headers meanwhile print as they come |
+| `await-lost` | session | wait until the connection is Lost (mirror and replica stay as a frozen view) |
+| `await-reply [requestId]` | wait | collect the reply of a no-wait request, the oldest pending by default |
+| `await-snapshot` | session | wait for a ProjectSnapshot newer than the last thing awaited (the last request's reply, the last await-task's end, or the previous await-snapshot); each await consumes one snapshot |
+| `await-task [taskId]` | wait | wait for the task (default $lastTaskId) to end; FAIL on TaskFailed, or under expect-fail on TaskCompleted |
+| `await-task-progress [taskId]` | session | wait until the task (default $lastTaskId) has reported progress at least once (a report an earlier command printed counts); FAIL at once when it ends without any |
+| `await-warning` | session | wait for the next TimeAdvanceWarning (a frame that failed to load while playing) |
+| `cancel-task <taskId>` | request | sync; removes a queued task (it then ends as TaskFailed "cancelled") or asks a running render to stop at its next frame; a finished task is an error reply |
+| `clone-light-rig <id>` | request | sync; lightRigId= |
+| `connect [host] [port]` | session | TCP connect, exchange Hellos (exact PROTOCOL_VERSION match), await the complete Bootstrap |
+| `create-camera-rig [name]` | request | sync; cameraRigId= |
+| `create-color-map [name]` | request | sync; colorMapId= and object=TYPE:INDEX, the record and its scene-side Array |
+| `create-light-rig [name]` | request | sync; lightRigId= |
+| `create-shot [name]` | request | sync; shotId=; the new shot becomes active |
+| `declare-file-animation-dataset <name> <importer> <source>... [set-frame-count=BOOL]` | request | sync; declares a file animation without importing it; the reply carries datasetId= |
+| `disconnect` | session | send Disconnect and close; mirror and replica are cleared -> Disconnected |
+| `discover-dataset-candidates` | request | sync; one EVT DatasetCandidate file= proposedName= per candidate |
+| `dump-frame` | session | one EVT Frame line for the newest frame header |
+| `dump-layers` | session | one EVT Layer line per mirror layer: index, name, nodes, active |
+| `dump-project` | session | one EVT Project line from the replica (name, activeShot, counts, dirty, directory), then one EVT Shot, Dataset, LightRig, CameraRig and ColorMap line per entity |
+| `dump-scene` | session | one EVT Object line per mirror object: type, index, subtype, name, params count |
+| `dump-ui-state` | session | one EVT UIState present= children= line for the newest tree the server sent, then one EVT UIStateEntry path= value= per leaf |
+| `expect-error [substring]` | session | the next server message other than a Frame or a liveness Pong must be an Error, containing SUBSTRING if given |
+| `expect-pong` | session | the next non-Frame server message must be a Pong |
+| `find-object <type> [first\|name=<name>]` | session | the first mirror object of that type, or the first one so named: one EVT Object line, and $lastObjectRef (type:index), $lastObjectType, $lastObjectIndex |
+| `import-file-animation-dataset <name> <importer> <path>... [set-frame-count=BOOL]` | request | task: import a file animation from those files |
+| `import-static-dataset <path> [name] [importer\|VSR_SUBTREE]` | request | task; IMPORTER is a vsr::io::ImporterType name (OBJ, PLY, ...) or VSR_SUBTREE for a subtree archive |
+| `incorporate-dataset-candidate <file> [proposedName] [name]` | request | task: import a candidate discover-dataset-candidates found |
+| `list-directory <directory>` | request | one EVT DirectoryEntry name= kind= size= mtime= per entry (File, Directory, ProjectDirectory); refused outside every Data Root |
+| `list-roots` | request | one EVT DataRoot path= per Data Root; the first is $dataRoot |
+| `load-camera-rig-archive <file>` | request | sync; cameraRigId= |
+| `load-dataset <id>` | request | task: load an unloaded dataset |
+| `load-dataset-archive <file>` | request | task: import a Dataset Archive |
+| `load-light-rig-archive <file>` | request | sync; lightRigId= |
+| `new-project` | request | sync: an unsaved empty project replaces the current one |
+| `open-project <directory>` | request | task: open the project stored in DIR |
+| `pick <x> <y>` | session | send a Pick at that pixel (x right, y down from the top-left) and await its PickReply; sets $lastPickType and $lastPickIndex on a hit, unsets them on a miss |
+| `ping` | session | send Ping; the Pong is for expect-pong |
+| `reconnect` | session | connect again to the last host and port, retrying refused attempts until the deadline; a fresh handshake and Bootstrap |
+| `refresh-dataset-availability <id>` | request | sync; checks again whether the dataset's source is there |
+| `reimport-dataset <id>` | request | task: import the dataset again from its source |
+| `remove-camera-rig <id>` | request | sync |
+| `remove-color-map <id>` | request | sync |
+| `remove-dataset <id> [keep-asset-file]` | request | sync; removes the saved asset file too unless told to keep it |
+| `remove-light <lightRigId> <layer> <nodeIndex>` | request | sync; the node reference add-light returned |
+| `remove-light-rig <id>` | request | sync |
+| `remove-param <type> <index> <name>` | session | remove a parameter, mirror and wire |
+| `remove-shot <id>` | request | sync |
+| `rename-camera-rig <id> <newName>` | request | sync |
+| `rename-color-map <id> <newName>` | request | sync |
+| `rename-dataset <id> <newName>` | request | sync |
+| `rename-light-rig <id> <newName>` | request | sync |
+| `render-shot <shotId\|active>` | request | task: render the shot's frames offline; needs a saved project, refused while another render is queued or running; the end carries framesCompleted= and the output directory as its message |
+| `request-array-histogram <type> <index> <bins> (or <type:index> <bins>)` | request | sync: bin a scalar array on the server; the reply prints bins= min= max= nonFinite= and fills the histogram.* values (cleared when the request goes out) |
+| `save-camera-rig-archive <id> <file>` | request | sync |
+| `save-dataset-archive <id> <file>` | request | task: write the dataset as a Dataset Archive |
+| `save-frame <path.ppm>` | session | decode the newest frame into a binary P6 PPM (relative to the working directory) |
+| `save-light-rig-archive <id> <file>` | request | sync |
+| `save-project [directory]` | request | task: save to DIR, or to the project's own directory; sends the UI state tree set-ui-state built, if any |
+| `send-raw <typeByte 0..255> [hex bytes...]` | session | send a message of that type byte with the given payload bytes, verbatim |
+| `set-active-shot <id>` | request | sync |
+| `set-encodings <name>[,<name>...]` | session | offer frame encodings, most preferred first (raw, turbojpeg; case-insensitive) |
+| `set-frame-config <width> <height>` | session | request a frame size, await the FrameConfig ack |
+| `set-node-transform <layer> <node> <16 floats>` | session | set a transform node's matrix, column-major; NODE is the server's node index |
+| `set-outline [<type> <index> \| <type:index> \| none]` | session | outline that object, or clear the outline (none or no argument) |
+| `set-param <type> <index> <name> <anariType> <value...>` | session | optimistic edit: set a parameter on the mirror and on the wire (camera 1 fovy float32 0.9) |
+| `set-playing <shotId\|active> on\|off` | request | sync: start or stop playback of the active shot (another id is refused); the reply and a snapshot follow |
+| `set-time <shotId\|active> <frame>` | session | one-way scrub (latest-wins); while paused the server commits Time at Rest with one debounced snapshot; a SHOT that is not active is ignored silently |
+| `set-ui-state <key>=<value>... \| none` | session | build the UI state tree the next save-projects send, one string leaf windows/<key> per edit (repeated commands compose); none drops the tree |
+| `shutdown` | session | send Shutdown and await the server closing the socket -> Disconnected |
+| `sleep <ms>` | session | keep polling (events still print) for MS milliseconds; a loss meanwhile is the next command's to notice |
+| `start-rendering` | session | ask the server to stream frames |
+| `stop-rendering` | session | pause the stream |
+| `unload-dataset <id>` | request | sync |
+| `update-shot <id> <field>=<value>...` | request | sync: the replica's Shot with the edits applied is sent whole; fields name, frameCount, fps, loop, currentFrame, lightRigId, cameraRigId, renderSettings.*, binding.<datasetId>=on\|off |
+| `viewport-settings <key>=<value>...` | session | edit the remembered ViewportSettings and send the whole struct (unset keys keep their last value); keys highlightSelection, outlinePrimitives, showWorldBounds, edgeInvert, worldBoundsColor=r,g,b,a, worldBoundsWidth, visualizeAOV, depthVisualMinimum, depthVisualMaximum |
 
 ### Session, rendering and scene edits
-
-| command | does |
-|---------|------|
-| `connect [HOST] [PORT]` | TCP connect, exchange Hellos (exact `PROTOCOL_VERSION` match), await the complete Bootstrap |
-| `disconnect` | send Disconnect and close; mirror and replica are cleared -> Disconnected |
-| `shutdown` | send Shutdown and await the server closing the socket -> Disconnected |
-| `ping` | send Ping; the Pong is for `expect-pong` |
-| `expect-pong` | the next non-Frame server message must be a Pong |
-| `await-lost` | wait until the connection is Lost (mirror and replica stay as a frozen view) |
-| `reconnect` | connect again to the last host and port, retrying refused attempts until its deadline (a server being restarted refuses at once); a fresh handshake and Bootstrap |
-| `sleep MS` | keep polling (events still print) for MS milliseconds; a loss meanwhile is the next command's to notice. MS, like every `timeout=MS`, must fit a deadline |
-| `expect-error [SUBSTRING]` | the next server message other than a Frame or a liveness Pong must be an Error, containing SUBSTRING if given |
-| `send-raw TYPE [HEX ...]` | send a message of type byte TYPE (0..255) with the given payload bytes, verbatim |
-| `set-frame-config W H` | request a frame size, await the FrameConfig ack |
-| `set-encodings NAME[,NAME]` | offer frame encodings, most preferred first (`raw`, `turbojpeg`; case-insensitive) |
-| `start-rendering` | ask the server to stream frames |
-| `stop-rendering` | pause the stream |
-| `await-frame [COUNT]` | wait for COUNT (default 1) further frames |
-| `await-frame-at FRAME` | wait for a Frame whose header says `frame == FRAME`; the headers meanwhile print as they come |
-| `await-frame-advance [COUNT]` | wait for COUNT (default 1) further frames whose header `frame` differs from the previous frame's |
-| `save-frame PATH.ppm` | decode the newest frame into a binary P6 PPM (relative to the working directory) |
-| `set-param TYPE INDEX NAME ANARITYPE VALUE...` | optimistic edit: set a parameter on the mirror and on the wire (`camera 1 fovy float32 0.9`, `camera 1 position float32_vec3 1 2 3`, `... note string "two words"`, `... flag bool true`) |
-| `remove-param TYPE INDEX NAME` | remove a parameter, mirror and wire |
-| `set-node-transform LAYER NODE M0..M15` | set a transform node's matrix, column-major; NODE is the server's node index |
-| `dump-scene` | one `EVT Object` line per mirror object: type, index, subtype, name, params count |
-| `dump-layers` | one `EVT Layer` line per mirror layer: index, name, nodes, active |
-| `dump-project` | one `EVT Project` line from the replica (name, activeShot, counts, dirty, directory), then one `EVT Shot`, `EVT Dataset`, `EVT LightRig`, `EVT CameraRig` and `EVT ColorMap` line per entity |
-| `dump-frame` | one `EVT Frame` line for the newest frame header |
-| `set-ui-state KEY=VALUE... \| none` | build the UI state tree the next `save-project`s send: one string leaf `windows/<key>` per edit, repeated commands composing (a key set again is overwritten); `none` drops the tree, so `save-project` sends none again and the server keeps the tree the project opened with |
-| `dump-ui-state` | one `EVT UIState present= children=` line for the newest tree the server sent, then one `EVT UIStateEntry path= value=` per leaf (`windows/layout`) |
-| `find-object TYPE [first\|name=NAME]` | the first mirror object of that type, or the first one so named: one `EVT Object` line, and `$lastObjectRef` (`type:index`), `$lastObjectType`, `$lastObjectIndex`; every array kind is looked up in the one `array` pool |
-| `assert VALUE OP RHS` | compare a named value; OP in `== != < <= > >= contains`; RHS is a literal, or `@NAME` for another named value (`assert shot.active.currentFrame == @frame.frame`) |
 
 Object TYPE and ANARITYPE are the ANARI names without the `ANARI_` prefix,
 case-insensitive (`camera`, `light`, `float32`, `float32_vec3`, `int32`,
 `bool`, `string`). Vector, matrix and box values take one token per
-component. Where a command takes an object as `TYPE INDEX`, the one-token
+component: `set-param camera 1 fovy float32 0.9`, `set-param camera 1
+position float32_vec3 1 2 3`, `... note string "two words"`, `... flag bool
+true`. Where a command takes an object as `TYPE INDEX`, the one-token
 `TYPE:INDEX` spelling `$lastObjectRef` expands to is accepted as well
-(`set-outline`, `request-array-histogram`).
+(`set-outline`, `request-array-histogram`). `sleep`'s MS, like every
+`timeout=MS`, must fit a deadline. `save-frame` writes relative to the
+working directory.
 
 ### Playback, picking and the viewport
 
 Time in motion arrives in the Frame headers; Time at Rest in the Project
 Snapshot's active shot (`await-snapshot` prints its `playing=` and
-`currentFrame=`). `SHOT` below is a shot id or `active`, the replica's
-active shot.
+`currentFrame=`). `SHOT` is a shot id or `active`, the replica's active
+shot. `set-time` is a one-way scrub (latest-wins): while paused, the server
+commits Time at Rest with one debounced snapshot once no `SetTime` has
+arrived for 250 ms and the frame changed; a `SHOT` that is not active is
+ignored by the server, silently. `await-warning` prints the warning as `EVT
+TimeAdvanceWarning shotId= frame= message=`.
 
-| command | does |
-|---------|------|
-| `set-playing SHOT on\|off` | Project Op: start or stop playback of the active shot (another id is refused); the reply and a snapshot follow |
-| `set-time SHOT FRAME` | one-way scrub (latest-wins); while paused, the server commits Time at Rest with one debounced snapshot once no `SetTime` has arrived for 250 ms and the frame changed. A `SHOT` that is not active is ignored by the server, silently |
-| `await-warning` | wait for the next `TimeAdvanceWarning` (a frame that failed to load while playing); prints `EVT TimeAdvanceWarning shotId= frame= message=` |
-| `pick X Y` | send a `Pick` at that pixel (x right, y down from the top-left, in frame-header pixels; the server clamps what lies outside the frame) and await its `PickReply`, printed as `EVT PickReply requestId= hit= worldPosition="x y z" objectType= objectIndex=` (`none` when nothing was hit); sets `$lastPickType`, `$lastPickIndex` on a hit and unsets them on a miss |
-| `set-outline [TYPE INDEX\|TYPE:INDEX\|none]` | outline that object, or clear the outline (`none` or no argument) |
-| `viewport-settings KEY=VALUE...` | edit the remembered `ViewportSettings` and send the whole struct; keys `highlightSelection`, `outlinePrimitives`, `showWorldBounds`, `edgeInvert` (bools), `worldBoundsColor=r,g,b,a`, `worldBoundsWidth`, `visualizeAOV` (`NONE`, `DEPTH`, `ALBEDO`, `NORMAL`, `EDGES`, `OBJECT_ID`, `PRIMITIVE_ID`, `INSTANCE_ID`), `depthVisualMinimum`, `depthVisualMaximum`; an unknown key is a usage error. Unset keys keep the last value sent (the struct's defaults at first), so repeated commands compose; with no edits the current struct is sent again |
-| `request-array-histogram TYPE INDEX BINS` | Project Op: bin a scalar array on the server; the reply prints `bins=<count> min= max= nonFinite=` and fills the `histogram.*` values (cleared when the request goes out, so a refused one leaves none) |
+`pick X Y` picks in frame-header pixels (x right, y down from the top-left;
+the server clamps what lies outside the frame) and prints the reply as `EVT
+PickReply requestId= hit= worldPosition="x y z" objectType= objectIndex=`
+(`none` when nothing was hit). It is request/reply like a Project Op but its
+reply is a plain `PickReply`, not a `ProjectOpReply`: `expect-fail` and
+`no-wait` do not apply to it. `set-time`, `set-outline` and
+`viewport-settings` are optimistic: they send and print whatever events were
+queued.
 
-`pick` is request/reply like a Project Op but its reply is a plain
-`PickReply`, not a `ProjectOpReply`: `expect-fail` and `no-wait` do not apply
-to it. `set-time`, `set-outline` and `viewport-settings` are optimistic: they
-send and print whatever events were queued.
+`viewport-settings` keys: `highlightSelection`, `outlinePrimitives`,
+`showWorldBounds`, `edgeInvert` (bools), `worldBoundsColor=r,g,b,a`,
+`worldBoundsWidth`, `visualizeAOV` (`NONE`, `DEPTH`, `ALBEDO`, `NORMAL`,
+`EDGES`, `OBJECT_ID`, `PRIMITIVE_ID`, `INSTANCE_ID`), `depthVisualMinimum`,
+`depthVisualMaximum`; an unknown key is a usage error. Unset keys keep the
+last value sent (the struct's defaults at first), so repeated commands
+compose; with no edits the current struct is sent again.
 
 ### Project Ops, Remote Browse and tasks
 
@@ -146,13 +224,51 @@ runs `await-snapshot` before asserting on the replica. A failed op sends no
 snapshot; some "failed" ops still mutate (an import that leaves an
 `ImportFailed` record) and do.
 
+`update-shot ID FIELD=VALUE...` sends the replica's Shot with the edits
+applied, whole; the fields are `name`, `frameCount`, `fps`, `loop`,
+`currentFrame`, `lightRigId`, `cameraRigId`,
+`renderSettings.{width,height,samples,rendererLibrary,rendererSubtype,rendererObjectIndex,outputFilePrefix}`
+and `binding.<datasetId>=on|off` (`playing` is refused: it belongs to
+playback). `set-playing` starts or stops playback of the active shot only
+(another id is refused); the reply and a snapshot follow.
+`request-array-histogram` clears the `histogram.*` values when the request
+goes out, so a refused one leaves none. `list-directory` prints one entry per
+line (`File`, `Directory`, `ProjectDirectory`) and FAILs (or `expect-fail`s)
+outside every Data Root.
+
 Task-launching ops answer at once with `taskId=` and run on the server's loop
 one at a time; `await-task` waits for the `TaskCompleted`/`TaskFailed`, the
 `TaskProgress` lines printing as they come (`current= total=`, determinate
 for a render, `total=0` otherwise), and the end line carrying
 `framesCompleted=` when the task wrote frames. The completion message lands
 in `$lastTaskMessage`: an import's is the new dataset's id (then also
-`$lastDatasetId`), a render's the output directory.
+`$lastDatasetId`), a render's the output directory. A task that fails FAILs
+the `await-task`, unless it is written `expect-fail await-task [TASKID]`,
+when a completion FAILs instead. `await-task-progress` waits until the task
+has reported progress at least once (a report an earlier command already
+printed counts) and FAILs at once when it ends without any.
+
+`render-shot SHOT` needs a saved project and is refused while another render
+is queued or running. The shot becomes active first (a snapshot precedes the
+progress), the progress is determinate (`current=<frame> total=<frames>`),
+the end carries `framesCompleted=` and, when completed, the output directory
+as its message. While it is queued or running, mutating requests that reach
+dispatch are refused with "render in progress" and interactive frames pause;
+a request that arrives while the render body holds the loop is latched and
+dispatched once it returns, so it is refused only when another render is
+queued by then. `cancel-task TASKID` removes a queued task (it then ends as
+`TaskFailed "cancelled"`), or asks a running render to stop at its next frame
+(the reply is ok once it has; the task ends as `TaskFailed "cancelled"` with
+`framesCompleted=` the frames left on disk); a finished task is an error
+reply.
+
+`await-snapshot` waits for a `ProjectSnapshot` newer than the last thing
+awaited: the reply to the last request command, the end of the last
+`await-task`, or the previous `await-snapshot`. Each `await-snapshot`
+consumes one snapshot, so two that land together (a `set-playing`'s and the
+auto-stop's) are awaited one at a time. A snapshot that arrived before the
+mark belongs to something earlier, so await a task that sends none (a
+cancelled one) before the one whose snapshot is wanted.
 
 A refused request FAILs the command with the server's reason; written as an
 expectation, the reason is still there to check:
@@ -167,41 +283,6 @@ can be in flight (two imports and the cancel of the second before it runs);
 `await-reply` collects them, oldest first. A no-wait reply that an earlier
 command already drained is decoded when collected but its record is not
 printed again.
-
-| command | does |
-|---------|------|
-| `new-project` | sync: an unsaved empty project replaces the current one |
-| `open-project DIR` | task: open the project stored in DIR |
-| `save-project [DIR]` | task: save to DIR, or to the project's own directory |
-| `import-static-dataset PATH [NAME] [IMPORTER]` | task; IMPORTER is a `vsr::io::ImporterType` name (`OBJ`, `PLY`, ...) or `VSR_SUBTREE` for a subtree archive |
-| `import-file-animation-dataset NAME IMPORTER PATH... [set-frame-count=BOOL]` | task |
-| `declare-file-animation-dataset NAME IMPORTER SOURCE... [set-frame-count=BOOL]` | sync; the reply carries `datasetId=` |
-| `reimport-dataset ID`, `load-dataset ID` | tasks |
-| `rename-dataset ID NAME`, `unload-dataset ID`, `refresh-dataset-availability ID` | sync |
-| `remove-dataset ID [keep-asset-file]` | sync; removes the saved asset file too unless told to keep it |
-| `save-dataset-archive ID PATH`, `load-dataset-archive PATH` | tasks |
-| `discover-dataset-candidates` | sync; one `EVT DatasetCandidate file= proposedName=` per candidate |
-| `incorporate-dataset-candidate FILE [PROPOSED] [NAME]` | task |
-| `create-shot [NAME]` | sync; `shotId=`; the new shot becomes active |
-| `remove-shot ID`, `set-active-shot ID` | sync |
-| `set-playing SHOT on\|off`, `request-array-histogram TYPE INDEX BINS` | sync; see [Playback, picking and the viewport](#playback-picking-and-the-viewport) |
-| `update-shot ID FIELD=VALUE...` | sync: the replica's Shot with the edits applied is sent whole; fields `name`, `frameCount`, `fps`, `loop`, `currentFrame`, `lightRigId`, `cameraRigId`, `renderSettings.{width,height,samples,rendererLibrary,rendererSubtype,rendererObjectIndex,outputFilePrefix}`, `binding.<datasetId>=on\|off` (`playing` is refused: it belongs to playback) |
-| `create-light-rig [NAME]`, `clone-light-rig ID`, `load-light-rig-archive PATH` | sync; `lightRigId=` |
-| `remove-light-rig ID`, `rename-light-rig ID NAME`, `save-light-rig-archive ID PATH` | sync |
-| `add-light RIG [SUBTYPE]` | sync; `lightNode=LAYER:NODE`; SUBTYPE defaults to `directional` |
-| `remove-light RIG LAYER NODE` | sync; the node reference `add-light` returned |
-| `create-camera-rig [NAME]`, `load-camera-rig-archive PATH` | sync; `cameraRigId=` |
-| `remove-camera-rig ID`, `rename-camera-rig ID NAME`, `save-camera-rig-archive ID PATH` | sync |
-| `create-color-map [NAME]` | sync; `colorMapId=` and `object=TYPE:INDEX`, the record and its scene-side Array |
-| `rename-color-map ID NAME`, `remove-color-map ID` | sync |
-| `list-roots` | one `EVT DataRoot path=` per Data Root; the first is `$dataRoot` |
-| `list-directory PATH` | one `EVT DirectoryEntry name= kind= size= mtime=` per entry (`File`, `Directory`, `ProjectDirectory`); FAIL (or `expect-fail`) outside every root |
-| `render-shot SHOT` | task: render the shot's frames offline (`SHOT` an id or `active`); needs a saved project, refused while another render is queued or running. The shot becomes active first (a snapshot precedes the progress), the progress is determinate (`current=<frame> total=<frames>`), the end carries `framesCompleted=` and, when completed, the output directory as its message. While it is queued or running, mutating requests that reach dispatch are refused with "render in progress" and interactive frames pause; a request that arrives while the render body holds the loop is latched and dispatched once it returns, so it is refused only when another render is queued by then |
-| `cancel-task TASKID` | sync; removes a queued task (it then ends as `TaskFailed "cancelled"`), or asks a running render to stop at its next frame (the reply is ok once it has; the task ends as `TaskFailed "cancelled"` with `framesCompleted=` the frames left on disk); a finished task is an error reply |
-| `await-task [TASKID] [expect-fail]` | wait for the task (default `$lastTaskId`) to end; FAIL on `TaskFailed` unless `expect-fail` follows, then FAIL on `TaskCompleted` |
-| `await-task-progress [TASKID]` | wait until the task (default `$lastTaskId`) has reported progress at least once (a report an earlier command already printed counts); FAIL at once when it ends without any |
-| `await-snapshot` | wait for a `ProjectSnapshot` newer than the last thing awaited: the reply to the last request command, the end of the last `await-task`, or the previous `await-snapshot`. Each `await-snapshot` consumes one snapshot, so two that land together (a `set-playing`'s and the auto-stop's) are awaited one at a time. A snapshot that arrived before the mark belongs to something earlier, so await a task that sends none (a cancelled one) before the one whose snapshot is wanted |
-| `await-reply [REQUESTID]` | collect the reply of a `no-wait` request, the oldest pending by default |
 
 ### Variables
 
@@ -403,11 +484,16 @@ exercise its server surface, so the scenarios stay the acceptance test of the
 whole protocol:
 
 1. Add the session-level operation to `TestSession` (send, plus any inbound
-   handling and its `Event`), then the command to `CommandRunner`: a
-   `Command`-taking member, its dispatch line in `execute()` (or, for a
-   request with a reply, in `executeRequest()` through one of the shared
-   request shapes and a `Describe` for its results), and its line in
-   `commandHelp()`. Named values go into `namedValue()` and `assertNames()`.
+   handling and its `Event`), then one row to the command table in
+   `CommandRunner.cpp` (`commands()`, sorted by name): the name, usage,
+   arity, kind and handler, and a one-line summary. The handler is a member
+   in the file of its area (`SessionCommands.cpp`, `SceneCommands.cpp`,
+   `RequestCommands.cpp`, `WaitCommands.cpp`) or, for a request of a shape
+   the table already knows (`idRequest<R>`, `nameRequest<R>`, ...), the
+   shape bound to the request type and a `Describe` for its results. Named
+   values go into `namedValue()` and `assertNames()` (`NamedValues.cpp`).
+   Regenerate the command table above with `scivisStudioTestClient
+   --markdown`; the `[StudioTestClient]` suite checks this file carries it.
 2. Cover the command in `src/tests/test_StudioTestClient.cpp`, which runs
    scripts against an in-process `StudioServer`.
 3. Add `scenarios/<name>.studio` (self-contained, commented) and an

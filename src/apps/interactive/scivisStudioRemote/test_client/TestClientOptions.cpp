@@ -6,6 +6,7 @@
 // vsr_scivis_studio_protocol
 #include "StudioProtocol.h"
 // std
+#include <ostream>
 #include <sstream>
 
 namespace vsr::scivis_studio::test_client {
@@ -16,6 +17,83 @@ void setError(std::string *error, const std::string &text)
 {
   if (error)
     *error = text;
+}
+
+// `name usage`, the command as a script writes it.
+std::string commandLine(const CommandRunner::CommandSpec &spec)
+{
+  std::string line = spec.name;
+  if (*spec.usage)
+    line += std::string(" ") + spec.usage;
+  return line;
+}
+
+// `text` wrapped at `width` columns on spaces, every line after the first
+// indented by `indent`.
+void appendWrapped(
+    std::ostream &out, const std::string &text, size_t indent, size_t width)
+{
+  size_t column = indent;
+  bool first = true;
+  std::istringstream words(text);
+  std::string word;
+  while (words >> word) {
+    if (!first && column + 1 + word.size() > width) {
+      out << '\n' << std::string(indent, ' ');
+      column = indent;
+    } else if (!first) {
+      out << ' ';
+      ++column;
+    }
+    out << word;
+    column += word.size();
+    first = false;
+  }
+  out << '\n';
+}
+
+// The commands of one kind, `name usage` in the first column and the summary
+// wrapped in the second (on its own lines when the first overflows).
+void appendCommandHelp(std::ostream &out, CommandRunner::Kind kind)
+{
+  constexpr size_t SUMMARY_COLUMN = 32;
+  constexpr size_t WIDTH = 80;
+  for (const auto &spec : CommandRunner::commands()) {
+    if (spec.kind != kind)
+      continue;
+    const auto line = "  " + commandLine(spec);
+    out << line;
+    if (line.size() + 1 < SUMMARY_COLUMN)
+      out << std::string(SUMMARY_COLUMN - line.size(), ' ');
+    else
+      out << '\n' << std::string(SUMMARY_COLUMN, ' ');
+    appendWrapped(out, spec.summary, SUMMARY_COLUMN, WIDTH);
+  }
+}
+
+const char *kindText(CommandRunner::Kind kind)
+{
+  switch (kind) {
+  case CommandRunner::Kind::Session:
+    return "session";
+  case CommandRunner::Kind::Request:
+    return "request";
+  case CommandRunner::Kind::Wait:
+    return "wait";
+  }
+  return "?";
+}
+
+// A Markdown table cell: `|` would end it.
+std::string escapedCell(const std::string &text)
+{
+  std::string out;
+  for (const char c : text) {
+    if (c == '|')
+      out += '\\';
+    out += c;
+  }
+  return out;
 }
 
 } // namespace
@@ -31,6 +109,10 @@ bool parseTestClientOptions(const std::vector<std::string> &args,
 
     if (arg == "-h" || arg == "--help") {
       options.showHelp = true;
+      return true;
+    }
+    if (arg == "--markdown") {
+      options.showMarkdown = true;
       return true;
     }
     if (arg == "--keep-going") {
@@ -122,14 +204,49 @@ std::string testClientUsage(const std::string &programName)
          "  --quiet-events    print no EVT lines except from the dump-*"
          " commands\n"
          "  -h, --help        show this help\n"
+         "  --markdown        print the command table as Markdown (the"
+         " README's) and exit\n"
          "\n"
-         "Commands:\n";
-  for (const auto &line : CommandRunner::commandHelp())
-    out << "  " << line << '\n';
-  out << " ";
+         "Waiting commands take a trailing timeout=MS and FAIL as soon as"
+         " the\n"
+         "connection is Lost. An Error the server sends during any command"
+         " but\n"
+         "expect-error FAILs that command. `$name` expands to a variable in"
+         " any\n"
+         "argument; replies fill $lastShotId $lastLightRigId $lastCameraRigId\n"
+         "$lastColorMapId $lastObjectRef $lastObjectType $lastObjectIndex\n"
+         "$lastLightLayer $lastLightNode $lastDatasetId $lastTaskId"
+         " $lastTaskMessage\n"
+         "$lastRequestId $dataRoot.\n"
+         "\n"
+         "Session commands (no prefix applies):\n";
+  appendCommandHelp(out, CommandRunner::Kind::Session);
+  out << "\n"
+         "Request commands (each sends one request, awaits its ProjectOpReply"
+         " and\n"
+         "prints it; `expect-fail <request>` makes ok=false the OK outcome,\n"
+         "`no-wait <request>` sends without awaiting the reply):\n";
+  appendCommandHelp(out, CommandRunner::Kind::Request);
+  out << "\n"
+         "Waits (`expect-fail` applies):\n";
+  appendCommandHelp(out, CommandRunner::Kind::Wait);
+  out << "\n"
+         "assert values:\n ";
   for (const auto &name : CommandRunner::assertNames())
     out << ' ' << name;
   out << '\n';
+  return out.str();
+}
+
+std::string testClientCommandTable()
+{
+  std::ostringstream out;
+  out << "| command | kind | does |\n"
+         "|---------|------|------|\n";
+  for (const auto &spec : CommandRunner::commands()) {
+    out << "| `" << escapedCell(commandLine(spec)) << "` | "
+        << kindText(spec.kind) << " | " << escapedCell(spec.summary) << " |\n";
+  }
   return out.str();
 }
 

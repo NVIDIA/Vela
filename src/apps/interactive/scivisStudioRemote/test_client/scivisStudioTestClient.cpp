@@ -63,6 +63,10 @@ int main(int argc, const char **argv)
     std::cout << testClientUsage(programName);
     return 0;
   }
+  if (options.showMarkdown) {
+    std::cout << testClientCommandTable();
+    return 0;
+  }
 
   std::string script;
   if (!readScript(options, script, error)) {

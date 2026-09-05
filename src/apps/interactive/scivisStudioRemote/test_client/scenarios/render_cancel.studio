@@ -43,7 +43,7 @@ assert var.lastTaskId == 4
 expect-fail await-reply
 assert lastReplyError contains progress
 
-await-task 3 expect-fail
+expect-fail await-task 3
 assert task.3.state == Failed
 assert task.3.message == cancelled
 assert task.3.framesCompleted >= 1
@@ -53,7 +53,7 @@ assert project.shots == 1
 
 # The second render, queued or already running, is cancelled the same way.
 cancel-task 4
-await-task 4 expect-fail
+expect-fail await-task 4
 assert task.4.message == cancelled
 assert task.4.framesCompleted < 400
 assert tasks.failed == 2

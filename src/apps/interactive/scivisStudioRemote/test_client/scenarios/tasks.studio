@@ -33,7 +33,7 @@ await-reply
 assert replies.pending == 0
 # The cancelled task sends no snapshot, so it is awaited first; the snapshot
 # awaited is then task 2's.
-await-task 3 expect-fail
+expect-fail await-task 3
 await-task 2
 await-snapshot
 assert tasks.completed == 2

@@ -32,7 +32,7 @@ assert shot.shot_0001.binding.$lastDatasetId == true
 # the project (so a snapshot follows anyway). No reply names its id; on a
 # fresh server it is the second one minted.
 import-static-dataset $dataRoot/missing.obj Missing OBJ
-await-task expect-fail
+expect-fail await-task
 await-snapshot
 assert tasks.failed == 1
 assert project.datasets == 2
