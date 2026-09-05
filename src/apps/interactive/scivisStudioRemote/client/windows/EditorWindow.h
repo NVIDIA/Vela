@@ -31,8 +31,9 @@ namespace vsr::scivis_studio::client {
  *
  * Example:
  *   struct ShotList : EditorWindow {
- *     ShotList(Application *app, EditorContext *c) : EditorWindow(app, c,
- * "Shots") {} void buildEditorUI(const Project &project) override { ... }
+ *     ShotList(Application *app, EditorContext *c)
+ *         : EditorWindow(app, c, "Shots") {}
+ *     void buildEditorUI(const Project &project) override { ... }
  *   };
  */
 struct EditorWindow : public vsr::ui::imgui::Window
