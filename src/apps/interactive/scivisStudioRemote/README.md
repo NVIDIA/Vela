@@ -1395,6 +1395,21 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
     the `[StudioServer]` task scenario loads an archive under a requested
     name (and refuses a taken one), and `datasets.studio` does the same
     through `load-dataset-archive <file> [name]`. `PROTOCOL_VERSION` 7.
+  - *The server watches an Unloaded dataset's asset.* The client's Dataset
+    Editor sent `RefreshDatasetAvailability` once a second for the selected
+    Unloaded dataset (`m_availabilityDataset`, `m_lastAvailabilityCheck`,
+    an `InFlight`). The server owns the filesystem: the loop now runs
+    `ProjectContext::refreshUnloadedDatasetsAvailability()` (one `exists()`
+    per Unloaded dataset) once a second while a session is up, and a
+    dataset found missing moves the revision, so the usual
+    `followProjectRevisions` snapshot carries the change to every client
+    with no poll. The periodic check was chosen over stat-on-snapshot so an
+    asset deleted while nothing else changes is still noticed, as the
+    monolith's once-a-second check noticed it. The request type stays: the
+    test client's `refresh-dataset-availability` forces the check without
+    waiting for the tick (`datasets.studio`, `errors_project.studio`); the
+    GUI client no longer sends it. The `[StudioServer]` task scenario
+    removes an unloaded dataset's asset and waits for the unasked snapshot.
 
 ### Spec conformance
 

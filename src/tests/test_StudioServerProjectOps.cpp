@@ -1335,6 +1335,37 @@ SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
       }
     }
 
+    WHEN("the project is saved, its dataset unloaded and the asset removed")
+    {
+      REQUIRE(session.waitForSnapshots(++snapshots));
+      const auto saved = data.root / "avail";
+      SaveProject save;
+      save.directory = saved;
+      const auto saveEnd =
+          waitForTaskEnd(client, startedTaskId(session.request(save)));
+      REQUIRE(saveEnd);
+      REQUIRE(saveEnd->completed);
+      REQUIRE(session.waitForSnapshots(++snapshots));
+
+      REQUIRE(session.request(UnloadDataset{0, end->text}).ok);
+      REQUIRE(session.waitForSnapshots(++snapshots));
+      const auto unloaded = session.latestSnapshot().project.datasets.front();
+      REQUIRE(unloaded.residency == DatasetResidency::Unloaded);
+      REQUIRE(unloaded.status == DatasetStatus::Available);
+      const auto asset = saved / "datasets" / (unloaded.persistedName + ".vsr");
+      REQUIRE(std::filesystem::remove(asset));
+      const auto replies = client.count(StudioMessageType::ProjectOpReply);
+
+      THEN("a snapshot marks it Unavailable with nothing asked")
+      {
+        REQUIRE(session.waitForSnapshots(++snapshots));
+        const auto project = session.latestSnapshot().project;
+        REQUIRE(project.datasets.size() == 1);
+        REQUIRE(project.datasets.front().status == DatasetStatus::Unavailable);
+        REQUIRE(client.count(StudioMessageType::ProjectOpReply) == replies);
+      }
+    }
+
     WHEN("a path outside the roots is named")
     {
       REQUIRE(session.waitForSnapshots(++snapshots));

@@ -1441,6 +1441,12 @@ void ProjectContext::refreshUnloadedDatasetAvailability(Dataset &dataset)
     markDatasetUnavailable(dataset);
 }
 
+void ProjectContext::refreshUnloadedDatasetsAvailability()
+{
+  for (auto &dataset : m_project.datasets)
+    refreshUnloadedDatasetAvailability(dataset);
+}
+
 bool ProjectContext::removeDataset(
     const DatasetID &id, bool keepAssetFile, std::string *error)
 {

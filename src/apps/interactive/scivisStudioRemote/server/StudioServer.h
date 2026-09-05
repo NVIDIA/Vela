@@ -30,6 +30,7 @@
 #include "vsr/core/TypeMacros.hpp"
 // std
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -308,6 +309,11 @@ struct StudioServer
   // Runs one queued Server Task and sends its ending; after the exclusive
   // one (the shot render) the latch is discarded first.
   void runOneTask();
+  // Once a second while a session is up, stats the asset file of every
+  // Unloaded dataset (ProjectContext::refreshUnloadedDatasetsAvailability);
+  // one found missing is a revision, so a snapshot follows. The server owns
+  // the filesystem, so no client polls for this.
+  void refreshDatasetAvailability();
   // Drops the edits and SetTime a shot render's body accumulated in the
   // latch and answers a Pick with an Error: they targeted a scene the render
   // was mutating.
@@ -391,6 +397,7 @@ struct StudioServer
   // bootstrap's snapshot records where a new client stands regardless.
   uint64_t m_snapshotRevision{0};
   uint64_t m_boundShotRevision{0};
+  std::chrono::steady_clock::time_point m_nextAvailabilityCheck{};
   // Playback (loop thread only)
   Playback m_playback;
 

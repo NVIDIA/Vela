@@ -45,6 +45,9 @@ constexpr std::chrono::milliseconds FAREWELL_TIMEOUT{200};
 // Loop pacing when there is nothing to render.
 constexpr std::chrono::milliseconds LISTENING_SLEEP{20};
 constexpr std::chrono::milliseconds PAUSED_SLEEP{1};
+// How often the loop stats the Unloaded datasets' asset files while a
+// session is up (the monolith's Dataset Editor checked once a second too).
+constexpr std::chrono::seconds AVAILABILITY_CHECK_PERIOD{1};
 // Guards the pipeline against a hostile or confused SetFrameConfig.
 constexpr uint32_t MAX_FRAME_DIMENSION = 16384;
 
@@ -442,6 +445,7 @@ void StudioServer::run()
     // next bootstrap replays its ending).
     if (sessionEstablished() || m_dispatcher.renderActive())
       runOneTask();
+    refreshDatasetAvailability();
     followProjectRevisions();
     // A Frame still on the wire gets a moment to finish before time moves
     // on, so a fast link never sees a header skip a frame; on a slow link
@@ -492,6 +496,19 @@ void StudioServer::runOneTask()
     discardStaleInputs(m_control);
   }
   m_tasks.sendEnding(*ran);
+}
+
+void StudioServer::refreshDatasetAvailability()
+{
+  if (!sessionEstablished())
+    return;
+  const auto now = std::chrono::steady_clock::now();
+  if (now < m_nextAvailabilityCheck)
+    return;
+  m_nextAvailabilityCheck = now + AVAILABILITY_CHECK_PERIOD;
+  // A dataset found Unavailable moves the revision; followProjectRevisions
+  // sends the snapshot that tells the client.
+  m_projectContext.refreshUnloadedDatasetsAvailability();
 }
 
 void StudioServer::applyControlState()

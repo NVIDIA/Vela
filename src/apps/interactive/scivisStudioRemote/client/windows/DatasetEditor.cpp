@@ -68,26 +68,6 @@ const Dataset *DatasetEditor::resolveSelection(const Project &project)
   return dataset;
 }
 
-// Requests ///////////////////////////////////////////////////////////////////
-
-// The hint stats the asset file server-side; once a second is plenty.
-void DatasetEditor::refreshAvailability(const Dataset &dataset)
-{
-  ProjectOps &ops = m_context->ops();
-  if (dataset.residency != DatasetResidency::Unloaded || !m_context->canSend()
-      || m_refresh.busy(ops))
-    return;
-  const double now = ImGui::GetTime();
-  if (m_availabilityDataset == dataset.id
-      && now - m_lastAvailabilityCheck < 1.0)
-    return;
-  m_availabilityDataset = dataset.id;
-  m_lastAvailabilityCheck = now;
-  RefreshDatasetAvailability refresh;
-  refresh.datasetId = dataset.id;
-  m_refresh.send(ops, std::move(refresh), m_context->errorReporter());
-}
-
 // UI /////////////////////////////////////////////////////////////////////////
 
 void DatasetEditor::buildEditorUI(const Project &project)
@@ -117,7 +97,6 @@ void DatasetEditor::buildEditorUI(const Project &project)
   if (!dataset)
     return;
 
-  refreshAvailability(*dataset);
   buildUI_nameField(*dataset);
   buildUI_details(*dataset);
   buildUI_actions(project, *dataset);

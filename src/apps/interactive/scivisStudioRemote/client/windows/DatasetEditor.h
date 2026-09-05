@@ -24,8 +24,9 @@ namespace vsr::scivis_studio::client {
  * and incorporate candidates -- as a Project Op, with the archive paths
  * chosen through Remote Browse. The selection is a DatasetID re-resolved
  * against each snapshot; a control with a request in flight is greyed until
- * the reply. The availability hint of the selected Unloaded dataset is
- * refreshed at most once a second, as in the monolith.
+ * the reply. An Unloaded dataset's availability is the server's to watch
+ * (it stats the asset once a second and snapshots a change), so the editor
+ * only shows the status the replica holds.
  */
 struct DatasetEditor : public EditorWindow
 {
@@ -45,18 +46,13 @@ struct DatasetEditor : public EditorWindow
   void buildUI_actions(const Project &project, const Dataset &dataset);
   void buildUI_discoveryReview();
   void buildUI_removeConfirmation(const Project &project);
-  void refreshAvailability(const Dataset &dataset);
 
   DatasetID m_selected;
   InFlight m_datasetOp; // load/unload/reimport/remove/archives
   InFlight m_rename;
-  InFlight m_refresh;
   InFlight m_discover;
 
   ui::BufferedNameField m_nameField;
-
-  DatasetID m_availabilityDataset;
-  double m_lastAvailabilityCheck{0.0};
 
   DatasetID m_datasetToRemove;
   bool m_keepRemovedAsset{false};

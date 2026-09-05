@@ -166,7 +166,9 @@ outside Studio's set is **rejected with an error**, never silently ignored.
   (tasks); declared-dataset
   creation (sync — stats nothing, ADR 0023); `ReimportDataset` (task);
   `RenameDataset`, `RemoveDataset(keepAssetFile)`, `UnloadDataset`,
-  `RefreshDatasetAvailability` (sync); `LoadDataset`, dataset-archive
+  `RefreshDatasetAvailability` (sync; the server also stats every Unloaded
+  dataset's asset once a second on its own and snapshots a change, so the
+  request only forces a check now); `LoadDataset`, dataset-archive
   save/load (`LoadDatasetArchive{file, name}`, the name the dataset takes,
   empty for the archive's own; `PROTOCOL_VERSION` 7),
   `IncorporateDatasetCandidate` (tasks);

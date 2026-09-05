@@ -134,8 +134,10 @@ struct ProjectContext
   bool unloadDataset(const DatasetID &id, std::string *error = nullptr);
   // Cheap on-demand availability hint for an Unloaded dataset: a missing
   // asset file is definitively Unavailable. The check never upgrades status —
-  // the authoritative assessment is the load attempt itself.
+  // the authoritative assessment is the load attempt itself. The plural runs
+  // it over every Unloaded dataset (one exists() each).
   void refreshUnloadedDatasetAvailability(Dataset &dataset);
+  void refreshUnloadedDatasetsAvailability();
   bool saveDatasetArchive(const DatasetID &id,
       const std::filesystem::path &file,
       std::string *error = nullptr);
