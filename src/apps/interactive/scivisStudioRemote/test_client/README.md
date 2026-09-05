@@ -528,8 +528,12 @@ whole protocol:
    command table and the assert-value table above with
    `scivisStudioTestClient --markdown`; the `[StudioTestClient]` suite checks
    this file carries both.
-2. Cover the command in `src/tests/test_StudioTestClient.cpp`, which runs
-   scripts against an in-process `StudioServer`.
+2. Cover the command in the `[StudioTestClient]` suite:
+   `src/tests/test_StudioTestClientServer.cpp` runs scripts against an
+   in-process `StudioServer`; `test_StudioTestClientProjectOps.cpp` drives
+   the `FakeProjectServer` for what a real server cannot produce;
+   `test_StudioTestClientScript.cpp` holds the parser, option and command
+   table checks.
 3. Add `scenarios/<name>.studio` (self-contained, commented; `copy-fixture`
    first when it imports a fixture) and an `add_studio_scenario(<name>)` line
    in `CMakeLists.txt`; add the command and the scenario to the tables above.

@@ -76,7 +76,12 @@ if (TARGET vsr_scivis_studio_client_core AND TARGET vsr_scivis_studio_server_cor
   target_sources(${PROJECT_NAME} PRIVATE test_StudioRemoteE2E.cpp)
 endif()
 if (TARGET vsr_scivis_studio_test_client_core AND TARGET vsr_scivis_studio_server_core)
-  target_sources(${PROJECT_NAME} PRIVATE test_StudioTestClient.cpp)
+  target_sources(${PROJECT_NAME} PRIVATE
+    test_StudioTestClientConnection.cpp
+    test_StudioTestClientProjectOps.cpp
+    test_StudioTestClientScript.cpp
+    test_StudioTestClientServer.cpp
+  )
 endif()
 if (TARGET vsr_scivis_studio_protocol)
   target_sources(${PROJECT_NAME} PRIVATE
