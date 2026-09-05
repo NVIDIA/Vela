@@ -108,6 +108,18 @@ banner, auto-retrying); **Disconnected** is a completed user intention (clean
 home state, no retry). The frozen-with-banner treatment is exclusively for
 Lost.
 
+**Session Phase**:
+Where the client's session with its server stands, from the socket up to a
+bootstrapped mirror (`SessionPhase`): `Idle` (no socket: never connected,
+Lost between retries, or Disconnected), `AwaitingHello`, `AwaitingBootstrap`
+(Connected, but the mirror and replica are still a previous session's frozen
+view or empty), `Bootstrapping`, `Ready` (BootstrapEnd seen on this
+connection). `Ready` with a replica is the one condition under which the UI
+may send an edit (`ServerConnection::canSend`). Named after the server's
+`SessionState` where both sides wait for the same thing: `AwaitingHello`
+(each awaits the peer's Hello), `Bootstrapping` (the same bracket); `Ready`
+is the client's side of the server's `Established`.
+
 ### Files
 
 **Data Root**:

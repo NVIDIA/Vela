@@ -476,11 +476,12 @@ right after, by `onServerReady()`.
 replica and last frame as a frozen read-only view; pending requests fail
 once with "connection lost"; task records are handled at the next
 `BootstrapBegin` as above. Between a reconnect's Hello and its
-`BootstrapBegin` the client is `Connected` but not `bootstrapped()`: the
-replica on screen is the previous session's, so the editors stay read-only
-(`EditorContext::canSend`; the Object and Database editors' lock is released
-in `onBootstrapComplete`) -- a wait that lasts as long as the render a busy
-server finishes before it bootstraps anyone. A loss *during* a bootstrap empties the mirror
+`BootstrapBegin` the client is `Connected` but not `bootstrapped()` (its
+Session Phase is `AwaitingBootstrap`): the replica on screen is the previous
+session's, so every editor is read-only (`ServerConnection::canSend`, which
+the Object and Database editors read through `EditorContext`) -- a wait that
+lasts as long as the render a busy server finishes before it bootstraps
+anyone. A loss *during* a bootstrap empties the mirror
 instead of leaving the part that arrived (the replica is still the previous
 session's, since its snapshot comes last in the bracket). A retry greeted
 with a mismatched protocol version ends in `Disconnected` with the mismatch
@@ -1242,6 +1243,47 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   kills right after `await-task-progress`, with no count to keep in step;
   the eight fixture scenarios open with `copy-fixture fixtures/triangle.obj`
   where the hint was. Every scenario passes; nothing else changes.
+- **One client session phase.** The GUI client answered "may the user edit?"
+  four times: `ServerConnection::canEmitEdits` (`Phase::Established &&
+  m_bootstrapped && !m_bootstrapping`), `EditorContext::canSend` (`Connected
+  && bootstrapped() && !bootstrapping() && project()`),
+  `Application::m_panelsReadOnly` (set on Connected and Lost, cleared in
+  `onBootstrapComplete` and `enterHomeState`) and
+  `StudioViewport::m_serverReady` (set by `onServerReady`, cleared by
+  `dropMirrorReferences`); underneath, the connection tracked `Phase` (3)
+  x `m_bootstrapping` x `m_bootstrapped` x `m_autoRetryEnabled`. One
+  `SessionPhase { Idle, AwaitingHello, AwaitingBootstrap, Bootstrapping,
+  Ready }` (CONTEXT.md, "Session Phase") replaces the private `Phase` and
+  both bools: `bootstrapping()` and `bootstrapped()` are phase queries,
+  `canSend()` is `phase() == Ready && project()` defined once on
+  `ServerConnection` (`EditorContext::canSend` stays as a null-guarded
+  forwarder because the context is the editors' one seam to the
+  application, and the modals hold no connection pointer of their own),
+  the mirror's delegate is enabled exactly while `Ready` (`syncDelegate`),
+  and `setPhase` logs each transition as `setState` does. The Object and
+  Database editors' `LockableWindow` takes the `EditorContext` and reads
+  `!canSend()`, so `m_panelsReadOnly` and its four writes are gone; one
+  visible consequence is that those two panels are now greyed in the home
+  state too (no replica, nothing to edit), where `m_panelsReadOnly` had
+  left them enabled over an empty mirror. The viewport asks
+  `bootstrapped()` instead of keeping
+  `m_serverReady`, which also closes a gap: a `TransferScene` outside a
+  bootstrap (the server's scene resend after an open) used to clear
+  `m_serverReady` for the rest of the session, silencing outline and
+  viewport-settings sends until the next bootstrap. `m_autoRetryEnabled`
+  and `m_lostAt` became `std::optional<time_point> m_retryDeadline`,
+  present exactly while Lost and auto-retrying (set by `declareLoss` and a
+  user `connect()` while Lost, cleared when the window passes, when a retry
+  is greeted, and by `dropSession`), so `autoRetrying()` is `Lost &&
+  m_retryDeadline`; the design doc's Lost-retries / Disconnected-does-not
+  rule is unchanged and the `[StudioClient]`, `[StudioRemote]` and project
+  ops suites pass unchanged. A new `[StudioClient]` scenario pins the phase
+  through connect, a held reconnect bootstrap (`AwaitingBootstrap` with a
+  replica and no edits), loss and `disconnect()`. Vocabulary: the client's
+  `AwaitingHello` and `Bootstrapping` mean what the server's `SessionState`
+  of the same name means; the client's `Ready` is its side of the server's
+  `Established`, sharing a name only where both sides wait for the same
+  thing.
 
 ### Spec conformance
 

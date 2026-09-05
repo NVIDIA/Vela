@@ -45,9 +45,8 @@ struct EditorContext
   // The replica; null before the first snapshot and after disconnect().
   const Project *project() const;
   ProjectOps &ops() const;
-  // Connected, bootstrapped on this connection and holding a replica: the
-  // only time an editor may send. Lost, bootstrapping, and the wait between
-  // a reconnect's Hello and its bootstrap leave the panels read-only.
+  // ServerConnection::canSend() (Ready and holding a replica), false with no
+  // connection: the only time an editor may send.
   bool canSend() const;
   // A render this client launched is queued or running: the server refuses
   // every mutating request with "render in progress" until it ends, so the

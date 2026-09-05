@@ -349,7 +349,7 @@ std::optional<SceneObjectRef> StudioViewport::selectedIdentity() const
 
 void StudioViewport::syncOutline()
 {
-  if (!m_serverReady || !m_connection)
+  if (!m_connection || !m_connection->bootstrapped())
     return;
   const auto identity = selectedIdentity();
   if (identity == m_sentOutline)
@@ -360,14 +360,13 @@ void StudioViewport::syncOutline()
 
 void StudioViewport::sendViewportSettings()
 {
-  if (!m_serverReady || !m_connection)
+  if (!m_connection || !m_connection->bootstrapped())
     return;
   m_connection->setViewportSettings(m_settings);
 }
 
 void StudioViewport::onServerReady()
 {
-  m_serverReady = true;
   m_sentOutline.reset(); // the server starts with none; resend on change
   sendViewportSettings();
 }
@@ -455,8 +454,8 @@ void StudioViewport::dropMirrorReferences()
   m_renderers.current = {};
   m_reportResizes = false;
   m_sentFrameConfig = vsr::math::uint2(0, 0);
-  // The server this state was sent to is gone or being re-bootstrapped.
-  m_serverReady = false;
+  // The server this outline was sent to is gone, being re-bootstrapped or
+  // has rebuilt its scene; whichever, it starts with none.
   m_sentOutline.reset();
   if (m_connection && m_pendingPick.valid())
     m_connection->projectOps().forget(m_pendingPick);

@@ -50,25 +50,26 @@ using namespace protocol;
 
 namespace {
 
-// A reused panel that can be put in read-only mode from the outside: while
-// Lost the panels keep showing the frozen mirror but must not edit it.
+// A reused monolith panel that edits the mirror directly: read-only whenever
+// the editors are (EditorContext::canSend), so while Lost or awaiting a
+// reconnect's bootstrap it keeps showing the frozen mirror without editing it.
 template <typename WindowT>
 struct LockableWindow : public WindowT
 {
-  LockableWindow(vsr_ui::Application *app, const bool *locked)
-      : WindowT(app), m_locked(locked)
+  LockableWindow(vsr_ui::Application *app, const EditorContext *context)
+      : WindowT(app), m_context(context)
   {}
 
   void buildUI() override;
 
  private:
-  const bool *m_locked{nullptr};
+  const EditorContext *m_context{nullptr};
 };
 
 template <typename WindowT>
 void LockableWindow<WindowT>::buildUI()
 {
-  ImGui::BeginDisabled(*m_locked);
+  ImGui::BeginDisabled(!m_context->canSend());
   WindowT::buildUI();
   ImGui::EndDisabled();
 }
@@ -228,9 +229,9 @@ vsr_ui::WindowArray Application::setupWindows()
   auto *layers = new vsr_ui::LayerTree(this);
   layers->setReadOnly(true); // layer structure is server-push-only
   auto *objectEditor =
-      new LockableWindow<vsr_ui::ObjectEditor>(this, &m_panelsReadOnly);
+      new LockableWindow<vsr_ui::ObjectEditor>(this, &m_editorContext);
   auto *databaseEditor =
-      new LockableWindow<vsr_ui::DatabaseEditor>(this, &m_panelsReadOnly);
+      new LockableWindow<vsr_ui::DatabaseEditor>(this, &m_editorContext);
 
   auto *projectWindow = new ProjectWindow(this, &m_editorContext);
   auto *datasetEditor = new DatasetEditor(this, &m_editorContext);
@@ -711,15 +712,10 @@ void Application::onStateChanged(ConnectionState from, ConnectionState to)
   vsr::core::logStatus("[Client] %s -> %s", toString(from), toString(to));
   switch (to) {
   case ConnectionState::Connected:
-    // Hello answered, bootstrap still to come -- as long as the render a
-    // busy server finishes first. What is on screen until BootstrapBegin is
-    // the previous session's mirror, so the panels stay locked (like the
-    // editors, EditorContext::canSend) until onBootstrapComplete.
-    m_panelsReadOnly = true;
-    break;
   case ConnectionState::Lost:
-    // Freeze in place: mirror, replica and last frame stay; edits stop.
-    m_panelsReadOnly = true;
+    // Nothing to do: what is on screen stays (a frozen view while Lost, the
+    // previous session's until a reconnect's bootstrap) and every panel reads
+    // the connection's phase for whether it may edit.
     break;
   case ConnectionState::Disconnected:
   case ConnectionState::NeverConnected:
@@ -749,7 +745,6 @@ void Application::onProjectReplaced()
 void Application::onBootstrapComplete()
 {
   appContext()->vsr.sceneLoadComplete = true;
-  m_panelsReadOnly = false;
 
   // The project's layout wins only over no layout: a reconnect after Lost
   // keeps what the user has on screen. Before onServerReady(), which sends
@@ -790,7 +785,6 @@ void Application::enterHomeState()
   auto *ctx = appContext();
   ctx->vsr.sceneLoadComplete = false;
   ctx->clearSelected();
-  m_panelsReadOnly = false;
   m_layoutLive = false;
   if (m_viewport)
     m_viewport->reset();

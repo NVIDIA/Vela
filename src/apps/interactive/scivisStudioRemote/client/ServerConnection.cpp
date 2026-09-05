@@ -60,6 +60,23 @@ const char *toString(ConnectionState state)
   return "Unknown";
 }
 
+const char *toString(SessionPhase phase)
+{
+  switch (phase) {
+  case SessionPhase::Idle:
+    return "Idle";
+  case SessionPhase::AwaitingHello:
+    return "AwaitingHello";
+  case SessionPhase::AwaitingBootstrap:
+    return "AwaitingBootstrap";
+  case SessionPhase::Bootstrapping:
+    return "Bootstrapping";
+  case SessionPhase::Ready:
+    return "Ready";
+  }
+  return "Unknown";
+}
+
 // Construction ///////////////////////////////////////////////////////////////
 
 ServerConnection::ServerConnection(
@@ -106,9 +123,14 @@ ConnectionState ServerConnection::state() const
   return m_state;
 }
 
+SessionPhase ServerConnection::phase() const
+{
+  return m_phase;
+}
+
 bool ServerConnection::autoRetrying() const
 {
-  return m_state == ConnectionState::Lost && m_autoRetryEnabled;
+  return m_state == ConnectionState::Lost && m_retryDeadline.has_value();
 }
 
 const std::string &ServerConnection::statusText() const
@@ -128,12 +150,17 @@ uint16_t ServerConnection::port() const
 
 bool ServerConnection::bootstrapping() const
 {
-  return m_bootstrapping;
+  return m_phase == SessionPhase::Bootstrapping;
 }
 
 bool ServerConnection::bootstrapped() const
 {
-  return m_bootstrapped;
+  return m_phase == SessionPhase::Ready;
+}
+
+bool ServerConnection::canSend() const
+{
+  return m_phase == SessionPhase::Ready && m_project != nullptr;
 }
 
 const FrameConfig &ServerConnection::frameConfig() const
@@ -199,17 +226,15 @@ void ServerConnection::connect(const std::string &host, uint16_t port)
         endpointText(m_host, m_port).c_str());
     return;
   }
-  if (m_phase != Phase::Idle) {
+  if (m_phase != SessionPhase::Idle) {
     // A retry is in flight; redirecting it means starting over.
-    m_phase = Phase::Idle;
     closeChannel();
   }
   m_host = host;
   m_port = port;
   if (m_state == ConnectionState::Lost) {
     // A user-driven connect re-arms the auto-retry window.
-    m_autoRetryEnabled = true;
-    m_lostAt = Clock::now();
+    m_retryDeadline = Clock::now() + m_timings.autoRetryFor;
     m_retryDelay = m_timings.retryInitialDelay;
   }
   beginAttempt();
@@ -217,7 +242,7 @@ void ServerConnection::connect(const std::string &host, uint16_t port)
 
 void ServerConnection::disconnect()
 {
-  if (m_phase == Phase::Established) {
+  if (sessionOpen()) {
     auto sent = m_channel->send(encode(Disconnect{}));
     sent.wait_for(COURTESY_SEND_TIMEOUT);
   }
@@ -226,10 +251,8 @@ void ServerConnection::disconnect()
 
 void ServerConnection::dropSession(const std::string &status)
 {
-  m_phase = Phase::Idle;
   closeChannel();
-  m_autoRetryEnabled = false;
-  m_bootstrapping = false;
+  m_retryDeadline.reset();
   m_projectOps->failAllPending("connection lost");
   m_projectOps->clearTasks();
   clearMirror();
@@ -250,14 +273,14 @@ void ServerConnection::dropSession(const std::string &status)
 
 void ServerConnection::retryNow()
 {
-  if (m_state != ConnectionState::Lost || m_phase != Phase::Idle)
+  if (m_state != ConnectionState::Lost || m_phase != SessionPhase::Idle)
     return;
   beginAttempt();
 }
 
 void ServerConnection::shutdownServer()
 {
-  if (m_phase == Phase::Established) {
+  if (sessionOpen()) {
     auto sent = m_channel->send(encode(Shutdown{}));
     sent.wait_for(COURTESY_SEND_TIMEOUT);
   }
@@ -279,7 +302,7 @@ void ServerConnection::poll()
     batch.swap(m_inbound);
   }
   for (const auto &msg : batch) {
-    if (m_phase == Phase::Idle)
+    if (m_phase == SessionPhase::Idle)
       break; // handled message tore the connection down; drop the rest
     handleMessage(msg);
   }
@@ -293,9 +316,9 @@ void ServerConnection::poll()
       error = m_ioDisconnectError;
     }
     const std::string reason = error ? error.message() : "connection closed";
-    if (m_phase == Phase::Established)
+    if (sessionOpen())
       declareLoss(reason);
-    else if (m_phase == Phase::AwaitingHello)
+    else if (m_phase == SessionPhase::AwaitingHello)
       attemptFailed("connect failed: " + reason);
   }
 
@@ -303,7 +326,7 @@ void ServerConnection::poll()
   checkSendFailures();
 
   // 4. Liveness.
-  if (m_phase == Phase::Established) {
+  if (sessionOpen()) {
     const auto quiet = now - lastTraffic();
     if (quiet > m_timings.lossAfterSilence) {
       declareLoss("no traffic from server for "
@@ -314,16 +337,15 @@ void ServerConnection::poll()
       m_pingSentAt = now;
       sendMessage(encode(Ping{}));
     }
-  } else if (m_phase == Phase::AwaitingHello
+  } else if (m_phase == SessionPhase::AwaitingHello
       && now - m_attemptStart > m_timings.lossAfterSilence) {
     attemptFailed("no Hello from server");
   }
 
   // 5. Reconnect backoff while Lost.
-  if (m_state == ConnectionState::Lost && m_phase == Phase::Idle
-      && m_autoRetryEnabled) {
-    if (now - m_lostAt > m_timings.autoRetryFor) {
-      m_autoRetryEnabled = false;
+  if (m_phase == SessionPhase::Idle && autoRetrying()) {
+    if (now > *m_retryDeadline) {
+      m_retryDeadline.reset();
       m_status = "connection lost; automatic retry gave up";
     } else if (now >= m_nextRetryAt) {
       beginAttempt();
@@ -386,7 +408,7 @@ void ServerConnection::sendMessage(vsr::network::Message &&msg)
 
 bool ServerConnection::trySend(vsr::network::Message &&msg)
 {
-  if (m_phase != Phase::Established)
+  if (!sessionOpen())
     return false;
   m_sendFutures.push_back(m_channel->send(std::move(msg)));
   return true;
@@ -398,7 +420,7 @@ void ServerConnection::replyError(const std::string &text)
   Error error;
   error.message = text;
   // Straight to the channel: the rejection goes out in any phase the socket
-  // is open, not only once Established.
+  // is open, AwaitingHello included.
   m_channel->send(encode(error));
 }
 
@@ -416,7 +438,7 @@ void ServerConnection::checkSendFailures()
         return true;
       });
   m_sendFutures.erase(ready, m_sendFutures.end());
-  if (failure && m_phase == Phase::Established)
+  if (failure && sessionOpen())
     declareLoss("send failed: " + failure.message());
 }
 
@@ -463,9 +485,15 @@ ServerConnection::Clock::time_point ServerConnection::lastTraffic() const
 
 // Connection lifecycle (UI thread) ///////////////////////////////////////////
 
+bool ServerConnection::sessionOpen() const
+{
+  return m_phase != SessionPhase::Idle
+      && m_phase != SessionPhase::AwaitingHello;
+}
+
 void ServerConnection::beginAttempt()
 {
-  m_phase = Phase::AwaitingHello;
+  setPhase(SessionPhase::AwaitingHello);
   m_attemptStart = Clock::now();
   m_pingSentAt = {};
   m_sendFutures.clear();
@@ -485,8 +513,7 @@ void ServerConnection::beginAttempt()
 
 void ServerConnection::closeChannel()
 {
-  m_bootstrapped = false;
-  setDelegateEnabled(false);
+  setPhase(SessionPhase::Idle);
   // Fires our disconnect handler on this thread if the socket was open; that
   // report describes a close we asked for, so it is consumed here.
   m_channel->disconnect();
@@ -506,9 +533,19 @@ void ServerConnection::setState(ConnectionState to)
     onStateChanged(from, to);
 }
 
-bool ServerConnection::canEmitEdits() const
+void ServerConnection::setPhase(SessionPhase to)
 {
-  return m_phase == Phase::Established && m_bootstrapped && !m_bootstrapping;
+  if (to == m_phase)
+    return;
+  vsr::core::logStatus(
+      "[ServerConnection] phase %s -> %s", toString(m_phase), toString(to));
+  m_phase = to;
+  syncDelegate();
+}
+
+void ServerConnection::syncDelegate()
+{
+  setDelegateEnabled(m_phase == SessionPhase::Ready);
 }
 
 void ServerConnection::setDelegateEnabled(bool enabled)
@@ -527,13 +564,11 @@ void ServerConnection::declareLoss(const std::string &reason)
     m_farewellReason.clear();
   }
   vsr::core::logWarning("[ServerConnection] connection lost: %s", why.c_str());
-  m_phase = Phase::Idle;
-  if (m_bootstrapping) {
+  if (bootstrapping()) {
     // The bootstrap was cut short: the mirror holds whatever part of the
     // new scene arrived, which is nothing to show. Empty beats half-built;
     // the replica is still the previous session's (its snapshot comes last
     // in the bracket) and stays as display data.
-    m_bootstrapping = false;
     announceMirrorReplace();
     clearMirror();
   }
@@ -541,10 +576,9 @@ void ServerConnection::declareLoss(const std::string &reason)
   // Connection-scoped request failure: nothing waits on a reply that can no
   // longer come.
   m_projectOps->failAllPending("connection lost");
-  m_lostAt = now;
+  m_retryDeadline = now + m_timings.autoRetryFor;
   m_retryDelay = m_timings.retryInitialDelay;
   m_nextRetryAt = now + m_retryDelay;
-  m_autoRetryEnabled = true;
   m_status = "connection lost (" + why + "); reconnecting...";
   setState(ConnectionState::Lost);
 }
@@ -553,9 +587,8 @@ void ServerConnection::attemptFailed(const std::string &reason)
 {
   vsr::core::logWarning(
       "[ServerConnection] attempt failed: %s", reason.c_str());
-  m_phase = Phase::Idle;
   closeChannel();
-  if (m_state == ConnectionState::Lost && m_autoRetryEnabled) {
+  if (autoRetrying()) {
     scheduleRetry();
     m_status = "connection lost (" + reason + "); reconnecting...";
   } else {
@@ -579,7 +612,7 @@ void ServerConnection::handleMessage(const vsr::network::Message &msg)
     return;
   }
 
-  if (m_phase == Phase::AwaitingHello) {
+  if (m_phase == SessionPhase::AwaitingHello) {
     if (*type == StudioMessageType::Hello) {
       handleHello(msg);
     } else if (*type == StudioMessageType::Error) {
@@ -631,9 +664,7 @@ void ServerConnection::handleMessage(const vsr::network::Message &msg)
         m_farewellReason.c_str());
     return;
   case StudioMessageType::BootstrapBegin:
-    m_bootstrapping = true;
-    m_bootstrapped = false;
-    setDelegateEnabled(false);
+    setPhase(SessionPhase::Bootstrapping);
     announceMirrorReplace();
     clearMirror();
     // Task records: the server dropped the old session's queue without a
@@ -643,9 +674,7 @@ void ServerConnection::handleMessage(const vsr::network::Message &msg)
     m_projectOps->failUnfinishedTasks("connection lost");
     return;
   case StudioMessageType::BootstrapEnd:
-    m_bootstrapping = false;
-    m_bootstrapped = true;
-    setDelegateEnabled(canEmitEdits());
+    setPhase(SessionPhase::Ready);
     if (onBootstrapComplete)
       onBootstrapComplete();
     return;
@@ -770,14 +799,14 @@ void ServerConnection::handleHello(const vsr::network::Message &msg)
       dropSession(mismatch);
       return;
     }
-    m_phase = Phase::Idle;
     closeChannel();
-    m_autoRetryEnabled = false;
     m_status = mismatch;
     return;
   }
 
-  m_phase = Phase::Established;
+  setPhase(SessionPhase::AwaitingBootstrap);
+  // A retry that was greeted has healed the loss; the window is closed.
+  m_retryDeadline.reset();
   Hello reply;
   reply.version = PROTOCOL_VERSION;
   sendMessage(encode(reply));
@@ -803,7 +832,7 @@ void ServerConnection::applySceneMessage(
     // A whole-scene push outside the bootstrap (the server re-sent its scene)
     // replaces every object too; inside one BootstrapBegin already announced
     // it and the mirror is empty.
-    if (!m_bootstrapping)
+    if (!bootstrapping())
       announceMirrorReplace();
     messages::TransferScene(msg, m_mirror).execute();
     break;
@@ -819,7 +848,7 @@ void ServerConnection::applySceneMessage(
   default:
     break;
   }
-  setDelegateEnabled(canEmitEdits());
+  syncDelegate();
 }
 
 void ServerConnection::announceMirrorReplace()
@@ -834,7 +863,7 @@ void ServerConnection::clearMirror()
     return;
   setDelegateEnabled(false);
   m_mirror->removeAllObjects();
-  setDelegateEnabled(canEmitEdits());
+  syncDelegate();
 }
 
 } // namespace vsr::scivis_studio::client

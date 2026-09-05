@@ -50,6 +50,29 @@ enum class ConnectionState
 
 const char *toString(ConnectionState state);
 
+// Where the client's session with the server stands, from the socket up to a
+// bootstrapped mirror. Idle: no socket (NeverConnected, Lost between retries,
+// Disconnected). AwaitingHello: connecting, the server's Hello not yet seen.
+// AwaitingBootstrap: Hellos matched and Connected, the bootstrap not begun --
+// the mirror and replica are a previous session's frozen view or empty (a
+// server busy with a render defers the bootstrap until the render ends).
+// Bootstrapping: inside the BootstrapBegin..End bracket. Ready: BootstrapEnd
+// seen on this connection, mirror and replica are the server's; the only
+// phase in which an edit leaves the client. Named after the server's
+// SessionState where the two sides wait for the same thing: AwaitingHello
+// (each awaits the peer's Hello), Bootstrapping (the same bracket); Ready is
+// the client's side of the server's Established.
+enum class SessionPhase
+{
+  Idle,
+  AwaitingHello,
+  AwaitingBootstrap,
+  Bootstrapping,
+  Ready
+};
+
+const char *toString(SessionPhase phase);
+
 // Liveness and retry timings. The spec's numbers are suggestions, not
 // contract; tests shrink them.
 struct ConnectionTimings
@@ -105,18 +128,22 @@ struct ServerConnection
   // Queries (valid between polls) //
 
   ConnectionState state() const;
+  SessionPhase phase() const;
   // Lost and still inside autoRetryFor since the loss.
   bool autoRetrying() const;
   // One line for the banner: "reconnecting...", the last error, and so on.
   const std::string &statusText() const;
   const std::string &host() const;
   uint16_t port() const;
+  // phase() == Bootstrapping.
   bool bootstrapping() const;
-  // BootstrapEnd seen on the current connection: mirror and replica are the
-  // server's. False between a reconnect's Hello and its BootstrapBegin, when
-  // project() is still the previous session's frozen replica (a server busy
-  // with a render defers the bootstrap until the render ends).
+  // phase() == Ready: BootstrapEnd seen on the current connection, mirror
+  // and replica are the server's.
   bool bootstrapped() const;
+  // Ready and holding a replica: the one condition under which the UI may
+  // send an edit or a Project Op. Lost, bootstrapping, and the wait between
+  // a reconnect's Hello and its bootstrap all leave the panels read-only.
+  bool canSend() const;
 
   // Inbound state the UI reads //
 
@@ -201,27 +228,22 @@ struct ServerConnection
  private:
   using Clock = std::chrono::steady_clock;
 
-  // Where the current socket stands, independent of the user-facing state.
-  enum class Phase
-  {
-    Idle,
-    AwaitingHello,
-    Established
-  };
-
   // IO thread
   void onInbound(const vsr::network::Message &msg);
   void onChannelClosed(const boost::system::error_code &error);
   void markTraffic();
 
   // UI thread
+  // Hellos exchanged and the socket open: AwaitingBootstrap or later. What
+  // trySend() needs; edits need Ready.
+  bool sessionOpen() const;
   void beginAttempt();
+  // Closes the socket -> Idle; the mirror's delegate goes quiet with it.
   void closeChannel();
   void setState(ConnectionState to);
-  // Edits leave the mirror only on an Established connection whose bootstrap
-  // has completed and is not being redone; the delegate is enabled exactly
-  // then.
-  bool canEmitEdits() const;
+  void setPhase(SessionPhase to);
+  // The delegate emits exactly while Ready.
+  void syncDelegate();
   void setDelegateEnabled(bool enabled);
   void declareLoss(const std::string &reason);
   // What disconnect() does once the socket is closed: drop the session's
@@ -230,7 +252,7 @@ struct ServerConnection
   void attemptFailed(const std::string &reason);
   void scheduleRetry();
   void sendMessage(vsr::network::Message &&msg);
-  // False when the message was dropped (not Established).
+  // False when the message was dropped (session not open).
   bool trySend(vsr::network::Message &&msg);
   void replyError(const std::string &text);
   void checkSendFailures();
@@ -250,19 +272,17 @@ struct ServerConnection
   std::string m_host;
   uint16_t m_port{0};
   ConnectionState m_state{ConnectionState::NeverConnected};
-  Phase m_phase{Phase::Idle};
+  SessionPhase m_phase{SessionPhase::Idle};
   std::string m_status;
-  bool m_bootstrapping{false};
-  // BootstrapEnd seen on this connection; until then the mirror is either
-  // empty or a frozen view from an earlier session and must not emit.
-  bool m_bootstrapped{false};
 
   Clock::time_point m_attemptStart{};
   Clock::time_point m_pingSentAt{};
-  Clock::time_point m_lostAt{};
+  // Present exactly while Lost and auto-retrying: the end of the retry
+  // window (loss + autoRetryFor). Absent once it gave up, once a retry was
+  // greeted, and whenever the loss was the user's intention.
+  std::optional<Clock::time_point> m_retryDeadline;
   Clock::time_point m_nextRetryAt{};
   std::chrono::milliseconds m_retryDelay{0};
-  bool m_autoRetryEnabled{false};
 
   protocol::FrameConfig m_frameConfig;
   std::unique_ptr<Project> m_project;

@@ -145,8 +145,6 @@ class Application : public vsr::ui::imgui::Application
   int m_port{0}; // the connect menu's InputInt edits it; 0..65535
   protocol::FrameEncoding m_preferredEncoding{protocol::FrameEncoding::Raw};
 
-  // True while Lost: the panels show the frozen mirror but must not edit it.
-  bool m_panelsReadOnly{false};
   // The bootstrap's UIState is applied only when the client has no live
   // layout of its own: the first bootstrap out of the home state, not the
   // one a reconnect after Lost runs. Reset in enterHomeState().

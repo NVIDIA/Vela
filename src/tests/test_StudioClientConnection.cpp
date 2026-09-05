@@ -582,3 +582,74 @@ SCENARIO("ServerConnection keeps only the latest frame", "[StudioClient]")
     }
   }
 }
+
+SCENARIO("ServerConnection reports one session phase", "[StudioClient]")
+{
+  GIVEN("a client that has never connected")
+  {
+    Fixture f;
+    REQUIRE(f.connection.phase() == SessionPhase::Idle);
+    REQUIRE_FALSE(f.connection.canSend());
+
+    WHEN("it connects and is bootstrapped")
+    {
+      f.connect();
+      REQUIRE(f.waitConnectedAndBootstrapped());
+
+      THEN("the phase is Ready and it may send")
+      {
+        REQUIRE(f.connection.phase() == SessionPhase::Ready);
+        REQUIRE(f.connection.bootstrapped());
+        REQUIRE_FALSE(f.connection.bootstrapping());
+        REQUIRE(f.connection.canSend());
+      }
+
+      AND_WHEN("the server goes silent")
+      {
+        f.server.silent = true;
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.connection.state() == ConnectionState::Lost; }));
+
+        THEN("the phase is Idle and the frozen replica may not be edited")
+        {
+          REQUIRE(f.connection.phase() == SessionPhase::Idle);
+          REQUIRE(f.connection.project() != nullptr);
+          REQUIRE_FALSE(f.connection.canSend());
+        }
+
+        AND_WHEN("the reconnect is greeted but its bootstrap is held")
+        {
+          f.server.holdBootstrap = true;
+          f.server.silent = false;
+          REQUIRE(pollUntil(f.connection, [&] {
+            return f.connection.state() == ConnectionState::Connected
+                && f.server.count(StudioMessageType::Hello) == 2;
+          }));
+
+          THEN("the phase is AwaitingBootstrap: Connected, replica, no edits")
+          {
+            REQUIRE(f.connection.phase() == SessionPhase::AwaitingBootstrap);
+            REQUIRE_FALSE(f.connection.bootstrapped());
+            REQUIRE_FALSE(f.connection.bootstrapping());
+            REQUIRE(f.connection.project() != nullptr);
+            REQUIRE_FALSE(f.connection.canSend());
+            REQUIRE_FALSE(f.connection.autoRetrying());
+
+            AND_THEN(
+                "Ready again once the bootstrap completes, Idle after "
+                "disconnect()")
+            {
+              f.server.sendBootstrap();
+              REQUIRE(f.waitConnectedAndBootstrapped(2));
+              REQUIRE(f.connection.phase() == SessionPhase::Ready);
+              REQUIRE(f.connection.canSend());
+              f.connection.disconnect();
+              REQUIRE(f.connection.phase() == SessionPhase::Idle);
+              REQUIRE_FALSE(f.connection.canSend());
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -150,7 +150,6 @@ struct StudioViewport : public vsr::ui::imgui::BaseViewport
   // Picking, outline, passes //
 
   RequestHandle m_pendingPick;
-  bool m_serverReady{false}; // bootstrapped; settings and outline sent
   std::optional<SceneObjectRef> m_sentOutline;
   protocol::ViewportSettings m_settings;
 

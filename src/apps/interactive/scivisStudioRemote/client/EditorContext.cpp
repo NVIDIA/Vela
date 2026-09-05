@@ -21,9 +21,7 @@ ProjectOps &EditorContext::ops() const
 
 bool EditorContext::canSend() const
 {
-  return connection && connection->state() == ConnectionState::Connected
-      && connection->bootstrapped() && !connection->bootstrapping()
-      && connection->project() != nullptr;
+  return connection && connection->canSend();
 }
 
 bool EditorContext::renderInProgress() const
