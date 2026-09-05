@@ -20,9 +20,15 @@ using namespace protocol;
 
 namespace {
 
+// What TaskFailed says for a result that did not complete.
+std::string failureText(const TaskResult &result)
+{
+  return result.outcome == TaskOutcome::Cancelled ? "cancelled" : result.error;
+}
+
 vsr::network::Message endingOf(uint64_t taskId, const TaskResult &result)
 {
-  if (result.ok) {
+  if (result.outcome == TaskOutcome::Completed) {
     TaskCompleted completed;
     completed.taskId = taskId;
     completed.message = result.message;
@@ -31,12 +37,20 @@ vsr::network::Message endingOf(uint64_t taskId, const TaskResult &result)
   }
   TaskFailed failed;
   failed.taskId = taskId;
-  failed.error = result.error;
+  failed.error = failureText(result);
   failed.results = result.results;
   return encode(failed);
 }
 
 } // namespace
+
+TaskResult taskFailure(std::string error)
+{
+  TaskResult result;
+  result.outcome = TaskOutcome::Failed;
+  result.error = std::move(error);
+  return result;
+}
 
 // TaskControl ////////////////////////////////////////////////////////////////
 
@@ -105,7 +119,7 @@ bool ServerTaskRunner::cancel(uint64_t taskId, std::string *error)
   if (itr == m_queue.end()) {
     if (const auto *finished = findFinished(taskId)) {
       // The cancel this request asked for on the IO thread took effect.
-      if (finished->result.cancelled)
+      if (finished->result.outcome == TaskOutcome::Cancelled)
         return true;
       if (error)
         *error = "task already finished";
@@ -122,10 +136,9 @@ bool ServerTaskRunner::cancel(uint64_t taskId, std::string *error)
   FinishedTask finished;
   finished.taskId = taskId;
   finished.description = std::move(itr->description);
-  finished.result.ok = false;
-  finished.result.error = "cancelled";
-  // No body ran, so result.cancelled stays false: this CancelTask is the
-  // one answered "ok" here, and a later one finds a task that ended.
+  // No body ran, so the outcome is Failed, not Cancelled: this CancelTask is
+  // the one answered "ok" here, and a later one finds a task that ended.
+  finished.result = taskFailure("cancelled");
   m_queue.erase(itr);
   recordEnding(finished);
   return true;
@@ -179,14 +192,12 @@ std::optional<FinishedTask> ServerTaskRunner::runOne()
     // admitted but the OS refuses, say) fails its task instead of taking the
     // server down. Whatever it changed before throwing moved the
     // ProjectContext's revision, so the client still gets its snapshot.
-    finished.result = TaskResult{};
-    finished.result.ok = false;
-    finished.result.error = std::string("task aborted: ") + e.what();
+    finished.result = taskFailure(std::string("task aborted: ") + e.what());
   }
   m_runningId.store(0);
   m_running.reset();
 
-  if (finished.result.ok) {
+  if (finished.result.outcome == TaskOutcome::Completed) {
     vsr::core::logStatus("[StudioServer] task %llu completed: %s",
         static_cast<unsigned long long>(task.id),
         finished.description.c_str());
@@ -194,7 +205,7 @@ std::optional<FinishedTask> ServerTaskRunner::runOne()
     vsr::core::logWarning("[StudioServer] task %llu failed: %s: %s",
         static_cast<unsigned long long>(task.id),
         finished.description.c_str(),
-        finished.result.error.c_str());
+        failureText(finished.result).c_str());
   }
   recordEnding(finished);
   return finished;

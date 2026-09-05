@@ -33,9 +33,16 @@ namespace {
 // The failure of a task body whose dataset is gone by the time it runs.
 TaskResult datasetNotFound()
 {
+  return taskFailure("dataset not found");
+}
+
+// What a task that made a dataset reports: its id, or the failure.
+TaskResult datasetResult(const Dataset *dataset, const std::string &error)
+{
+  if (!dataset)
+    return taskFailure(error);
   TaskResult result;
-  result.ok = false;
-  result.error = "dataset not found";
+  result.message = dataset->id;
   return result;
 }
 
@@ -44,18 +51,14 @@ TaskResult datasetNotFound()
 // ImportFailed record stays in the project, so a snapshot still follows).
 TaskResult importResult(const Dataset *dataset)
 {
-  TaskResult result;
-  if (!dataset) {
-    result.ok = false;
-    result.error = "import failed";
-    return result;
-  }
-  result.message = dataset->id;
+  if (!dataset)
+    return taskFailure("import failed");
   if (dataset->status != DatasetStatus::Available) {
-    result.ok = false;
-    result.error = "dataset '" + dataset->name + "' import failed ("
-        + dataset::displayStatus(*dataset) + "); see the server log";
+    return taskFailure("dataset '" + dataset->name + "' import failed ("
+        + dataset::displayStatus(*dataset) + "); see the server log");
   }
+  TaskResult result;
+  result.message = dataset->id;
   return result;
 }
 
@@ -105,26 +108,21 @@ void ProjectOpDispatcher::handle(const OpenProject &req)
       "open project '" + directory->string() + "'",
       [this, directory = *directory](const TaskControl &progress) {
         return runTaskBody([&] {
-          TaskResult result;
+          std::string error;
           progress("staging");
           ProjectOpenStage stage;
-          if (!stageProjectOpen(directory, stage, {}, &result.error)) {
-            result.ok = false;
-            return result;
-          }
+          if (!stageProjectOpen(directory, stage, {}, &error))
+            return taskFailure(error);
           progress("applying");
           auto uiState = makeSubtree();
-          if (!context().openStagedProject(
-                  stage, &uiState->root(), &result.error)) {
-            result.ok = false;
-            return result;
-          }
+          if (!context().openStagedProject(stage, &uiState->root(), &error))
+            return taskFailure(error);
           *m_host.uiState = uiState;
           // The opened project's layout reaches the client that asked
           // before the snapshot that follows the task; a bootstrap
           // carries it too.
           m_host.send(encode(UIState{*m_host.uiState}));
-          return result;
+          return TaskResult{};
         });
       });
 }
@@ -148,33 +146,29 @@ void ProjectOpDispatcher::handle(const SaveProject &req)
             : std::string("save project"),
       [this, named, uiState = req.uiState](const TaskControl &progress) {
         return runTaskBody([&] {
-          TaskResult result;
+          std::string error;
           auto directory = named;
           if (!directory) {
             const auto &own = project().projectDirectory;
             if (own.empty()) {
-              result.ok = false;
-              result.error = "project has never been saved; choose a directory";
-              return result;
+              return taskFailure(
+                  "project has never been saved; choose a directory");
             }
-            directory = m_host.dataRoots->resolve(own, &result.error);
-            if (!directory) {
-              result.ok = false;
-              return result;
-            }
+            directory = m_host.dataRoots->resolve(own, &error);
+            if (!directory)
+              return taskFailure(error);
           }
           progress("writing");
           // A save without UI state keeps what the project opened with,
           // so a headless save never drops the user's layout.
           const auto &tree = uiState ? uiState : *m_host.uiState;
           if (!context().saveProject(
-                  *directory, tree ? &tree->root() : nullptr, &result.error)) {
-            result.ok = false;
-            return result;
+                  *directory, tree ? &tree->root() : nullptr, &error)) {
+            return taskFailure(error);
           }
           if (uiState)
             *m_host.uiState = uiState;
-          return result;
+          return TaskResult{};
         });
       });
 }
@@ -258,12 +252,13 @@ void ProjectOpDispatcher::handle(const ReimportDataset &req)
       "reimport dataset '" + req.datasetId + "'",
       [this, id = req.datasetId](const TaskControl &progress) {
         return runTaskBody([&] {
-          TaskResult result;
           if (!project::findDataset(project(), id))
             return datasetNotFound();
           progress("reimporting");
-          result.ok = context().reimportStaticDataset(id, &result.error);
-          return result;
+          std::string error;
+          if (!context().reimportStaticDataset(id, &error))
+            return taskFailure(error);
+          return TaskResult{};
         });
       });
 }
@@ -274,12 +269,13 @@ void ProjectOpDispatcher::handle(const LoadDataset &req)
       "load dataset '" + req.datasetId + "'",
       [this, id = req.datasetId](const TaskControl &progress) {
         return runTaskBody([&] {
-          TaskResult result;
           if (!project::findDataset(project(), id))
             return datasetNotFound();
           progress("loading");
-          result.ok = context().loadDataset(id, &result.error);
-          return result;
+          std::string error;
+          if (!context().loadDataset(id, &error))
+            return taskFailure(error);
+          return TaskResult{};
         });
       });
 }
@@ -296,12 +292,13 @@ void ProjectOpDispatcher::handle(const SaveDatasetArchive &req)
       "save dataset '" + req.datasetId + "' to '" + file->string() + "'",
       [this, id = req.datasetId, file = *file](const TaskControl &progress) {
         return runTaskBody([&] {
-          TaskResult result;
           if (!project::findDataset(project(), id))
             return datasetNotFound();
           progress("writing");
-          result.ok = context().saveDatasetArchive(id, file, &result.error);
-          return result;
+          std::string error;
+          if (!context().saveDatasetArchive(id, file, &error))
+            return taskFailure(error);
+          return TaskResult{};
         });
       });
 }
@@ -318,13 +315,10 @@ void ProjectOpDispatcher::handle(const LoadDatasetArchive &req)
       "load dataset archive '" + file->string() + "'",
       [this, file = *file](const TaskControl &progress) {
         return runTaskBody([&] {
-          TaskResult result;
           progress("loading");
-          auto *dataset = context().loadDatasetArchive(file, &result.error);
-          result.ok = dataset != nullptr;
-          if (dataset)
-            result.message = dataset->id;
-          return result;
+          std::string error;
+          return datasetResult(
+              context().loadDatasetArchive(file, &error), error);
         });
       });
 }
@@ -344,14 +338,11 @@ void ProjectOpDispatcher::handle(const IncorporateDatasetCandidate &req)
       "incorporate dataset candidate '" + file->string() + "'",
       [this, candidate, name = req.name](const TaskControl &progress) {
         return runTaskBody([&] {
-          TaskResult result;
           progress("loading");
-          auto *dataset = context().incorporateDatasetCandidate(
-              candidate, name, &result.error);
-          result.ok = dataset != nullptr;
-          if (dataset)
-            result.message = dataset->id;
-          return result;
+          std::string error;
+          return datasetResult(
+              context().incorporateDatasetCandidate(candidate, name, &error),
+              error);
         });
       });
 }
@@ -389,15 +380,11 @@ void ProjectOpDispatcher::handle(const RenderShot &req)
       "render shot '" + req.shotId + "'",
       [this, shotId = req.shotId](const TaskControl &task) {
         return runTaskBody([&] {
-          TaskResult result;
           // Mutations are refused while the render is pending, so the
           // shot made active by the prelude is still the one; a body
           // that found otherwise would render the wrong shot.
-          if (project().activeShotId != shotId) {
-            result.ok = false;
-            result.error = "shot '" + shotId + "' is no longer active";
-            return result;
-          }
+          if (project().activeShotId != shotId)
+            return taskFailure("shot '" + shotId + "' is no longer active");
           // The latch must be discarded before the task's ending goes
           // out, and a frame's load or encode can throw out of
           // renderActiveShotToFrames: the destructor covers the throw
@@ -429,9 +416,11 @@ void ProjectOpDispatcher::handle(const RenderShot &req)
             return true;
           };
           const auto rendered = renderActiveShotToFrames(context(), &progress);
-          result.ok = rendered.completed;
-          result.error = rendered.cancelled ? "cancelled" : rendered.error;
-          result.cancelled = rendered.cancelled;
+          TaskResult result;
+          result.outcome = rendered.cancelled ? TaskOutcome::Cancelled
+              : rendered.completed            ? TaskOutcome::Completed
+                                              : TaskOutcome::Failed;
+          result.error = rendered.error;
           result.message = rendered.outputDirectory.string();
           setResults(result,
               protocol::RenderShotResult{uint64_t(rendered.framesCompleted)});
