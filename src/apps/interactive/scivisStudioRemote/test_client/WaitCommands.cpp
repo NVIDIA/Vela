@@ -156,22 +156,18 @@ CommandRunner::Failure CommandRunner::awaitReply(uint64_t requestId,
   if (reply) {
     // Already consumed and printed (a no-wait reply an earlier command
     // drained): the results are decoded, the record is not repeated.
-    Event event{"ProjectOpReply", {}};
+    Event event(StudioMessageType::ProjectOpReply);
     decorate(*reply, event);
   } else {
     const auto wait = pumpUntilEvent(
         [&](Event &event) {
-          if (event.name != "ProjectOpReply")
+          if (event.type != StudioMessageType::ProjectOpReply
+              || event.requestId != requestId)
             return false;
-          for (const auto &[key, value] : event.fields) {
-            if (key == "requestId" && value == idText) {
-              reply = m_session->reply(requestId);
-              if (reply)
-                decorate(*reply, event);
-              return true;
-            }
-          }
-          return false;
+          reply = m_session->reply(requestId);
+          if (reply)
+            decorate(*reply, event);
+          return true;
         },
         deadline);
     if (wait != WaitEnd::Done)

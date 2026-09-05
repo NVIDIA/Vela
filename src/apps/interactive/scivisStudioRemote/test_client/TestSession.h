@@ -8,6 +8,7 @@
 #include "PlaybackMessages.h"
 #include "ProjectOpReply.h"
 #include "StudioCodec.h"
+#include "StudioProtocol.h"
 #include "ViewportMessages.h"
 // vsr_scivis_studio_model
 #include "Dataset.h"
@@ -64,13 +65,31 @@ struct SessionTimings
   std::chrono::milliseconds lossAfterSilence{15000};
 };
 
-// One server message as the record stream reports it: the message name and a
-// key/value summary (`Frame width=64 height=48 ...`).
+// One record of the event stream: a server message as the session consumed
+// it, or an entry the runner adds under a reply (a DirectoryEntry). Its
+// identity is typed -- the message type, and the request or task id a reply
+// or task message carries -- so a wait matches on those; the name and the
+// key/value fields are its text (`Frame width=64 height=48 ...`).
 struct Event
 {
+  Event() = default;
+  // A record of the runner's own (DatasetCandidate, DataRoot, ...), or of a
+  // type byte outside the Studio set.
+  explicit Event(std::string name);
+  // A server message's record, named after its type.
+  explicit Event(protocol::StudioMessageType type);
+
   std::string name;
+  // The message this records, when it is one.
+  std::optional<protocol::StudioMessageType> type;
+  // The request id of a ProjectOpReply or PickReply.
+  std::optional<uint64_t> requestId;
+  // The task id of a TaskProgress, TaskCompleted or TaskFailed.
+  std::optional<uint64_t> taskId;
   std::vector<std::pair<std::string, std::string>> fields;
 
+  // The value of that field as the record prints it; null when it has none.
+  const std::string *field(const char *key) const;
   std::string text() const;
 };
 

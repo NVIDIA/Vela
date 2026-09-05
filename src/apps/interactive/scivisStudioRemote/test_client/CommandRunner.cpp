@@ -512,7 +512,7 @@ CommandRunner::WaitEnd CommandRunner::pumpUntilEvent(
             wait = WaitEnd::Done;
             return true;
           }
-          if (event.name == "Error") {
+          if (event.type == StudioMessageType::Error) {
             // Not what this command waited for: the server is objecting to
             // something, and the rest of the queue is the next command's.
             wait = WaitEnd::Error;
@@ -566,8 +566,10 @@ CommandRunner::Failure CommandRunner::drainEvents()
   Failure failure;
   while (m_session->takeEvent(event)) {
     printEvent(event);
-    if (event.name == "Error" && !failure && !event.fields.empty())
-      failure = "server answered Error " + event.fields.front().second;
+    if (event.type == StudioMessageType::Error && !failure) {
+      if (const auto *message = event.field("message"))
+        failure = "server answered Error " + *message;
+    }
   }
   return failure;
 }

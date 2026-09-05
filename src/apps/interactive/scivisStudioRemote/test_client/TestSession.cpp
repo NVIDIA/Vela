@@ -81,6 +81,19 @@ const char *toString(SessionState state)
   return "Unknown";
 }
 
+Event::Event(std::string n) : name(std::move(n)) {}
+
+Event::Event(StudioMessageType t) : name(toString(t)), type(t) {}
+
+const std::string *Event::field(const char *key) const
+{
+  for (const auto &[k, value] : fields) {
+    if (k == key)
+      return &value;
+  }
+  return nullptr;
+}
+
 std::string Event::text() const
 {
   std::string out = name;
@@ -95,7 +108,7 @@ std::string Event::text() const
 
 Event frameEvent(const FrameHeader &header, size_t bytes)
 {
-  Event event{"Frame", {}};
+  Event event(StudioMessageType::Frame);
   event.fields.emplace_back("width", std::to_string(header.width));
   event.fields.emplace_back("height", std::to_string(header.height));
   event.fields.emplace_back("encoding", toString(header.encoding));
@@ -771,14 +784,14 @@ void TestSession::handleMessage(const Message &msg)
 {
   const auto type = messageType(msg);
   if (!type) {
-    Event event{"Unknown", {}};
+    Event event("Unknown");
     event.fields.emplace_back("type", std::to_string(int(msg.header.type)));
     pushEvent(std::move(event));
     replyError("unknown message type " + std::to_string(int(msg.header.type)));
     return;
   }
 
-  Event event{toString(*type), {}};
+  Event event(*type);
 
   if (m_phase == Phase::AwaitingHello) {
     if (*type == StudioMessageType::Hello) {
@@ -908,6 +921,7 @@ void TestSession::handleMessage(const Message &msg)
       event.fields.emplace_back("malformed", "true");
       break;
     }
+    event.requestId = reply->requestId;
     event.fields.emplace_back("requestId", std::to_string(reply->requestId));
     event.fields.emplace_back("ok", boolText(reply->ok));
     event.fields.emplace_back("error", quotedText(reply->error));
@@ -931,6 +945,7 @@ void TestSession::handleMessage(const Message &msg)
       event.fields.emplace_back("malformed", "true");
       break;
     }
+    event.requestId = reply->requestId;
     event.fields.emplace_back("requestId", std::to_string(reply->requestId));
     event.fields.emplace_back("hit", boolText(reply->hit));
     const auto &p = reply->worldPosition;
@@ -970,6 +985,7 @@ void TestSession::handleMessage(const Message &msg)
       event.fields.emplace_back("malformed", "true");
       break;
     }
+    event.taskId = progress->taskId;
     event.fields.emplace_back("taskId", std::to_string(progress->taskId));
     event.fields.emplace_back("current", std::to_string(progress->current));
     event.fields.emplace_back("total", std::to_string(progress->total));
@@ -996,6 +1012,7 @@ void TestSession::handleMessage(const Message &msg)
       event.fields.emplace_back("malformed", "true");
       break;
     }
+    event.taskId = completed->taskId;
     event.fields.emplace_back("taskId", std::to_string(completed->taskId));
     event.fields.emplace_back("message", quotedText(completed->message));
     const auto frames = framesCompletedOf(*completed);
@@ -1014,6 +1031,7 @@ void TestSession::handleMessage(const Message &msg)
       event.fields.emplace_back("malformed", "true");
       break;
     }
+    event.taskId = failed->taskId;
     event.fields.emplace_back("taskId", std::to_string(failed->taskId));
     event.fields.emplace_back("error", quotedText(failed->error));
     const auto frames = framesCompletedOf(*failed);
@@ -1082,7 +1100,7 @@ void TestSession::handleHello(const Message &msg)
     attemptFailed("undecodable Hello from server");
     return;
   }
-  Event event{"Hello", {}};
+  Event event(StudioMessageType::Hello);
   event.fields.emplace_back("version", std::to_string(hello->version));
   event.fields.emplace_back("buildInfo", quotedText(hello->buildInfo));
   pushEvent(std::move(event));
@@ -1103,7 +1121,7 @@ void TestSession::handleHello(const Message &msg)
 
 void TestSession::applySceneMessage(StudioMessageType type, const Message &msg)
 {
-  Event event{toString(type), {}};
+  Event event(type);
   switch (type) {
   case StudioMessageType::TransferScene:
     messages::TransferScene(msg, &m_mirror).execute();
@@ -1136,7 +1154,7 @@ void TestSession::consumeFrame()
   if (!frame)
     return;
 
-  Event event{"Frame", {}};
+  Event event(StudioMessageType::Frame);
   const auto view = decodeFrame(*frame);
   if (!view) {
     vsr::core::logError("[TestSession] malformed Frame dropped");

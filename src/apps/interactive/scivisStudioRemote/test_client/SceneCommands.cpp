@@ -257,20 +257,16 @@ CommandRunner::Failure CommandRunner::pick(
     return error;
 
   // A PickReply is a plain message, not a ProjectOpReply, but it is matched
-  // the same way: by the request id in its record.
+  // the same way: by the request id its record carries.
   const auto idText = std::to_string(request.requestId);
   const PickReply *reply = nullptr;
   const auto wait = pumpUntilEvent(
       [&](const Event &event) {
-        if (event.name != "PickReply")
+        if (event.type != StudioMessageType::PickReply
+            || event.requestId != request.requestId)
           return false;
-        for (const auto &[key, value] : event.fields) {
-          if (key == "requestId" && value == idText) {
-            reply = m_session->pickReply(request.requestId);
-            return true;
-          }
-        }
-        return false;
+        reply = m_session->pickReply(request.requestId);
+        return true;
       },
       deadline);
   if (wait != WaitEnd::Done)

@@ -147,10 +147,12 @@ CommandRunner::Failure CommandRunner::expectPong(
   // Frames are stream data, not replies; any other message is the answer.
   Event next;
   const auto wait = pumpUntilEvent(
-      [](const Event &e) { return e.name != "Frame"; }, deadline, &next);
+      [](const Event &e) { return e.type != StudioMessageType::Frame; },
+      deadline,
+      &next);
   if (wait != WaitEnd::Done)
     return waitFailure(wait, "Pong", deadline);
-  if (next.name != "Pong")
+  if (next.type != StudioMessageType::Pong)
     return "expected Pong, got " + next.text();
   return {};
 }
@@ -205,12 +207,15 @@ CommandRunner::Failure CommandRunner::expectError(
   // session pings on its own after a quiet spell.
   Event next;
   const auto wait = pumpUntilEvent(
-      [](const Event &e) { return e.name != "Frame" && e.name != "Pong"; },
+      [](const Event &e) {
+        return e.type != StudioMessageType::Frame
+            && e.type != StudioMessageType::Pong;
+      },
       deadline,
       &next);
   if (wait != WaitEnd::Done)
     return waitFailure(wait, "server message", deadline);
-  if (next.name != "Error")
+  if (next.type != StudioMessageType::Error)
     return "expected Error, got " + next.text();
   if (!command.args.empty()
       && m_session->lastError().find(command.args[0]) == std::string::npos) {
@@ -249,7 +254,8 @@ CommandRunner::Failure CommandRunner::setFrameConfig(
   if (!m_session->setFrameConfig(uint32_t(width), uint32_t(height), &error))
     return error;
   const auto wait = pumpUntilEvent(
-      [](const Event &e) { return e.name == "FrameConfig"; }, deadline);
+      [](const Event &e) { return e.type == StudioMessageType::FrameConfig; },
+      deadline);
   if (wait != WaitEnd::Done)
     return waitFailure(wait, "FrameConfig ack", deadline);
   return {};
@@ -304,7 +310,7 @@ CommandRunner::Failure CommandRunner::awaitFrame(
   size_t seen = 0;
   const auto wait = pumpUntilEvent(
       [&](const Event &e) {
-        if (e.name == "Frame")
+        if (e.type == StudioMessageType::Frame)
           ++seen;
         return seen >= count;
       },
@@ -329,12 +335,10 @@ CommandRunner::Failure CommandRunner::awaitFrameAt(
   const auto wanted = std::to_string(frame);
   const auto wait = pumpUntilEvent(
       [&](const Event &e) {
-        if (e.name != "Frame")
+        if (e.type != StudioMessageType::Frame)
           return false;
-        for (const auto &[key, value] : e.fields)
-          if (key == "frame")
-            return value == wanted;
-        return false;
+        const auto *frame = e.field("frame");
+        return frame && *frame == wanted;
       },
       deadline);
   if (wait != WaitEnd::Done)
@@ -371,7 +375,10 @@ CommandRunner::Failure CommandRunner::awaitWarning(
   if (const auto lost = notConnected())
     return lost;
   const auto wait = pumpUntilEvent(
-      [](const Event &e) { return e.name == "TimeAdvanceWarning"; }, deadline);
+      [](const Event &e) {
+        return e.type == StudioMessageType::TimeAdvanceWarning;
+      },
+      deadline);
   if (wait != WaitEnd::Done)
     return waitFailure(wait, "TimeAdvanceWarning", deadline);
   return {};
