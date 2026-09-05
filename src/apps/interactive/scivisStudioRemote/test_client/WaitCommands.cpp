@@ -45,7 +45,8 @@ CommandRunner::Failure CommandRunner::awaitTask(
   const auto &task = *m_session->task(taskId);
   // The task's snapshot follows its end message: await-snapshot waits past
   // whatever had arrived by then.
-  m_snapshotMark = task.snapshotsAtEnd;
+  if (const auto at = m_session->snapshotsAtTaskEnd(taskId))
+    m_snapshots.markAt(*at);
   const bool failed = task.status == TaskRecord::Status::Failed;
   if (failed && !modifiers.expectFail)
     return "task " + std::to_string(taskId) + " failed: " + task.message;
@@ -100,14 +101,14 @@ CommandRunner::Failure CommandRunner::awaitSnapshot(
 {
   if (const auto lost = notConnected())
     return lost;
-  const auto wait =
-      pumpUntil([&] { return m_session->snapshotsReceived() > m_snapshotMark; },
-          deadline);
+  const auto wait = pumpUntil(
+      [&] { return m_snapshots.passed(m_session->snapshotsReceived()); },
+      deadline);
   if (wait != WaitEnd::Done)
     return waitFailure(wait, "ProjectSnapshot", deadline);
   // One snapshot per await: two that land in the same poll (a SetPlaying's
   // and the auto-stop's, say) are awaited one at a time, the second at once.
-  ++m_snapshotMark;
+  m_snapshots.advance();
   return {};
 }
 
@@ -177,8 +178,8 @@ CommandRunner::Failure CommandRunner::awaitReply(uint64_t requestId,
   }
   // A snapshot this request caused follows its reply; whatever arrived up to
   // the reply belongs to earlier requests.
-  m_snapshotMark =
-      m_session->snapshotsAtReply(requestId).value_or(m_snapshotMark);
+  if (const auto at = m_session->snapshotsAtReply(requestId))
+    m_snapshots.markAt(*at);
   for (const auto &event : following)
     printEvent(event);
 

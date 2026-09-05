@@ -249,6 +249,14 @@ std::optional<size_t> TestSession::snapshotsAtReply(uint64_t requestId) const
   return received->snapshotsReceived;
 }
 
+std::optional<size_t> TestSession::snapshotsAtTaskEnd(uint64_t taskId) const
+{
+  const auto *record = m_tasks.at(taskId);
+  if (!record || !record->finished())
+    return {};
+  return record->snapshotsAtEnd;
+}
+
 size_t TestSession::repliesFailed() const
 {
   return m_repliesFailed;

@@ -238,6 +238,9 @@ struct TestSession
   // sends an op's snapshot after its reply, so a snapshot past this count is
   // one the request (or a later one) caused. Empty until the reply arrives.
   std::optional<size_t> snapshotsAtReply(uint64_t requestId) const;
+  // Likewise for a task's end message, which its snapshot follows. Empty
+  // until the task has ended.
+  std::optional<size_t> snapshotsAtTaskEnd(uint64_t taskId) const;
   // Replies with ok == false, counted over the session's lifetime.
   size_t repliesFailed() const;
   // What the session has heard of a task; null before its first message and

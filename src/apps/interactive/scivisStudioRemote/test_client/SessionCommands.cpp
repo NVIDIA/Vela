@@ -104,7 +104,7 @@ CommandRunner::Failure CommandRunner::connect(
   if (!ok)
     return error;
   // The Bootstrap's snapshot is not the one await-snapshot waits for.
-  m_snapshotMark = m_session->snapshotsReceived();
+  m_snapshots.markAt(m_session->snapshotsReceived());
   m_pendingReplies.clear();
   return pending;
 }
@@ -181,7 +181,7 @@ CommandRunner::Failure CommandRunner::reconnect(
   const auto pending = drainEvents();
   if (!ok)
     return error;
-  m_snapshotMark = m_session->snapshotsReceived();
+  m_snapshots.markAt(m_session->snapshotsReceived());
   m_pendingReplies.clear();
   return pending;
 }

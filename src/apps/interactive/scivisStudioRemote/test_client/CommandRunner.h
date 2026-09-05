@@ -47,6 +47,33 @@ struct RunnerOptions
 };
 
 /*
+ * Where await-snapshot starts counting: the snapshots the session had applied
+ * when the last awaited thing arrived -- a connect's Bootstrap, a request's
+ * reply (or, until a no-wait reply is collected, its send), a task's end
+ * message, the previous await-snapshot. Marked at the reply rather than the
+ * send, since the previous request's snapshot may still be on the wire at the
+ * send. Each await-snapshot then advances the mark by one, so consecutive
+ * awaits consume consecutive snapshots.
+ *
+ * Example:
+ *   cursor.markAt(session.snapshotsAtReply(id).value_or(0));
+ *   session.pollUntil([&] { return cursor.passed(session.snapshotsReceived());
+ * }, 5s); cursor.advance();
+ */
+struct SnapshotCursor
+{
+  // The awaited thing arrived with `count` snapshots applied.
+  void markAt(size_t count);
+  // The one snapshot past the mark has been consumed.
+  void advance();
+  // Whether `count` snapshots applied is past the mark.
+  bool passed(size_t count) const;
+
+ private:
+  size_t m_mark{0};
+};
+
+/*
  * Executes script commands against a TestSession and writes the record
  * stream: exactly one `OK <command>` or `FAIL <command>: <reason>` line per
  * command, and one `EVT <Name> key=value ...` line for every server message
@@ -357,14 +384,8 @@ struct CommandRunner
   // Requests sent under no-wait whose replies are still to be collected, in
   // send order, with the Describe each await-reply will use.
   std::deque<std::pair<uint64_t, Describe>> m_pendingReplies;
-  // What await-snapshot waits past: the snapshots received when the last
-  // awaited thing arrived -- a request's reply (or, until a no-wait reply is
-  // collected, its send), a task's end message, the previous await-snapshot.
-  // Taken at the reply rather than the send, since the previous request's
-  // snapshot may still be on the wire at the send. Each await-snapshot then
-  // moves the mark on by one, so consecutive awaits consume consecutive
-  // snapshots.
-  size_t m_snapshotMark{0};
+  // What await-snapshot waits past.
+  SnapshotCursor m_snapshots;
   // What the last list-directory returned (`browse.entries`).
   std::vector<protocol::DirectoryEntry> m_browseEntries;
   // The last ViewportSettings sent: every viewport-settings command edits
@@ -380,6 +401,21 @@ struct CommandRunner
 };
 
 // Inlined definitions ////////////////////////////////////////////////////////
+
+inline void SnapshotCursor::markAt(size_t count)
+{
+  m_mark = count;
+}
+
+inline void SnapshotCursor::advance()
+{
+  ++m_mark;
+}
+
+inline bool SnapshotCursor::passed(size_t count) const
+{
+  return count > m_mark;
+}
 
 template <typename R>
 inline CommandRunner::Run CommandRunner::bareRequest(Describe describe)
@@ -471,7 +507,7 @@ inline CommandRunner::Failure CommandRunner::sendRequest(
   m_variables["lastRequestId"] = std::to_string(request.requestId);
   // Until the reply is collected (at once, or by await-reply under no-wait)
   // the best mark is the count as the request goes out.
-  m_snapshotMark = m_session->snapshotsReceived();
+  m_snapshots.markAt(m_session->snapshotsReceived());
   std::string error;
   if (!m_session->send(request, &error))
     return error;
