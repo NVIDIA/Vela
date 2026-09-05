@@ -1133,6 +1133,41 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   library, empty name, nothing loadable), `[SciVisStudio]` covers the four
   bind cases and the hidden new rig.
 
+- **One table for the test client's commands.** `test_client/CommandRunner.cpp`
+  was 3167 lines: two string-dispatch chains over 80 handlers (107
+  `if (name == "...")` checks), 58 `usageError(command, "<literal>")` calls
+  each re-checking its own arity, and the vocabulary retyped in
+  `commandHelp()`, the header's prose and the README's three tables with
+  nothing checking they agreed. The runner now has one `CommandSpec` table
+  (`CommandRunner::commands()`, sorted by name, one `findCommand()` lookup):
+  name, usage, `minArgs`/`maxArgs`, a `Kind` (`Session`, `Request`, `Wait`)
+  and the handler, which is a member of one of three signatures (taking the
+  `Command`, the `Deadline` and the prefixes only as it needs them) or a
+  request shape bound to its request type (`idRequest<RemoveShot>(...)`, 25
+  rows). `execute()` checks the argument count and the prefix legality
+  against the row, so about 40 arity checks are gone from the handlers, and
+  `usageError()`, `--help` and the README's command table all print the
+  row's usage: `--help` is rendered from the table by kind,
+  `scivisStudioTestClient --markdown` prints the README's table, and the
+  `[StudioTestClient]` suite checks the table is sorted and consistent and
+  that `test_client/README.md` carries the generated table verbatim. The
+  prefixes travel as a `Modifiers` value into the handlers instead of the
+  `m_expectFail`/`m_noWait` members; a prefix is legal iff the row's kind
+  admits it (`no-wait` on a `Request`, `expect-fail` on a `Request` or a
+  `Wait`), so `await-task`'s own trailing `expect-fail` spelling is gone --
+  scripts write `expect-fail await-task [TASKID]` (ten scenario lines and
+  four test scripts changed) -- and `expect-fail await-snapshot`, which was
+  silently accepted, is now the FAIL `expect-fail await-task-progress`
+  always was. `await-snapshot` and `await-task-progress` are `Session` rows:
+  they have no failing outcome to invert. The `Describe` callbacks take the
+  runner as a parameter so the table's rows can be built without one. The
+  file is split by area, each under 600 lines: `CommandRunner.cpp` (run
+  loop, prefixes, the table, the pump), `SessionCommands.cpp`,
+  `SceneCommands.cpp`, `RequestCommands.cpp`, `WaitCommands.cpp`,
+  `NamedValues.cpp`, and the runner-free `AnyText.{h,cpp}` (the ANARI `Any`
+  <-> token codec) and `CommandText.{h,cpp}` (record spellings and the
+  shared argument parsers). No wire or record-stream change.
+
 ### Spec conformance
 
 Every bullet of the spec sections named below, against the tree at

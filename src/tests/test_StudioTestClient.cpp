@@ -39,6 +39,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -1075,6 +1076,48 @@ SCENARIO("the test client parses its command line", "[StudioTestClient]")
         REQUIRE(usage.find(flag) != std::string::npos);
       for (const auto &name : CommandRunner::assertNames())
         REQUIRE(usage.find(name) != std::string::npos);
+      for (const auto &spec : CommandRunner::commands())
+        REQUIRE(usage.find(std::string("  ") + spec.name) != std::string::npos);
+    }
+  }
+}
+
+SCENARIO("the command table is the one source of the command vocabulary",
+    "[StudioTestClient]")
+{
+  GIVEN("the runner's command table")
+  {
+    const auto &commands = CommandRunner::commands();
+
+    THEN("it is sorted by name, with one consistent row per command")
+    {
+      REQUIRE(commands.size() > 70);
+      for (size_t i = 0; i < commands.size(); ++i) {
+        const auto &spec = commands[i];
+        INFO(spec.name);
+        if (i > 0)
+          REQUIRE(std::string(commands[i - 1].name) < spec.name);
+        REQUIRE(spec.usage != nullptr);
+        REQUIRE(std::string(spec.summary).size() > 0);
+        REQUIRE(spec.minArgs >= 0);
+        REQUIRE((spec.maxArgs == -1 || spec.maxArgs >= spec.minArgs));
+        REQUIRE(spec.run.fn);
+        REQUIRE(CommandRunner::findCommand(spec.name) == &spec);
+      }
+      REQUIRE(CommandRunner::findCommand("no-such-command") == nullptr);
+    }
+
+    THEN("the README's command table is the one --markdown prints")
+    {
+      const auto readme = std::filesystem::path(__FILE__).parent_path() / ".."
+          / "apps" / "interactive" / "scivisStudioRemote" / "test_client"
+          / "README.md";
+      std::ifstream file(readme);
+      REQUIRE(file);
+      const std::string text((std::istreambuf_iterator<char>(file)), {});
+      const auto table = testClientCommandTable();
+      REQUIRE(table.find("| command | kind | does |") == 0);
+      REQUIRE(text.find(table) != std::string::npos);
     }
   }
 }
@@ -1408,7 +1451,7 @@ SCENARIO("the test client drives project ops against a fake server",
           "assert project.directory == /data/p1\n"
           "assert project.name == p1\n"
           "open-project /data/missing\n"
-          "await-task expect-fail\n"
+          "expect-fail await-task\n"
           "assert tasks.failed == 1\n"
           "expect-fail cancel-task 7\n"
           // Two requests in flight, collected in send order.
@@ -1477,7 +1520,7 @@ SCENARIO("the test client drives project ops against a fake server",
         REQUIRE(hasLine(r, "EVT TaskCompleted taskId=1 message=\"\""));
         REQUIRE(hasLine(r,
             "EVT TaskFailed taskId=2 error=\"project directory does not exist\""));
-        REQUIRE(hasLine(r, "OK await-task expect-fail"));
+        REQUIRE(hasLine(r, "OK expect-fail await-task"));
         REQUIRE(
             hasLine(r, "EVT TaskCompleted taskId=4 message=\"dataset_0002\""));
         REQUIRE(hasLine(
@@ -1824,7 +1867,7 @@ SCENARIO("the test client drives project ops against a fake server",
           "cancel-task $lastTaskId\n"
           "expect-fail await-reply\n"
           "assert lastReplyError contains progress\n"
-          "await-task $lastTaskId expect-fail\n"
+          "expect-fail await-task $lastTaskId\n"
           "assert task.last.state == Failed\n"
           "assert task.last.message == cancelled\n"
           "assert task.last.framesCompleted >= 1\n"
@@ -2001,7 +2044,7 @@ SCENARIO("the test client drives project ops against a fake server",
           "assert task.1.state == Running\n"
           "assert task.1.message == \"\"\n"
           "cancel-task 1\n"
-          "await-task 1 expect-fail\n"
+          "expect-fail await-task 1\n"
           "assert task.1.state == Failed\n"
           "assert task.1.message == \"cancelled\"\n"
           "disconnect\n");

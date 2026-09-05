@@ -123,7 +123,7 @@ await-reply
 await-reply
 await-reply
 await-task 5
-await-task 6 expect-fail
+expect-fail await-task 6
 await-snapshot
 assert tasks.completed == 5
 assert tasks.failed == 1

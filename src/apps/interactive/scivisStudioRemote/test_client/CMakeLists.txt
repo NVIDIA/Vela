@@ -6,10 +6,17 @@
 # run scripts against an in-process StudioServer. No SDL, no ImGui, and
 # nothing from client/: the protocol library is all it shares with the GUI.
 add_library(vsr_scivis_studio_test_client_core OBJECT
+  AnyText.cpp
   CommandRunner.cpp
+  CommandText.cpp
+  NamedValues.cpp
+  RequestCommands.cpp
+  SceneCommands.cpp
   Script.cpp
+  SessionCommands.cpp
   TestClientOptions.cpp
   TestSession.cpp
+  WaitCommands.cpp
 )
 
 target_include_directories(vsr_scivis_studio_test_client_core

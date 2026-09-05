@@ -56,15 +56,15 @@ assert replies.failed == 28
 # with no directory to save to, and a path inside the root that holds no
 # project are all accepted as tasks, which then fail.
 load-dataset dataset_9999
-await-task expect-fail
+expect-fail await-task
 reimport-dataset dataset_9999
-await-task expect-fail
+expect-fail await-task
 save-dataset-archive dataset_9999 $dataRoot/x.vsr
-await-task expect-fail
+expect-fail await-task
 save-project
-await-task expect-fail
+expect-fail await-task
 open-project $dataRoot/nowhere
-await-task expect-fail
+expect-fail await-task
 assert tasks.failed == 5
 assert tasks.completed == 0
 assert replies.failed == 28
