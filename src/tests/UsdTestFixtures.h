@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include "TestDirectories.h"
 // catch
 #include "catch.hpp"
 // vsr
@@ -17,24 +18,14 @@
 // std
 #include <filesystem>
 #include <fstream>
-#include <random>
 #include <string>
 
-// A directory of this process' own, removed when the test binary exits.
-struct ScopedFixtureDirectory
-{
-  ScopedFixtureDirectory();
-  ~ScopedFixtureDirectory();
-
-  std::filesystem::path path;
-};
-
-// Fixture files live in a directory unique to this process, so two concurrent
-// runs of the test binary cannot collide on a name while relative asset
-// references between fixtures still resolve.
+// Fixture files live in a directory unique to this process, removed when the
+// test binary exits, so two concurrent runs of the binary cannot collide on
+// a name while relative asset references between fixtures still resolve.
 inline const std::filesystem::path &fixtureDirectory()
 {
-  static const ScopedFixtureDirectory directory;
+  static const ScopedFixtureDirectory directory("vsr_test_usd_");
   return directory.path;
 }
 
@@ -139,24 +130,6 @@ inline constexpr const char *QUAD_MESH_BODY = R"(
 )";
 
 // Inlined definitions ////////////////////////////////////////////////////////
-
-inline ScopedFixtureDirectory::ScopedFixtureDirectory()
-{
-  // create_directory reports whether it was this process that made the
-  // directory, so retrying on a taken name is what makes the choice safe
-  // rather than merely unlikely.
-  std::random_device entropy;
-  const auto root = std::filesystem::temp_directory_path();
-  do {
-    path = root / ("vsr_test_usd_" + std::to_string(entropy()));
-  } while (!std::filesystem::create_directory(path));
-}
-
-inline ScopedFixtureDirectory::~ScopedFixtureDirectory()
-{
-  std::error_code ec;
-  std::filesystem::remove_all(path, ec);
-}
 
 inline StageFixture::StageFixture(const char *name, const std::string &contents)
     : m_path(fixtureDirectory() / name)

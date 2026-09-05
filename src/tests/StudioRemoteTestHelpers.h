@@ -4,6 +4,7 @@
 #pragma once
 
 #include "NetworkTestHelpers.h"
+#include "StudioServerTestHelpers.h"
 // vsr_scivis_studio_client_core
 #include "ServerConnection.h"
 // vsr_scivis_studio_server_core

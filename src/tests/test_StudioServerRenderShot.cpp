@@ -4,6 +4,7 @@
 // catch
 #include "StudioRemoteTestHelpers.h"
 #include "StudioServerTestHelpers.h"
+#include "TestDirectories.h"
 #include "catch.hpp"
 // vsr_scivis_studio_server_core
 #include "ServerOptions.h"
@@ -27,11 +28,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
 #include <memory>
 #include <optional>
 #include <string>
-#include <system_error>
 #include <vector>
 
 using namespace vsr::scivis_studio;
@@ -49,29 +48,18 @@ const std::string LAYOUT_MARKER = "[Window][RenderShotTest]";
 struct RenderFixture
 {
   RenderFixture();
-  ~RenderFixture();
 
-  std::filesystem::path root;
+  ScopedFixtureDirectory scratch{"vsr_studio_server_render_shot_"};
+  const std::filesystem::path &root{scratch.path};
   std::filesystem::path mesh;
   std::filesystem::path projectDir;
 };
 
 RenderFixture::RenderFixture()
 {
-  static int counter = 0;
-  root = std::filesystem::temp_directory_path()
-      / ("vsr_studio_server_render_shot_" + std::to_string(++counter));
-  std::filesystem::remove_all(root);
-  std::filesystem::create_directories(root);
   mesh = root / "mesh.obj";
-  std::ofstream(mesh) << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+  writeTriangleObj(mesh);
   projectDir = root / "proj";
-}
-
-RenderFixture::~RenderFixture()
-{
-  std::error_code ec;
-  std::filesystem::remove_all(root, ec);
 }
 
 // Connects `client` and runs its Hello/bootstrap handshake.

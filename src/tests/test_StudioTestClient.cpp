@@ -3,6 +3,7 @@
 
 // catch
 #include "StudioRemoteTestHelpers.h"
+#include "TestDirectories.h"
 #include "catch.hpp"
 // vsr_scivis_studio_test_client_core
 #include "CommandRunner.h"
@@ -47,8 +48,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-// posix
-#include <unistd.h>
 
 using namespace vsr::scivis_studio;
 using namespace vsr::scivis_studio::protocol;
@@ -1127,9 +1126,8 @@ SCENARIO("the test client owns a server it spawned", "[StudioTestClient]")
   // A stand-in for scivisStudioServer: /bin/sh printing what the real one
   // prints. ServerProcess appends `--port N --data-root DIR`, which land in
   // the shell's positional parameters and are echoed back as a check.
-  const auto work = std::filesystem::temp_directory_path()
-      / ("vsrStudioServerProcess-" + std::to_string(::getpid()));
-  std::filesystem::remove_all(work);
+  ScopedFixtureDirectory scratch("vsrStudioServerProcess-");
+  const auto &work = scratch.path;
   std::filesystem::create_directories(work / "data");
   const auto log = work / "server.log";
   const auto fakeServer = [&](const char *script) {
@@ -1231,8 +1229,6 @@ SCENARIO("the test client owns a server it spawned", "[StudioTestClient]")
       }
     }
   }
-
-  std::filesystem::remove_all(work);
 }
 
 SCENARIO("the command table is the one source of the command vocabulary",

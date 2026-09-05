@@ -4,6 +4,7 @@
 // catch
 #include "StudioRemoteTestHelpers.h"
 #include "StudioServerTestHelpers.h"
+#include "TestDirectories.h"
 #include "catch.hpp"
 // vsr_scivis_studio_server_core
 #include "ArrayHistogram.h"
@@ -31,7 +32,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
 #include <limits>
 #include <memory>
 #include <numeric>
@@ -56,27 +56,16 @@ constexpr size_t SCALAR_COUNT = 1000;
 struct MeshFixture
 {
   MeshFixture();
-  ~MeshFixture();
 
-  std::filesystem::path root;
+  ScopedFixtureDirectory scratch{"vsr_studio_server_viewport_"};
+  const std::filesystem::path &root{scratch.path};
   std::filesystem::path mesh;
 };
 
 MeshFixture::MeshFixture()
 {
-  static int counter = 0;
-  root = std::filesystem::temp_directory_path()
-      / ("vsr_studio_server_viewport_" + std::to_string(++counter));
-  std::filesystem::remove_all(root);
-  std::filesystem::create_directories(root);
   mesh = root / "triangle.obj";
-  std::ofstream(mesh) << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
-}
-
-MeshFixture::~MeshFixture()
-{
-  std::error_code ec;
-  std::filesystem::remove_all(root, ec);
+  writeTriangleObj(mesh);
 }
 
 // A started server with one bootstrapped client, the triangle imported and

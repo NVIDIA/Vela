@@ -4,6 +4,7 @@
 // catch
 #include "StudioFakeServer.h"
 #include "StudioRemoteTestHelpers.h"
+#include "TestDirectories.h"
 #include "catch.hpp"
 // vsr_scivis_studio_server_core
 #include "ServerOptions.h"
@@ -40,7 +41,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
 #include <functional>
 #include <iterator>
 #include <memory>
@@ -191,28 +191,10 @@ void Client::requireMirrorsServer(RunningServer &server)
 // project the session saves and reopens; gone with the test.
 struct ProjectScratch
 {
-  ProjectScratch();
-  ~ProjectScratch();
-
-  std::filesystem::path base;
-  std::filesystem::path saved;
+  ScopedFixtureDirectory scratch{"vsr_studio_e2e_"};
+  const std::filesystem::path &base{scratch.path};
+  std::filesystem::path saved{base / "saved"};
 };
-
-ProjectScratch::ProjectScratch()
-{
-  static int counter = 0;
-  base = std::filesystem::temp_directory_path()
-      / ("vsr_studio_e2e_" + std::to_string(++counter));
-  std::filesystem::remove_all(base);
-  std::filesystem::create_directories(base);
-  saved = base / "saved";
-}
-
-ProjectScratch::~ProjectScratch()
-{
-  std::error_code ec;
-  std::filesystem::remove_all(base, ec);
-}
 
 // Polls until the frame header names `shotId`; false on timeout.
 bool waitForFrameOf(Client &client, const ShotID &shotId)
@@ -1083,7 +1065,7 @@ SCENARIO("scivisStudioServer and the client core pick, outline and bin",
     // and (0, 1, 0), under the server's Data Root.
     ProjectScratch scratch;
     const auto mesh = scratch.base / "triangle.obj";
-    std::ofstream(mesh) << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+    writeTriangleObj(mesh);
 
     // A scalar array the histogram can be asked about: 1000 float32 values
     // evenly spread over [0, 1]; the bootstrap mirrors its descriptor.
@@ -1240,7 +1222,7 @@ SCENARIO("scivisStudioServer and the client core render shots and recover",
   {
     ProjectScratch scratch;
     const auto mesh = scratch.base / "triangle.obj";
-    std::ofstream(mesh) << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+    writeTriangleObj(mesh);
 
     auto server = std::make_unique<RunningServer>(0);
     REQUIRE(server->started);

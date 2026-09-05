@@ -17,6 +17,8 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -86,6 +88,13 @@ struct ServerLoop
   std::atomic<bool> finished{false};
   std::thread thread;
 };
+
+// Writes the one-triangle OBJ (corners at the origin, (1, 0, 0) and
+// (0, 1, 0) in the z = 0 plane) the server suites import.
+inline void writeTriangleObj(const std::filesystem::path &file)
+{
+  std::ofstream(file) << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+}
 
 // Inlined definitions ////////////////////////////////////////////////////////
 

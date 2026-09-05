@@ -4,6 +4,7 @@
 // catch
 #include "StudioRemoteTestHelpers.h"
 #include "StudioServerTestHelpers.h"
+#include "TestDirectories.h"
 #include "catch.hpp"
 // vsr_scivis_studio_server_core
 #include "DataRoots.h"
@@ -58,20 +59,14 @@ namespace {
 struct DataRootFixture
 {
   DataRootFixture();
-  ~DataRootFixture();
 
-  std::filesystem::path root;
+  ScopedFixtureDirectory scratch{"vsr_studio_server_project_ops_"};
+  const std::filesystem::path &root{scratch.path};
   std::filesystem::path mesh;
   std::filesystem::path grid;
   std::filesystem::path plainDir;
   std::filesystem::path projectDir;
 };
-
-void writeTriangleObj(const std::filesystem::path &file)
-{
-  std::ofstream out(file);
-  out << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
-}
 
 void writeGridObj(const std::filesystem::path &file, int n)
 {
@@ -92,11 +87,6 @@ void writeGridObj(const std::filesystem::path &file, int n)
 
 DataRootFixture::DataRootFixture()
 {
-  static int counter = 0;
-  root = std::filesystem::temp_directory_path()
-      / ("vsr_studio_server_project_ops_" + std::to_string(++counter));
-  std::filesystem::remove_all(root);
-  std::filesystem::create_directories(root);
   mesh = root / "mesh.obj";
   writeTriangleObj(mesh);
   grid = root / "grid.obj";
@@ -106,12 +96,6 @@ DataRootFixture::DataRootFixture()
   projectDir = root / "proj";
   std::filesystem::create_directories(projectDir);
   std::ofstream(projectDir / PROJECT_MANIFEST_FILENAME) << "";
-}
-
-DataRootFixture::~DataRootFixture()
-{
-  std::error_code ec;
-  std::filesystem::remove_all(root, ec);
 }
 
 // A started server on a fresh project with one bootstrapped client.
@@ -264,9 +248,8 @@ const Dataset *findDatasetNamed(const Project &project, const std::string &name)
 
 SCENARIO("DataRoots admit only canonical paths inside a root", "[StudioServer]")
 {
-  const auto base =
-      std::filesystem::temp_directory_path() / "vsr_studio_data_roots_test";
-  std::filesystem::remove_all(base);
+  ScopedFixtureDirectory scratch("vsr_studio_data_roots_");
+  const auto &base = scratch.path;
   std::filesystem::create_directories(base / "data" / "sub");
   std::filesystem::create_directories(base / "data2");
   std::filesystem::create_directories(base / "elsewhere" / "proj");
@@ -320,8 +303,6 @@ SCENARIO("DataRoots admit only canonical paths inside a root", "[StudioServer]")
       REQUIRE(roots.roots().size() == 1);
     }
   }
-
-  std::filesystem::remove_all(base);
 }
 
 SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
