@@ -7,7 +7,10 @@
 // std
 #include <cctype>
 #include <cerrno>
+#include <csignal>
+#include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <fstream>
 #include <iterator>
 #include <thread>
@@ -30,6 +33,37 @@ constexpr const char *LISTENING = "Listening on port ";
 constexpr const char *NO_DEVICE = "no ANARI device could be loaded";
 constexpr auto POLL_INTERVAL = 20ms;
 constexpr auto STOP_GRACE = 5s;
+
+// The running server's pid, for the death handlers below: a signal handler
+// cannot walk a ServerProcess, so start() publishes the pid here and reap()
+// clears it. Written only by the (single-threaded) client and read in a
+// handler, hence sig_atomic_t.
+volatile std::sig_atomic_t g_spawnedServerPid = 0;
+std::terminate_handler g_previousTerminate = nullptr;
+
+// Async-signal-safe: kill(), signal() and raise() only.
+void stopSpawnedServer()
+{
+  const auto pid = g_spawnedServerPid;
+  if (pid != 0)
+    ::kill(static_cast<pid_t>(pid), SIGTERM);
+}
+
+extern "C" void onDeathSignal(int signum)
+{
+  stopSpawnedServer();
+  // Re-raise so the exit status still says which signal ended the client.
+  ::signal(signum, SIG_DFL);
+  ::raise(signum);
+}
+
+void onTerminate()
+{
+  stopSpawnedServer();
+  if (g_previousTerminate)
+    g_previousTerminate();
+  std::abort();
+}
 
 // The port the last Listening line in `text` names, if any.
 bool listeningPort(const std::string &text, uint16_t &port)
@@ -132,6 +166,7 @@ bool ServerProcess::start(std::string *error)
     return false;
   }
   m_pid = pid;
+  g_spawnedServerPid = pid;
   return true;
 }
 
@@ -248,9 +283,24 @@ bool ServerProcess::reap(bool block)
     return false;
   // reaped < 0: no such child any more (ECHILD); it is gone either way.
   m_exitStatus = reaped > 0 ? status : 0;
+  if (g_spawnedServerPid == m_pid)
+    g_spawnedServerPid = 0;
   m_pid = 0;
   m_listening = false;
   return true;
+}
+
+void stopSpawnedServerOnDeath()
+{
+  // Idempotent: a second std::set_terminate() would chain onTerminate to
+  // itself.
+  static bool installed = false;
+  if (installed)
+    return;
+  installed = true;
+  ::signal(SIGTERM, onDeathSignal);
+  ::signal(SIGINT, onDeathSignal);
+  g_previousTerminate = std::set_terminate(onTerminate);
 }
 
 } // namespace vsr::scivis_studio::test_client

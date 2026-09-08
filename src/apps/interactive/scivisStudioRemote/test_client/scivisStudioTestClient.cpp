@@ -159,6 +159,9 @@ int main(int argc, const char **argv)
     std::filesystem::create_directories(work / "data");
     server = std::make_unique<ServerProcess>(
         command, work / "data", work / "server.log");
+    // ~ServerProcess() only runs on a normal return from main; without this
+    // a SIGTERMed or terminating client would orphan the server it spawned.
+    stopSpawnedServerOnDeath();
     std::filesystem::current_path(work);
     std::cerr << "[scivisStudioTestClient] work dir " << work.string() << '\n';
     if (!server->start(&error)) {

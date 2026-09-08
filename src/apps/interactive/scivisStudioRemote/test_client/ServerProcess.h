@@ -106,4 +106,14 @@ struct ServerProcess
   std::uintmax_t m_logStart{0};
 };
 
+// Makes this process take its spawned server with it when it dies. Installs
+// SIGTERM/SIGINT handlers that SIGTERM the running ServerProcess's child
+// before re-raising the signal with the default disposition, and a
+// std::terminate hook that does the same for an uncaught exception. Without
+// it only ~ServerProcess() stops the server, so a signalled or terminating
+// client leaves it re-parented to init. SIGSEGV and SIGKILL stay uncovered.
+// Called from main(); calling it again does nothing. The handler uses only
+// kill(), signal() and raise().
+void stopSpawnedServerOnDeath();
+
 } // namespace vsr::scivis_studio::test_client
