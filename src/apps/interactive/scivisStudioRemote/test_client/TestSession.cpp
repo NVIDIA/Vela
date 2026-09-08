@@ -14,15 +14,12 @@
 #include "TaskMessages.h"
 // vsr_scivis_studio_model
 #include "Project.h"
-// vsr_network
-#include "vsr/network/messages/NewObject.hpp"
-#include "vsr/network/messages/RemoveObject.hpp"
-#include "vsr/network/messages/TransferLayer.hpp"
-#include "vsr/network/messages/TransferScene.hpp"
 // vsr_scene
 #include "vsr/scene/Layer.hpp"
 // vsr_core
 #include "vsr/core/Logging.hpp"
+// anari
+#include <anari/anari_cpp.hpp>
 // std
 #include <algorithm>
 #include <thread>
@@ -31,22 +28,40 @@ namespace vsr::scivis_studio::test_client {
 
 using namespace protocol;
 using vsr::network::Message;
-namespace messages = vsr::network::messages;
 
 namespace {
 
-// Bound on flushing a courtesy Disconnect before the socket closes.
-constexpr std::chrono::milliseconds COURTESY_SEND_TIMEOUT{200};
 constexpr std::chrono::milliseconds POLL_INTERVAL{1};
 // Between reconnect attempts a restarting server refuses.
 constexpr std::chrono::milliseconds RECONNECT_PAUSE{100};
-constexpr const char *BUILD_INFO = "scivisStudioTestClient";
 // What a BootstrapBegin says of the tasks the previous session left running.
 constexpr const char *CONNECTION_LOST = "connection lost";
 
 std::string endpointText(const std::string &host, uint16_t port)
 {
   return host + ":" + std::to_string(port);
+}
+
+void recordHello(Event &event, const Message &msg)
+{
+  const auto hello = decode<Hello>(msg);
+  if (!hello) {
+    event.fields.emplace_back("malformed", "true");
+    return;
+  }
+  event.fields.emplace_back("version", std::to_string(hello->version));
+  event.fields.emplace_back("buildInfo", quotedText(hello->buildInfo));
+}
+
+// The connection's timings for a scripted session: the script's liveness
+// numbers, and no automatic retry -- a loss is the script's to reconnect.
+client::ConnectionTimings connectionTimings(SessionTimings timings)
+{
+  client::ConnectionTimings out;
+  out.pingAfterQuiet = timings.pingAfterQuiet;
+  out.lossAfterSilence = timings.lossAfterSilence;
+  out.autoRetryFor = std::chrono::milliseconds{0};
+  return out;
 }
 
 } // namespace
@@ -130,28 +145,12 @@ size_t totalObjects(const vsr::scene::Scene &scene)
 // Construction ///////////////////////////////////////////////////////////////
 
 TestSession::TestSession(SessionTimings timings)
-    : m_timings(timings),
-      m_channel(std::make_shared<vsr::network::NetworkClient>())
+    : m_connection(&m_mirror, connectionTimings(timings))
 {
-  // Registered before any connect() so the IO thread never sees the handler
-  // map change. Every type byte gets one: a message outside the Studio set
-  // is answered with an Error, not dropped by the transport.
-  for (int value = 0; value <= 0xff; ++value) {
-    m_channel->registerHandler(
-        uint8_t(value), [this](const Message &msg) { onInbound(msg); });
-  }
-  m_channel->setDisconnectHandler(
-      [this](
-          const boost::system::error_code &error) { onChannelClosed(error); });
+  m_connection.onMessage = [this](const Message &msg) { record(msg); };
 }
 
-TestSession::~TestSession()
-{
-  // Joining the IO thread first guarantees no handler runs against a
-  // half-destroyed object.
-  m_channel->disconnect();
-  m_channel.reset();
-}
+TestSession::~TestSession() = default;
 
 // Queries ////////////////////////////////////////////////////////////////////
 
@@ -162,12 +161,12 @@ SessionState TestSession::state() const
 
 const std::string &TestSession::host() const
 {
-  return m_host;
+  return m_connection.host();
 }
 
 uint16_t TestSession::port() const
 {
-  return m_port;
+  return m_connection.port();
 }
 
 vsr::scene::Scene &TestSession::mirror()
@@ -182,12 +181,12 @@ const vsr::scene::Scene &TestSession::mirror() const
 
 const Project *TestSession::project() const
 {
-  return m_project.get();
+  return m_connection.project();
 }
 
 const FrameConfig &TestSession::frameConfig() const
 {
-  return m_frameConfig;
+  return m_connection.frameConfig();
 }
 
 const std::optional<FrameHeader> &TestSession::lastFrameHeader() const
@@ -230,9 +229,11 @@ const std::string &TestSession::failure() const
   return m_failure;
 }
 
-uint64_t TestSession::nextRequestId()
+client::RequestHandle TestSession::sendPick(int x, int y, std::string *error)
 {
-  return m_nextRequestId++;
+  if (!requireConnected(error))
+    return {};
+  return m_connection.projectOps().pick(x, y, {});
 }
 
 const ProjectOpReply *TestSession::reply(uint64_t requestId) const
@@ -309,7 +310,7 @@ const std::optional<TimeAdvanceWarning> &TestSession::lastWarning() const
 
 const SubtreePtr &TestSession::uiState() const
 {
-  return m_uiState;
+  return m_connection.uiState();
 }
 
 // Session ////////////////////////////////////////////////////////////////////
@@ -321,26 +322,32 @@ bool TestSession::connect(const std::string &host,
 {
   // Connecting over an open link (or a half-open attempt) is an implicit
   // disconnect first; the state then says so.
-  if (m_phase != Phase::Idle)
+  if (m_connection.phase() != client::SessionPhase::Idle)
     disconnect();
-  m_host = host;
-  m_port = port;
-  beginAttempt();
+  m_failure.clear();
+  m_connection.connect(host, port);
 
   // Every way an attempt ends lands in Idle, except success.
-  pollUntil([&] { return m_bootstrapped || m_phase == Phase::Idle; }, deadline);
-  if (m_bootstrapped)
+  pollUntil(
+      [&] {
+        return m_connection.bootstrapped()
+            || m_connection.phase() == client::SessionPhase::Idle;
+      },
+      deadline);
+  if (m_connection.bootstrapped())
     return true;
-  if (m_phase != Phase::Idle) {
+  m_failure = m_connection.lastFailure();
+  if (m_connection.phase() != client::SessionPhase::Idle) {
     // The deadline: Connected was never entered (that takes BootstrapEnd), so
     // closing leaves the state as it was.
-    m_failure =
-        (m_phase == Phase::AwaitingHello ? "no Hello from "
-                                         : "no complete Bootstrap from ")
+    m_failure = (m_connection.phase() == client::SessionPhase::AwaitingHello
+                        ? "no Hello from "
+                        : "no complete Bootstrap from ")
         + endpointText(host, port) + " within "
         + std::to_string(deadline.count()) + " ms";
-    m_phase = Phase::Idle;
-    closeChannel();
+    // The connection is left with no session; this session's state is the
+    // one it had, since it was never Connected on this attempt.
+    m_connection.disconnect();
   }
   if (error)
     *error = m_failure;
@@ -350,19 +357,21 @@ bool TestSession::connect(const std::string &host,
 bool TestSession::reconnect(
     std::chrono::milliseconds deadline, std::string *error)
 {
-  if (m_host.empty()) {
+  if (m_connection.host().empty()) {
     if (error)
       *error = "never connected: nothing to reconnect to";
     return false;
   }
-  // Lost is auto-retrying (CONTEXT.md): a server still coming back refuses
-  // at once, so attempts repeat until the deadline, each bounded by what is
-  // left of it.
+  // The connection never retries a loss on its own here, and a server still
+  // coming back refuses at once, so attempts repeat until the deadline, each
+  // bounded by what is left of it.
   const auto end = Clock::now() + deadline;
+  const std::string host = m_connection.host();
+  const uint16_t port = m_connection.port();
   while (true) {
     const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
         end - Clock::now());
-    if (connect(m_host, m_port, std::max(left, {}), error))
+    if (connect(host, port, std::max(left, {}), error))
       return true;
     if (Clock::now() + RECONNECT_PAUSE >= end)
       return false;
@@ -372,13 +381,10 @@ bool TestSession::reconnect(
 
 void TestSession::disconnect()
 {
-  if (m_phase == Phase::Established) {
-    auto sent = m_channel->send(encode(Disconnect{}));
-    sent.wait_for(COURTESY_SEND_TIMEOUT);
-  }
-  m_phase = Phase::Idle;
-  closeChannel();
-  finishDisconnect();
+  m_connection.disconnect();
+  clearSessionRecords();
+  if (m_state != SessionState::NeverConnected)
+    setState(SessionState::Disconnected);
 }
 
 bool TestSession::shutdown(
@@ -386,16 +392,16 @@ bool TestSession::shutdown(
 {
   if (!requireConnected(error))
     return false;
-  send(encode(Shutdown{}));
-  m_phase = Phase::Closing;
+  m_connection.sendShutdown();
 
-  if (pollUntil([&] { return m_phase != Phase::Closing; }, deadline))
+  const bool closed = pollUntil(
+      [&] { return m_connection.phase() != client::SessionPhase::Closing; },
+      deadline);
+  // The connection drops the session on the close it asked for; a server that
+  // kept the socket open is left here instead. Either way we meant to leave.
+  disconnect();
+  if (closed)
     return true;
-
-  // The server kept the socket open; we still meant to leave.
-  m_phase = Phase::Idle;
-  closeChannel();
-  finishDisconnect();
   if (error) {
     *error = "server did not close the socket within "
         + std::to_string(deadline.count()) + " ms of Shutdown";
@@ -407,66 +413,11 @@ bool TestSession::shutdown(
 
 void TestSession::poll()
 {
-  const auto now = Clock::now();
-
-  // 1. Inbound messages, on this thread only. They come before the disconnect
-  // latch so the server's farewell (a Disconnect with the reason, then the
-  // close) is still heard.
-  std::vector<Message> batch;
-  {
-    std::lock_guard lock(m_inboundMutex);
-    batch.swap(m_inbound);
-  }
-  for (const auto &msg : batch) {
-    if (m_phase == Phase::Idle)
-      break; // a handled message tore the connection down; drop the rest
-    handleMessage(msg);
-  }
-  if (m_phase != Phase::Idle)
-    consumeFrame();
-
-  // 2. The IO thread's disconnect latch.
-  if (m_ioDisconnected.exchange(false)) {
-    boost::system::error_code error;
-    {
-      std::lock_guard lock(m_inboundMutex);
-      error = m_ioDisconnectError;
-    }
-    const std::string reason = error ? error.message() : "connection closed";
-    switch (m_phase) {
-    case Phase::Established:
-      linkFailed(reason);
-      break;
-    case Phase::AwaitingHello:
-      attemptFailed("connect failed: " + reason);
-      break;
-    case Phase::Closing:
-      // The close we asked for with Shutdown.
-      m_phase = Phase::Idle;
-      closeChannel();
-      finishDisconnect();
-      break;
-    case Phase::Idle:
-      break;
-    }
-  }
-
-  // 3. Completed sends that failed mean the link is gone.
-  checkSendFailures();
-
-  // 4. Liveness.
-  if (m_phase == Phase::Established) {
-    const auto quiet = now - lastTraffic();
-    if (quiet > m_timings.lossAfterSilence) {
-      linkFailed("no traffic from server for "
-          + std::to_string(m_timings.lossAfterSilence.count()) + " ms");
-    } else if (quiet > m_timings.pingAfterQuiet
-        && m_pingSentAt < lastTraffic()) {
-      // One Ping per quiet period: the next waits for traffic to come back.
-      m_pingSentAt = now;
-      send(encode(Ping{}));
-    }
-  }
+  // Every message the connection handles is recorded through onMessage as it
+  // goes; frames never reach that hook.
+  m_connection.poll();
+  consumeFrame();
+  syncState();
 }
 
 bool TestSession::takeEvent(Event &out)
@@ -498,8 +449,12 @@ bool TestSession::send(Message &&msg, std::string *error)
 {
   if (!requireConnected(error))
     return false;
-  m_sendFutures.push_back(m_channel->send(std::move(msg)));
-  return true;
+  if (m_connection.trySend(std::move(msg)))
+    return true;
+  // Ready and refused: the session went while this poll was in hand.
+  if (error)
+    *error = "the connection dropped the message";
+  return false;
 }
 
 bool TestSession::sendRaw(
@@ -552,12 +507,16 @@ bool TestSession::setParameter(const SceneObjectRef &object,
   auto *obj = mirrorObject(object, error);
   if (!obj)
     return false;
+  if (!value.valid() || anari::isArray(value.type())) {
+    // The delegate skips those, so the edit would stay local (arrays never
+    // ride a SetObjectParameter).
+    if (error)
+      *error = "cannot set an array or empty value on a parameter";
+    return false;
+  }
+  // The mirror's update delegate turns this into the SetObjectParameter.
   obj->addParameter(name).setValue(value);
-  SetObjectParameter edit;
-  edit.object = object;
-  edit.name = name;
-  edit.value = value;
-  return send(edit, error);
+  return true;
 }
 
 bool TestSession::removeParameter(
@@ -566,11 +525,9 @@ bool TestSession::removeParameter(
   auto *obj = mirrorObject(object, error);
   if (!obj)
     return false;
+  // Likewise the RemoveObjectParameter.
   obj->removeParameter(name);
-  RemoveObjectParameter edit;
-  edit.object = object;
-  edit.name = name;
-  return send(edit, error);
+  return true;
 }
 
 bool TestSession::setNodeTransform(const SceneNodeRef &node,
@@ -599,84 +556,15 @@ bool TestSession::setNodeTransform(const SceneNodeRef &node,
         node.layerName.c_str(),
         node.nodeIndex);
   }
+  // The delegate cannot build this one: a layer signal does not name the
+  // node that moved (MirrorUpdateDelegate.h).
   SetNodeTransform edit;
   edit.node = node;
   edit.transform = transform;
   return send(edit, error);
 }
 
-// IO thread //////////////////////////////////////////////////////////////////
-
-void TestSession::onInbound(const Message &msg)
-{
-  markTraffic();
-  switch (StudioMessageType(msg.header.type)) {
-  case StudioMessageType::Ping:
-    m_channel->send(encode(Pong{}));
-    return;
-  case StudioMessageType::Frame: {
-    std::lock_guard lock(m_inboundMutex);
-    m_latestFrame = msg;
-    return;
-  }
-  default: {
-    std::lock_guard lock(m_inboundMutex);
-    m_inbound.push_back(msg);
-    return;
-  }
-  }
-}
-
-void TestSession::onChannelClosed(const boost::system::error_code &error)
-{
-  {
-    std::lock_guard lock(m_inboundMutex);
-    m_ioDisconnectError = error;
-  }
-  m_ioDisconnected.store(true);
-}
-
-void TestSession::markTraffic()
-{
-  m_lastTraffic.store(Clock::now().time_since_epoch().count());
-}
-
-TestSession::Clock::time_point TestSession::lastTraffic() const
-{
-  return Clock::time_point(Clock::duration(m_lastTraffic.load()));
-}
-
-// Connection lifecycle (caller's thread) /////////////////////////////////////
-
-void TestSession::beginAttempt()
-{
-  m_phase = Phase::AwaitingHello;
-  m_pingSentAt = {};
-  m_failure.clear();
-  m_farewellReason.clear();
-  m_sendFutures.clear();
-  {
-    std::lock_guard lock(m_inboundMutex);
-    m_inbound.clear();
-    m_latestFrame.reset();
-  }
-  markTraffic();
-  // Armed before the socket exists: resolution and connect run on the IO
-  // thread and report through the disconnect handler either way.
-  m_ioDisconnected.store(false);
-  m_channel->connect(m_host, m_port);
-}
-
-void TestSession::closeChannel()
-{
-  m_bootstrapping = false;
-  m_bootstrapped = false;
-  // Fires our disconnect handler on this thread if the socket was open; that
-  // report describes a close we asked for, so it is consumed here.
-  m_channel->disconnect();
-  m_ioDisconnected.store(false);
-  m_sendFutures.clear();
-}
+// State //////////////////////////////////////////////////////////////////////
 
 void TestSession::setState(SessionState to)
 {
@@ -687,75 +575,46 @@ void TestSession::setState(SessionState to)
   m_state = to;
 }
 
-void TestSession::linkFailed(const std::string &reason)
+void TestSession::syncState()
 {
-  // Before BootstrapEnd the link was never Connected, so losing it is one more
-  // failed attempt and the state stays as it was.
-  if (m_bootstrapped)
-    declareLoss(reason);
-  else
-    attemptFailed("connect failed: " + reason);
+  if (m_connection.bootstrapped()) {
+    // Connected means fully populated: only with BootstrapEnd are mirror and
+    // replica the server's.
+    setState(SessionState::Connected);
+    return;
+  }
+  if (m_state != SessionState::Connected
+      || m_connection.phase() != client::SessionPhase::Idle) {
+    // Before the first BootstrapEnd every ending is one more failed attempt,
+    // and the state stays as it was.
+    return;
+  }
+  // An established link ended: involuntarily unless the connection says the
+  // session was dropped on purpose (a Shutdown's close, a mismatched server
+  // met while Lost). Lost keeps replies, picks and task records as the frozen
+  // view they belong to; a dropped session takes them with it.
+  m_failure = m_connection.lastFailure();
+  if (m_connection.state() == client::ConnectionState::Disconnected) {
+    clearSessionRecords();
+    setState(SessionState::Disconnected);
+  } else {
+    setState(SessionState::Lost);
+  }
 }
 
-void TestSession::declareLoss(const std::string &reason)
+void TestSession::clearSessionRecords()
 {
-  // The server's farewell, when it sent one, explains the close.
-  m_failure = m_farewellReason.empty() ? reason : m_farewellReason;
-  m_farewellReason.clear();
-  vsr::core::logWarning("[TestSession] connection lost: %s", m_failure.c_str());
-  m_phase = Phase::Idle;
-  closeChannel();
-  setState(SessionState::Lost);
-}
-
-void TestSession::attemptFailed(const std::string &reason)
-{
-  vsr::core::logWarning("[TestSession] attempt failed: %s", reason.c_str());
-  m_failure = reason;
-  m_phase = Phase::Idle;
-  closeChannel();
-}
-
-void TestSession::finishDisconnect()
-{
-  clearMirror();
-  m_project.reset();
   m_replies.clear();
   m_pickReplies.clear();
   m_tasks.clear();
-  m_uiState.reset();
-  m_frameConfig = {};
-  if (m_state != SessionState::NeverConnected)
-    setState(SessionState::Disconnected);
-}
-
-void TestSession::clearMirror()
-{
-  m_mirror.removeAllObjects();
-  m_mirror.removeAllLayers();
-}
-
-void TestSession::checkSendFailures()
-{
-  boost::system::error_code failure;
-  auto ready = std::remove_if(m_sendFutures.begin(),
-      m_sendFutures.end(),
-      [&](vsr::network::MessageFuture &f) {
-        if (!vsr::network::is_ready(f))
-          return false;
-        const auto error = f.valid() ? f.get() : boost::system::error_code{};
-        if (error && !failure)
-          failure = error;
-        return true;
-      });
-  m_sendFutures.erase(ready, m_sendFutures.end());
-  if (failure && m_phase == Phase::Established)
-    linkFailed("send failed: " + failure.message());
 }
 
 bool TestSession::requireConnected(std::string *error) const
 {
-  if (m_phase == Phase::Established)
+  // Connected and still Ready: the phase the connection takes a send in, and
+  // the one a loss this poll has not yet been noticed in has already left.
+  if (m_state == SessionState::Connected
+      && m_connection.phase() == client::SessionPhase::Ready)
     return true;
   if (error)
     *error = std::string("not connected (") + toString(m_state) + ")";
@@ -773,65 +632,39 @@ vsr::scene::Object *TestSession::mirrorObject(
   return obj;
 }
 
+// Recording //////////////////////////////////////////////////////////////////
+
 void TestSession::pushEvent(Event event)
 {
   m_events.push_back(std::move(event));
 }
 
-void TestSession::replyError(const std::string &text)
-{
-  vsr::core::logError("[TestSession] %s", text.c_str());
-  Error error;
-  error.message = text;
-  m_channel->send(encode(error));
-}
-
-// Inbound handling (caller's thread) /////////////////////////////////////////
-
-void TestSession::handleMessage(const Message &msg)
+void TestSession::record(const Message &msg)
 {
   const auto type = messageType(msg);
   if (!type) {
     Event event("Unknown");
     event.fields.emplace_back("type", std::to_string(int(msg.header.type)));
     pushEvent(std::move(event));
-    replyError("unknown message type " + std::to_string(int(msg.header.type)));
     return;
   }
 
   Event event(*type);
-
-  if (m_phase == Phase::AwaitingHello) {
-    if (*type == StudioMessageType::Hello) {
-      handleHello(msg);
-    } else if (*type == StudioMessageType::Error) {
-      const auto error = decode<Error>(msg);
-      const std::string text = error ? error->message : "?";
-      event.fields.emplace_back("message", quotedText(text));
-      pushEvent(std::move(event));
-      attemptFailed("server refused: " + text);
-    } else if (*type == StudioMessageType::Disconnect) {
-      const auto reason = farewellReason(decode<Disconnect>(msg));
-      event.fields.emplace_back("reason", quotedText(reason));
-      pushEvent(std::move(event));
-      attemptFailed(reason);
-    } else {
-      pushEvent(std::move(event));
-      vsr::core::logError("[TestSession] %s received before the server's Hello",
-          toString(*type));
-    }
-    return;
-  }
+  // What the connection made of the message is already done: it is Ready
+  // exactly while a session is established, and inside the bracket while a
+  // Bootstrap replays.
+  const bool bootstrapped = m_connection.bootstrapped();
+  const bool bootstrapping = m_connection.bootstrapping();
 
   if (isSceneMessageType(*type)) {
-    applySceneMessage(*type, msg);
+    recordSceneMessage(event);
+    pushEvent(std::move(event));
     return;
   }
 
   switch (*type) {
   case StudioMessageType::Hello:
-    vsr::core::logWarning(
-        "[TestSession] unexpected Hello on an established connection");
+    recordHello(event, msg);
     break;
   case StudioMessageType::Pong:
     break;
@@ -839,29 +672,22 @@ void TestSession::handleMessage(const Message &msg)
     const auto error = decode<Error>(msg);
     const std::string text = error ? error->message : "(undecodable Error)";
     event.fields.emplace_back("message", quotedText(text));
-    if (!m_bootstrapped) {
-      // Nothing of ours but the Hello is in flight before BootstrapEnd, so an
-      // Error here is the server turning the attempt down (a version it does
-      // not speak, say); it usually closes right after.
-      pushEvent(std::move(event));
-      attemptFailed("server refused: " + text);
-      return;
+    // An Error before the first BootstrapEnd is the server turning the
+    // attempt down, not a session error: the connection has already failed
+    // the attempt over it.
+    if (bootstrapped) {
+      m_lastError = text;
+      ++m_errorsReceived;
     }
-    m_lastError = text;
-    ++m_errorsReceived;
-    vsr::core::logWarning(
-        "[TestSession] server error: %s", m_lastError.c_str());
     break;
   }
   case StudioMessageType::Disconnect:
-    // The server's farewell: the close that follows is explained by it.
-    m_farewellReason = farewellReason(decode<Disconnect>(msg));
-    event.fields.emplace_back("reason", quotedText(m_farewellReason));
+    // The server's farewell; the connection keeps its reason as the one the
+    // close that follows is explained by.
+    event.fields.emplace_back(
+        "reason", quotedText(farewellReason(decode<Disconnect>(msg))));
     break;
   case StudioMessageType::BootstrapBegin:
-    m_bootstrapping = true;
-    m_bootstrapped = false;
-    clearMirror();
     // A task still open here belonged to a session that is over: its end
     // message, if any, went to a closed socket. The replay that follows
     // carries what the server still knows; whatever it does not repeat stays
@@ -876,46 +702,40 @@ void TestSession::handleMessage(const Message &msg)
     m_tasksReplayed = 0;
     break;
   case StudioMessageType::BootstrapEnd:
-    m_bootstrapping = false;
-    m_bootstrapped = true;
-    // Connected means fully populated: only now are mirror and replica the
-    // server's.
-    setState(SessionState::Connected);
     break;
   case StudioMessageType::FrameConfig: {
     const auto config = decode<FrameConfig>(msg);
     if (!config) {
-      vsr::core::logError("[TestSession] undecodable FrameConfig");
       event.fields.emplace_back("malformed", "true");
       break;
     }
-    m_frameConfig = *config;
     event.fields.emplace_back("width", std::to_string(config->width));
     event.fields.emplace_back("height", std::to_string(config->height));
     break;
   }
   case StudioMessageType::ProjectSnapshot: {
-    auto snapshot = decode<ProjectSnapshot>(msg);
+    // Decoded again rather than read off the replica: an undecodable
+    // snapshot leaves the replica as it was, and the record must say so.
+    const auto snapshot = decode<ProjectSnapshot>(msg);
     if (!snapshot) {
-      vsr::core::logError("[TestSession] undecodable ProjectSnapshot");
       event.fields.emplace_back("malformed", "true");
       break;
     }
-    m_project = std::make_unique<Project>(std::move(snapshot->project));
+    const auto *project = &snapshot->project;
     ++m_snapshotsReceived;
-    event.fields.emplace_back("activeShot", m_project->activeShotId);
-    event.fields.emplace_back("shots", std::to_string(m_project->shots.size()));
+    event.fields.emplace_back("activeShot", project->activeShotId);
+    event.fields.emplace_back("shots", std::to_string(project->shots.size()));
     event.fields.emplace_back(
-        "datasets", std::to_string(m_project->datasets.size()));
+        "datasets", std::to_string(project->datasets.size()));
     event.fields.emplace_back(
-        "lightRigs", std::to_string(m_project->lightRigs.size()));
+        "lightRigs", std::to_string(project->lightRigs.size()));
     event.fields.emplace_back(
-        "cameraRigs", std::to_string(m_project->cameraRigs.size()));
+        "cameraRigs", std::to_string(project->cameraRigs.size()));
     event.fields.emplace_back(
-        "colorMaps", std::to_string(m_project->colorMaps.size()));
-    event.fields.emplace_back("dirty", boolText(m_project->dirty));
+        "colorMaps", std::to_string(project->colorMaps.size()));
+    event.fields.emplace_back("dirty", boolText(project->dirty));
     // Time at Rest, as the snapshot carries it for the active shot.
-    if (const auto *shot = project::activeShot(*m_project)) {
+    if (const auto *shot = project::activeShot(*project)) {
       event.fields.emplace_back("playing", boolText(shot->playing));
       event.fields.emplace_back(
           "currentFrame", std::to_string(shot->currentFrame));
@@ -925,7 +745,6 @@ void TestSession::handleMessage(const Message &msg)
   case StudioMessageType::ProjectOpReply: {
     auto reply = decode<ProjectOpReply>(msg);
     if (!reply) {
-      vsr::core::logError("[TestSession] undecodable ProjectOpReply");
       event.fields.emplace_back("malformed", "true");
       break;
     }
@@ -949,7 +768,6 @@ void TestSession::handleMessage(const Message &msg)
   case StudioMessageType::PickReply: {
     auto reply = decode<PickReply>(msg);
     if (!reply) {
-      vsr::core::logError("[TestSession] undecodable PickReply");
       event.fields.emplace_back("malformed", "true");
       break;
     }
@@ -975,7 +793,6 @@ void TestSession::handleMessage(const Message &msg)
   case StudioMessageType::TimeAdvanceWarning: {
     const auto warning = decode<TimeAdvanceWarning>(msg);
     if (!warning) {
-      vsr::core::logError("[TestSession] undecodable TimeAdvanceWarning");
       event.fields.emplace_back("malformed", "true");
       break;
     }
@@ -989,7 +806,6 @@ void TestSession::handleMessage(const Message &msg)
   case StudioMessageType::TaskProgress: {
     const auto progress = decode<TaskProgress>(msg);
     if (!progress) {
-      vsr::core::logError("[TestSession] undecodable TaskProgress");
       event.fields.emplace_back("malformed", "true");
       break;
     }
@@ -1009,14 +825,13 @@ void TestSession::handleMessage(const Message &msg)
     ++record.progressReports;
     record.current = progress->current;
     record.total = progress->total;
-    if (m_bootstrapping)
+    if (bootstrapping)
       ++m_tasksReplayed;
     break;
   }
   case StudioMessageType::TaskCompleted: {
-    const auto completed = decode<TaskCompleted>(msg);
+    auto completed = decode<TaskCompleted>(msg);
     if (!completed) {
-      vsr::core::logError("[TestSession] undecodable TaskCompleted");
       event.fields.emplace_back("malformed", "true");
       break;
     }
@@ -1033,9 +848,8 @@ void TestSession::handleMessage(const Message &msg)
     break;
   }
   case StudioMessageType::TaskFailed: {
-    const auto failed = decode<TaskFailed>(msg);
+    auto failed = decode<TaskFailed>(msg);
     if (!failed) {
-      vsr::core::logError("[TestSession] undecodable TaskFailed");
       event.fields.emplace_back("malformed", "true");
       break;
     }
@@ -1053,25 +867,30 @@ void TestSession::handleMessage(const Message &msg)
   }
   case StudioMessageType::UIState: {
     // Opaque to every client: kept for the uiState.* asserts, never read
-    // beyond the child names a script asks for.
+    // beyond the child names a script asks for. uiState() is the connection's
+    // copy; this decode is only for the record.
     const auto state = decode<UIState>(msg);
     if (!state) {
-      vsr::core::logError("[TestSession] undecodable UIState");
       event.fields.emplace_back("malformed", "true");
       break;
     }
-    m_uiState = state->tree;
-    event.fields.emplace_back("present", boolText(m_uiState != nullptr));
-    event.fields.emplace_back("children",
-        std::to_string(m_uiState ? m_uiState->root().numChildren() : 0));
+    const auto &tree = state->tree;
+    event.fields.emplace_back("present", boolText(tree != nullptr));
+    event.fields.emplace_back(
+        "children", std::to_string(tree ? tree->root().numChildren() : 0));
     break;
   }
   default:
-    vsr::core::logWarning(
-        "[TestSession] %s is not handled by this client", toString(*type));
     break;
   }
   pushEvent(std::move(event));
+}
+
+void TestSession::recordSceneMessage(Event &event) const
+{
+  event.fields.emplace_back("objects", std::to_string(totalObjects(m_mirror)));
+  event.fields.emplace_back(
+      "layers", std::to_string(m_mirror.numberOfLayers()));
 }
 
 void TestSession::handleTaskEnd(uint64_t taskId,
@@ -1090,7 +909,7 @@ void TestSession::handleTaskEnd(uint64_t taskId,
     ++m_tasksCompleted;
   else
     ++m_tasksFailed;
-  if (m_bootstrapping)
+  if (m_connection.bootstrapping())
     ++m_tasksReplayed;
 }
 
@@ -1101,75 +920,14 @@ TaskRecord &TestSession::taskRecord(uint64_t taskId)
   return m_tasks[taskId];
 }
 
-void TestSession::handleHello(const Message &msg)
-{
-  const auto hello = decode<Hello>(msg);
-  if (!hello) {
-    attemptFailed("undecodable Hello from server");
-    return;
-  }
-  Event event(StudioMessageType::Hello);
-  event.fields.emplace_back("version", std::to_string(hello->version));
-  event.fields.emplace_back("buildInfo", quotedText(hello->buildInfo));
-  pushEvent(std::move(event));
-
-  if (hello->version != PROTOCOL_VERSION) {
-    attemptFailed("protocol version mismatch: server speaks v"
-        + std::to_string(hello->version) + ", this client v"
-        + std::to_string(PROTOCOL_VERSION));
-    return;
-  }
-
-  m_phase = Phase::Established;
-  Hello reply;
-  reply.version = PROTOCOL_VERSION;
-  reply.buildInfo = BUILD_INFO;
-  send(encode(reply));
-}
-
-void TestSession::applySceneMessage(StudioMessageType type, const Message &msg)
-{
-  Event event(type);
-  bool applied = true;
-  switch (type) {
-  case StudioMessageType::TransferScene:
-    applied = messages::TransferScene(msg, &m_mirror).execute();
-    break;
-  case StudioMessageType::TransferLayer:
-    applied = messages::TransferLayer(msg, &m_mirror).execute();
-    break;
-  case StudioMessageType::ObjectAdded:
-    applied = messages::NewObject(msg, &m_mirror).execute();
-    break;
-  case StudioMessageType::ObjectRemoved:
-    applied = messages::RemoveObject(msg, &m_mirror).execute();
-    break;
-  default:
-    break;
-  }
-  if (!applied) {
-    // The mirror could not take the push as sent; the server hears it.
-    replyError(std::string(toString(type)) + " refused by the mirror");
-    event.fields.emplace_back("malformed", "true");
-  }
-  event.fields.emplace_back("objects", std::to_string(totalObjects(m_mirror)));
-  event.fields.emplace_back(
-      "layers", std::to_string(m_mirror.numberOfLayers()));
-  pushEvent(std::move(event));
-}
-
 void TestSession::consumeFrame()
 {
-  std::optional<Message> frame;
-  {
-    std::lock_guard lock(m_inboundMutex);
-    frame.swap(m_latestFrame);
-  }
-  if (!frame)
+  Message frame;
+  if (!m_connection.takeLatestFrame(frame))
     return;
 
   Event event(StudioMessageType::Frame);
-  const auto view = decodeFrame(*frame);
+  const auto view = decodeFrame(frame);
   if (!view) {
     vsr::core::logError("[TestSession] malformed Frame dropped");
     event.fields.emplace_back("malformed", "true");
@@ -1183,7 +941,7 @@ void TestSession::consumeFrame()
       m_frameMaxStep = step;
   }
   m_lastFrameHeader = view->header;
-  m_lastFrame = std::move(*frame);
+  m_lastFrame = std::move(frame);
   ++m_framesReceived;
   pushEvent(frameEvent(view->header, view->size));
 }

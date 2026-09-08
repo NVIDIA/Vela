@@ -1,10 +1,11 @@
 ## SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 ## SPDX-License-Identifier: Apache-2.0
 
-# The headless test client: a second, independent client implementation
-# driven by a script. Everything but main() lives in the core so vsrTests can
-# run scripts against an in-process StudioServer. No SDL, no ImGui, and
-# nothing from client/: the protocol library is all it shares with the GUI.
+# The headless test client: the GUI client's connection core driven by a
+# script instead of a UI. Everything but main() lives in this core so vsrTests
+# can run scripts against an in-process StudioServer. No SDL and no ImGui: the
+# GUI's own core is UI-free, so the session code is shared with it rather than
+# written twice.
 add_library(vsr_scivis_studio_test_client_core OBJECT
   AnyText.cpp
   CommandRunner.cpp
@@ -28,6 +29,7 @@ PUBLIC
 
 target_link_libraries(vsr_scivis_studio_test_client_core
 PUBLIC
+  vsr_scivis_studio_client_core
   vsr_scivis_studio_protocol
   vsr_scivis_studio_model
   vsr_network
@@ -41,6 +43,7 @@ add_executable(scivisStudioTestClient scivisStudioTestClient.cpp)
 target_link_libraries(scivisStudioTestClient
 PRIVATE
   vsr_scivis_studio_test_client_core
+  vsr_scivis_studio_client_core
   vsr_scivis_studio_protocol
   vsr_scivis_studio_model
 )

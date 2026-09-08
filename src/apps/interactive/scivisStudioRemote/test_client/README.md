@@ -1,16 +1,30 @@
 # scivisStudioTestClient
 
-A second, complete Studio client with no UI: a command-line program that
-speaks the Studio Message Set from a script so `scivisStudioServer` can be
-exercised end to end on a machine with no display, in CI, or by an agent
-working unattended. It exists so every server milestone can be verified
-without launching the interactive client, and so the protocol has two
-independent client implementations: `test_client/` shares only
-`vsr_scivis_studio_protocol` (and through it the transport and model types)
-with `client/`, and implements its own connection, handshake, Bootstrap,
-liveness and loss logic (`TestSession`). It keeps the same client-held state
-as the GUI client, a Structural Mirror and a Project Replica, so scripts can
-assert on what the server pushed, not just on which message types arrived.
+A complete Studio client with no UI: a command-line program that speaks the
+Studio Message Set from a script so `scivisStudioServer` can be exercised end
+to end on a machine with no display, in CI, or by an agent working
+unattended. It exists so every server milestone can be verified without
+launching the interactive client.
+
+It is the GUI client's session, driven by a script: `TestSession` owns a
+`client::ServerConnection` and records it. The connection is the one
+`scivisStudioClient` uses -- connect, the Hello exchange, the Bootstrap into
+a Structural Mirror and Project Replica, Ping/Pong liveness, loss detection,
+Project Ops -- and `TestSession` adds what a script needs and a UI does not:
+the event stream, the counters, and the replies, picks and task records kept
+by request and task id. It records from `ServerConnection::onMessage`, which
+fires for every message `poll()` consumed once that message has been handled,
+so what an event reports is what the message left behind.
+
+Two hand-written implementations of the client side were the earlier
+arrangement, so that a bug in the GUI client's session code could not hide a
+server bug. They were written from one template and stayed one file apart:
+every protocol change landed twice, and milestone 7 paid for it three times.
+The independence that matters is kept where it costs nothing: the server
+suites in `src/tests/test_StudioServer*.cpp` drive the server with a raw
+`TestClient` that shares no session code with either client, and this client
+still holds its own Structural Mirror and Project Replica, so scripts assert
+on what the server pushed, not just on which message types arrived.
 
 Design: [`docs/scivis-studio-client-server.md`](../../../../../docs/scivis-studio-client-server.md),
 section "Headless test client"; vocabulary: [`CONTEXT.md`](../CONTEXT.md).
@@ -513,8 +527,10 @@ Each later milestone lands with the test client commands and scenarios that
 exercise its server surface, so the scenarios stay the acceptance test of the
 whole protocol:
 
-1. Add the session-level operation to `TestSession` (send, plus any inbound
-   handling and its `Event`), then one row to the command table in
+1. Add the session-level operation to `TestSession` (a send, plus the
+   `Event` its answer is recorded as in `TestSession::record()`; the
+   handling itself belongs to `client::ServerConnection`, which both clients
+   share), then one row to the command table in
    `CommandRunner.cpp` (`commands()`, sorted by name): the name, usage,
    arity, kind and handler, and a one-line summary. The handler is a member
    in the file of its area (`SessionCommands.cpp`, `SceneCommands.cpp`,

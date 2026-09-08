@@ -509,23 +509,31 @@ src/apps/interactive/scivisStudioRemote/
 
 ## Headless test client
 
-`scivisStudioTestClient` is a second, complete client with no UI: a
-command-line program that speaks the full Studio Message Set from a script so
-the server can be exercised end to end on a machine with no display, in CI,
-or by an agent working unattended. It exists so that every server-side
-milestone can be verified without launching the interactive client, and so
-the protocol has two independent client implementations.
+`scivisStudioTestClient` is a complete client with no UI: a command-line
+program that speaks the full Studio Message Set from a script so the server
+can be exercised end to end on a machine with no display, in CI, or by an
+agent working unattended. It exists so that every server-side milestone can
+be verified without launching the interactive client.
 
-- **Its own application, not a test harness for `client/`.** It lives in
-  `test_client/`, links only `vsr_scivis_studio_protocol` (and through it the
-  transport and model types), and implements its own connection, handshake,
-  bootstrap, liveness and loss logic. It shares no code with `client/` beyond
-  the protocol library, so a bug in the GUI client's session code cannot hide
-  a server bug, and vice versa.
-- **Same client-held state.** It maintains a Structural Mirror and a Project
-  Replica exactly as the GUI client does, so scripts can assert on what the
-  server pushed (object counts, layer counts, active shot, replica fields,
-  frame headers), not just on which message types arrived.
+- **The GUI client's session, driven by a script.** It lives in
+  `test_client/` and links `vsr_scivis_studio_client_core`: its `TestSession`
+  owns a `client::ServerConnection` and records it, adding the event stream,
+  the counters and the replies, picks and task records a script waits on. It
+  records from `ServerConnection::onMessage`, which fires for every message
+  `poll()` consumed once that message has been handled.
+  Two hand-written client implementations were the earlier arrangement, so
+  that a bug in the GUI client's session code could not hide a server bug.
+  Both were written from one template, and the cost was a protocol change
+  landing twice — three times over in milestone 7 — for coverage two copies
+  of one design do not give. The independence that matters is kept where it
+  costs nothing: the server suites in `src/tests/test_StudioServer*.cpp`
+  drive the server with a raw `TestClient` that shares no session code with
+  either client.
+- **Same client-held state.** It holds a Structural Mirror and a Project
+  Replica exactly as the GUI client does (the connection's own), so scripts
+  can assert on what the server pushed (object counts, layer counts, active
+  shot, replica fields, frame headers), not just on which message types
+  arrived.
 - **Scripted, deterministic, machine-checkable.** Commands come from a script
   file (`--script`), inline (`-e "cmd; cmd"`), or stdin, one command per
   line. Every wait has a deadline (`--timeout` default) and every command

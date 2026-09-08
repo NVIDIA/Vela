@@ -58,17 +58,19 @@ const char *toString(ConnectionState state);
 // server busy with a render defers the bootstrap until the render ends).
 // Bootstrapping: inside the BootstrapBegin..End bracket. Ready: BootstrapEnd
 // seen on this connection, mirror and replica are the server's; the only
-// phase in which an edit leaves the client. Named after the server's
-// SessionState where the two sides wait for the same thing: AwaitingHello
-// (each awaits the peer's Hello), Bootstrapping (the same bracket); Ready is
-// the client's side of the server's Established.
+// phase in which an edit leaves the client. Closing: a Shutdown went out and
+// the socket is only waited on, for the server's own close. Named after the
+// server's SessionState where the two sides wait for the same thing:
+// AwaitingHello (each awaits the peer's Hello), Bootstrapping (the same
+// bracket); Ready is the client's side of the server's Established.
 enum class SessionPhase
 {
   Idle,
   AwaitingHello,
   AwaitingBootstrap,
   Bootstrapping,
-  Ready
+  Ready,
+  Closing
 };
 
 const char *toString(SessionPhase phase);
@@ -81,6 +83,8 @@ struct ConnectionTimings
   std::chrono::milliseconds lossAfterSilence{15000};
   std::chrono::milliseconds retryInitialDelay{1000};
   std::chrono::milliseconds retryMaxDelay{8000};
+  // How long a loss retries on its own; 0 never does, and every reconnect is
+  // then the caller's to ask for.
   std::chrono::milliseconds autoRetryFor{60000}; // then manual only
 };
 
@@ -133,6 +137,10 @@ struct ServerConnection
   bool autoRetrying() const;
   // One line for the banner: "reconnecting...", the last error, and so on.
   const std::string &statusText() const;
+  // Why the last attempt failed or the link was lost, as the reason alone
+  // (statusText() is the same reason dressed for the banner). Empty until one
+  // fails, and cleared by every new attempt.
+  const std::string &lastFailure() const;
   const std::string &host() const;
   uint16_t port() const;
   // phase() == Bootstrapping.
@@ -181,7 +189,13 @@ struct ServerConnection
   void disconnect();
   // Manual retry while Lost, also after auto-retry gave up.
   void retryNow();
-  // Sends Shutdown, then disconnect().
+  // Sends Shutdown and waits in Closing for the server to close the socket;
+  // that close is the completed intention (-> Disconnected), not a loss. The
+  // caller keeps polling; a server that holds the socket open past
+  // lossAfterSilence is left anyway.
+  void sendShutdown();
+  // Sends Shutdown, then disconnect(): Disconnected before this returns,
+  // without waiting for the server to go.
   void shutdownServer();
 
   // Once per UI frame: drains inbound messages into the mirror, replica and
@@ -203,8 +217,18 @@ struct ServerConnection
   void setViewportSettings(const protocol::ViewportSettings &settings);
   template <typename T>
   void send(const T &payload);
+  // An already encoded message (a payload of a type this struct has no
+  // wrapper for); false when the session was not open to take it.
+  bool trySend(vsr::network::Message &&msg);
 
   // Callbacks, invoked from poll() on the UI thread //
+
+  // Every inbound message poll() consumed, once it has been handled, in the
+  // order they were consumed -- Frames excepted, which never reach handling
+  // and are taken with takeLatestFrame(). After handling, not before, so an
+  // observer sees the mirror, replica and phase the message left behind.
+  // For observers only: nothing here reads it.
+  std::function<void(const vsr::network::Message &)> onMessage;
 
   std::function<void(ConnectionState from, ConnectionState to)> onStateChanged;
   // The mirror is about to be wholesale-replaced (BootstrapBegin, or a
@@ -234,8 +258,9 @@ struct ServerConnection
   void markTraffic();
 
   // UI thread
-  // Hellos exchanged and the socket open: AwaitingBootstrap or later. What
-  // trySend() needs; edits need Ready.
+  // Hellos exchanged and the socket open with nothing said in farewell:
+  // AwaitingBootstrap, Bootstrapping or Ready. What trySend() needs; edits
+  // need Ready.
   bool sessionOpen() const;
   void beginAttempt();
   // Closes the socket -> Idle; the mirror's delegate goes quiet with it.
@@ -252,8 +277,9 @@ struct ServerConnection
   void attemptFailed(const std::string &reason);
   void scheduleRetry();
   void sendMessage(vsr::network::Message &&msg);
-  // False when the message was dropped (session not open).
-  bool trySend(vsr::network::Message &&msg);
+  // A goodbye straight to the channel, waited on for COURTESY_SEND_TIMEOUT so
+  // it leaves before the socket closes and the UI thread waits no longer.
+  void flushCourtesy(vsr::network::Message &&msg);
   void replyError(const std::string &text);
   void checkSendFailures();
   void handleMessage(const vsr::network::Message &msg);
@@ -274,8 +300,11 @@ struct ServerConnection
   ConnectionState m_state{ConnectionState::NeverConnected};
   SessionPhase m_phase{SessionPhase::Idle};
   std::string m_status;
+  std::string m_failure;
 
   Clock::time_point m_attemptStart{};
+  // When the Shutdown went out: the Closing wait is bounded from here.
+  Clock::time_point m_closingSince{};
   Clock::time_point m_pingSentAt{};
   // Present exactly while Lost and auto-retrying: the end of the retry
   // window (loss + autoRetryFor). Absent once it gave up, once a retry was

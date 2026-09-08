@@ -551,19 +551,20 @@ template <typename R>
 inline CommandRunner::Failure CommandRunner::sendRequest(
     R request, Deadline deadline, Modifiers modifiers, const Describe &describe)
 {
-  request.requestId = m_session->nextRequestId();
-  m_variables["lastRequestId"] = std::to_string(request.requestId);
   // Until the reply is collected (at once, or by await-reply under no-wait)
   // the best mark is the count as the request goes out.
   m_snapshots.markAt(m_session->snapshotsReceived());
   std::string error;
-  if (!m_session->send(request, &error))
+  const auto handle = m_session->sendRequest(std::move(request), &error);
+  if (!handle.valid())
     return error;
+  const uint64_t requestId = handle.requestId;
+  m_variables["lastRequestId"] = std::to_string(requestId);
   if (modifiers.noWait) {
-    m_pendingReplies.emplace_back(request.requestId, describe);
+    m_pendingReplies.emplace_back(requestId, describe);
     return drainEvents();
   }
-  return awaitReply(request.requestId, deadline, modifiers, describe);
+  return awaitReply(requestId, deadline, modifiers, describe);
 }
 
 template <typename Result, typename F>

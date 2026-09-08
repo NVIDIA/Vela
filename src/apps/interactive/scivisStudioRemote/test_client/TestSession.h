@@ -3,18 +3,17 @@
 
 #pragma once
 
+// vsr_scivis_studio_client_core
+#include "ProjectOps.h"
+#include "ServerConnection.h"
 // vsr_scivis_studio_protocol
 #include "FrameMessages.h"
 #include "PlaybackMessages.h"
 #include "ProjectOpReply.h"
 #include "StudioCodec.h"
 #include "StudioProtocol.h"
-#include "ViewportMessages.h"
-// vsr_scivis_studio_model
-#include "Dataset.h"
 // vsr_network
 #include "vsr/network/Message.hpp"
-#include "vsr/network/NetworkChannel.hpp"
 // vsr_scene
 #include "vsr/scene/Scene.hpp"
 // vsr_core
@@ -23,14 +22,11 @@
 #include "vsr/core/TypeMacros.hpp"
 #include "vsr/core/VSRMath.hpp"
 // std
-#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <functional>
-#include <memory>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <utility>
@@ -153,31 +149,33 @@ void forEachObjectPool(const vsr::scene::ObjectDatabase &db, Visitor &&visit)
 size_t totalObjects(const vsr::scene::Scene &scene);
 
 /*
- * The test client's connection to a Studio server: TCP connect, Hello
- * exchange with an exact version check, the bracketed Bootstrap into an owned
- * Structural Mirror and Project Replica, Ping/Pong liveness, loss detection,
- * and explicit disconnect, shutdown and reconnect. It is a second, independent
- * implementation of the client side of the protocol and shares no code with
- * the GUI client's session.
+ * The test client's session with a Studio server: the GUI client's
+ * ServerConnection, driven headlessly and recorded. The connection owns the
+ * protocol -- TCP connect, the Hello exchange, the bracketed Bootstrap into
+ * the Structural Mirror and Project Replica this session owns, Ping/Pong
+ * liveness, loss detection -- and this struct adds what a script needs and a
+ * UI does not: an event stream, counters, and the replies, picks and Server
+ * Task records kept by id, so a wait can be on state rather than on the
+ * order messages happen to arrive in.
  *
- * Project Ops go out through send() with an id from nextRequestId(); the
- * session keeps every ProjectOpReply by request id, applies every Project
- * Snapshot to the replica, and tracks each Server Task's progress and end, so
- * a caller can wait on state rather than on the order messages happen to
- * arrive in. Picks share the id space: every PickReply is kept by request id
- * too. Time in motion is read off the Frame headers: the session counts the
- * frames whose `frame` differed from the previous one (and the largest
- * forward step between two consecutive headers), and keeps the newest
- * TimeAdvanceWarning.
+ * It records from ServerConnection::onMessage, which fires for every message
+ * poll() consumed once it has been handled, so the mirror, replica and phase
+ * an event reports are the ones the message left behind. Frames never reach
+ * that hook (they are a latest-wins slot); poll() takes the newest one and
+ * records it. Time in motion is read off the Frame headers: the session
+ * counts the frames whose `frame` differed from the previous one, and the
+ * largest forward step between two consecutive headers.
  *
- * Threading: every public member runs on the caller's thread. The network
- * handlers run on the channel's IO thread and only queue messages (Frames
- * into a latest-wins slot), stamp the traffic clock, answer Ping with Pong,
- * and latch the disconnect; poll() does everything else. Every received
- * message poll() consumes becomes an Event for takeEvent().
+ * Project Ops go out through sendRequest(), which is ProjectOps::send() with
+ * no callback: the reply is picked up from the event stream by request id,
+ * as picks are. Scene edits are optimistic in the mirror, and the
+ * connection's MirrorUpdateDelegate turns the parameter ones into their
+ * messages.
  *
- * Every wait takes a deadline and returns false with the reason when it
- * passes; nothing blocks unboundedly.
+ * Loss never retries on its own here (autoRetryFor is 0): reconnect() is the
+ * script's word. Every wait takes a deadline and returns false with the
+ * reason when it passes; nothing blocks unboundedly. Every public member runs
+ * on the caller's thread.
  *
  * Example:
  *   TestSession session;
@@ -229,8 +227,15 @@ struct TestSession
 
   // Project Ops and Server Tasks (valid between polls) //
 
-  // A fresh client-minted request id for the next Project Op.
-  uint64_t nextRequestId();
+  // Mints a request id, sends the request through the connection's
+  // ProjectOps and answers with its handle; an invalid one with the reason
+  // when the session is not Connected. The reply is not awaited: it lands in
+  // the event stream and under reply(handle.requestId).
+  template <typename Req>
+  client::RequestHandle sendRequest(Req request, std::string *error = nullptr);
+  // Likewise for a Pick at that pixel (x right, y down from the top-left of
+  // the frame); its answer is a PickReply, kept under pickReply().
+  client::RequestHandle sendPick(int x, int y, std::string *error = nullptr);
   // The reply the server sent to that request id; null until it arrives, and
   // once the session is Disconnected.
   const protocol::ProjectOpReply *reply(uint64_t requestId) const;
@@ -321,9 +326,10 @@ struct TestSession
       std::string *error = nullptr);
   bool startRendering(std::string *error = nullptr);
   bool stopRendering(std::string *error = nullptr);
-  // Optimistic scene edits: applied to the mirror and sent. False when the
-  // mirror has no such object or layer. The node index of a transform is the
-  // server's; the mirror is updated only when it has a transform node there.
+  // Optimistic scene edits: applied to the mirror and sent (the parameter
+  // ones by the mirror's own update delegate). False when the mirror has no
+  // such object or layer. The node index of a transform is the server's; the
+  // mirror is updated only when it has a transform node there.
   bool setParameter(const SceneObjectRef &object,
       const std::string &name,
       const vsr::core::Any &value,
@@ -338,68 +344,38 @@ struct TestSession
  private:
   using Clock = std::chrono::steady_clock;
 
-  // Where the socket stands, independent of the user-facing state.
-  enum class Phase
-  {
-    Idle,
-    AwaitingHello,
-    Established,
-    Closing // Shutdown sent, waiting for the server to close
-  };
-
-  // IO thread
-  void onInbound(const vsr::network::Message &msg);
-  void onChannelClosed(const boost::system::error_code &error);
-  void markTraffic();
-
-  // Caller's thread
-  void beginAttempt();
-  void closeChannel();
   void setState(SessionState to);
-  void linkFailed(const std::string &reason);
-  void declareLoss(const std::string &reason);
-  void attemptFailed(const std::string &reason);
-  void finishDisconnect();
-  void clearMirror();
-  void checkSendFailures();
-  void handleMessage(const vsr::network::Message &msg);
-  void handleHello(const vsr::network::Message &msg);
-  void applySceneMessage(
-      protocol::StudioMessageType type, const vsr::network::Message &msg);
+  // What the connection did since the last look: Connected once it is
+  // bootstrapped, Lost or Disconnected once an established link ended.
+  void syncState();
+  // What the connection dropped when it dropped the session.
+  void clearSessionRecords();
+  // Records one handled message as an Event and in the counters and maps.
+  void record(const vsr::network::Message &msg);
+  // The object and layer counts the mirror holds now.
+  void recordSceneMessage(Event &event) const;
+  // The newest Frame the connection took, if any.
+  void consumeFrame();
   void handleTaskEnd(uint64_t taskId,
       TaskRecord::Status status,
       std::string message,
       uint64_t framesCompleted);
   // The record of a task, made if the task is new.
   TaskRecord &taskRecord(uint64_t taskId);
-  void consumeFrame();
   void pushEvent(Event event);
-  void replyError(const std::string &text);
   bool requireConnected(std::string *error) const;
   // The mirror's object for an edit, or null with the reason.
   vsr::scene::Object *mirrorObject(
       const SceneObjectRef &object, std::string *error);
-  Clock::time_point lastTraffic() const;
 
-  SessionTimings m_timings;
-  std::shared_ptr<vsr::network::NetworkClient> m_channel;
+  // Declared before the connection, which installs its update delegate on
+  // the mirror and must let go of it first.
   vsr::scene::Scene m_mirror;
-  std::unique_ptr<Project> m_project;
+  client::ServerConnection m_connection;
 
-  std::string m_host;
-  uint16_t m_port{0};
   SessionState m_state{SessionState::NeverConnected};
-  Phase m_phase{Phase::Idle};
   std::string m_failure; // why the last attempt failed or the link was lost
-  // The reason of the server's farewell (a Disconnect), if it sent one: the
-  // close that follows is explained by it.
-  std::string m_farewellReason;
-  bool m_bootstrapping{false};
-  bool m_bootstrapped{false};
 
-  Clock::time_point m_pingSentAt{};
-
-  protocol::FrameConfig m_frameConfig;
   std::optional<protocol::FrameHeader> m_lastFrameHeader;
   vsr::network::Message m_lastFrame;
   size_t m_framesReceived{0};
@@ -407,7 +383,6 @@ struct TestSession
   int m_frameMaxStep{0};
   size_t m_errorsReceived{0};
   std::string m_lastError;
-  uint64_t m_nextRequestId{1};
   struct ReceivedReply
   {
     protocol::ProjectOpReply reply;
@@ -423,18 +398,8 @@ struct TestSession
   size_t m_tasksCompleted{0};
   size_t m_tasksFailed{0};
   size_t m_tasksReplayed{0};
-  protocol::SubtreePtr m_uiState;
   size_t m_snapshotsReceived{0};
   std::deque<Event> m_events;
-  std::vector<vsr::network::MessageFuture> m_sendFutures;
-
-  // Shared with the IO thread
-  std::mutex m_inboundMutex;
-  std::vector<vsr::network::Message> m_inbound;
-  std::optional<vsr::network::Message> m_latestFrame;
-  boost::system::error_code m_ioDisconnectError;
-  std::atomic<bool> m_ioDisconnected{false};
-  std::atomic<Clock::rep> m_lastTraffic{0};
 };
 
 // Inlined definitions ////////////////////////////////////////////////////////
@@ -448,6 +413,15 @@ template <typename T>
 inline bool TestSession::send(const T &payload, std::string *error)
 {
   return send(protocol::encode(payload), error);
+}
+
+template <typename Req>
+inline client::RequestHandle TestSession::sendRequest(
+    Req request, std::string *error)
+{
+  if (!requireConnected(error))
+    return {};
+  return m_connection.projectOps().send(std::move(request), {});
 }
 
 } // namespace vsr::scivis_studio::test_client

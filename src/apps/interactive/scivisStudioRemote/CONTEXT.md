@@ -123,7 +123,8 @@ bootstrapped mirror (`SessionPhase`): `Idle` (no socket: never connected,
 Lost between retries, or Disconnected), `AwaitingHello`, `AwaitingBootstrap`
 (Connected, but the mirror and replica are still a previous session's frozen
 view or empty), `Bootstrapping`, `Ready` (BootstrapEnd seen on this
-connection). `Ready` with a replica is the one condition under which the UI
+connection), `Closing` (a Shutdown went out and only the server's own close
+is awaited). `Ready` with a replica is the one condition under which the UI
 may send an edit (`ServerConnection::canSend`). Named after the server's
 `SessionState` where both sides wait for the same thing: `AwaitingHello`
 (each awaits the peer's Hello), `Bootstrapping` (the same bracket); `Ready`

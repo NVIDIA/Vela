@@ -1585,6 +1585,42 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   `test_StudioServerProjectOps.cpp` (1567) still exceed 1000 lines; the
   last two were outside this round's items.
 
+- **One client session, recorded instead of rewritten.**
+  `test_client/TestSession.cpp` (1196 lines) and
+  `client/ServerConnection.cpp` (840) were written from one template: the
+  same four-step `poll()`, the same `handleMessage` switch, and duplicate
+  `beginAttempt`, `closeChannel`, `onInbound`, `onChannelClosed`,
+  `markTraffic`, `checkSendFailures`, `handleHello`, `applySceneMessage` and
+  `clearMirror`. Two copies of one design gave no independent coverage and
+  taxed every protocol change -- Shutdown, UIState and the task replay each
+  landed twice in milestone 7. At Jefferson's direction (option 1 of
+  `21-decision-test-session-over-server-connection.md`) `TestSession` now
+  owns a `client::ServerConnection` and records it: the connection carries
+  the socket, the handshake, the Bootstrap, liveness, loss, the mirror, the
+  replica and Project Ops, and the session keeps only what a script needs --
+  the `Event` queue, the counters, and the replies, picks and task records by
+  id. `ServerConnection` gained the three things sharing needed: an
+  `onMessage` hook that fires from `poll()` for each message *after* it was
+  handled (so an event reports the mirror, replica and phase the message left
+  behind, which is what the scene-transfer records print), a `Closing` phase
+  with `sendShutdown()`, in which a Shutdown's own close is the completed
+  intention and not a loss, and `lastFailure()`, the reason a banner's
+  `statusText()` dresses. Two behaviours converged on the test client's,
+  which were the better ones: an `Error` before `BootstrapEnd` is the server
+  refusing the attempt (a failed attempt, not a loss), and `clearMirror()`
+  drops layers as well as objects. `autoRetryFor = 0` turns the automatic
+  reconnect off, which is how a script's `reconnect` stays the only one.
+  Every `StudioScenario` passes and every record stream is unchanged: the 25
+  scenarios' streams were captured before and after and differ only in how
+  many `Frame` and `TaskProgress` records the run happened to see (and, in
+  `render_cancel`, in how many frames the cancelled render had written).
+  Requests now go out through the connection's `ProjectOps`
+  (`TestSession::sendRequest`, `sendPick`), which mints the request ids the
+  session used to mint itself. The recorder no longer marks a scene message
+  the mirror refused, the one record field this move could not keep;
+  `dump-scene` and the object and layer counts still show what arrived.
+  `TestSession.cpp` is 949 lines of recording, from 1196 of protocol.
+
 ### Spec conformance
 
 Every bullet of the spec sections named below, against the tree at

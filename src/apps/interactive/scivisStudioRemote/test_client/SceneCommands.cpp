@@ -248,25 +248,23 @@ CommandRunner::Failure CommandRunner::pick(
     return usageError(command);
   // Frame-header pixels, x right and y down from the top-left; the server
   // clamps what lies outside the frame.
-  Pick request;
-  request.requestId = m_session->nextRequestId();
-  request.x = int(x);
-  request.y = int(y);
-  m_variables["lastRequestId"] = std::to_string(request.requestId);
   std::string error;
-  if (!m_session->send(request, &error))
+  const auto handle = m_session->sendPick(int(x), int(y), &error);
+  if (!handle.valid())
     return error;
+  const uint64_t requestId = handle.requestId;
+  m_variables["lastRequestId"] = std::to_string(requestId);
 
   // A PickReply is a plain message, not a ProjectOpReply, but it is matched
   // the same way: by the request id its record carries.
-  const auto idText = std::to_string(request.requestId);
+  const auto idText = std::to_string(requestId);
   const PickReply *reply = nullptr;
   const auto wait = pumpUntilEvent(
       [&](const Event &event) {
         if (event.type != StudioMessageType::PickReply
-            || event.requestId != request.requestId)
+            || event.requestId != requestId)
           return false;
-        reply = m_session->pickReply(request.requestId);
+        reply = m_session->pickReply(requestId);
         return true;
       },
       deadline);
