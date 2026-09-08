@@ -9,6 +9,7 @@
 // vsr_ui_imgui
 #include "vsr/ui/imgui/modals/Modal.h"
 // std
+#include <cstddef>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -22,7 +23,9 @@ namespace vsr::scivis_studio::modals {
  * sortable, with the name auto-generated from the common stem until the user
  * edits it. Frames are not stat'ed here -- the remote client's live on the
  * server -- but a mixed set of extensions is pointed out; whether the frames
- * exist is the Action's business, and its error shows in the dialog.
+ * exist is the Action's business. A host that can tell names the offending
+ * frames (Action::unreadableFrames) and they are marked red in the list;
+ * anything else it refuses is one message under the form.
  */
 struct AddFileAnimationDatasetDialog : public vsr::ui::imgui::Modal
 {
@@ -36,6 +39,13 @@ struct AddFileAnimationDatasetDialog : public vsr::ui::imgui::Modal
   struct Action : public ModalAction
   {
     virtual void submit(const Request &request, ActionResult done) = 0;
+    // Which frames of `request` the host cannot read, as indices into its
+    // sourcePaths. A host holding the files (the monolith) stats them before
+    // anything is imported, and the dialog marks those rows red instead of
+    // submitting; a host whose frames are the server's cannot tell, returns
+    // none, and answers a submit with the server's error instead. Empty
+    // means "nothing known against them", not "all readable".
+    virtual std::vector<size_t> unreadableFrames(const Request &request) const;
   };
 
   AddFileAnimationDatasetDialog(vsr::ui::imgui::Application *app,
@@ -49,6 +59,7 @@ struct AddFileAnimationDatasetDialog : public vsr::ui::imgui::Modal
   void buildUI_frameList();
   void submit();
   void reset();
+  void clearValidation();
   void updateGeneratedName();
   void updateExtensionWarning();
 
@@ -58,6 +69,9 @@ struct AddFileAnimationDatasetDialog : public vsr::ui::imgui::Modal
   bool m_nameEditedByUser{false};
   std::vector<std::string> m_sourcePaths;
   std::vector<char> m_selectedRows;
+  // Set for a frame the Action named unreadable at the last Import; the row
+  // is drawn red until the list changes.
+  std::vector<char> m_invalidRows;
   std::string m_extensionWarning;
   std::string m_error;
 };

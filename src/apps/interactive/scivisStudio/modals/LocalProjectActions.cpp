@@ -9,25 +9,26 @@
 // vsr_ui_imgui
 #include "vsr/ui/imgui/Application.h"
 // std
+#include <cstddef>
 #include <system_error>
+#include <vector>
 
 namespace vsr::scivis_studio {
 
 namespace {
 
-// The frames the project would fail to read, named so the dialog can say
-// which ones. Only the monolith can ask: the client's frames are the
+// The frames the project would fail to read, by index, so the dialog can
+// mark those rows. Only the monolith can ask: the client's frames are the
 // server's files.
-std::string missingFrames(const std::vector<std::filesystem::path> &sourcePaths)
+std::vector<size_t> missingFrames(
+    const std::vector<std::filesystem::path> &sourcePaths)
 {
-  std::string missing;
-  for (const auto &path : sourcePaths) {
+  std::vector<size_t> missing;
+  for (size_t i = 0; i < sourcePaths.size(); ++i) {
     std::error_code ec;
-    if (std::filesystem::is_regular_file(path, ec) && !ec)
+    if (std::filesystem::is_regular_file(sourcePaths[i], ec) && !ec)
       continue;
-    if (!missing.empty())
-      missing += ", ";
-    missing += path.filename().string();
+    missing.push_back(i);
   }
   return missing;
 }
@@ -98,16 +99,16 @@ LocalFileAnimationAction::LocalFileAnimationAction(
 
 LocalFileAnimationAction::~LocalFileAnimationAction() = default;
 
+std::vector<size_t> LocalFileAnimationAction::unreadableFrames(
+    const modals::AddFileAnimationDatasetDialog::Request &request) const
+{
+  return missingFrames(request.sourcePaths);
+}
+
 void LocalFileAnimationAction::submit(
     const modals::AddFileAnimationDatasetDialog::Request &request,
     modals::ActionResult done)
 {
-  const std::string missing = missingFrames(request.sourcePaths);
-  if (!missing.empty()) {
-    done(false, "Missing or unreadable frames: " + missing);
-    return;
-  }
-
   m_app->showTaskModal(
       [ctx = m_projectContext, request]() {
         if (ctx) {

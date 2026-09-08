@@ -119,6 +119,12 @@ AddFileAnimationDatasetDialog::AddFileAnimationDatasetDialog(
 
 AddFileAnimationDatasetDialog::~AddFileAnimationDatasetDialog() = default;
 
+std::vector<size_t> AddFileAnimationDatasetDialog::Action::unreadableFrames(
+    const Request &) const
+{
+  return {};
+}
+
 void AddFileAnimationDatasetDialog::reset()
 {
   m_name.clear();
@@ -126,8 +132,14 @@ void AddFileAnimationDatasetDialog::reset()
   m_sourcePaths.clear();
   m_selectedRows.clear();
   m_extensionWarning.clear();
-  m_error.clear();
+  clearValidation();
   m_action->reset();
+}
+
+void AddFileAnimationDatasetDialog::clearValidation()
+{
+  m_invalidRows.clear();
+  m_error.clear();
 }
 
 void AddFileAnimationDatasetDialog::updateGeneratedName()
@@ -156,6 +168,7 @@ void AddFileAnimationDatasetDialog::updateExtensionWarning()
 
 void AddFileAnimationDatasetDialog::submit()
 {
+  clearValidation();
   if (m_sourcePaths.empty()) {
     m_error = "Select at least one frame.";
     return;
@@ -167,7 +180,20 @@ void AddFileAnimationDatasetDialog::submit()
   for (const auto &path : m_sourcePaths)
     request.sourcePaths.emplace_back(path);
 
-  m_error.clear();
+  // Frames the host knows it cannot read are pointed at in the list, which
+  // is where they can be removed or replaced; nothing is submitted until
+  // they are gone.
+  const auto unreadable = m_action->unreadableFrames(request);
+  if (!unreadable.empty()) {
+    m_invalidRows.assign(m_sourcePaths.size(), 0);
+    for (const auto index : unreadable) {
+      if (index < m_invalidRows.size())
+        m_invalidRows[index] = 1;
+    }
+    m_error = "One or more selected frames are missing or invalid.";
+    return;
+  }
+
   m_action->submit(request, [this](bool ok, const std::string &error) {
     if (!ok) {
       m_error = error;
@@ -211,6 +237,8 @@ void AddFileAnimationDatasetDialog::buildUI_listControls()
 {
   auto listChanged = [this] {
     m_selectedRows.resize(m_sourcePaths.size(), 0);
+    // The marks named rows of the list the change just rearranged.
+    clearValidation();
     updateExtensionWarning();
     updateGeneratedName();
   };
@@ -282,6 +310,11 @@ void AddFileAnimationDatasetDialog::buildUI_frameList()
           ImGuiChildFlags_Borders)) {
     m_selectedRows.resize(m_sourcePaths.size(), 0);
     for (int i = 0; i < int(m_sourcePaths.size()); ++i) {
+      const bool invalid =
+          i < int(m_invalidRows.size()) && m_invalidRows[i] != 0;
+      if (invalid)
+        ImGui::PushStyleColor(ImGuiCol_Text, ERROR_TEXT_COLOR);
+
       const auto filename =
           std::filesystem::path(m_sourcePaths[i]).filename().string();
       const auto label = std::to_string(i) + "  " + filename;
@@ -293,6 +326,9 @@ void AddFileAnimationDatasetDialog::buildUI_frameList()
       }
       if (ImGui::IsItemHovered())
         ImGui::SetTooltip("%s", m_sourcePaths[i].c_str());
+
+      if (invalid)
+        ImGui::PopStyleColor();
     }
   }
   ImGui::EndChild();

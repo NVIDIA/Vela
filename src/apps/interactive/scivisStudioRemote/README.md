@@ -1651,20 +1651,28 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   and checks a directory against the local filesystem; `RemoteProjectActions`
   sends the Project Op and answers from the reply. The footer both seams meet
   in -- the busy line, the error, the browse, Cancel beside the action button
-  -- is `modalFooter`, drawn once for all three. Both apps show the remote
-  versions, which were the better-designed ones, so the monolith gained the
-  greying, the continuously-updated mixed-extension warning, and in-dialog
-  errors wherever the host can answer before acting (frames it cannot find, a
-  directory it refuses); the static import still runs behind the task modal,
-  so its failures still only reach the log. The monolith lost the red rows for
-  missing frames, which now name themselves in the error text instead. The
-  browse vocabulary (`BrowseMode`, `BrowseRequest`) and the two message
-  colours moved with them, and the client's `ui::` namespace re-exports what
-  its editors already used. Manual check on 2026-09-08, both apps against the
-  same `mesh.obj`: the monolith's dialog imported it as `tri [Loaded]`, and
-  the client's -- with the path picked through Remote Browse and again typed
-  -- as `tri-obj [Loaded]`. `test_SciVisStudio`, `test_StudioClientProjectOps`
-  and every scenario pass unchanged.
+  -- is `modalFooter`, drawn once for all three. The greying is the client's
+  alone: `ModalAction::busy()` is false by default and no `Local*Action`
+  overrides it, because a host that answers in place is never waiting, so in
+  the monolith the busy line never draws and nothing is ever disabled. What
+  the monolith did gain is the continuously-updated mixed-extension warning
+  and in-dialog errors wherever the host can answer before acting (frames it
+  cannot find, a directory it refuses); the static import still runs behind
+  the task modal, so its failures still only reach the log. The red rows for
+  missing frames are shared, not lost: a host that can tell names them
+  (`Action::unreadableFrames`, which the monolith answers by stat'ing and the
+  client leaves empty, its frames being the server's), the dialog marks those
+  rows red and submits nothing until they are gone, and `errorText` /
+  `warningText` wrap as they always claimed to. The browse vocabulary
+  (`BrowseMode`, `BrowseRequest`) and the two message colours moved with them,
+  and the client's `ui::` namespace re-exports what its editors already used.
+  Manual check on 2026-09-08, both apps against the same `mesh.obj`: the
+  monolith's dialog imported it as `tri2 [Loaded]`, and the client's -- with
+  the path picked through Remote Browse and again typed -- as `tri2-obj
+  [Loaded]`. Add Static Dataset clears Name and Source Path on every opening
+  in both apps now, the client's behaviour, which someone adding five datasets
+  from one directory will notice. `test_SciVisStudio`,
+  `test_StudioClientProjectOps` and every scenario pass unchanged.
 
 ### Spec conformance
 

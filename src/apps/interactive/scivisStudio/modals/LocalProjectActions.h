@@ -9,7 +9,9 @@
 #include "modals/AddStaticDatasetDialog.h"
 #include "modals/ProjectLocationDialog.h"
 // std
+#include <cstddef>
 #include <functional>
+#include <vector>
 
 namespace vsr::ui::imgui {
 class Application;
@@ -53,6 +55,10 @@ struct LocalFileAnimationAction
 
   void submit(const modals::AddFileAnimationDatasetDialog::Request &request,
       modals::ActionResult done) override;
+  // The frames of `request` this filesystem has no regular file for.
+  std::vector<size_t> unreadableFrames(
+      const modals::AddFileAnimationDatasetDialog::Request &request)
+      const override;
 
  private:
   vsr::ui::imgui::Application *m_app{nullptr};
