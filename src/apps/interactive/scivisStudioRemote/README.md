@@ -1683,14 +1683,16 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   client that was SIGTERMed or SIGINTed on its own, or that died from an
   uncaught exception, left the server it spawned re-parented to init and
   still listening. `stopSpawnedServerOnDeath()` (`test_client/ServerProcess.h`),
-  called by `main` once a server is spawned, installs SIGTERM/SIGINT handlers
-  and a `std::set_terminate` hook that SIGTERM the running child -- its pid
-  published in a `sig_atomic_t` by `start()` and cleared by `reap()`, since a
-  handler cannot walk a `ServerProcess` -- before re-raising the signal with
-  the default disposition. The handler uses only `kill()`, `signal()` and
-  `raise()`. SIGSEGV and SIGKILL stay uncovered: Jefferson judged the
-  parent-death pipe that would cover them heavier than the problem
-  (2026-09-08). `--port 0` is ratified as a real server option in the same
+  called by `main` once a server is spawned, installs SIGTERM and SIGINT
+  handlers that SIGTERM the running child and then re-raise the signal with
+  the default disposition, and a `std::set_terminate` hook that SIGTERMs it
+  for an uncaught exception. The child's pid is published in a
+  `sig_atomic_t` by `start()` and cleared by `reap()`, since a handler cannot
+  walk a `ServerProcess`; the handler uses only `kill()`, `signal()` and
+  `raise()`. Only those two signals are hooked, so anything else -- SIGSEGV
+  and SIGKILL among them -- still orphans the server: Jefferson judged the
+  parent-death pipe that would cover every client death heavier than the
+  problem (2026-09-08). `--port 0` is ratified as a real server option in the same
   round; the `Listening on port N` line it is read back from is now asserted
   against a live `StudioServer` by `[StudioServer]` "StudioServer's Listening
   line names the port it bound", so the launcher contract cannot drift

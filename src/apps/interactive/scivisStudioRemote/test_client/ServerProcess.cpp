@@ -36,8 +36,11 @@ constexpr auto STOP_GRACE = 5s;
 
 // The running server's pid, for the death handlers below: a signal handler
 // cannot walk a ServerProcess, so start() publishes the pid here and reap()
-// clears it. Written only by the (single-threaded) client and read in a
-// handler, hence sig_atomic_t.
+// clears it. Only those two write it, both on the client's main thread, but
+// the signal may be delivered on the transport's I/O thread, so the handler's
+// read is a cross-thread one: sig_atomic_t is the type that read is defined
+// for. One live server is assumed, the client's; a second ServerProcess
+// would overwrite the pid this holds.
 volatile std::sig_atomic_t g_spawnedServerPid = 0;
 std::terminate_handler g_previousTerminate = nullptr;
 
@@ -51,7 +54,11 @@ void stopSpawnedServer()
 
 extern "C" void onDeathSignal(int signum)
 {
+  // kill() may set errno, and a handler owes the interrupted code the errno
+  // it left behind.
+  const int savedErrno = errno;
   stopSpawnedServer();
+  errno = savedErrno;
   // Re-raise so the exit status still says which signal ended the client.
   ::signal(signum, SIG_DFL);
   ::raise(signum);

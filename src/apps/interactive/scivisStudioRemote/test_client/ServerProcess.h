@@ -107,11 +107,12 @@ struct ServerProcess
 };
 
 // Makes this process take its spawned server with it when it dies. Installs
-// SIGTERM/SIGINT handlers that SIGTERM the running ServerProcess's child
-// before re-raising the signal with the default disposition, and a
-// std::terminate hook that does the same for an uncaught exception. Without
-// it only ~ServerProcess() stops the server, so a signalled or terminating
-// client leaves it re-parented to init. SIGSEGV and SIGKILL stay uncovered.
+// SIGTERM and SIGINT handlers that SIGTERM the running ServerProcess's child
+// and then re-raise the signal with the default disposition, and a
+// std::terminate hook that SIGTERMs it for an uncaught exception. Without
+// them only ~ServerProcess() stops the server, so a signalled or terminating
+// client leaves it re-parented to init. Only those two signals are hooked:
+// anything else, SIGSEGV and SIGKILL among them, still orphans the server.
 // Called from main(); calling it again does nothing. The handler uses only
 // kill(), signal() and raise().
 void stopSpawnedServerOnDeath();
