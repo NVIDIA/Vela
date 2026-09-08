@@ -93,7 +93,8 @@ Studio reuses the `vsr::network` transport as-is — Boost.Asio TCP,
   the running one's progress) so a reconnecting client resumes progress
   display seamlessly.
 - **Manual launch, CLI-configured.** The user launches the server out-of-band
-  (ssh, job script). Configuration is argv only: `--port` (default 12345),
+  (ssh, job script). Configuration is argv only: `--port` (default 12345; 0
+  asks the OS for a free port, named in the `Listening on port N` line),
   `--library <anari lib>`, `--data-root` (repeatable), optional
   `--project <path>`. The server is config-free (`~/.config/vsr/studio` is
   frontend-only), outlives client connections, and exits only on an explicit

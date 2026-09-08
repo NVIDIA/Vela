@@ -22,6 +22,8 @@
 #include "vsr/network/messages/TransferScene.hpp"
 // vsr_scene
 #include "vsr/scene/Scene.hpp"
+// vsr_core
+#include "vsr/core/Logging.hpp"
 // std
 #include <atomic>
 #include <chrono>
@@ -40,6 +42,44 @@ using vsr::network::Message;
 using namespace std::chrono_literals;
 
 namespace {
+
+// Records the status lines the server logs while it lives. run() logs from
+// the loop thread, so the lines are mutex-guarded.
+struct StatusLog
+{
+  StatusLog();
+  ~StatusLog();
+  bool contains(const std::string &text) const;
+
+  mutable std::mutex mutex;
+  std::vector<std::string> lines;
+};
+
+StatusLog::StatusLog()
+{
+  vsr::core::setLoggingCallback(
+      [this](vsr::core::LogLevel level, std::string message) {
+        if (level != vsr::core::STATUS)
+          return;
+        std::lock_guard<std::mutex> guard(mutex);
+        lines.push_back(std::move(message));
+      });
+}
+
+StatusLog::~StatusLog()
+{
+  vsr::core::setNoLogging();
+}
+
+bool StatusLog::contains(const std::string &text) const
+{
+  std::lock_guard<std::mutex> guard(mutex);
+  for (const auto &line : lines) {
+    if (line.find(text) != std::string::npos)
+      return true;
+  }
+  return false;
+}
 
 std::vector<std::string> argv(std::initializer_list<const char *> items)
 {
@@ -167,6 +207,36 @@ SCENARIO("ServerOptions parses the server command line", "[StudioServer]")
           {"--port", "--library", "--data-root", "--project", "--help"})
         REQUIRE(usage.find(flag) != std::string::npos);
       REQUIRE(usage.find(std::to_string(DEFAULT_PORT)) != std::string::npos);
+    }
+  }
+}
+
+SCENARIO(
+    "StudioServer's Listening line names the port it bound", "[StudioServer]")
+{
+  if (!helideAvailable()) {
+    WARN("helide ANARI library unavailable, skipping the Listening line test");
+    return;
+  }
+
+  // The launcher contract: scivisStudioTestClient reads the port of a server
+  // it spawned with --port 0 out of this line, so it must keep naming the
+  // port the OS picked.
+  GIVEN("a server started on port 0, with the status log captured")
+  {
+    // Declared first so it outlives the server that logs through it.
+    StatusLog log;
+    RunningServer running(testServerOptions());
+    INFO(running.startError);
+    REQUIRE(running.started);
+    REQUIRE(running.port() != 0);
+
+    THEN("the logged Listening line names that port")
+    {
+      REQUIRE(waitFor([&] {
+        return log.contains("[StudioServer] Listening on port "
+            + std::to_string(running.port()));
+      }));
     }
   }
 }

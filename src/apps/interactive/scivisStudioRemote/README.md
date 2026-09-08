@@ -50,7 +50,8 @@ scivisStudioServer --data-root /data/sims [--data-root ...] \
   Omitted, the first loadable entry of the device manager's list is used
   (`VSR_ANARI_LIBRARIES` orders that list); an unloadable library falls back
   through the rest. The library's `.so` must be on `LD_LIBRARY_PATH`.
-- `--port` (default 12345).
+- `--port` (default 12345; 0 asks the OS for a free port, named in the
+  `Listening on port N` line).
 
 Configuration is argv only; the server reads no config file. It keeps running
 across client disconnects and exits on `Ctrl-C`/`SIGTERM` or when a client
@@ -1675,6 +1676,26 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   Escape as well as on accept in both apps now, the client's behaviour, which
   someone adding five datasets from one directory will notice. `test_SciVisStudio`,
   `test_StudioClientProjectOps` and every scenario pass unchanged.
+
+- **The test client takes its spawned server with it.** `run_scenario.sh` had
+  `trap cleanup EXIT INT TERM`; `scivisStudioTestClient` had only
+  `~ServerProcess()`, which runs on a normal return from `main` alone, so a
+  client that was SIGTERMed or SIGINTed on its own, or that died from an
+  uncaught exception, left the server it spawned re-parented to init and
+  still listening. `stopSpawnedServerOnDeath()` (`test_client/ServerProcess.h`),
+  called by `main` once a server is spawned, installs SIGTERM/SIGINT handlers
+  and a `std::set_terminate` hook that SIGTERM the running child -- its pid
+  published in a `sig_atomic_t` by `start()` and cleared by `reap()`, since a
+  handler cannot walk a `ServerProcess` -- before re-raising the signal with
+  the default disposition. The handler uses only `kill()`, `signal()` and
+  `raise()`. SIGSEGV and SIGKILL stay uncovered: Jefferson judged the
+  parent-death pipe that would cover them heavier than the problem
+  (2026-09-08). `--port 0` is ratified as a real server option in the same
+  round; the `Listening on port N` line it is read back from is now asserted
+  against a live `StudioServer` by `[StudioServer]` "StudioServer's Listening
+  line names the port it bound", so the launcher contract cannot drift
+  silently, and the `--port` entries in `docs/scivis-studio-client-server.md`
+  and the server option list above name the 0 case.
 
 ### Spec conformance
 
