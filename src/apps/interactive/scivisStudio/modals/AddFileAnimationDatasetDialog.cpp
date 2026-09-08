@@ -206,6 +206,11 @@ void AddFileAnimationDatasetDialog::submit()
 
 void AddFileAnimationDatasetDialog::buildUI()
 {
+  // The title bar's close skips Cancel, so an opening is the other place a
+  // previous refusal's marks and error have to go.
+  if (ImGui::IsWindowAppearing())
+    clearValidation();
+
   const bool busy = m_action->busy();
 
   ImGui::BeginDisabled(busy);
@@ -237,7 +242,7 @@ void AddFileAnimationDatasetDialog::buildUI_listControls()
 {
   auto listChanged = [this] {
     m_selectedRows.resize(m_sourcePaths.size(), 0);
-    // The marks named rows of the list the change just rearranged.
+    // The marks name rows of the list this change just rearranged.
     clearValidation();
     updateExtensionWarning();
     updateGeneratedName();
@@ -324,11 +329,11 @@ void AddFileAnimationDatasetDialog::buildUI_frameList()
           m_selectedRows.assign(m_sourcePaths.size(), 0);
         m_selectedRows[i] = m_selectedRows[i] ? 0 : 1;
       }
+      if (invalid)
+        ImGui::PopStyleColor(); // the path in the tooltip is not an error
+
       if (ImGui::IsItemHovered())
         ImGui::SetTooltip("%s", m_sourcePaths[i].c_str());
-
-      if (invalid)
-        ImGui::PopStyleColor();
     }
   }
   ImGui::EndChild();

@@ -53,12 +53,12 @@ struct LocalFileAnimationAction
       vsr::ui::imgui::Application *app, ProjectContext *projectContext);
   ~LocalFileAnimationAction() override;
 
-  void submit(const modals::AddFileAnimationDatasetDialog::Request &request,
-      modals::ActionResult done) override;
   // The frames of `request` this filesystem has no regular file for.
   std::vector<size_t> unreadableFrames(
       const modals::AddFileAnimationDatasetDialog::Request &request)
       const override;
+  void submit(const modals::AddFileAnimationDatasetDialog::Request &request,
+      modals::ActionResult done) override;
 
  private:
   vsr::ui::imgui::Application *m_app{nullptr};

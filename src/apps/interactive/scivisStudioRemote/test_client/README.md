@@ -405,7 +405,9 @@ Every line is one record: exactly one `OK <command>` or `FAIL <command>:
 <reason>` per command, and one `EVT <Name> key=value ...` per server message
 as the session consumes it (Frames are latest-wins, so a fast stream shows
 fewer `EVT Frame` lines than the server sent). `<command>` is the command as
-written, so the output can be grepped for the script's own lines.
+written, so the output can be grepped for the script's own lines. A message
+that could not be decoded, and a scene push the mirror refused as sent, carry
+`malformed=true` instead of (or beside) the fields they would have had.
 
 ```
 EVT Hello version=1 buildInfo="scivisStudioServer/helide"

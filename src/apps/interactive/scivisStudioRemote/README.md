@@ -1609,12 +1609,14 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   which were the better ones: an `Error` before `BootstrapEnd` is the server
   refusing the attempt, and `clearMirror()` drops layers as well as objects
   (so a dropped or lost session leaves the GUI's mirror with no layers
-  either -- a visible post-disconnect change, ratified). A refusal is the
-  server's deliberate answer and retrying would only be refused again, so the
-  branch calls `dropSession("server refused: ...")`: the state goes
-  `Disconnected`, the banner names the reason and nothing auto-retries.
-  (Calling `attemptFailed` there left the GUI at `Connected` over a closed
-  socket, since the state has been `Connected` since the Hello.)
+  either -- a visible post-disconnect change, ratified). A refusal after the
+  Hellos matched is the server's deliberate answer and retrying would only be
+  refused again, so an `Error` in `AwaitingBootstrap` or `Bootstrapping` calls
+  `dropSession("server refused: ...")`: the state goes `Disconnected`, the
+  banner names the reason and nothing auto-retries. (Calling `attemptFailed`
+  there left the GUI at `Connected` over a closed socket, since the state has
+  been `Connected` since the Hello. An `Error` in `AwaitingHello`, before any
+  session, is still a failed attempt and retries.)
   `autoRetryFor = 0` turns the automatic reconnect off, which is how a
   script's `reconnect` stays the only one.
   Every `StudioScenario` passes and every record stream is unchanged: the 25
@@ -1669,9 +1671,9 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   Manual check on 2026-09-08, both apps against the same `mesh.obj`: the
   monolith's dialog imported it as `tri2 [Loaded]`, and the client's -- with
   the path picked through Remote Browse and again typed -- as `tri2-obj
-  [Loaded]`. Add Static Dataset clears Name and Source Path on every opening
-  in both apps now, the client's behaviour, which someone adding five datasets
-  from one directory will notice. `test_SciVisStudio`,
+  [Loaded]`. Add Static Dataset clears Name and Source Path on Cancel and
+  Escape as well as on accept in both apps now, the client's behaviour, which
+  someone adding five datasets from one directory will notice. `test_SciVisStudio`,
   `test_StudioClientProjectOps` and every scenario pass unchanged.
 
 ### Spec conformance

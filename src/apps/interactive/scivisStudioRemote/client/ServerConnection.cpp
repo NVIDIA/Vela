@@ -705,7 +705,8 @@ void ServerConnection::handleMessage(const vsr::network::Message &msg)
       // dropped, not merely have its channel closed.
       const auto reason = "server refused: " + error->message;
       vsr::core::logWarning(
-          "[ServerConnection] attempt failed: %s", reason.c_str());
+          "[ServerConnection] session refused before its bootstrap: %s",
+          error->message.c_str());
       m_failure = reason;
       dropSession(reason);
       return;

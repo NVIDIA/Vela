@@ -38,7 +38,6 @@ struct AddFileAnimationDatasetDialog : public vsr::ui::imgui::Modal
 
   struct Action : public ModalAction
   {
-    virtual void submit(const Request &request, ActionResult done) = 0;
     // Which frames of `request` the host cannot read, as indices into its
     // sourcePaths. A host holding the files (the monolith) stats them before
     // anything is imported, and the dialog marks those rows red instead of
@@ -46,6 +45,7 @@ struct AddFileAnimationDatasetDialog : public vsr::ui::imgui::Modal
     // none, and answers a submit with the server's error instead. Empty
     // means "nothing known against them", not "all readable".
     virtual std::vector<size_t> unreadableFrames(const Request &request) const;
+    virtual void submit(const Request &request, ActionResult done) = 0;
   };
 
   AddFileAnimationDatasetDialog(vsr::ui::imgui::Application *app,
