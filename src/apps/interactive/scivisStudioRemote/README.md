@@ -1607,18 +1607,26 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   intention and not a loss, and `lastFailure()`, the reason a banner's
   `statusText()` dresses. Two behaviours converged on the test client's,
   which were the better ones: an `Error` before `BootstrapEnd` is the server
-  refusing the attempt (a failed attempt, not a loss), and `clearMirror()`
-  drops layers as well as objects. `autoRetryFor = 0` turns the automatic
-  reconnect off, which is how a script's `reconnect` stays the only one.
+  refusing the attempt, and `clearMirror()` drops layers as well as objects
+  (so a dropped or lost session leaves the GUI's mirror with no layers
+  either -- a visible post-disconnect change, ratified). A refusal is the
+  server's deliberate answer and retrying would only be refused again, so the
+  branch calls `dropSession("server refused: ...")`: the state goes
+  `Disconnected`, the banner names the reason and nothing auto-retries.
+  (Calling `attemptFailed` there left the GUI at `Connected` over a closed
+  socket, since the state has been `Connected` since the Hello.)
+  `autoRetryFor = 0` turns the automatic reconnect off, which is how a
+  script's `reconnect` stays the only one.
   Every `StudioScenario` passes and every record stream is unchanged: the 25
   scenarios' streams were captured before and after and differ only in how
   many `Frame` and `TaskProgress` records the run happened to see (and, in
   `render_cancel`, in how many frames the cancelled render had written).
   Requests now go out through the connection's `ProjectOps`
   (`TestSession::sendRequest`, `sendPick`), which mints the request ids the
-  session used to mint itself. The recorder no longer marks a scene message
-  the mirror refused, the one record field this move could not keep;
-  `dump-scene` and the object and layer counts still show what arrived.
+  session used to mint itself. A scene message the mirror refused still gets
+  `malformed=true` on its event, as follow-up 18 promised: the connection
+  counts its refusals (`sceneRefusals()`) and the recorder re-derives the
+  stamp from a count that moved across the message.
   `TestSession.cpp` is 949 lines of recording, from 1196 of protocol.
 
 - **One set of modals for both Studios.** The three modals the two apps shared

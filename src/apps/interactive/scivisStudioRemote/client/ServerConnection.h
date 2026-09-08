@@ -152,6 +152,10 @@ struct ServerConnection
   // send an edit or a Project Op. Lost, bootstrapping, and the wait between
   // a reconnect's Hello and its bootstrap all leave the panels read-only.
   bool canSend() const;
+  // How many scene pushes the mirror has refused since this object was made.
+  // An observer that samples it around a scene message (onMessage fires after
+  // handling) learns whether that message was the one refused.
+  uint64_t sceneRefusals() const;
 
   // Inbound state the UI reads //
 
@@ -301,6 +305,9 @@ struct ServerConnection
   SessionPhase m_phase{SessionPhase::Idle};
   std::string m_status;
   std::string m_failure;
+  // Scene pushes the mirror refused, counted for observers (see
+  // sceneRefusals()); never reset, so a comparison across a message is safe.
+  uint64_t m_sceneRefusals{0};
 
   Clock::time_point m_attemptStart{};
   // When the Shutdown went out: the Closing wait is bounded from here.

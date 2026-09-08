@@ -170,6 +170,11 @@ bool ServerConnection::canSend() const
   return m_phase == SessionPhase::Ready && m_project != nullptr;
 }
 
+uint64_t ServerConnection::sceneRefusals() const
+{
+  return m_sceneRefusals;
+}
+
 const FrameConfig &ServerConnection::frameConfig() const
 {
   return m_frameConfig;
@@ -694,9 +699,15 @@ void ServerConnection::handleMessage(const vsr::network::Message &msg)
       // BootstrapEnd (the bracket is the server's to send), so an Error here
       // is the server turning the attempt down -- a client it will not have,
       // a project it cannot open for one -- and it usually closes right
-      // after. The session was never established, so this is one more failed
-      // attempt, not a loss.
-      attemptFailed("server refused: " + error->message);
+      // after. A refusal is the server's deliberate answer, so retrying would
+      // only be refused again: the session ends here, completed, rather than
+      // lost. The state has been Connected since the Hello, so it must be
+      // dropped, not merely have its channel closed.
+      const auto reason = "server refused: " + error->message;
+      vsr::core::logWarning(
+          "[ServerConnection] attempt failed: %s", reason.c_str());
+      m_failure = reason;
+      dropSession(reason);
       return;
     }
     // A refusal that names a request type is that request's answer (the
@@ -906,8 +917,10 @@ void ServerConnection::applySceneMessage(
   // A push the mirror could not take as sent (a layer whose node numbering
   // it cannot reproduce) is a protocol error: the message logged why, the
   // affected layer stays empty, and the server hears the refusal.
-  if (!applied)
+  if (!applied) {
+    ++m_sceneRefusals;
     replyError(std::string(toString(type)) + " refused by the mirror");
+  }
 }
 
 void ServerConnection::announceMirrorReplace()

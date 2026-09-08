@@ -352,8 +352,9 @@ struct TestSession
   void clearSessionRecords();
   // Records one handled message as an Event and in the counters and maps.
   void record(const vsr::network::Message &msg);
-  // The object and layer counts the mirror holds now.
-  void recordSceneMessage(Event &event) const;
+  // The object and layer counts the mirror holds now, and the malformed stamp
+  // when this message is the one the mirror refused.
+  void recordSceneMessage(Event &event);
   // The newest Frame the connection took, if any.
   void consumeFrame();
   void handleTaskEnd(uint64_t taskId,
@@ -399,6 +400,8 @@ struct TestSession
   size_t m_tasksFailed{0};
   size_t m_tasksReplayed{0};
   size_t m_snapshotsReceived{0};
+  // The connection's refusal count as of the last scene message recorded.
+  uint64_t m_sceneRefusals{0};
   std::deque<Event> m_events;
 };
 

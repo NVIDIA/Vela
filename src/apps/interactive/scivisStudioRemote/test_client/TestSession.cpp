@@ -886,8 +886,15 @@ void TestSession::record(const Message &msg)
   pushEvent(std::move(event));
 }
 
-void TestSession::recordSceneMessage(Event &event) const
+void TestSession::recordSceneMessage(Event &event)
 {
+  // The connection answers a refused push with an Error and counts it; the
+  // stamp is re-derived here so a refusal stays visible to a script.
+  const auto refusals = m_connection.sceneRefusals();
+  if (refusals != m_sceneRefusals) {
+    m_sceneRefusals = refusals;
+    event.fields.emplace_back("malformed", "true");
+  }
   event.fields.emplace_back("objects", std::to_string(totalObjects(m_mirror)));
   event.fields.emplace_back(
       "layers", std::to_string(m_mirror.numberOfLayers()));
