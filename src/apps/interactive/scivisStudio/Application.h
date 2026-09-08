@@ -21,14 +21,17 @@ struct TransferFunctionEditor;
 struct Viewport;
 } // namespace vsr::ui::imgui
 
-namespace vsr::scivis_studio {
-
+namespace vsr::scivis_studio::modals {
 struct AddStaticDatasetDialog;
 struct AddFileAnimationDatasetDialog;
+struct ProjectLocationDialog;
+} // namespace vsr::scivis_studio::modals
+
+namespace vsr::scivis_studio {
+
 struct CameraRigEditor;
 struct DatasetEditor;
 struct LightRigEditor;
-struct ProjectLocationDialog;
 struct ProjectWindow;
 struct ShotEditor;
 
@@ -104,9 +107,9 @@ class Application : public vsr::ui::imgui::Application
   vsr::ui::imgui::LayerTree *m_layerTree{nullptr};
   vsr::ui::imgui::TransferFunctionEditor *m_transferFunctionEditor{nullptr};
 
-  std::unique_ptr<ProjectLocationDialog> m_projectLocationDialog;
-  std::unique_ptr<AddStaticDatasetDialog> m_addStaticDatasetDialog;
-  std::unique_ptr<AddFileAnimationDatasetDialog>
+  std::unique_ptr<modals::ProjectLocationDialog> m_projectLocationDialog;
+  std::unique_ptr<modals::AddStaticDatasetDialog> m_addStaticDatasetDialog;
+  std::unique_ptr<modals::AddFileAnimationDatasetDialog>
       m_addFileAnimationDatasetDialog;
   ConfirmationModalState m_confirmationModal;
 };

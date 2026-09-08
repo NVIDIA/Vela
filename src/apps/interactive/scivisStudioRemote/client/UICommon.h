@@ -3,6 +3,8 @@
 
 #pragma once
 
+// vsr_scivis_studio_modals
+#include "modals/ModalUI.h"
 // imgui
 #include <imgui.h>
 // std
@@ -31,19 +33,17 @@ namespace vsr::scivis_studio::client::ui {
  *   archive.file = ui::withVsrExtension(chosen);
  */
 
-constexpr ImVec4 ERROR_TEXT_COLOR{1.f, 0.4f, 0.4f, 1.f};
-constexpr ImVec4 WARNING_TEXT_COLOR{1.f, 0.75f, 0.3f, 1.f};
+// The message colours and archive extensions are the shared modals'
+// (modals/ModalUI.h); the editors reach them through this namespace.
+using modals::ARCHIVE_EXTENSIONS;
+using modals::archiveExtensions;
+using modals::ERROR_TEXT_COLOR;
+using modals::errorText;
+using modals::WARNING_TEXT_COLOR;
+using modals::warningText;
+
 constexpr ImVec4 PROJECT_DIRECTORY_COLOR{0.55f, 0.8f, 1.f, 1.f};
 
-// Wrapped red text; nothing when `text` is empty.
-void errorText(const std::string &text);
-void warningText(const std::string &text);
-
-// The extensions rig and dataset archives carry (.tsd is the legacy one);
-// Remote Browse greys everything else when asked for an archive.
-constexpr std::array<const char *, 2> ARCHIVE_EXTENSIONS = {".vsr", ".tsd"};
-// ARCHIVE_EXTENSIONS as a BrowseRequest wants them.
-std::vector<std::string> archiveExtensions();
 // Rig and dataset archives default to .vsr when the user typed no extension.
 std::filesystem::path withVsrExtension(const std::filesystem::path &file);
 

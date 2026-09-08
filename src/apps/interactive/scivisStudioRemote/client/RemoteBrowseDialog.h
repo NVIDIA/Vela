@@ -7,6 +7,8 @@
 #include "EditorContext.h"
 // vsr_scivis_studio_protocol
 #include "BrowseMessages.h"
+// vsr_scivis_studio_modals
+#include "modals/BrowseProvider.h"
 // vsr_ui_imgui
 #include "vsr/ui/imgui/modals/Modal.h"
 // std
@@ -17,31 +19,11 @@
 
 namespace vsr::scivis_studio::client {
 
-// The three SDL dialog modes plus the multi-file pick the file-animation
-// dialog needs.
-enum class BrowseMode
-{
-  OpenFile,
-  OpenFiles,
-  SaveFile,
-  OpenDirectory
-};
-
-// One browse; the dialog copies it and calls onAccept at most once with
-// absolute server paths.
-struct BrowseRequest
-{
-  BrowseMode mode{BrowseMode::OpenFile};
-  std::string title;
-  // Lower-case, with the dot (".vsr"). Files not matching are greyed, never
-  // hidden; empty matches everything.
-  std::vector<std::string> extensions;
-  // Empty: the directory browsed last, else the first Data Root.
-  std::filesystem::path startDirectory;
-  // SaveFile: the proposed file name.
-  std::string defaultName;
-  std::function<void(const std::vector<std::filesystem::path> &)> onAccept;
-};
+// The browse vocabulary is the shared modals' (BrowseProvider.h); Remote
+// Browse is one provider of it, the monolith's native SDL dialogs are the
+// other.
+using modals::BrowseMode;
+using modals::BrowseRequest;
 
 /*
  * Remote Browse: the one dumb dialog that replaces every native file dialog.
@@ -118,6 +100,25 @@ struct RemoteBrowseDialog : public vsr::ui::imgui::Modal
   InFlight m_pendingRoots;
   InFlight m_pendingList;
   std::filesystem::path m_requestedDirectory;
+};
+
+/*
+ * Remote Browse as a shared modal's BrowseProvider: one dialog per owner,
+ * nested in the owner's popup, so the owner's Escape has to wait while it is
+ * up.
+ */
+struct RemoteBrowseProvider : public modals::BrowseProvider
+{
+  RemoteBrowseProvider(
+      vsr::ui::imgui::Application *app, EditorContext *context);
+  ~RemoteBrowseProvider() override;
+
+  void browse(BrowseRequest request) override;
+  void renderUI() override;
+  bool visible() const override;
+
+ private:
+  RemoteBrowseDialog m_dialog;
 };
 
 } // namespace vsr::scivis_studio::client

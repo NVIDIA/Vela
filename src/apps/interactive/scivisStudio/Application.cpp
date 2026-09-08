@@ -7,6 +7,8 @@
 #include "RenderShot.h"
 #include "modals/AddFileAnimationDatasetDialog.h"
 #include "modals/AddStaticDatasetDialog.h"
+#include "modals/BrowseProvider.h"
+#include "modals/LocalProjectActions.h"
 #include "modals/ProjectLocationDialog.h"
 #include "windows/CameraRigEditor.h"
 #include "windows/DatasetEditor.h"
@@ -173,11 +175,25 @@ vsr::ui::imgui::WindowArray Application::setupWindows()
   m_layerTree->hide();
   m_transferFunctionEditor->hide();
 
-  m_projectLocationDialog = std::make_unique<ProjectLocationDialog>(this);
+  m_projectLocationDialog =
+      std::make_unique<modals::ProjectLocationDialog>(this,
+          std::make_unique<modals::NativeBrowseProvider>(this),
+          std::make_unique<LocalProjectLocationAction>(
+              [this](modals::ProjectLocationMode mode,
+                  const std::filesystem::path &directory) {
+                if (mode == modals::ProjectLocationMode::OpenProject)
+                  openProject(directory);
+                else
+                  saveProjectAs(directory);
+              }));
   m_addStaticDatasetDialog =
-      std::make_unique<AddStaticDatasetDialog>(this, &m_projectContext);
+      std::make_unique<modals::AddStaticDatasetDialog>(this,
+          std::make_unique<modals::NativeBrowseProvider>(this),
+          std::make_unique<LocalStaticDatasetAction>(this, &m_projectContext));
   m_addFileAnimationDatasetDialog =
-      std::make_unique<AddFileAnimationDatasetDialog>(this, &m_projectContext);
+      std::make_unique<modals::AddFileAnimationDatasetDialog>(this,
+          std::make_unique<modals::NativeBrowseProvider>(this),
+          std::make_unique<LocalFileAnimationAction>(this, &m_projectContext));
 
   if (!m_initialProjectDirectory.empty()) {
     ProjectOpenOptions options;
@@ -453,18 +469,14 @@ void Application::showAddFileAnimationDatasetDialog()
 
 void Application::showProjectLocationDialogForOpen()
 {
-  m_projectLocationDialog->configure(ProjectLocationMode::OpenProject,
-      [this](
-          const std::filesystem::path &directory) { openProject(directory); });
+  m_projectLocationDialog->configure(modals::ProjectLocationMode::OpenProject);
   m_projectLocationDialog->show();
 }
 
 void Application::showProjectLocationDialogForSaveAs()
 {
-  m_projectLocationDialog->configure(ProjectLocationMode::SaveProjectAs,
-      [this](const std::filesystem::path &directory) {
-        saveProjectAs(directory);
-      });
+  m_projectLocationDialog->configure(
+      modals::ProjectLocationMode::SaveProjectAs);
   m_projectLocationDialog->show();
 }
 

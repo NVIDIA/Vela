@@ -486,11 +486,17 @@ src/apps/interactive/scivisStudioRemote/
   plus `vsr_scivis_studio_model` (payloads carry Project state via the
   existing `ProjectSerialization` machinery). Graduates to `src/vsr/network`
   only when something else needs it.
-- **Client UI is adapted, not shared.** The monolith's five editors and three
-  modals call `ProjectContext` directly; sharing them would force an
-  abstraction seam into the monolith now. The client gets its own copies
-  under `client/`; duplication is bounded (8 files) and consolidation happens
-  when loopback replaces the monolith.
+- **Editors are adapted; the three modals are shared.** The monolith's five
+  editors call `ProjectContext` directly, and the client gets its own copies
+  under `client/windows/`; consolidating those happens when loopback replaces
+  the monolith. The three modals (Add Static Dataset, Add File Animation
+  Dataset, Project Location) were half-identical, so they moved to
+  `scivisStudio/modals/` (`vsr_scivis_studio_modals`) with two seams: a
+  `BrowseProvider` for where a path comes from (native SDL dialogs, or Remote
+  Browse) and a `ModalAction` for what an accepted dialog does (in place
+  against `ProjectContext`, or a Project Op answered by the server's reply).
+  Each app supplies its own halves -- `LocalProjectActions`,
+  `RemoteProjectActions`.
 - **Client linkage — wholesale, discipline by review.** The client links
   `vsr_scivis_studio_model` (the replica holds the real structs), which also
   hands it code it must never call. **The client's allowed surface is: types

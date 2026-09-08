@@ -10,23 +10,6 @@
 
 namespace vsr::scivis_studio::client::ui {
 
-void errorText(const std::string &text)
-{
-  if (!text.empty())
-    ImGui::TextColored(ERROR_TEXT_COLOR, "%s", text.c_str());
-}
-
-void warningText(const std::string &text)
-{
-  if (!text.empty())
-    ImGui::TextColored(WARNING_TEXT_COLOR, "%s", text.c_str());
-}
-
-std::vector<std::string> archiveExtensions()
-{
-  return {ARCHIVE_EXTENSIONS.begin(), ARCHIVE_EXTENSIONS.end()};
-}
-
 std::filesystem::path withVsrExtension(const std::filesystem::path &file)
 {
   std::filesystem::path result = file;

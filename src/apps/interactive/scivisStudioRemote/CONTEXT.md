@@ -143,6 +143,18 @@ The client's stateless walk of the server's filesystem (`ListRoots`,
 filters, and server-side operation validation is the sole authority on what a
 path may be used for.
 
+**Browse Provider**:
+Where a shared modal gets a path: the monolith's native SDL dialogs, or the
+client's Remote Browse. One of the two seams the three modals both Studios
+show are parameterised on (`scivisStudio/modals/BrowseProvider.h`).
+
+**Modal Action**:
+The other seam: what an accepted shared modal does, and how it answers --
+once, on the submitting frame (the monolith, in process) or a later one (the
+client, when the Project Op's reply lands). While it has not answered, the
+modal is greyed; an unaccepted request's error shows in the dialog, which
+stays open (`scivisStudio/modals/ModalAction.h`).
+
 ### Time and rendering
 
 **Time at Rest**:

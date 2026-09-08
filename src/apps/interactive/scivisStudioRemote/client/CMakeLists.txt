@@ -29,9 +29,7 @@ add_executable(scivisStudioClient
   StudioViewport.cpp
   UICommon.cpp
   scivisStudioClient.cpp
-  modals/AddFileAnimationDatasetDialog.cpp
-  modals/AddStaticDatasetDialog.cpp
-  modals/ProjectLocationDialog.cpp
+  modals/RemoteProjectActions.cpp
   windows/CameraRigEditor.cpp
   windows/DatasetEditor.cpp
   windows/EditorWindow.cpp
@@ -50,5 +48,6 @@ PRIVATE
   vsr_scivis_studio_client_core
   vsr_scivis_studio_protocol
   vsr_scivis_studio_model
+  vsr_scivis_studio_modals
   vsr_ui_imgui
 )

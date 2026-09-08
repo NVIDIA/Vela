@@ -525,4 +525,28 @@ void RemoteBrowseDialog::buildUI_buttons()
   ImGui::EndDisabled();
 }
 
+// RemoteBrowseProvider ///////////////////////////////////////////////////////
+
+RemoteBrowseProvider::RemoteBrowseProvider(
+    vsr::ui::imgui::Application *app, EditorContext *context)
+    : m_dialog(app, context)
+{}
+
+RemoteBrowseProvider::~RemoteBrowseProvider() = default;
+
+void RemoteBrowseProvider::browse(BrowseRequest request)
+{
+  m_dialog.open(std::move(request));
+}
+
+void RemoteBrowseProvider::renderUI()
+{
+  m_dialog.renderUI();
+}
+
+bool RemoteBrowseProvider::visible() const
+{
+  return m_dialog.visible();
+}
+
 } // namespace vsr::scivis_studio::client

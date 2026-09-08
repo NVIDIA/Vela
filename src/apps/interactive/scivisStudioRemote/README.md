@@ -1621,6 +1621,43 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   `dump-scene` and the object and layer counts still show what arrived.
   `TestSession.cpp` is 949 lines of recording, from 1196 of protocol.
 
+- **One set of modals for both Studios.** The three modals the two apps shared
+  by copy -- Add Static Dataset, Add File Animation Dataset, Project Location
+  -- were about half identical line for line (82 of 161/205, 181 of 362/318,
+  31 of 115/112): the same form against two seams. At Jefferson's direction
+  (option 2 of `22-decision-loopback-and-shared-editors.md`; option 1, the
+  in-process loopback, is not in this PR) there is now one implementation of
+  each in `scivisStudio/modals/`, built as `vsr_scivis_studio_modals` -- a
+  second OBJECT library beside `vsr_scivis_studio_model` in the same
+  directory, rather than sources of it, because the model library must not
+  pull in ImGui -- and linked by both apps. The document named one seam, the
+  browse; the code had two, so there are two. A `BrowseProvider` says where a
+  path comes from -- `NativeBrowseProvider` (the SDL dialogs, its own OS
+  window, so `visible()` is false and `renderUI()` only picks up what the
+  callback left) or the client's `RemoteBrowseProvider` (Remote Browse, nested
+  in the owner's popup, which is why the owner's Escape waits for it). A
+  `ModalAction` says what an accepted dialog does and answers
+  `ActionResult(ok, error)` once, on the submitting frame or a later one, so
+  the dialog greys itself and holds the host's error either way:
+  `LocalProjectActions` runs the import behind the Application's task modal
+  and checks a directory against the local filesystem; `RemoteProjectActions`
+  sends the Project Op and answers from the reply. The footer both seams meet
+  in -- the busy line, the error, the browse, Cancel beside the action button
+  -- is `modalFooter`, drawn once for all three. Both apps show the remote
+  versions, which were the better-designed ones, so the monolith gained the
+  greying, the continuously-updated mixed-extension warning, and in-dialog
+  errors wherever the host can answer before acting (frames it cannot find, a
+  directory it refuses); the static import still runs behind the task modal,
+  so its failures still only reach the log. The monolith lost the red rows for
+  missing frames, which now name themselves in the error text instead. The
+  browse vocabulary (`BrowseMode`, `BrowseRequest`) and the two message
+  colours moved with them, and the client's `ui::` namespace re-exports what
+  its editors already used. Manual check on 2026-09-08, both apps against the
+  same `mesh.obj`: the monolith's dialog imported it as `tri [Loaded]`, and
+  the client's -- with the path picked through Remote Browse and again typed
+  -- as `tri-obj [Loaded]`. `test_SciVisStudio`, `test_StudioClientProjectOps`
+  and every scenario pass unchanged.
+
 ### Spec conformance
 
 Every bullet of the spec sections named below, against the tree at

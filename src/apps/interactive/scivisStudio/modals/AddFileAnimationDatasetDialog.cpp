@@ -2,29 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "AddFileAnimationDatasetDialog.h"
-
-#include "vsr/core/Logging.hpp"
-#include "vsr/ui/imgui/Application.h"
-
-#include "imgui.h"
-
+// vsr_scivis_studio_modals
+#include "modals/ModalUI.h"
+// imgui
+#include <imgui.h>
+#include <misc/cpp/imgui_stdlib.h>
+// std
 #include <algorithm>
 #include <cctype>
-#include <cstring>
-#include <filesystem>
 #include <set>
 
-namespace vsr::scivis_studio {
+namespace vsr::scivis_studio::modals {
 
 namespace {
 
-template <size_t N>
-void copyToInputBuffer(std::array<char, N> &buffer, const std::string &value)
-{
-  buffer.fill('\0');
-  std::strncpy(buffer.data(), value.c_str(), buffer.size() - 1);
-}
-
+// "frame_2" before "frame_10": digit runs compare by value.
 int naturalCompareString(const std::string &a, const std::string &b)
 {
   size_t ia = 0;
@@ -35,17 +27,17 @@ int naturalCompareString(const std::string &a, const std::string &b)
     if (digitA && digitB) {
       size_t enda = ia;
       size_t endb = ib;
-      while (enda < a.size()
-          && std::isdigit(static_cast<unsigned char>(a[enda])))
+      while (
+          enda < a.size() && std::isdigit(static_cast<unsigned char>(a[enda])))
         ++enda;
-      while (endb < b.size()
-          && std::isdigit(static_cast<unsigned char>(b[endb])))
+      while (
+          endb < b.size() && std::isdigit(static_cast<unsigned char>(b[endb])))
         ++endb;
 
       auto na = a.substr(ia, enda - ia);
       auto nb = b.substr(ib, endb - ib);
-      na.erase(0, na.find_first_not_of('0'));
-      nb.erase(0, nb.find_first_not_of('0'));
+      na.erase(0, std::min(na.find_first_not_of('0'), na.size()));
+      nb.erase(0, std::min(nb.find_first_not_of('0'), nb.size()));
       if (na.size() != nb.size())
         return na.size() < nb.size() ? -1 : 1;
       if (na != nb)
@@ -108,149 +100,150 @@ std::string commonStemPrefix(const std::vector<std::string> &paths)
   return std::filesystem::path(paths.front()).stem().string();
 }
 
-std::string extensionLabel(const std::string &extension)
-{
-  return extension.empty() ? std::string("<none>") : extension;
-}
-
 bool anySelected(const std::vector<char> &selectedRows)
 {
   return std::any_of(
-      selectedRows.begin(), selectedRows.end(), [](char selected) {
-        return selected != 0;
-      });
-}
-
-void resizeSelection(std::vector<char> &selectedRows, size_t size)
-{
-  selectedRows.resize(size, 0);
+      selectedRows.begin(), selectedRows.end(), [](char s) { return s != 0; });
 }
 
 } // namespace
 
 AddFileAnimationDatasetDialog::AddFileAnimationDatasetDialog(
-    vsr::ui::imgui::Application *app, ProjectContext *projectContext)
+    vsr::ui::imgui::Application *app,
+    std::unique_ptr<BrowseProvider> browse,
+    std::unique_ptr<Action> action)
     : Modal(app, "Add File Animation Dataset"),
-      m_projectContext(projectContext)
+      m_browse(std::move(browse)),
+      m_action(std::move(action))
 {}
 
 AddFileAnimationDatasetDialog::~AddFileAnimationDatasetDialog() = default;
 
 void AddFileAnimationDatasetDialog::reset()
 {
-  m_name.fill('\0');
-  m_sourcePaths.clear();
-  m_browsedSourcePaths.clear();
-  m_invalidRows.clear();
-  m_selectedRows.clear();
-  m_validationMessage.clear();
-  m_extensionWarning.clear();
+  m_name.clear();
   m_nameEditedByUser = false;
-  m_showInvalidRows = false;
-}
-
-void AddFileAnimationDatasetDialog::clearValidation()
-{
-  m_invalidRows.clear();
-  m_validationMessage.clear();
+  m_sourcePaths.clear();
+  m_selectedRows.clear();
   m_extensionWarning.clear();
-  m_showInvalidRows = false;
-}
-
-void AddFileAnimationDatasetDialog::appendBrowsedFiles()
-{
-  if (m_browsedSourcePaths.empty())
-    return;
-
-  std::sort(
-      m_browsedSourcePaths.begin(), m_browsedSourcePaths.end(), naturalPathLess);
-  m_sourcePaths.insert(m_sourcePaths.end(),
-      m_browsedSourcePaths.begin(),
-      m_browsedSourcePaths.end());
-  m_browsedSourcePaths.clear();
-  resizeSelection(m_selectedRows, m_sourcePaths.size());
-  clearValidation();
-  updateGeneratedName();
+  m_error.clear();
+  m_action->reset();
 }
 
 void AddFileAnimationDatasetDialog::updateGeneratedName()
 {
-  if (m_nameEditedByUser)
-    return;
-
-  copyToInputBuffer(m_name, commonStemPrefix(m_sourcePaths));
+  if (!m_nameEditedByUser)
+    m_name = commonStemPrefix(m_sourcePaths);
 }
 
-bool AddFileAnimationDatasetDialog::validateForImport()
+void AddFileAnimationDatasetDialog::updateExtensionWarning()
 {
-  m_invalidRows.assign(m_sourcePaths.size(), false);
-  m_validationMessage.clear();
   m_extensionWarning.clear();
-
-  if (m_sourcePaths.empty()) {
-    m_validationMessage = "Select at least one frame.";
-    return false;
-  }
-
   std::set<std::string> extensions;
-  bool ok = true;
-  for (size_t i = 0; i < m_sourcePaths.size(); ++i) {
-    const std::filesystem::path path = m_sourcePaths[i];
-    extensions.insert(path.extension().string());
+  for (const auto &path : m_sourcePaths)
+    extensions.insert(std::filesystem::path(path).extension().string());
+  if (extensions.size() <= 1)
+    return;
+  m_extensionWarning = "Mixed extensions: ";
+  bool first = true;
+  for (const auto &extension : extensions) {
+    if (!first)
+      m_extensionWarning += ", ";
+    m_extensionWarning += extension.empty() ? "<none>" : extension;
+    first = false;
+  }
+}
 
-    std::error_code ec;
-    if (!std::filesystem::exists(path, ec) || ec) {
-      m_invalidRows[i] = true;
-      ok = false;
-      continue;
-    }
-    if (!std::filesystem::is_regular_file(path, ec) || ec) {
-      m_invalidRows[i] = true;
-      ok = false;
-    }
+void AddFileAnimationDatasetDialog::submit()
+{
+  if (m_sourcePaths.empty()) {
+    m_error = "Select at least one frame.";
+    return;
   }
 
-  if (extensions.size() > 1) {
-    m_extensionWarning = "Mixed extensions: ";
-    bool first = true;
-    for (const auto &ext : extensions) {
-      if (!first)
-        m_extensionWarning += ", ";
-      m_extensionWarning += extensionLabel(ext);
-      first = false;
-    }
-  }
+  Request request;
+  request.name = m_name;
+  request.sourcePaths.reserve(m_sourcePaths.size());
+  for (const auto &path : m_sourcePaths)
+    request.sourcePaths.emplace_back(path);
 
-  if (!ok)
-    m_validationMessage = "One or more selected frames are missing or invalid.";
-  return ok;
+  m_error.clear();
+  m_action->submit(request, [this](bool ok, const std::string &error) {
+    if (!ok) {
+      m_error = error;
+      return;
+    }
+    reset();
+    hide();
+  });
 }
 
 void AddFileAnimationDatasetDialog::buildUI()
 {
-  appendBrowsedFiles();
+  const bool busy = m_action->busy();
 
-  if (ImGui::InputText("Name", m_name.data(), m_name.size()))
+  ImGui::BeginDisabled(busy);
+  ImGui::SetNextItemWidth(420.f);
+  if (ImGui::InputText("Name", &m_name))
     m_nameEditedByUser = true;
 
-  if (ImGui::Button("Add Files..."))
-    m_app->getFilenamesFromDialog(m_browsedSourcePaths);
+  buildUI_listControls();
+
+  ImGui::Text("Frames: %zu", m_sourcePaths.size());
+  warningText(m_extensionWarning);
+  buildUI_frameList();
+  ImGui::EndDisabled();
+
+  switch (modalFooter(*m_browse, *m_action, m_error, "Import")) {
+  case ModalChoice::Cancelled:
+    reset();
+    hide();
+    break;
+  case ModalChoice::Submitted:
+    submit();
+    break;
+  case ModalChoice::None:
+    break;
+  }
+}
+
+void AddFileAnimationDatasetDialog::buildUI_listControls()
+{
+  auto listChanged = [this] {
+    m_selectedRows.resize(m_sourcePaths.size(), 0);
+    updateExtensionWarning();
+    updateGeneratedName();
+  };
+
+  if (ImGui::Button("Add Files...")) {
+    BrowseRequest request;
+    request.mode = BrowseMode::OpenFiles;
+    request.title = "Choose the frame files (Ctrl/Shift-click for several)";
+    request.onAccept = [this, listChanged](
+                           const std::vector<std::filesystem::path> &paths) {
+      std::vector<std::string> added;
+      for (const auto &path : paths)
+        added.push_back(path.generic_string());
+      std::sort(added.begin(), added.end(), naturalPathLess);
+      m_sourcePaths.insert(m_sourcePaths.end(), added.begin(), added.end());
+      listChanged();
+    };
+    m_browse->browse(std::move(request));
+  }
   ImGui::SameLine();
   if (ImGui::Button("Remove") && anySelected(m_selectedRows)) {
-    for (int i = static_cast<int>(m_sourcePaths.size()) - 1; i >= 0; --i) {
-      if (i < static_cast<int>(m_selectedRows.size()) && m_selectedRows[i])
+    for (int i = int(m_sourcePaths.size()) - 1; i >= 0; --i) {
+      if (i < int(m_selectedRows.size()) && m_selectedRows[i])
         m_sourcePaths.erase(m_sourcePaths.begin() + i);
     }
     m_selectedRows.assign(m_sourcePaths.size(), 0);
-    clearValidation();
-    updateGeneratedName();
+    listChanged();
   }
   ImGui::SameLine();
   if (ImGui::Button("Clear")) {
     m_sourcePaths.clear();
     m_selectedRows.clear();
-    clearValidation();
-    updateGeneratedName();
+    listChanged();
   }
 
   if (ImGui::Button("Move Up") && anySelected(m_selectedRows)
@@ -261,49 +254,38 @@ void AddFileAnimationDatasetDialog::buildUI()
         std::swap(m_selectedRows[i], m_selectedRows[i - 1]);
       }
     }
-    clearValidation();
-    updateGeneratedName();
+    listChanged();
   }
   ImGui::SameLine();
   if (ImGui::Button("Move Down") && anySelected(m_selectedRows)
-      && !m_selectedRows.empty() && !m_selectedRows.back()) {
-    for (int i = static_cast<int>(m_sourcePaths.size()) - 2; i >= 0; --i) {
+      && !m_selectedRows.back()) {
+    for (int i = int(m_sourcePaths.size()) - 2; i >= 0; --i) {
       if (m_selectedRows[i] && !m_selectedRows[i + 1]) {
         std::swap(m_sourcePaths[i], m_sourcePaths[i + 1]);
         std::swap(m_selectedRows[i], m_selectedRows[i + 1]);
       }
     }
-    clearValidation();
-    updateGeneratedName();
+    listChanged();
   }
   ImGui::SameLine();
   if (ImGui::Button("Sort by Name")) {
     std::sort(m_sourcePaths.begin(), m_sourcePaths.end(), naturalPathLess);
     m_selectedRows.assign(m_sourcePaths.size(), 0);
-    clearValidation();
-    updateGeneratedName();
+    listChanged();
   }
+}
 
-  ImGui::Text("Frames: %zu", m_sourcePaths.size());
-  if (!m_extensionWarning.empty())
-    ImGui::TextWrapped("%s", m_extensionWarning.c_str());
-  if (!m_validationMessage.empty())
-    ImGui::TextWrapped("%s", m_validationMessage.c_str());
-
-  if (ImGui::BeginChild(
-          "FileAnimationFrames", ImVec2(0.f, 240.f), true)) {
-    resizeSelection(m_selectedRows, m_sourcePaths.size());
-    for (int i = 0; i < static_cast<int>(m_sourcePaths.size()); ++i) {
-      const bool invalid =
-          m_showInvalidRows && i < static_cast<int>(m_invalidRows.size())
-          && m_invalidRows[i];
-      if (invalid)
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.f, 0.35f, 0.25f, 1.f));
-
+void AddFileAnimationDatasetDialog::buildUI_frameList()
+{
+  if (ImGui::BeginChild("FileAnimationFrames",
+          ImVec2(560.f, 240.f),
+          ImGuiChildFlags_Borders)) {
+    m_selectedRows.resize(m_sourcePaths.size(), 0);
+    for (int i = 0; i < int(m_sourcePaths.size()); ++i) {
       const auto filename =
           std::filesystem::path(m_sourcePaths[i]).filename().string();
       const auto label = std::to_string(i) + "  " + filename;
-      if (ImGui::Selectable(label.c_str(), m_selectedRows[i])) {
+      if (ImGui::Selectable(label.c_str(), m_selectedRows[i] != 0)) {
         const bool append = ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeyShift;
         if (!append)
           m_selectedRows.assign(m_sourcePaths.size(), 0);
@@ -311,52 +293,9 @@ void AddFileAnimationDatasetDialog::buildUI()
       }
       if (ImGui::IsItemHovered())
         ImGui::SetTooltip("%s", m_sourcePaths[i].c_str());
-
-      if (invalid)
-        ImGui::PopStyleColor();
     }
   }
   ImGui::EndChild();
-
-  ImGui::Spacing();
-  if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-    reset();
-    hide();
-    return;
-  }
-
-  ImGui::SameLine();
-  if (ImGui::Button("Import")) {
-    if (!validateForImport()) {
-      m_showInvalidRows = true;
-      vsr::core::logWarning(
-          "[SciVisStudio] File animation dataset validation failed: %s",
-          m_validationMessage.c_str());
-      return;
-    }
-
-    if (!m_extensionWarning.empty())
-      vsr::core::logWarning(
-          "[SciVisStudio] %s", m_extensionWarning.c_str());
-
-    const std::string name = m_name.data();
-    std::vector<std::filesystem::path> sourcePaths;
-    sourcePaths.reserve(m_sourcePaths.size());
-    for (const auto &path : m_sourcePaths)
-      sourcePaths.emplace_back(path);
-
-    reset();
-    hide();
-    m_app->showTaskModal(
-        [ctx = m_projectContext, name, sourcePaths]() {
-          if (ctx) {
-            ctx->addFileAnimationDataset(name,
-                sourcePaths,
-                vsr::io::ImporterType::VOLUME_ANIMATION);
-          }
-        },
-        "Importing File Animation Dataset...");
-  }
 }
 
-} // namespace vsr::scivis_studio
+} // namespace vsr::scivis_studio::modals

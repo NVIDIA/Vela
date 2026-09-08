@@ -3,11 +3,10 @@
 
 #include "Application.h"
 // scivisStudioClient
+#include "RemoteBrowseDialog.h"
 #include "StudioViewport.h"
 #include "UICommon.h"
-#include "modals/AddFileAnimationDatasetDialog.h"
-#include "modals/AddStaticDatasetDialog.h"
-#include "modals/ProjectLocationDialog.h"
+#include "modals/RemoteProjectActions.h"
 #include "windows/CameraRigEditor.h"
 #include "windows/DatasetEditor.h"
 #include "windows/HistogramPanel.h"
@@ -268,12 +267,19 @@ vsr_ui::WindowArray Application::setupWindows()
 
   setWindowArray(windows);
 
-  m_projectLocationDialog = std::make_unique<ProjectLocationDialog>(
-      this, &m_editorContext, [this] { return buildUIState(); });
+  m_projectLocationDialog =
+      std::make_unique<modals::ProjectLocationDialog>(this,
+          std::make_unique<RemoteBrowseProvider>(this, &m_editorContext),
+          std::make_unique<RemoteProjectLocationAction>(
+              &m_editorContext, [this] { return buildUIState(); }));
   m_addStaticDatasetDialog =
-      std::make_unique<AddStaticDatasetDialog>(this, &m_editorContext);
+      std::make_unique<modals::AddStaticDatasetDialog>(this,
+          std::make_unique<RemoteBrowseProvider>(this, &m_editorContext),
+          std::make_unique<RemoteStaticDatasetAction>(&m_editorContext));
   m_addFileAnimationDialog =
-      std::make_unique<AddFileAnimationDatasetDialog>(this, &m_editorContext);
+      std::make_unique<modals::AddFileAnimationDatasetDialog>(this,
+          std::make_unique<RemoteBrowseProvider>(this, &m_editorContext),
+          std::make_unique<RemoteFileAnimationAction>(&m_editorContext));
 
   if (m_options.connectAtStartup)
     m_autoConnectInFrames = AUTO_CONNECT_DELAY_FRAMES;
@@ -551,7 +557,8 @@ void Application::openProjectDialog()
 {
   requestDirtyAction(
       "Discard unsaved changes and open another project?", [this] {
-        m_projectLocationDialog->configure(ProjectLocationMode::OpenProject);
+        m_projectLocationDialog->configure(
+            modals::ProjectLocationMode::OpenProject);
         m_projectLocationDialog->show();
       });
 }
@@ -579,7 +586,8 @@ void Application::saveProjectAsDialog()
 {
   if (!m_editorContext.canSend())
     return;
-  m_projectLocationDialog->configure(ProjectLocationMode::SaveProjectAs);
+  m_projectLocationDialog->configure(
+      modals::ProjectLocationMode::SaveProjectAs);
   m_projectLocationDialog->show();
 }
 
