@@ -38,12 +38,9 @@ struct BlockData
 };
 struct AMRField
 {
-  std::vector<int> refinementRatio;
   std::vector<int> blockLevel;
-  std::vector<BlockBounds> blockBounds;
-  // deprecated: data per block
-  std::vector<BlockData> blockData;
-  // new: data as one contiguous array
+  std::vector<vsr::math::int3> blockOrigins;
+  std::vector<vsr::math::int3> blockDims;
   std::vector<float> data;
   struct
   {
@@ -257,74 +254,57 @@ inline void read_variable(
       var.data.data(), H5::PredType::NATIVE_DOUBLE, dataspace, dataspace);
 }
 
+struct box3d
+{
+  box3d() : lower(INFINITY), upper(INFINITY) {}
+  box3d(double *arr) : lower(arr + 0), upper(arr + 3) {}
+  box3d(const grid_t::aabbd &bb)
+      : lower(bb.min.x, bb.min.y, bb.min.z), upper(bb.max.x, bb.max.y, bb.max.z)
+  {}
+  math::double3 size() const
+  {
+    return upper - lower;
+  }
+  box3d &extend(const box3d &other)
+  {
+    lower = min(lower, other.lower);
+    upper = min(upper, other.upper);
+    return *this;
+  }
+  math::double3 lower, upper;
+};
+
 inline AMRField toAMRField(const grid_t &grid, const variable_t &var)
 {
   AMRField result;
 
-  // Length of the sides of the bounding box
-  double len_total[3] = {grid.bnd_box[0].max.x - grid.bnd_box[0].min.x,
-      grid.bnd_box[0].max.y - grid.bnd_box[0].min.y,
-      grid.bnd_box[0].max.z - grid.bnd_box[0].min.z};
-
-  int max_level = 0;
-  double len[3];
-  for (size_t i = 0; i < var.global_num_blocks; ++i) {
-    if (grid.refine_level[i] > max_level) {
-      max_level = grid.refine_level[i];
-      len[0] = grid.bnd_box[i].max.x - grid.bnd_box[i].min.x;
-      len[1] = grid.bnd_box[i].max.y - grid.bnd_box[i].min.y;
-      len[2] = grid.bnd_box[i].max.z - grid.bnd_box[i].min.z;
-    }
-  }
-
-  // --- cellWidth
-  for (int l = 0; l <= max_level; ++l) {
-    result.refinementRatio.push_back(2);
-  }
-
-  len[0] /= var.nxb;
-  len[1] /= var.nyb;
-  len[2] /= var.nzb;
-
-  // This is the number of cells for the finest level (?)
-  int vox[3];
-  vox[0] = static_cast<int>(round(len_total[0] / len[0]));
-  vox[1] = static_cast<int>(round(len_total[1] / len[1]));
-  vox[2] = static_cast<int>(round(len_total[2] / len[2]));
+  int numBlocks = grid.coordinates.size();
+  math::int3 blockDims = math::int3(var.nxb, var.nyb, var.nzb);
 
   float max_scalar = -FLT_MAX;
   float min_scalar = FLT_MAX;
 
-  size_t numLeaves = 0;
-  for (size_t i = 0; i < var.global_num_blocks; ++i) {
-    if (grid.node_type[i] == 1)
-      numLeaves++;
+  math::double3 minBlockSize(INFINITY);
+  math::double3 maxBlockSize(0.);
+  box3d worldBounds;
+  for (int i = 0; i < numBlocks; i++) {
+    box3d blockBounds = grid.bnd_box[i];
+    worldBounds.extend(blockBounds);
+    minBlockSize = min(minBlockSize, blockBounds.size());
+    maxBlockSize = max(maxBlockSize, blockBounds.size());
   }
+  math::double3 unitCellSize = maxBlockSize / math::double3(blockDims);
+  math::int3 unitGridDims = math::int3(worldBounds.size() / unitCellSize + .5);
 
-  for (size_t i = 0; i < var.global_num_blocks; ++i) {
-    // Project min on vox grid
-    int level = max_level - grid.refine_level[i];
-    int cellsize = 1 << level;
+  int maxRefine = 1;
+  int maxLevel = 0;
+  for (int i = 0; i < numBlocks; ++i) {
+    box3d blockBounds = grid.bnd_box[i];
+    math::double3 cellSize = blockBounds.size() / math::double3(blockDims);
 
-    int lower[3] = {
-        static_cast<int>(round((grid.bnd_box[i].min.x - grid.bnd_box[0].min.x)
-            / len_total[0] * vox[0])),
-        static_cast<int>(round((grid.bnd_box[i].min.y - grid.bnd_box[0].min.y)
-            / len_total[1] * vox[1])),
-        static_cast<int>(round((grid.bnd_box[i].min.z - grid.bnd_box[0].min.z)
-            / len_total[2] * vox[2]))};
+    math::int3 origin =
+        math::int3((blockBounds.lower - worldBounds.lower) / cellSize + .5);
 
-    BlockBounds bounds = {{lower[0] / cellsize,
-        lower[1] / cellsize,
-        lower[2] / cellsize,
-        int(lower[0] / cellsize + var.nxb - 1),
-        int(lower[1] / cellsize + var.nyb - 1),
-        int(lower[2] / cellsize + var.nzb - 1)}};
-
-    BlockData data;
-    data.dims[0] = var.nxb;
-    data.dims[1] = var.nyb;
-    data.dims[2] = var.nzb;
     for (int z = 0; z < var.nzb; ++z) {
       for (int y = 0; y < var.nyb; ++y) {
         for (int x = 0; x < var.nxb; ++x) {
@@ -335,18 +315,14 @@ inline AMRField toAMRField(const grid_t &grid, const variable_t &var)
           float valf(val);
           min_scalar = fminf(min_scalar, valf);
           max_scalar = fmaxf(max_scalar, valf);
-          // per-block data (deprecated):
-          data.values.push_back((float)val);
-          // as contiguous array (new):
           result.data.push_back((float)val);
         }
       }
     }
 
-    result.blockLevel.push_back(level);
-    result.blockBounds.push_back(bounds);
-    // set per-block data (deprecated):
-    result.blockData.push_back(data);
+    result.blockLevel.push_back(grid.refine_level[i]);
+    result.blockOrigins.push_back(origin);
+    result.blockDims.push_back(blockDims);
     result.voxelRange = {min_scalar, max_scalar};
   }
 
@@ -432,42 +408,23 @@ SpatialFieldRef import_FLASH(Scene &scene, const char *filepath)
 
   logStatus("[import_FLASH] converting to VSR objects...");
 
-  // set data per block (deprecated):
-  auto blockData = scene.createArray(ANARI_ARRAY3D, amrField.blockData.size());
-  {
-    auto *dst = (size_t *)blockData->map();
-    std::transform(amrField.blockData.begin(),
-        amrField.blockData.end(),
-        dst,
-        [&](const auto &bd) {
-          auto block = scene.createArray(
-              ANARI_FLOAT32, bd.dims[0], bd.dims[1], bd.dims[2]);
-          block->setData(bd.values);
-          return block.index();
-        });
-    blockData->unmap();
-  }
-  // set data as contiguous array (not supported by all devices yet):
   auto data = scene.createArray(ANARI_FLOAT32, amrField.data.size());
   data->setData(amrField.data.data());
 
-  auto refinementRatio =
-      scene.createArray(ANARI_UINT32, amrField.refinementRatio.size());
-  refinementRatio->setData(amrField.refinementRatio);
+  auto blockOrigins =
+      scene.createArray(ANARI_INT32_VEC3, amrField.blockOrigins.size());
+  blockOrigins->setData(amrField.blockOrigins.data());
 
-  auto blockBounds =
-      scene.createArray(ANARI_INT32_BOX3, amrField.blockBounds.size());
-  blockBounds->setData(amrField.blockBounds.data());
+  auto blockDims =
+      scene.createArray(ANARI_INT32_VEC3, amrField.blockDims.size());
+  blockDims->setData(amrField.blockDims.data());
 
   auto blockLevel = scene.createArray(ANARI_INT32, amrField.blockLevel.size());
   blockLevel->setData(amrField.blockLevel);
 
-  field->setParameterObject("refinementRatio", *refinementRatio);
-  field->setParameterObject("block.bounds", *blockBounds);
+  field->setParameterObject("block.origin", *blockOrigins);
+  field->setParameterObject("block.dimensions", *blockDims);
   field->setParameterObject("block.level", *blockLevel);
-  // deprecated data representation:
-  field->setParameterObject("block.data", *blockData);
-  // new data representation (devices are free to support either):
   field->setParameterObject("data", *data);
 
   logStatus("[import_FLASH] ...done!");
