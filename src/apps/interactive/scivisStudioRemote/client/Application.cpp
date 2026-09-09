@@ -75,6 +75,30 @@ void LockableWindow<WindowT>::buildUI()
   ImGui::EndDisabled();
 }
 
+// What the mirror's object editors may offer. A value edit reaches the
+// server as SetObjectParameter and comes back in the next commit's scene
+// snapshot; these five have no client-to-server message at all, so the
+// widget would only edit the mirror and be undone by the next snapshot.
+vsr::ui::ObjectEditPolicy mirrorEditPolicy()
+{
+  vsr::ui::ObjectEditPolicy policy;
+  policy.refuse(vsr::ui::ObjectEdit::CreateObject,
+      "the server owns the scene's objects: this client has no message"
+      " that creates one");
+  policy.refuse(vsr::ui::ObjectEdit::SetUsageHint,
+      "a parameter's usage hint is not on the wire; only its value is");
+  policy.refuse(vsr::ui::ObjectEdit::SetStringList,
+      "string lists and attribute bindings are not on the wire; only"
+      " values are");
+  policy.refuse(vsr::ui::ObjectEdit::BindArray,
+      "array contents live on the server: an array-valued edit is dropped"
+      " before it is sent");
+  policy.refuse(vsr::ui::ObjectEdit::ClearValue,
+      "clearing a parameter has no message on the wire; unset the object"
+      " reference instead");
+  return policy;
+}
+
 // ImGui docking needs a couple of frames before window sizes are final.
 constexpr int AUTO_CONNECT_DELAY_FRAMES = 3;
 
@@ -230,10 +254,13 @@ vsr_ui::WindowArray Application::setupWindows()
   m_layerTree = layers;
   // Layer structure is server-push-only.
   layers->setEditMode(vsr_ui::LayerTree::EditMode::ReadOnly);
+  const auto editPolicy = mirrorEditPolicy();
   auto *objectEditor =
       new LockableWindow<vsr_ui::ObjectEditor>(this, &m_editorContext);
+  objectEditor->setEditPolicy(editPolicy);
   auto *databaseEditor =
       new LockableWindow<vsr_ui::DatabaseEditor>(this, &m_editorContext);
+  databaseEditor->setEditPolicy(editPolicy);
 
   auto *projectWindow = new ProjectWindow(this, &m_editorContext);
   auto *datasetEditor = new DatasetEditor(this, &m_editorContext);

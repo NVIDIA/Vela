@@ -13,6 +13,11 @@ DatabaseEditor::DatabaseEditor(Application *app, const char *name)
     : Window(app, name)
 {}
 
+void DatabaseEditor::setEditPolicy(const vsr::ui::ObjectEditPolicy &policy)
+{
+  m_editPolicy = policy;
+}
+
 void DatabaseEditor::buildUI()
 {
   ImGui::BeginDisabled(!appContext()->vsr.sceneLoadComplete);
@@ -36,7 +41,8 @@ void DatabaseEditor::buildUI()
         if (doDelete)
           appContext()->vsr.scene.removeObject(o);
         else
-          vsr::ui::buildUI_object(*o, appContext()->vsr.scene, true);
+          vsr::ui::buildUI_object(
+              *o, appContext()->vsr.scene, true, 0, m_editPolicy);
         ImGui::PopID();
       });
     }

@@ -76,11 +76,31 @@ static bool buildUI_object_info_tooltip_text(
   return false;
 }
 
-static void buildUI_parameter_contextMenu(
-    vsr::scene::Scene &scene, vsr::scene::Object *o, vsr::scene::Parameter *p)
+// An affordance the policy may refuse: drawn disabled, with the reason on
+// hover. Wrap the ImGui call in the pair; a disabled menu never opens, so
+// its body simply does not run.
+static void beginRefusableEdit(
+    const vsr::ui::ObjectEditPolicy &policy, vsr::ui::ObjectEdit edit)
+{
+  ImGui::BeginDisabled(!policy.allows(edit));
+}
+
+static void endRefusableEdit(
+    const vsr::ui::ObjectEditPolicy &policy, vsr::ui::ObjectEdit edit)
+{
+  ImGui::EndDisabled();
+  if (const char *reason = policy.refusal(edit))
+    vsr::ui::tooltipForPreviousItem(reason);
+}
+
+static void buildUI_parameter_contextMenu(vsr::scene::Scene &scene,
+    vsr::scene::Object *o,
+    vsr::scene::Parameter *p,
+    const vsr::ui::ObjectEditPolicy &policy)
 {
   if (ImGui::BeginPopup("buildUI_parameter_contextMenu")) {
     if (ImGui::BeginMenu("set type")) {
+      beginRefusableEdit(policy, vsr::ui::ObjectEdit::SetUsageHint);
       if (ImGui::BeginMenu("uniform")) {
         if (ImGui::MenuItem("direction")) {
           p->setUsage(vsr::scene::ParameterUsageHint::DIRECTION);
@@ -170,15 +190,19 @@ static void buildUI_parameter_contextMenu(
 
         ImGui::EndMenu(); // "uniform"
       }
+      endRefusableEdit(policy, vsr::ui::ObjectEdit::SetUsageHint);
 
       ImGui::Separator();
 
+      beginRefusableEdit(policy, vsr::ui::ObjectEdit::SetStringList);
       if (ImGui::MenuItem("attribute"))
         p->setToAttribute();
+      endRefusableEdit(policy, vsr::ui::ObjectEdit::SetStringList);
 
       ImGui::Separator();
 
       if (ImGui::BeginMenu("object")) {
+        beginRefusableEdit(policy, vsr::ui::ObjectEdit::CreateObject);
         if (ImGui::BeginMenu("new")) {
           if (ImGui::BeginMenu("array")) {
             vsr::scene::ArrayRef a;
@@ -274,8 +298,8 @@ static void buildUI_parameter_contextMenu(
 
 #define OBJECT_UI_MENU_ITEM(text, subtype)                                     \
   if (ImGui::MenuItem(text)) {                                                 \
-    g = scene.createObject<vsr::scene::Geometry>(                               \
-        vsr::scene::tokens::geometry::subtype);                                 \
+    g = scene.createObject<vsr::scene::Geometry>(                              \
+        vsr::scene::tokens::geometry::subtype);                                \
   }
             OBJECT_UI_MENU_ITEM("cone", cone);
             OBJECT_UI_MENU_ITEM("curve", curve);
@@ -297,8 +321,8 @@ static void buildUI_parameter_contextMenu(
 
 #define OBJECT_UI_MENU_ITEM(text, subtype)                                     \
   if (ImGui::MenuItem(text)) {                                                 \
-    s = scene.createObject<vsr::scene::Sampler>(                                \
-        vsr::scene::tokens::sampler::subtype);                                  \
+    s = scene.createObject<vsr::scene::Sampler>(                               \
+        vsr::scene::tokens::sampler::subtype);                                 \
   }
             OBJECT_UI_MENU_ITEM("compressedImage2D", compressedImage2D);
             OBJECT_UI_MENU_ITEM("image1D", image1D);
@@ -315,6 +339,7 @@ static void buildUI_parameter_contextMenu(
 
           ImGui::EndMenu(); // "new"
         }
+        endRefusableEdit(policy, vsr::ui::ObjectEdit::CreateObject);
 
         ImGui::Separator();
 
@@ -326,7 +351,9 @@ static void buildUI_parameter_contextMenu(
       p->setValue({t, i});                                                     \
     ImGui::EndMenu();                                                          \
   }
+        beginRefusableEdit(policy, vsr::ui::ObjectEdit::BindArray);
         OBJECT_UI_MENU_ITEM("array", ANARI_ARRAY);
+        endRefusableEdit(policy, vsr::ui::ObjectEdit::BindArray);
         OBJECT_UI_MENU_ITEM("geometry", ANARI_GEOMETRY);
         OBJECT_UI_MENU_ITEM("material", ANARI_MATERIAL);
         OBJECT_UI_MENU_ITEM("sampler", ANARI_SAMPLER);
@@ -356,7 +383,8 @@ static void buildUI_parameter_contextMenu(
 void buildUI_object(vsr::scene::Object &o,
     vsr::scene::Scene &scene,
     bool useTableForParameters,
-    int level)
+    int level,
+    const ObjectEditPolicy &policy)
 {
   static anari::DataType typeForSelection = ANARI_UNKNOWN;
   static vsr::scene::Parameter *paramForSelection = nullptr;
@@ -424,14 +452,14 @@ void buildUI_object(vsr::scene::Object &o,
       for (size_t i = 0; i < o.numParameters(); i++) {
         auto &p = o.parameterAt(i);
         ImGui::TableNextRow();
-        buildUI_parameter(o, p, scene, useTableForParameters);
+        buildUI_parameter(o, p, scene, useTableForParameters, policy);
       }
 
       ImGui::EndTable();
     }
   } else {
     for (size_t i = 0; i < o.numParameters(); i++)
-      buildUI_parameter(o, o.parameterAt(i), scene);
+      buildUI_parameter(o, o.parameterAt(i), scene, false, policy);
   }
 
   // object parameters //
@@ -463,8 +491,10 @@ void buildUI_object(vsr::scene::Object &o,
 
       ImGui::SameLine();
 
+      beginRefusableEdit(policy, ObjectEdit::ClearValue);
       if (ImGui::Button("clear"))
         p.setValue({});
+      endRefusableEdit(policy, ObjectEdit::ClearValue);
 
       ImGui::SameLine();
 
@@ -477,7 +507,7 @@ void buildUI_object(vsr::scene::Object &o,
       ImGui::EndDisabled();
 
       if (obj != nullptr)
-        buildUI_object(*obj, scene, useTableForParameters, level + 1);
+        buildUI_object(*obj, scene, useTableForParameters, level + 1, policy);
     }
 
     ImGui::PopID();
@@ -546,7 +576,8 @@ void buildUI_object(vsr::scene::Object &o,
 bool buildUI_parameter(vsr::scene::Object &o,
     vsr::scene::Parameter &p,
     vsr::scene::Scene &scene,
-    bool useTable)
+    bool useTable,
+    const ObjectEditPolicy &policy)
 {
   ImGui::PushID(&p);
 
@@ -761,9 +792,14 @@ bool buildUI_parameter(vsr::scene::Object &o,
   } break;
   case ANARI_STRING: {
     if (!p.stringValues().empty()) {
+      // The list and the selection index are both properties of the
+      // parameter, not of its value, so a host that can only carry values
+      // cannot keep the two ends in step.
+      beginRefusableEdit(policy, ObjectEdit::SetStringList);
       auto ss = p.stringSelection();
       update |= ImGui::Combo(
           name, &ss, UI_stringList_callback, &p, p.stringValues().size());
+      endRefusableEdit(policy, ObjectEdit::SetStringList);
 
       if (update) {
         pVal = p.stringValues()[ss].c_str();
@@ -848,7 +884,7 @@ bool buildUI_parameter(vsr::scene::Object &o,
     p.setValue(pVal);
 
   buildUI_parameter_contextMenu(
-      scene, &o, &p); // NOTE: 'p' can be deleted after this
+      scene, &o, &p, policy); // NOTE: 'p' can be deleted after this
 
   ImGui::PopID();
 
