@@ -76,22 +76,26 @@ static bool buildUI_object_info_tooltip_text(
   return false;
 }
 
+namespace {
+
 // An affordance the policy may refuse: drawn disabled, with the reason on
 // hover. Wrap the ImGui call in the pair; a disabled menu never opens, so
 // its body simply does not run.
-static void beginRefusableEdit(
+void beginRefusableEdit(
     const vsr::ui::ObjectEditPolicy &policy, vsr::ui::ObjectEdit edit)
 {
   ImGui::BeginDisabled(!policy.allows(edit));
 }
 
-static void endRefusableEdit(
+void endRefusableEdit(
     const vsr::ui::ObjectEditPolicy &policy, vsr::ui::ObjectEdit edit)
 {
   ImGui::EndDisabled();
   if (const char *reason = policy.refusal(edit))
     vsr::ui::tooltipForPreviousItem(reason);
 }
+
+} // namespace
 
 static void buildUI_parameter_contextMenu(vsr::scene::Scene &scene,
     vsr::scene::Object *o,

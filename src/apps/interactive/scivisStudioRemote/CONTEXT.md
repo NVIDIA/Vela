@@ -113,6 +113,16 @@ object a dataset creates, and asks the server about contents it cannot read
 (Array Histogram).
 _Avoid_: partial dataset, dataset stub, subtree expansion
 
+**Edit Policy**:
+Which parameter edits a client's object editors offer at all
+(`vsr::ui::ObjectEditPolicy`, set once on the UI Application). A refused
+edit is drawn disabled with the reason on hover, never hidden. The client
+refuses exactly the five that no client-to-server message expresses --
+object creation, usage hints, string lists and attribute bindings,
+array-valued bindings, and clearing a value -- so the widget never changes
+the Structural Mirror in a way the next commit would silently undo.
+_Avoid_: read-only mode, locked parameter
+
 **Connection State**:
 The client's explicit state toward its server: `NeverConnected`, `Connected`,
 `Lost`, or `Disconnected`. **Lost** is involuntary (view frozen under a

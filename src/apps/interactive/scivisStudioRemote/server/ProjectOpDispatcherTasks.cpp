@@ -100,10 +100,10 @@ TaskResult ProjectOpDispatcher::runTaskBody(
   try {
     result = body();
   } catch (...) {
-    m_host.flushScenePushes();
+    m_host.flushSceneSnapshot();
     throw;
   }
-  m_host.flushScenePushes();
+  m_host.flushSceneSnapshot();
   return result;
 }
 

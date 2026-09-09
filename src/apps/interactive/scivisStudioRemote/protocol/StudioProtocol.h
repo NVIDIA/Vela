@@ -121,8 +121,8 @@ constexpr int PROTOCOL_VERSION = 7;
   X(TransferScene,               120, ServerToClient)            \
   X(TransferLayer,               121, ServerToClient)            \
   /* No current sender: a scene change travels as one   */       \
-  /* TransferScene at the commit point. Kept because a  */       \
-  /* client still applies them, mirroring older servers */       \
+  /* TransferScene at the commit point. Reserved, not   */       \
+  /* renumbered; the client still applies them.         */       \
   X(ObjectAdded,                 122, ServerToClient)            \
   X(ObjectRemoved,               123, ServerToClient)            \
   /* Optimistic edits, no reply (140..) */                       \

@@ -224,7 +224,7 @@ Project &ProjectOpDispatcher::project()
 
 void ProjectOpDispatcher::finish(const ProjectOpReply &reply)
 {
-  m_host.flushScenePushes();
+  m_host.flushSceneSnapshot();
   m_host.send(encode(reply));
 }
 

@@ -60,4 +60,11 @@ vsr::app::Context *Modal::appContext() const
   return m_app ? m_app->appContext() : nullptr;
 }
 
+const vsr::ui::ObjectEditPolicy &Modal::objectEditPolicy() const
+{
+  // A modal with no application behind it has nothing to refuse.
+  static const vsr::ui::ObjectEditPolicy PERMISSIVE;
+  return m_app ? m_app->objectEditPolicy() : PERMISSIVE;
+}
+
 } // namespace vsr::ui::imgui

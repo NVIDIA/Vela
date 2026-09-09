@@ -23,7 +23,7 @@ namespace vsr::scivis_studio::protocol {
  *
  * The last two have no current sender -- the server sends one TransferScene
  * at each commit point instead -- but both directions still encode and
- * decode them.
+ * decode them, so the pair stays a live part of the protocol.
  *
  * The receiver constructs the paired messages class from the Message and a
  * target Scene, then calls execute().

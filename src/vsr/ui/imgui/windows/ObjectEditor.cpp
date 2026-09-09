@@ -13,11 +13,6 @@ ObjectEditor::ObjectEditor(Application *app, const char *name)
     : Window(app, name)
 {}
 
-void ObjectEditor::setEditPolicy(const vsr::ui::ObjectEditPolicy &policy)
-{
-  m_editPolicy = policy;
-}
-
 void ObjectEditor::buildUI()
 {
   auto selectedNode = appContext()->getFirstSelected();
@@ -34,7 +29,7 @@ void ObjectEditor::buildUI()
 
   if (auto *selectedObject = node->getObject(); selectedObject) {
     vsr::ui::buildUI_object(
-        *selectedObject, appContext()->vsr.scene, true, 0, m_editPolicy);
+        *selectedObject, appContext()->vsr.scene, true, 0, objectEditPolicy());
   } else if (node->isTransform()) {
     // Setup transform values //
 

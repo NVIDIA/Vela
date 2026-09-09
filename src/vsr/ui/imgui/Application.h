@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ExtensionManager.h"
+#include "vsr_ui_imgui.h"
 
 #include "modals/AppSettingsDialog.h"
 #include "modals/BlockingTaskModal.h"
@@ -68,6 +69,13 @@ class Application
   vsr::app::Context *appContext();
   UIConfig *uiConfig();
   CommandLineOptions *commandLineOptions();
+
+  // Which parameter edits this application's object editors may offer.
+  // Permissive by default; an application whose scene is not its own to
+  // change (the SciVis Studio client, whose edits must reach a server)
+  // narrows it once at startup and every window sees the same answer.
+  const vsr::ui::ObjectEditPolicy &objectEditPolicy() const;
+  void setObjectEditPolicy(const vsr::ui::ObjectEditPolicy &policy);
 
   // NOTE: These wrap SDL3's file/folder dialogs, which are ASYNCHRONOUS. The
   // call returns immediately and the chosen path is written into the out-param
@@ -193,6 +201,7 @@ class Application
 
   UIConfig m_uiConfig;
   CommandLineOptions m_commandLine;
+  vsr::ui::ObjectEditPolicy m_objectEditPolicy;
 
  private:
   void mainLoop();

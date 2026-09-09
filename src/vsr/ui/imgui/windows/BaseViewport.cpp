@@ -502,8 +502,11 @@ void BaseViewport::ui_menubar_Renderer()
       ImGui::Text("Parameters:");
       ImGui::Indent(INDENT_AMOUNT);
 
-      vsr::ui::buildUI_object(
-          *m_renderers.current, appContext()->vsr.scene, true);
+      vsr::ui::buildUI_object(*m_renderers.current,
+          appContext()->vsr.scene,
+          true,
+          0,
+          objectEditPolicy());
 
       ImGui::Unindent(INDENT_AMOUNT);
       ImGui::Separator();
@@ -624,7 +627,8 @@ void BaseViewport::ui_menubar_Camera()
               "Use Implicit Aspect Ratio", &m_camera.useImplicitAspectRatio))
         camera_setUseImplicitAspectRatio(m_camera.useImplicitAspectRatio);
       ImGui::Separator();
-      vsr::ui::buildUI_object(*m_camera.current, scene, true);
+      vsr::ui::buildUI_object(
+          *m_camera.current, scene, true, 0, objectEditPolicy());
       ImGui::Unindent(INDENT_AMOUNT);
     }
 

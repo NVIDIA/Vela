@@ -470,6 +470,7 @@ SCENARIO("ServerConnection announces a mid-session scene replacement",
     {
       auto second = f.source.createObject<vsr::scene::Geometry>("sphere");
       second->setName("second geometry");
+      second->setParameter("radius", 0.25f);
       messages::TransferScene resend(&f.source, false);
       f.server.send(
           encodeSceneMessage<StudioMessageType::TransferScene>(resend));
@@ -484,6 +485,16 @@ SCENARIO("ServerConnection announces a mid-session scene replacement",
         REQUIRE(f.mirrorPopulatedAtReplace);
         REQUIRE(f.bootstraps == 1);
         REQUIRE_FALSE(f.connection.bootstrapping());
+
+        AND_THEN("the replacement's objects carry their parameters")
+        {
+          // What the streaming ObjectAdded push could never deliver: it
+          // serialized an object at creation, before anything was set on it.
+          auto geometry = f.mirror.getObject<vsr::scene::Geometry>(1);
+          REQUIRE(geometry);
+          REQUIRE(geometry->name() == "second geometry");
+          REQUIRE(geometry->parameterValueAs<float>("radius") == 0.25f);
+        }
 
         AND_THEN("edits still flow afterwards")
         {

@@ -31,7 +31,11 @@ struct HistogramPanel : public EditorWindow
   HistogramPanel(vsr::ui::imgui::Application *app, EditorContext *context);
   ~HistogramPanel() override;
 
-  void onProjectReplaced() override;
+  // The mirror is about to be replaced: drop the plotted histogram, which
+  // belongs to an array of the scene going away. Not onProjectReplaced() --
+  // that fires on every snapshot, including ones that leave the scene
+  // alone, and it fires after the replacement rather than before it.
+  void dropMirrorReferences();
 
  private:
   struct ArrayChoice

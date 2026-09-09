@@ -97,6 +97,16 @@ UIConfig *Application::uiConfig()
   return &m_uiConfig;
 }
 
+const vsr::ui::ObjectEditPolicy &Application::objectEditPolicy() const
+{
+  return m_objectEditPolicy;
+}
+
+void Application::setObjectEditPolicy(const vsr::ui::ObjectEditPolicy &policy)
+{
+  m_objectEditPolicy = policy;
+}
+
 CommandLineOptions *Application::commandLineOptions()
 {
   return &m_commandLine;

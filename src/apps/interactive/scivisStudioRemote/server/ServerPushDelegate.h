@@ -32,11 +32,11 @@ namespace vsr::scivis_studio::server {
  * thread mutates the Scene; in this server only the render loop does.
  *
  * Example:
- *   auto *push = scene.updateDelegate().emplace<ServerPushDelegate>();
- *   push->setEnabled(true);
+ *   auto *recorder = scene.updateDelegate().emplace<ServerPushDelegate>();
+ *   recorder->setEnabled(true);
  *   importDataset();
- *   if (push->sceneDirty()) {
- *     push->clearSceneDirty();
+ *   if (recorder->sceneDirty()) {
+ *     recorder->clearSceneDirty();
  *     sendTransferScene();
  *   }
  */

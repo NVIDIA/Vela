@@ -157,9 +157,9 @@ bool mutatesProject(const ProjectRequest &request);
  * dataset id, the project's own directory -- it reads when the task runs,
  * because a task queued ahead of it (an OpenProject, say) may still change
  * the Project, and requests must take effect in the order sent. Before any
- * reply the host flushes scene pushes (the TransferScene a project reset
- * asked for), so the client's mirror never lags the snapshot that names
- * its objects.
+ * reply the host flushes the scene snapshot -- one TransferScene when the
+ * op changed the scene, nothing when it did not -- so the client's mirror
+ * never lags the Project Snapshot that names its objects.
  *
  * Example:
  *   ProjectOpDispatcher::Host host;
@@ -178,7 +178,7 @@ struct ProjectOpDispatcher
     ServerTaskRunner *tasks{nullptr};
     std::function<void(vsr::network::Message &&)> send;
     // Sends one TransferScene iff this op changed the scene.
-    std::function<void()> flushScenePushes;
+    std::function<void()> flushSceneSnapshot;
     // The UI-state tree stored with the project (ui-state round trip).
     protocol::SubtreePtr *uiState{nullptr};
   };

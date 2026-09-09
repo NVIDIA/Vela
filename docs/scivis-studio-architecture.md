@@ -22,7 +22,7 @@ flowchart LR
     M[Structural Mirror]
     UI -->|Project Ops| C
     C -->|replace from snapshot| P
-    C -->|apply scene pushes| M
+    C -->|apply scene snapshots| M
     M -->|inspect and edit parameters| UI
     VP -->|camera edits and controls| C
     C -->|latest frame| VP
@@ -44,15 +44,15 @@ flowchart LR
     SC --> R
   end
   C -->|Studio messages over TCP| S
-  S -->|replies, snapshots, scene pushes, task events| C
+  S -->|replies, snapshots, scene transfers, task events| C
   R -->|encoded pixels plus shotId and frame| C
 ```
 
 The server owns identity, project lifecycle, dataset residency, files, animation
 and ANARI rendering. The client owns interaction and presentation. Its Project
-Replica is read-only; its Structural Mirror contains scene structure and array
-descriptors, with opaque dataset interiors. Camera and other editable parameter
-values can change optimistically in the mirror.
+Replica is read-only; its Structural Mirror contains the full scene structure
+with every parameter, and arrays as descriptors only. Camera and other editable
+parameter values can change optimistically in the mirror.
 
 “Thin client” describes runtime responsibilities: the client still links the
 shared Studio model and VSR libraries. It has a presentation ImagePipeline,
@@ -76,7 +76,7 @@ Paths below are relative to `src/apps/interactive/` unless marked otherwise.
 | Project request dispatch | Validation, ordering, sync operations and task launch | [server/ProjectOpDispatcher.h](../src/apps/interactive/scivisStudioRemote/server/ProjectOpDispatcher.h), [ProjectOpDispatcherTasks.cpp](../src/apps/interactive/scivisStudioRemote/server/ProjectOpDispatcherTasks.cpp) |
 | Server Tasks | Single-lane execution, progress, cancellation, retained endings | [server/ServerTaskRunner.h](../src/apps/interactive/scivisStudioRemote/server/ServerTaskRunner.h) |
 | Shared Studio model | Project/dataset/shot/rig operations, revisions, persistence | [scivisStudio/ProjectContext.h](../src/apps/interactive/scivisStudio/ProjectContext.h), [ProjectSerialization.h](../src/apps/interactive/scivisStudio/ProjectSerialization.h) |
-| Scene synchronization | Structural object/layer pushes; full scene resend after rebuild | [server/ServerPushDelegate.h](../src/apps/interactive/scivisStudioRemote/server/ServerPushDelegate.h) |
+| Scene synchronization | Records structural changes; one whole-scene transfer at each commit point | [server/ServerPushDelegate.h](../src/apps/interactive/scivisStudioRemote/server/ServerPushDelegate.h) |
 | Playback and viewport rendering | Server clock, picking, AOVs, outlines and bounds | [server/Playback.h](../src/apps/interactive/scivisStudioRemote/server/Playback.h), [ViewportPasses.cpp](../src/apps/interactive/scivisStudioRemote/server/ViewportPasses.cpp) |
 | Server files and queries | Allowed roots, directory metadata, array histograms | [server/DataRoots.h](../src/apps/interactive/scivisStudioRemote/server/DataRoots.h), [RemoteBrowse.cpp](../src/apps/interactive/scivisStudioRemote/server/RemoteBrowse.cpp), [ArrayHistogram.cpp](../src/apps/interactive/scivisStudioRemote/server/ArrayHistogram.cpp) |
 | Headless client | Script the same connection core; record/assert results; optionally spawn server | [test_client/README.md](../src/apps/interactive/scivisStudioRemote/test_client/README.md), [TestSession.h](../src/apps/interactive/scivisStudioRemote/test_client/TestSession.h) |
@@ -180,18 +180,21 @@ Two lifecycle/testing exceptions help when navigating the code:
 | Return path | What changes on the client | Why it is separate |
 |---|---|---|
 | ProjectSnapshot | Replaces the whole Project Replica | A revision-driven commit marker for project mutations |
-| Structural scene pushes | Updates objects/layers in the Structural Mirror | Preserves server identities without sending bulk dataset arrays |
+| Structural scene transfer | Replaces objects/layers in the Structural Mirror | Preserves server identities and parameter values without sending bulk dataset arrays |
 | Frame header + pixels | Updates the displayed image and In-Motion Time | Keeps image/time paired without a project snapshot on every frame |
 
 A ProjectOpReply resolves a request; it does not itself replace the replica.
-Scene messages for a mutation precede its trailing snapshot. The implementation
-emits snapshots for revision changes, including failed operations that leave
-recorded state; refused and no-op operations have no snapshot.
+The scene message for a mutation precedes its trailing snapshot; a mutation
+that leaves the scene alone sends none. The implementation emits snapshots for
+revision changes, including failed operations that leave recorded state;
+refused and no-op operations have no snapshot.
 
 Editable parameter changes travel from the mirror through MirrorUpdateDelegate,
 with no success reply for each drag. Applying inbound changes suppresses the
-outbound delegate. ServerPushDelegate publishes structure, not ordinary
-parameter updates.
+outbound delegate. ServerPushDelegate only records that the scene changed; the
+server serializes it once, at the commit point, so an object reaches the mirror
+with the parameters its importer set rather than as the empty shell it was at
+creation.
 
 ## Read one action end to end
 

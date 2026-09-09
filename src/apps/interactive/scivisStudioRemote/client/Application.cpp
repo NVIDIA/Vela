@@ -245,6 +245,10 @@ vsr_ui::WindowArray Application::setupWindows()
 {
   auto windows = vsr_ui::Application::setupWindows();
 
+  // Every object editor in this application browses the mirror, including
+  // the viewport's renderer and camera menus.
+  setObjectEditPolicy(mirrorEditPolicy());
+
   auto *ctx = appContext();
 
   auto *log = new vsr_ui::Log(this);
@@ -254,13 +258,10 @@ vsr_ui::WindowArray Application::setupWindows()
   m_layerTree = layers;
   // Layer structure is server-push-only.
   layers->setEditMode(vsr_ui::LayerTree::EditMode::ReadOnly);
-  const auto editPolicy = mirrorEditPolicy();
   auto *objectEditor =
       new LockableWindow<vsr_ui::ObjectEditor>(this, &m_editorContext);
-  objectEditor->setEditPolicy(editPolicy);
   auto *databaseEditor =
       new LockableWindow<vsr_ui::DatabaseEditor>(this, &m_editorContext);
-  databaseEditor->setEditPolicy(editPolicy);
 
   auto *projectWindow = new ProjectWindow(this, &m_editorContext);
   auto *datasetEditor = new DatasetEditor(this, &m_editorContext);
@@ -269,6 +270,7 @@ vsr_ui::WindowArray Application::setupWindows()
   auto *cameraRigEditor = new CameraRigEditor(this, &m_editorContext);
   auto *timeline = new Timeline(this, &m_editorContext);
   auto *histogram = new HistogramPanel(this, &m_editorContext);
+  m_histogram = histogram;
   m_taskPanel = new TaskPanel(this, &m_editorContext);
 
   m_editors = {projectWindow,
@@ -696,8 +698,9 @@ void Application::disconnect()
 
 // Everything the UI holds into the mirror must go before the mirror is
 // cleared: selection (LayerNodeRefs), the layer tree's anchor/hover/menu
-// nodes and layer index, and the viewport's use-counted camera and renderer
-// refs, which would otherwise release against recreated slots.
+// nodes and layer index, the histogram plotted from an array of the scene
+// going away, and the viewport's use-counted camera and renderer refs,
+// which would otherwise release against recreated slots.
 void Application::releaseMirror()
 {
   auto *ctx = appContext();
@@ -705,6 +708,8 @@ void Application::releaseMirror()
   ctx->vsr.sceneLoadComplete = false;
   if (m_layerTree)
     m_layerTree->dropSceneReferences();
+  if (m_histogram)
+    m_histogram->dropMirrorReferences();
   if (m_viewport)
     m_viewport->dropMirrorReferences();
 }

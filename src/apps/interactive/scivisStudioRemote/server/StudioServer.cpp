@@ -89,7 +89,7 @@ ProjectOpDispatcher::Host StudioServer::makeDispatcherHost()
   host.dataRoots = &m_dataRoots;
   host.tasks = &m_tasks;
   host.send = [this](Message &&msg) { send(std::move(msg)); };
-  host.flushScenePushes = [this] { flushSceneSnapshot(); };
+  host.flushSceneSnapshot = [this] { flushSceneSnapshot(); };
   host.uiState = &m_uiState;
   return host;
 }
@@ -338,7 +338,7 @@ bool StudioServer::setupRendering(std::string *error)
       m_pipeline.emplace_back<vsr::rendering::CopyFromColorBufferPass>();
   copy->setExternalBuffer(m_colorBytes);
 
-  m_push = scene.updateDelegate().emplace<ServerPushDelegate>();
+  m_sceneRecorder = scene.updateDelegate().emplace<ServerPushDelegate>();
 
   vsr::core::logStatus(
       "[StudioServer] rendering shot '%s' with renderer '%s' at %ux%u",
@@ -394,9 +394,9 @@ void StudioServer::teardown()
   }
 
   auto &scene = m_ctx.vsr.scene;
-  if (m_push) {
-    scene.updateDelegate().erase(m_push);
-    m_push = nullptr;
+  if (m_sceneRecorder) {
+    scene.updateDelegate().erase(m_sceneRecorder);
+    m_sceneRecorder = nullptr;
   }
   // Passes hold ANARI handles: release them before the device goes.
   m_viewport.teardown();
@@ -432,9 +432,8 @@ void StudioServer::run()
     applyControlState();
     if (m_state == SessionState::Bootstrapping)
       bootstrap();
-    // Backstop for the scene changes that reach no commit point of their
-    // own (playback advancing a file-animation dataset, a rebind); every
-    // dispatcher path has already flushed by now.
+    // Backstop for a scene change with no commit point of its own; every
+    // dispatcher path has already flushed by the time the loop gets here.
     flushSceneSnapshot();
     // One Server Task per iteration; frames wait while it runs. A shot
     // render outlives its session (it runs with nobody listening and the
@@ -559,11 +558,11 @@ void StudioServer::applyControlState()
   if (!control.edits.empty()) {
     // Origin-based echo suppression: what the client just told us must not be
     // pushed back at it.
-    const bool pushWasEnabled = m_push && m_push->enabled();
-    setPushEnabled(false);
+    const bool wasRecording = m_sceneRecorder && m_sceneRecorder->enabled();
+    setRecordingEnabled(false);
     for (const auto &edit : control.edits)
       std::visit([this](const auto &e) { applyEdit(e); }, edit);
-    setPushEnabled(pushWasEnabled);
+    setRecordingEnabled(wasRecording);
   }
 
   if (control.time)
@@ -723,9 +722,9 @@ void StudioServer::endSession(const std::string &reason, bool closeSocket)
 void StudioServer::resetSession()
 {
   m_session = {};
-  setPushEnabled(false);
-  if (m_push)
-    m_push->clearSceneDirty();
+  setRecordingEnabled(false);
+  if (m_sceneRecorder)
+    m_sceneRecorder->clearSceneDirty();
   setStreaming(false);
   m_tasks.dropQueued();
   m_playback.cancelScrub();
@@ -756,7 +755,7 @@ void StudioServer::bootstrap()
   send(encode(BootstrapEnd{}));
 
   setState(SessionState::Established);
-  setPushEnabled(true);
+  setRecordingEnabled(true);
 }
 
 void StudioServer::followProjectRevisions()
@@ -792,9 +791,12 @@ void StudioServer::sendProjectSnapshot()
 // what keeps a scene-untouching op (renaming a shot) to its reply alone.
 void StudioServer::flushSceneSnapshot()
 {
-  if (!m_push || !m_push->sceneDirty())
+  // Nothing to send to: the flag stays set rather than being dropped, and
+  // resetSession() clears it when the session that recorded it ends.
+  if (!m_sceneRecorder || !m_sceneRecorder->sceneDirty()
+      || !sessionEstablished())
     return;
-  m_push->clearSceneDirty();
+  m_sceneRecorder->clearSceneDirty();
   sendSceneSnapshot();
 }
 
@@ -969,10 +971,10 @@ void StudioServer::setStreaming(bool streaming)
   }
 }
 
-void StudioServer::setPushEnabled(bool enabled)
+void StudioServer::setRecordingEnabled(bool enabled)
 {
-  if (m_push)
-    m_push->setEnabled(enabled);
+  if (m_sceneRecorder)
+    m_sceneRecorder->setEnabled(enabled);
 }
 
 // Viewport ///////////////////////////////////////////////////////////////////

@@ -342,7 +342,11 @@ void MultiDeviceViewport::ui_menubar()
       ImGui::Text("Parameters:");
       ImGui::Indent(INDENT_AMOUNT);
 
-      vsr::ui::buildUI_object(m_rendererObject, appContext()->vsr.scene, false);
+      vsr::ui::buildUI_object(m_rendererObject,
+          appContext()->vsr.scene,
+          false,
+          0,
+          objectEditPolicy());
 
       ImGui::Unindent(INDENT_AMOUNT);
       ImGui::Separator();

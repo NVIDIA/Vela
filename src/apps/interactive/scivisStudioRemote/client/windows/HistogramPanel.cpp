@@ -62,11 +62,10 @@ HistogramPanel::HistogramPanel(
 
 HistogramPanel::~HistogramPanel() = default;
 
-// The plotted histogram belongs to an array in the mirror that the snapshot
-// just replaced; keeping it would draw the old data under the new scene's
+// Keeping the plot would draw the old scene's data under the new scene's
 // "select an object" hint. The identity the combo was listed for goes too,
 // so the next selection re-lists.
-void HistogramPanel::onProjectReplaced()
+void HistogramPanel::dropMirrorReferences()
 {
   m_result.reset();
   m_plot.clear();

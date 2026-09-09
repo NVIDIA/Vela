@@ -907,7 +907,9 @@ void ServerConnection::applySceneMessage(
     break;
   // No current sender: the server records structural changes and sends one
   // TransferScene at the commit point instead of streaming these two during
-  // a mutation. The apply paths stay so an older server still mirrors.
+  // a mutation. The apply paths stay because the message pair is still part
+  // of the protocol (see StudioProtocol.h) and the mirror must answer
+  // anything the wire may carry.
   case StudioMessageType::ObjectAdded:
     applied = messages::NewObject(msg, m_mirror).execute();
     break;

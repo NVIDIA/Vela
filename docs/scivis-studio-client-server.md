@@ -61,8 +61,9 @@ optimistic and one-way. All object identity is minted by the server (ADR
 from creation replies and scene pushes.
 
 Layer structure is server-push-only: there is **no client layer-edit message
-in the protocol at all**. The server pushes whole-layer `TransferLayer`
-snapshots; the client's `LayerTree` ships as a read-only inspector
+in the protocol at all**. The server sends whole-scene `TransferScene`
+snapshots (and `TransferLayer` at bootstrap); the client's `LayerTree` ships
+as a read-only inspector
 (`LayerTree::EditMode::ReadOnly` in `vsr_ui_imgui`). A pushed layer carries
 each node's server index (`LayerNodeNumbering::Preserved`) and the mirror
 places every node back in that slot, so a `SceneNodeRef` names the same node
@@ -203,8 +204,10 @@ outside Studio's set is **rejected with an error**, never silently ignored.
   `TimeAdvanceWarning{frame, message}` (server→client).
 - **Scene, client→server** (optimistic, no reply): `SetObjectParameter`,
   `RemoveObjectParameter`, `SetNodeTransform` (rig-owned nodes).
-- **Scene, server→client**: structural `TransferScene`, `TransferLayer`
-  snapshots, object added/removed pushes, `ProjectSnapshot`.
+- **Scene, server→client**: structural `TransferScene` and `TransferLayer`
+  snapshots, `ProjectSnapshot`. (`ObjectAdded`/`ObjectRemoved` are reserved
+  values with no current sender: one `TransferScene` per commit point
+  replaced them.)
 - **Viewport**: `Pick{x, y}` (request/reply),
   `SetOutline{objectIdentity?}` and `ViewportSettings` (optimistic one-way).
 - **On-demand**: `RequestArrayHistogram` (sync).

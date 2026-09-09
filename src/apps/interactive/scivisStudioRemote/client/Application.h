@@ -36,6 +36,7 @@ namespace vsr::scivis_studio::client {
 
 struct StudioViewport;
 struct EditorWindow;
+struct HistogramPanel;
 struct TaskPanel;
 
 // What `--host H`, `--port N` and `--connect` set; the rest of argv goes to
@@ -141,6 +142,7 @@ class Application : public vsr::ui::imgui::Application
   EditorContext m_editorContext;
   StudioViewport *m_viewport{nullptr};
   vsr::ui::imgui::LayerTree *m_layerTree{nullptr};
+  HistogramPanel *m_histogram{nullptr};
   std::vector<EditorWindow *> m_editors;
   TaskPanel *m_taskPanel{nullptr};
   std::unique_ptr<modals::ProjectLocationDialog> m_projectLocationDialog;

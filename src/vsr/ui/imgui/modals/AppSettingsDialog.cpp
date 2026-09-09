@@ -142,7 +142,8 @@ void AppSettingsDialog::buildUI_offlineRenderSettings()
       1,
       std::numeric_limits<int>::max());
 
-  tooltipForPreviousItem("Number of total frames for [0.0-1.0] animation time.");
+  tooltipForPreviousItem(
+      "Number of total frames for [0.0-1.0] animation time.");
 
   ImGui::DragInt("frameIncrement",
       (int *)&ctx->offline.frame.frameIncrement,
@@ -162,7 +163,8 @@ void AppSettingsDialog::buildUI_offlineRenderSettings()
       0,
       ctx->offline.frame.numFrames - 1);
 
-  tooltipForPreviousItem("Offset into total frame count (when rendering subset)");
+  tooltipForPreviousItem(
+      "Offset into total frame count (when rendering subset)");
 
   doFix |= ImGui::DragInt("end frame offset",
       (int *)&ctx->offline.frame.endFrame,
@@ -270,7 +272,9 @@ void AppSettingsDialog::buildUI_offlineRenderSettings()
     vsr::ui::buildUI_object(
         ctx->offline.renderer.rendererObjects[activeRenderer],
         ctx->vsr.scene,
-        false);
+        false,
+        0,
+        objectEditPolicy());
     ImGui::Unindent(vsr::ui::INDENT_AMOUNT);
   }
 

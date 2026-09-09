@@ -343,7 +343,9 @@ struct StudioServer
   void followCameraEdit(const vsr::scene::Object *object);
   void setState(SessionState state);
   void setStreaming(bool streaming);
-  void setPushEnabled(bool enabled);
+  // Whether structural scene changes are recorded at all; off while the
+  // server applies a client's own edits and until a bootstrap has finished.
+  void setRecordingEnabled(bool enabled);
 
   // Viewport (loop thread)
   // Applies the latched ViewportSettings and SetOutline, and takes over a
@@ -369,7 +371,7 @@ struct StudioServer
   vsr::rendering::AnariSceneRenderPass *m_scenePass{nullptr};
   std::vector<uint8_t> m_colorBytes; // RGBA8, filled by the pipeline
   std::vector<std::byte> m_encodedPixels;
-  ServerPushDelegate *m_push{nullptr};
+  ServerPushDelegate *m_sceneRecorder{nullptr};
 
   // Viewport (loop thread)
   ViewportPasses m_viewport;

@@ -222,7 +222,11 @@ void TransferFunctionEditor::buildUI_drawEditor()
 void TransferFunctionEditor::buildUI_opacityScale()
 {
   auto *param = m_volume->parameter("opacity");
-  if (!vsr::ui::buildUI_parameter(*m_volume, *param, appContext()->vsr.scene))
+  if (!vsr::ui::buildUI_parameter(*m_volume,
+          *param,
+          appContext()->vsr.scene,
+          false,
+          objectEditPolicy()))
     return;
 
   // Apply to all other volumes
@@ -235,7 +239,11 @@ void TransferFunctionEditor::buildUI_opacityScale()
 void TransferFunctionEditor::buildUI_unitDistance()
 {
   auto *param = m_volume->parameter("unitDistance");
-  if (!vsr::ui::buildUI_parameter(*m_volume, *param, appContext()->vsr.scene))
+  if (!vsr::ui::buildUI_parameter(*m_volume,
+          *param,
+          appContext()->vsr.scene,
+          false,
+          objectEditPolicy()))
     return;
 
   // Apply to all other volumes
@@ -249,17 +257,19 @@ void TransferFunctionEditor::buildUI_valueRange()
 {
   ImGui::BeginDisabled(!m_volume);
 
-  if (vsr::ui::buildUI_parameter(
-      *m_volume, *m_volume->parameter("valueRange"), appContext()->vsr.scene)) {
-
+  if (vsr::ui::buildUI_parameter(*m_volume,
+          *m_volume->parameter("valueRange"),
+          appContext()->vsr.scene,
+          false,
+          objectEditPolicy())) {
     auto range = m_volume->parameterValueAs<vsr::math::box1>("valueRange");
 
     for (auto *volume : m_otherVolumes) {
       auto *field =
           volume->parameterValueAsObject<vsr::scene::SpatialField>("value");
-        volume->setParameter("valueRange", ANARI_FLOAT32_BOX1, &range);
-      }
+      volume->setParameter("valueRange", ANARI_FLOAT32_BOX1, &range);
     }
+  }
 
   if (ImGui::Button("reset##valueRange") && m_volume) {
     auto *field =
@@ -272,7 +282,6 @@ void TransferFunctionEditor::buildUI_valueRange()
       }
     }
   }
-
 
   ImGui::SameLine();
   if (ImGui::Button("Load")) {
@@ -388,7 +397,7 @@ void TransferFunctionEditor::setObjectPtrsFromSelectedObject()
   const auto &selectedNodes = appContext()->getSelectedNodes();
 
   // Collect all volume pointers from selection
-  std::vector<vsr::scene::Volume*> allVolumes;
+  std::vector<vsr::scene::Volume *> allVolumes;
   for (const auto &node : selectedNodes) {
     if (!node.valid())
       continue;
@@ -471,7 +480,8 @@ void TransferFunctionEditor::setObjectPtrsFromSelectedObject()
       vsr::math::float4 scalarColor{1.f, 1.f, 1.f, 1.f};
       if (auto v = firstVolume->parameterValueAs<vsr::math::float4>("color"))
         scalarColor = *v;
-      else if (auto v = firstVolume->parameterValueAs<vsr::math::float3>("color"))
+      else if (auto v =
+                   firstVolume->parameterValueAs<vsr::math::float3>("color"))
         scalarColor = vsr::math::float4((*v).x, (*v).y, (*v).z, 1.f);
 
       auto &cm = m_tfnsColorPoints[0];
@@ -524,14 +534,12 @@ void TransferFunctionEditor::loadDefaultMaps()
       [&](const std::vector<vsr::core::ColorPoint> &colorPoints,
           const std::string &name,
           const std::string &source) {
-        auto existing =
-            std::find(m_tfnsNames.begin(), m_tfnsNames.end(), name);
+        auto existing = std::find(m_tfnsNames.begin(), m_tfnsNames.end(), name);
         if (existing != m_tfnsNames.end()) {
           auto index = std::distance(m_tfnsNames.begin(), existing);
           m_tfnsColorPoints[index] = colorPoints;
           vsr::core::logStatus(
-              ("[tfn_editor] Replaced color map '" + name + "' from "
-                  + source)
+              ("[tfn_editor] Replaced color map '" + name + "' from " + source)
                   .c_str());
         } else {
           m_tfnsColorPoints.push_back(colorPoints);
@@ -548,8 +556,7 @@ void TransferFunctionEditor::loadDefaultMaps()
   addColorMap(vsr::core::colormap::grayscale, "Grayscale");
 
   for (const auto &colorMap : vsr::io::loadUserColorMaps()) {
-    addColorPoints(
-        colorMap.colorPoints, colorMap.name, colorMap.path.string());
+    addColorPoints(colorMap.colorPoints, colorMap.name, colorMap.path.string());
   }
 };
 
@@ -561,7 +568,8 @@ void TransferFunctionEditor::loadColormap(
 
   if (tfn.colorPoints.empty() || tfn.opacityPoints.empty()) {
     vsr::core::logError(
-        ("[tfn_editor] Failed to load transfer function from file: " + filepath).c_str());
+        ("[tfn_editor] Failed to load transfer function from file: " + filepath)
+            .c_str());
     return;
   }
 
@@ -591,16 +599,16 @@ void TransferFunctionEditor::loadColormap(
       }
     }
 
-    smartOpacityPoints.push_back(opacityPoints.back()); // Always keep last point
+    smartOpacityPoints.push_back(
+        opacityPoints.back()); // Always keep last point
 
     // Only use smart points if we reduced the count significantly
     if (smartOpacityPoints.size() < opacityPoints.size() * 0.8f) {
       opacityPoints = smartOpacityPoints;
-      vsr::core::logStatus(
-          ("[tfn_editor] Reduced opacity control points from "
-              + std::to_string(colors.size()) + " to "
-              + std::to_string(opacityPoints.size()) + " points")
-              .c_str());
+      vsr::core::logStatus(("[tfn_editor] Reduced opacity control points from "
+          + std::to_string(colors.size()) + " to "
+          + std::to_string(opacityPoints.size()) + " points")
+                               .c_str());
     }
   }
 
@@ -649,7 +657,8 @@ void TransferFunctionEditor::loadColormap(
 void TransferFunctionEditor::updateColormaps()
 {
   if (!m_colorMapArray) {
-    // Map 0 = "{from volume}": the scalar is the canonical value, nothing to do.
+    // Map 0 = "{from volume}": the scalar is the canonical value, nothing to
+    // do.
     if (m_currentMap == 0)
       return;
 
@@ -684,7 +693,8 @@ void TransferFunctionEditor::updateColormaps()
 
   // Update reference volume
   if (m_volume) {
-    auto *colorArray = m_volume->parameterValueAsObject<vsr::scene::Array>("color");
+    auto *colorArray =
+        m_volume->parameterValueAsObject<vsr::scene::Array>("color");
     if (colorArray) {
       auto co = getSampledColorsAndOpacities(colorArray->size());
       auto *colorMap = colorArray->mapAs<vsr::math::float4>();
@@ -700,7 +710,8 @@ void TransferFunctionEditor::updateColormaps()
 
   // Update other volumes
   for (auto *volume : m_otherVolumes) {
-    auto *colorArray = volume->parameterValueAsObject<vsr::scene::Array>("color");
+    auto *colorArray =
+        volume->parameterValueAsObject<vsr::scene::Array>("color");
     if (!colorArray)
       continue;
 
@@ -718,9 +729,8 @@ void TransferFunctionEditor::updateColormaps()
 
 void TransferFunctionEditor::updateTfnPaletteTexture()
 {
-  auto width = m_colorMapArray
-      ? m_colorMapArray->size()
-      : std::max(m_tfnColorPoints->size(), size_t(2));
+  auto width = m_colorMapArray ? m_colorMapArray->size()
+                               : std::max(m_tfnColorPoints->size(), size_t(2));
   if (width == 0) {
     vsr::core::logError(
         "[tfn_editor] No color map data, cannot update SDL image!");
