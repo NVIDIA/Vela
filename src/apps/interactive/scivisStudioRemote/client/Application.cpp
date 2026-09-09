@@ -227,6 +227,7 @@ vsr_ui::WindowArray Application::setupWindows()
   m_viewport = new StudioViewport(
       this, &ctx->view.manipulator, m_connection.get(), "Viewport");
   auto *layers = new vsr_ui::LayerTree(this);
+  m_layerTree = layers;
   // Layer structure is server-push-only.
   layers->setEditMode(vsr_ui::LayerTree::EditMode::ReadOnly);
   auto *objectEditor =
@@ -667,13 +668,16 @@ void Application::disconnect()
 }
 
 // Everything the UI holds into the mirror must go before the mirror is
-// cleared: selection (LayerNodeRefs) and the viewport's use-counted camera
-// and renderer refs, which would otherwise release against recreated slots.
+// cleared: selection (LayerNodeRefs), the layer tree's anchor/hover/menu
+// nodes and layer index, and the viewport's use-counted camera and renderer
+// refs, which would otherwise release against recreated slots.
 void Application::releaseMirror()
 {
   auto *ctx = appContext();
   ctx->clearSelected();
   ctx->vsr.sceneLoadComplete = false;
+  if (m_layerTree)
+    m_layerTree->dropSceneReferences();
   if (m_viewport)
     m_viewport->dropMirrorReferences();
 }

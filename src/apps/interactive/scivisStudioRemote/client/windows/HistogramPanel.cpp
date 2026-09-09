@@ -62,6 +62,20 @@ HistogramPanel::HistogramPanel(
 
 HistogramPanel::~HistogramPanel() = default;
 
+// The plotted histogram belongs to an array in the mirror that the snapshot
+// just replaced; keeping it would draw the old data under the new scene's
+// "select an object" hint. The identity the combo was listed for goes too,
+// so the next selection re-lists.
+void HistogramPanel::onProjectReplaced()
+{
+  m_result.reset();
+  m_plot.clear();
+  m_resultLabel.clear();
+  m_error.clear();
+  m_listedFor = {};
+  m_choice = 0;
+}
+
 std::vector<HistogramPanel::ArrayChoice> HistogramPanel::arrayChoices(
     const vsr::scene::Object &object) const
 {

@@ -31,6 +31,8 @@ struct HistogramPanel : public EditorWindow
   HistogramPanel(vsr::ui::imgui::Application *app, EditorContext *context);
   ~HistogramPanel() override;
 
+  void onProjectReplaced() override;
+
  private:
   struct ArrayChoice
   {

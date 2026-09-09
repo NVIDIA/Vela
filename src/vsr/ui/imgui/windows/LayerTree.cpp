@@ -51,6 +51,14 @@ void LayerTree::setEditMode(EditMode mode)
   m_editMode = mode;
 }
 
+void LayerTree::dropSceneReferences()
+{
+  m_anchorNode = {};
+  m_hoveredNode = VSR_INVALID_INDEX;
+  m_menuNode = VSR_INVALID_INDEX;
+  m_layerIdx = 0;
+}
+
 bool LayerTree::canEdit() const
 {
   return m_editMode != EditMode::ReadOnly;

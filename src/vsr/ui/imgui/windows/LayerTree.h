@@ -31,6 +31,15 @@ struct LayerTree : public Window
 
   void setEditMode(EditMode mode);
 
+  // Drop everything the widget remembers about the current scene: the
+  // selection anchor, the hovered and context-menu nodes and the chosen
+  // layer. Applications that replace the whole scene under a live widget
+  // (the SciVis Studio client, whenever a Project Snapshot replaces the
+  // Structural Mirror) must call this before the old layers are destroyed:
+  // a LayerNodeRef has no generation counter, so a retained one still
+  // reports valid() while dangling. Harmless to call at any other time.
+  void dropSceneReferences();
+
  private:
   bool canEdit() const; // not ReadOnly
   bool canAddRemoveLayers() const; // Full

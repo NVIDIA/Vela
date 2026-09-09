@@ -28,6 +28,10 @@ struct AddStaticDatasetDialog;
 struct ProjectLocationDialog;
 } // namespace vsr::scivis_studio::modals
 
+namespace vsr::ui::imgui {
+struct LayerTree;
+}
+
 namespace vsr::scivis_studio::client {
 
 struct StudioViewport;
@@ -136,6 +140,7 @@ class Application : public vsr::ui::imgui::Application
   std::unique_ptr<ServerConnection> m_connection;
   EditorContext m_editorContext;
   StudioViewport *m_viewport{nullptr};
+  vsr::ui::imgui::LayerTree *m_layerTree{nullptr};
   std::vector<EditorWindow *> m_editors;
   TaskPanel *m_taskPanel{nullptr};
   std::unique_ptr<modals::ProjectLocationDialog> m_projectLocationDialog;
