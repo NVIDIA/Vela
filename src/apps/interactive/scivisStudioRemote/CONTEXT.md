@@ -105,10 +105,13 @@ Ops.
 _Avoid_: client project, local project
 
 **Opaque Dataset**:
-A dataset as the Structural Mirror holds it: its root node and project
-metadata only, with the interior subtree living solely on the server.
-On-demand subtree expansion is a reserved protocol affordance, not a v1
-feature.
+A dataset as the Structural Mirror holds it: its full object and layer
+structure with every parameter, but arrays as descriptors only (type, shape,
+element count) — bulk contents stay on the server. Opacity is a property of
+array *contents*, never of structure. A client can name and edit every
+object a dataset creates, and asks the server about contents it cannot read
+(Array Histogram).
+_Avoid_: partial dataset, dataset stub, subtree expansion
 
 **Connection State**:
 The client's explicit state toward its server: `NeverConnected`, `Connected`,

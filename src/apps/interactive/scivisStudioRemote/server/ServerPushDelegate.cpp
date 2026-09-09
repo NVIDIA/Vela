@@ -2,25 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "ServerPushDelegate.h"
-// vsr_scivis_studio_protocol
-#include "SceneMessages.h"
-// vsr_network
-#include "vsr/network/messages/NewObject.hpp"
-#include "vsr/network/messages/RemoveObject.hpp"
-#include "vsr/network/messages/TransferLayer.hpp"
 
 namespace vsr::scivis_studio::server {
-
-using namespace protocol;
-namespace messages = vsr::network::messages;
-
-ServerPushDelegate::ServerPushDelegate(vsr::scene::Scene *scene,
-    SendFunction send,
-    ResendSceneFunction requestSceneResend)
-    : m_scene(scene),
-      m_send(std::move(send)),
-      m_requestSceneResend(std::move(requestSceneResend))
-{}
 
 bool ServerPushDelegate::enabled() const
 {
@@ -32,52 +15,57 @@ void ServerPushDelegate::setEnabled(bool enabled)
   m_enabled = enabled;
 }
 
+bool ServerPushDelegate::sceneDirty() const
+{
+  return m_sceneDirty;
+}
+
+void ServerPushDelegate::clearSceneDirty()
+{
+  m_sceneDirty = false;
+}
+
 void ServerPushDelegate::signalObjectAdded(const vsr::scene::Object *obj)
 {
-  if (!m_enabled || !obj)
-    return;
-  messages::NewObject message(obj);
-  m_send(encodeSceneMessage<StudioMessageType::ObjectAdded>(message));
+  if (obj)
+    markDirty();
 }
 
 void ServerPushDelegate::signalObjectRemoved(const vsr::scene::Object *obj)
 {
-  if (!m_enabled || !obj)
-    return;
-  messages::RemoveObject message(obj);
-  m_send(encodeSceneMessage<StudioMessageType::ObjectRemoved>(message));
+  if (obj)
+    markDirty();
 }
 
 void ServerPushDelegate::signalRemoveAllObjects()
 {
-  if (!m_enabled)
-    return;
-  m_requestSceneResend();
+  markDirty();
 }
 
 void ServerPushDelegate::signalLayerAdded(const vsr::scene::Layer *layer)
 {
-  sendLayer(layer);
+  if (layer)
+    markDirty();
 }
 
 void ServerPushDelegate::signalLayerStructureUpdated(
     const vsr::scene::Layer *layer)
 {
-  sendLayer(layer);
+  if (layer)
+    markDirty();
 }
 
 void ServerPushDelegate::signalLayerTransformUpdated(
     const vsr::scene::Layer *layer)
 {
-  sendLayer(layer);
+  if (layer)
+    markDirty();
 }
 
-void ServerPushDelegate::sendLayer(const vsr::scene::Layer *layer)
+void ServerPushDelegate::markDirty()
 {
-  if (!m_enabled || !m_scene || !layer)
-    return;
-  messages::TransferLayer message(m_scene, layer);
-  m_send(encodeSceneMessage<StudioMessageType::TransferLayer>(message));
+  if (m_enabled)
+    m_sceneDirty = true;
 }
 
 } // namespace vsr::scivis_studio::server

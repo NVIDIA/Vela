@@ -905,6 +905,9 @@ void ServerConnection::applySceneMessage(
   case StudioMessageType::TransferLayer:
     applied = messages::TransferLayer(msg, m_mirror).execute();
     break;
+  // No current sender: the server records structural changes and sends one
+  // TransferScene at the commit point instead of streaming these two during
+  // a mutation. The apply paths stay so an older server still mirrors.
   case StudioMessageType::ObjectAdded:
     applied = messages::NewObject(msg, m_mirror).execute();
     break;

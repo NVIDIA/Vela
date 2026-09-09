@@ -177,7 +177,7 @@ struct ProjectOpDispatcher
     const DataRoots *dataRoots{nullptr};
     ServerTaskRunner *tasks{nullptr};
     std::function<void(vsr::network::Message &&)> send;
-    // Sends the pending TransferScene, if a scene reset requested one.
+    // Sends one TransferScene iff this op changed the scene.
     std::function<void()> flushScenePushes;
     // The UI-state tree stored with the project (ui-state round trip).
     protocol::SubtreePtr *uiState{nullptr};

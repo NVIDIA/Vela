@@ -89,10 +89,7 @@ ProjectOpDispatcher::Host StudioServer::makeDispatcherHost()
   host.dataRoots = &m_dataRoots;
   host.tasks = &m_tasks;
   host.send = [this](Message &&msg) { send(std::move(msg)); };
-  host.flushScenePushes = [this] {
-    if (m_session.sceneResendPending)
-      sendSceneSnapshot();
-  };
+  host.flushScenePushes = [this] { flushSceneSnapshot(); };
   host.uiState = &m_uiState;
   return host;
 }
@@ -341,10 +338,7 @@ bool StudioServer::setupRendering(std::string *error)
       m_pipeline.emplace_back<vsr::rendering::CopyFromColorBufferPass>();
   copy->setExternalBuffer(m_colorBytes);
 
-  m_push = scene.updateDelegate().emplace<ServerPushDelegate>(
-      &scene,
-      [this](Message &&msg) { send(std::move(msg)); },
-      [this]() { m_session.sceneResendPending = true; });
+  m_push = scene.updateDelegate().emplace<ServerPushDelegate>();
 
   vsr::core::logStatus(
       "[StudioServer] rendering shot '%s' with renderer '%s' at %ux%u",
@@ -438,8 +432,10 @@ void StudioServer::run()
     applyControlState();
     if (m_state == SessionState::Bootstrapping)
       bootstrap();
-    if (m_session.sceneResendPending)
-      sendSceneSnapshot();
+    // Backstop for the scene changes that reach no commit point of their
+    // own (playback advancing a file-animation dataset, a rebind); every
+    // dispatcher path has already flushed by now.
+    flushSceneSnapshot();
     // One Server Task per iteration; frames wait while it runs. A shot
     // render outlives its session (it runs with nobody listening and the
     // next bootstrap replays its ending).
@@ -728,6 +724,8 @@ void StudioServer::resetSession()
 {
   m_session = {};
   setPushEnabled(false);
+  if (m_push)
+    m_push->clearSceneDirty();
   setStreaming(false);
   m_tasks.dropQueued();
   m_playback.cancelScrub();
@@ -788,9 +786,20 @@ void StudioServer::sendProjectSnapshot()
   send(encode(ProjectSnapshot{m_projectContext.project()}));
 }
 
+// The commit point of every scene-changing mutation: one structure-only
+// TransferScene carrying the objects with their parameters and the layers,
+// which is all the mirror needs. Sending nothing when the scene is clean is
+// what keeps a scene-untouching op (renaming a shot) to its reply alone.
+void StudioServer::flushSceneSnapshot()
+{
+  if (!m_push || !m_push->sceneDirty())
+    return;
+  m_push->clearSceneDirty();
+  sendSceneSnapshot();
+}
+
 void StudioServer::sendSceneSnapshot()
 {
-  m_session.sceneResendPending = false;
   if (!sessionEstablished())
     return;
   messages::TransferScene transfer(&m_ctx.vsr.scene, false);

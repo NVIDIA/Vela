@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Color maps: a ColorMapRecord and its scene-side Array are created together,
-# so the reply names both the record id and the object (an ObjectAdded push
-# precedes it), renamed and removed as a pair.
+# so the reply names both the record id and the object (the TransferScene
+# that commits the mutation precedes it), renamed and removed as a pair.
 
 connect
 assert project.colorMaps == 0

@@ -26,6 +26,8 @@
 #include "ViewportMessages.h"
 // vsr_scivis_studio_model
 #include "ProjectSerialization.h"
+// vsr_network
+#include "vsr/network/messages/TransferScene.hpp"
 // vsr_scene
 #include "vsr/scene/Scene.hpp"
 // vsr_core
@@ -824,7 +826,7 @@ SCENARIO("StudioServer serves project, shot, rig and color map ops",
 
       THEN("lights are added as scene objects and removed again")
       {
-        const auto added = client.count(StudioMessageType::ObjectAdded);
+        const auto scenes = client.count(StudioMessageType::TransferScene);
         reply = session.request(AddLightToRig{0, rig->lightRigId, "point"});
         REQUIRE(reply.ok);
         const auto light = results<LightAddedResult>(reply);
@@ -832,18 +834,18 @@ SCENARIO("StudioServer serves project, shot, rig and color map ops",
         REQUIRE(light->lightNode.layerName == "studio");
         REQUIRE(light->lightNode.nodeIndex != VSR_INVALID_INDEX);
         REQUIRE(session.waitForSnapshots(++snapshots));
-        REQUIRE(client.count(StudioMessageType::ObjectAdded) == added + 1);
+        REQUIRE(client.count(StudioMessageType::TransferScene) == scenes + 1);
 
         reply = session.request(AddLightToRig{0, rig->lightRigId, "laser"});
         REQUIRE_FALSE(reply.ok);
         REQUIRE(reply.error.find("laser") != std::string::npos);
 
-        const auto removed = client.count(StudioMessageType::ObjectRemoved);
+        const auto afterAdd = client.count(StudioMessageType::TransferScene);
         reply = session.request(
             RemoveLightFromRig{0, rig->lightRigId, light->lightNode});
         REQUIRE(reply.ok);
         REQUIRE(session.waitForSnapshots(++snapshots));
-        REQUIRE(client.count(StudioMessageType::ObjectRemoved) == removed + 1);
+        REQUIRE(client.count(StudioMessageType::TransferScene) == afterAdd + 1);
 
         reply = session.request(
             RemoveLightFromRig{0, rig->lightRigId, light->lightNode});
@@ -918,7 +920,7 @@ SCENARIO("StudioServer serves project, shot, rig and color map ops",
 
     WHEN("color maps are created, renamed and removed")
     {
-      const auto added = client.count(StudioMessageType::ObjectAdded);
+      const auto scenes = client.count(StudioMessageType::TransferScene);
       auto reply = session.request(CreateColorMap{0, "Heat"});
       REQUIRE(reply.ok);
       const auto created = results<ColorMapCreatedResult>(reply);
@@ -929,7 +931,7 @@ SCENARIO("StudioServer serves project, shot, rig and color map ops",
       {
         REQUIRE(created->object.type == ANARI_ARRAY1D);
         REQUIRE(created->object.objectIndex != VSR_INVALID_INDEX);
-        REQUIRE(client.count(StudioMessageType::ObjectAdded) == added + 1);
+        REQUIRE(client.count(StudioMessageType::TransferScene) == scenes + 1);
         const auto project = session.latestSnapshot().project;
         REQUIRE(project.colorMaps.size() == 1);
         REQUIRE(project.colorMaps.front().id == created->colorMapId);
@@ -952,11 +954,11 @@ SCENARIO("StudioServer serves project, shot, rig and color map ops",
                     ->name
             == "Warm");
 
-        const auto removed = client.count(StudioMessageType::ObjectRemoved);
+        const auto before = client.count(StudioMessageType::TransferScene);
         reply = session.request(RemoveColorMap{0, created->colorMapId});
         REQUIRE(reply.ok);
         REQUIRE(session.waitForSnapshots(++snapshots));
-        REQUIRE(client.count(StudioMessageType::ObjectRemoved) == removed + 1);
+        REQUIRE(client.count(StudioMessageType::TransferScene) == before + 1);
         REQUIRE(session.latestSnapshot().project.colorMaps.size() == 1);
         reply = session.request(RemoveColorMap{0, created->colorMapId});
         REQUIRE_FALSE(reply.ok);
@@ -1100,6 +1102,87 @@ SCENARIO("StudioServer answers Remote Browse inside its Data Roots",
       REQUIRE_FALSE(reply.ok);
       REQUIRE(reply.error.find("not a directory") != std::string::npos);
       REQUIRE(session.client.count(StudioMessageType::ProjectSnapshot) == 0);
+    }
+  }
+}
+
+SCENARIO("StudioServer commits scene changes as one snapshot", "[StudioServer]")
+{
+  if (!helideAvailable()) {
+    WARN("helide ANARI library unavailable, skipping the scene commit test");
+    return;
+  }
+
+  DataRootFixture data;
+  Session session(data.root);
+  auto &client = session.client;
+  size_t snapshots = 0;
+
+  GIVEN("a bootstrapped client and a mesh under the data root")
+  {
+    WHEN("a dataset is imported")
+    {
+      ImportStaticDataset import;
+      import.name = "Tri";
+      import.sourcePath = data.mesh;
+      import.importerType = vsr::io::ImporterType::OBJ;
+      const auto taskId = startedTaskId(session.request(import));
+      const auto end = client.waitForTaskEnd(taskId);
+      REQUIRE(end);
+      REQUIRE(end->completed);
+      REQUIRE(session.waitForSnapshots(++snapshots));
+
+      THEN("nothing streamed during it and one TransferScene commits it")
+      {
+        REQUIRE(client.count(StudioMessageType::ObjectAdded) == 0);
+        REQUIRE(client.count(StudioMessageType::ObjectRemoved) == 0);
+        REQUIRE(client.count(StudioMessageType::TransferLayer) == 0);
+        REQUIRE(client.count(StudioMessageType::TransferScene) == 1);
+        // The Project Snapshot is the commit marker: the scene message for
+        // the same mutation precedes it.
+        REQUIRE(client.indexOf(StudioMessageType::TransferScene)
+            < client.indexOf(StudioMessageType::ProjectSnapshot));
+      }
+
+      THEN("the mirror it builds carries the imported parameters")
+      {
+        vsr::scene::Scene mirror;
+        vsr::network::messages::TransferScene(
+            client.last(StudioMessageType::TransferScene), &mirror)
+            .execute();
+
+        size_t geometries = 0;
+        size_t withVertexPositions = 0;
+        vsr::core::foreach_item_const(
+            mirror.objectDB().geometry, [&](const vsr::scene::Geometry *g) {
+              if (!g)
+                return;
+              ++geometries;
+              if (g->parameter("vertex.position"))
+                ++withVertexPositions;
+            });
+        REQUIRE(geometries > 0);
+        REQUIRE(withVertexPositions == geometries);
+      }
+
+      AND_WHEN("an op that does not touch the scene follows")
+      {
+        auto reply = session.request(CreateCameraRig{0, "Cam"});
+        REQUIRE(reply.ok);
+        const auto rig = results<CameraRigCreatedResult>(reply);
+        REQUIRE(rig);
+        REQUIRE(session.waitForSnapshots(++snapshots));
+        const auto scenes = client.count(StudioMessageType::TransferScene);
+
+        reply = session.request(RenameCameraRig{0, rig->cameraRigId, "Cam 2"});
+        REQUIRE(reply.ok);
+        REQUIRE(session.waitForSnapshots(++snapshots));
+
+        THEN("it commits with its reply alone, sending no scene message")
+        {
+          REQUIRE(client.count(StudioMessageType::TransferScene) == scenes);
+        }
+      }
     }
   }
 }

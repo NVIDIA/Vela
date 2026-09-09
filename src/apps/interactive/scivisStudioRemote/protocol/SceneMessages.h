@@ -21,6 +21,10 @@ namespace vsr::scivis_studio::protocol {
  *   StudioMessageType::ObjectAdded    <-> messages::NewObject
  *   StudioMessageType::ObjectRemoved  <-> messages::RemoveObject
  *
+ * The last two have no current sender -- the server sends one TransferScene
+ * at each commit point instead -- but both directions still encode and
+ * decode them.
+ *
  * The receiver constructs the paired messages class from the Message and a
  * target Scene, then calls execute().
  *

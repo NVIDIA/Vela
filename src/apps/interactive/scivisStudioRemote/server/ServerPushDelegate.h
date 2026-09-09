@@ -3,60 +3,55 @@
 
 #pragma once
 
-// vsr_network
-#include "vsr/network/Message.hpp"
 // vsr_scene
 #include "vsr/scene/UpdateDelegate.hpp"
-// std
-#include <functional>
-
-namespace vsr::scene {
-struct Scene;
-}
 
 namespace vsr::scivis_studio::server {
 
 /*
- * The server's scene push delegate: turns structural Scene mutations into the
- * Studio scene messages that keep the client's Structural Mirror current.
- * Identity, lifecycle and structure are server-authoritative, so those are
- * pushed (ObjectAdded, ObjectRemoved, whole-layer TransferLayer snapshots);
- * parameter values are optimistic and one-way and are deliberately NOT
- * pushed.
+ * The server's scene recorder: it sends nothing. Every structural Scene
+ * mutation -- an object added or removed, a layer added, restructured or
+ * moved, the whole scene emptied -- only marks the scene dirty. The owner
+ * asks at the commit point (the reply or task ending that a Project
+ * Snapshot rides on) and sends one TransferScene there.
  *
- * signalRemoveAllObjects does not send anything itself: it fires at the start
- * of a rebuild, when the scene is momentarily empty, so a TransferScene
- * serialized here would describe nothing. The delegate instead asks the owner
- * to resend the scene, and the render loop sends one TransferScene after the
- * mutation that emptied it has finished -- the same snapshot a bootstrap
- * sends, which is the simplest message that leaves the mirror correct.
+ * That timing is the point. Scene signals fire *during* a mutation:
+ * signalObjectAdded fires from Scene::createObject, before the importer has
+ * set a single parameter, so an object serialized there is an empty shell,
+ * and signalRemoveAllObjects fires when the scene is momentarily empty.
+ * Deferring to the commit point is what makes the mirror's objects carry
+ * their parameter values, and it collapses the O(nodes) whole-layer
+ * serializations an import used to cause into one snapshot. The cost is
+ * that a mutation is all-or-nothing on the client: no incremental progress,
+ * and the replaced mirror clears the selection.
  *
- * Origin-based echo suppression: the owner disables the delegate while it
- * applies a client's edits and during bootstrap (the TransferScene there
- * already covers everything). Signals arrive synchronously on whichever
- * thread mutates the Scene; in this server only the render loop does, and
- * NetworkChannel::send() is thread-safe regardless.
+ * Origin-based echo suppression: the owner disables the recorder while it
+ * applies a client's edits and during bootstrap (whose own TransferScene
+ * already covers everything), so a client's parameter edit does not come
+ * back to it as a snapshot. Signals arrive synchronously on whichever
+ * thread mutates the Scene; in this server only the render loop does.
  *
  * Example:
- *   auto *push = scene.updateDelegate().emplace<ServerPushDelegate>(&scene,
- *       [&](vsr::network::Message &&m) { channel.send(std::move(m)); },
- *       [&] { sceneResendPending = true; });
- *   push->setEnabled(false);
- *   applyClientEdit();
+ *   auto *push = scene.updateDelegate().emplace<ServerPushDelegate>();
  *   push->setEnabled(true);
+ *   importDataset();
+ *   if (push->sceneDirty()) {
+ *     push->clearSceneDirty();
+ *     sendTransferScene();
+ *   }
  */
 struct ServerPushDelegate : public vsr::scene::EmptyUpdateDelegate
 {
-  using SendFunction = std::function<void(vsr::network::Message &&)>;
-  using ResendSceneFunction = std::function<void()>;
-
-  ServerPushDelegate(vsr::scene::Scene *scene,
-      SendFunction send,
-      ResendSceneFunction requestSceneResend);
+  ServerPushDelegate() = default;
   ~ServerPushDelegate() override = default;
 
   bool enabled() const;
   void setEnabled(bool enabled);
+
+  // Set by any recorded signal, cleared by the owner once it has sent the
+  // snapshot that covers them.
+  bool sceneDirty() const;
+  void clearSceneDirty();
 
   void signalObjectAdded(const vsr::scene::Object *obj) override;
   void signalObjectRemoved(const vsr::scene::Object *obj) override;
@@ -66,12 +61,10 @@ struct ServerPushDelegate : public vsr::scene::EmptyUpdateDelegate
   void signalLayerTransformUpdated(const vsr::scene::Layer *layer) override;
 
  private:
-  void sendLayer(const vsr::scene::Layer *layer);
+  void markDirty();
 
-  vsr::scene::Scene *m_scene{nullptr};
-  SendFunction m_send;
-  ResendSceneFunction m_requestSceneResend;
   bool m_enabled{false};
+  bool m_sceneDirty{false};
 };
 
 } // namespace vsr::scivis_studio::server

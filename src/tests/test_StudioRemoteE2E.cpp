@@ -1028,6 +1028,25 @@ SCENARIO("scivisStudioServer and the client core pick, outline and bin",
         E2E_TIMEOUT));
     REQUIRE(client.mirror.numberOfObjects(ANARI_SURFACE) == 1);
 
+    // The import's objects reach the mirror with their parameter values, not
+    // as empty shells: the commit-point TransferScene carries them.
+    {
+      const vsr::scene::Surface *surface = nullptr;
+      vsr::core::foreach_item_const(
+          client.mirror.objectDB().surface, [&](const vsr::scene::Surface *s) {
+            if (s)
+              surface = s;
+          });
+      REQUIRE(surface);
+      REQUIRE(surface->numParameters() > 0);
+      const auto *geometry =
+          surface->parameterValueAsObject<vsr::scene::Geometry>("geometry");
+      REQUIRE(geometry);
+      REQUIRE(geometry->parameter("vertex.position"));
+      REQUIRE(
+          surface->parameterValueAsObject<vsr::scene::Material>("material"));
+    }
+
     // Frame the triangle through the mirror: its centroid sits on the view
     // axis two units away, so the centre pixel hits it and the corners see
     // past it.

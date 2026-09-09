@@ -233,9 +233,6 @@ struct StudioServer
   {
     uint64_t serial{0}; // the connection the session runs on
     protocol::FrameEncoding encoding{protocol::FrameEncoding::Raw};
-    // The push delegate asked for the structural scene to be resent
-    // (an update it cannot express as a push); the loop does so next.
-    bool sceneResendPending{false};
     // The Frame on the wire: latest-frame-wins, one in flight.
     vsr::network::MessageFuture frameInFlight;
     std::deque<ProjectRequest> pendingRequests;
@@ -305,6 +302,8 @@ struct StudioServer
   // that follows the client (streaming, pushes, queued tasks, scrub window).
   void resetSession();
   void bootstrap();
+  // Sends sendSceneSnapshot() iff the recorder saw a scene change.
+  void flushSceneSnapshot();
   void sendSceneSnapshot();
   // Runs one queued Server Task and sends its ending; after the exclusive
   // one (the shot render) the latch is discarded first.

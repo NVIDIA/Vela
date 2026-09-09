@@ -4,8 +4,8 @@
 # Light and camera rigs: create, add and remove lights, rename, clone,
 # archive to a file under the data root and load the archive back, bind a
 # rig to the active shot, remove. Light rigs live in the scene (their lights
-# arrive as ObjectAdded pushes before the reply); camera rigs are pure
-# Project data.
+# arrive in the TransferScene that commits the mutation, before the reply);
+# camera rigs are pure Project data.
 
 connect
 list-roots
