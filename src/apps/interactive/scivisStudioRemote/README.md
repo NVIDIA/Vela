@@ -6,6 +6,11 @@ project, the scene and the ANARI device and streams frames; the thin
 Mirror. Design: [`docs/scivis-studio-client-server.md`](../../../../docs/scivis-studio-client-server.md);
 vocabulary: [`CONTEXT.md`](CONTEXT.md).
 
+For a visual code tour, open the
+[interactive architecture atlas](../../../../docs/scivis-studio-architecture.html)
+in a browser, or read its
+[Markdown overview](../../../../docs/scivis-studio-architecture.md).
+
 ```
 scivisStudioRemote/
 ├── protocol/   vsr_scivis_studio_protocol   Studio Message Set, codecs, frame codec
