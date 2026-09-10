@@ -72,6 +72,8 @@ SCENARIO("Frame encodings and pixel formats", "[StudioProtocol]")
       // No measurement rather than an instant frame.
       REQUIRE(header.renderMs == 0.f);
       REQUIRE(header.pipelineMs == 0.f);
+      // An empty box: no bounds reported, not a scene of zero size.
+      REQUIRE(header.worldBounds.lower.x > header.worldBounds.upper.x);
     }
   }
 }
@@ -89,6 +91,8 @@ SCENARIO("Frame encode/decode", "[StudioProtocol]")
     header.frame = -3;
     header.renderMs = 12.5f;
     header.pipelineMs = 18.25f;
+    header.worldBounds = vsr::math::box3(
+        vsr::math::float3(-1.f, -2.f, -3.f), vsr::math::float3(4.f, 5.f, 6.f));
     const auto pixels = makePixels(header.width, header.height);
     const auto msg = encodeFrame(header, pixels.data(), pixels.size());
 
@@ -114,6 +118,10 @@ SCENARIO("Frame encode/decode", "[StudioProtocol]")
       REQUIRE(view->header.frame == -3);
       REQUIRE(view->header.renderMs == 12.5f);
       REQUIRE(view->header.pipelineMs == 18.25f);
+      REQUIRE(view->header.worldBounds.lower
+          == vsr::math::float3(-1.f, -2.f, -3.f));
+      REQUIRE(
+          view->header.worldBounds.upper == vsr::math::float3(4.f, 5.f, 6.f));
       REQUIRE(sameBytes(*view, pixels));
       REQUIRE(view->data >= msg.payload.data());
       REQUIRE(

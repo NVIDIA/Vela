@@ -230,6 +230,13 @@ the wire; the client shows it beside the rate frames arrive at, which is a
 property of the link, not of the render.
 _Avoid_: server fps, frame rate (a cost is a time, not a rate)
 
+**World Bounds**:
+The bounds of the server's world, read once per render and carried by every
+frame header alongside the pixels it belongs to. The thin client owns no
+world of its own, so this is the only scene extent it knows; framing a view
+on it (Reset View) is the client's, not a request to the server.
+_Avoid_: scene bounds message, bounds push
+
 **Pick**:
 A request naming a viewport pixel, answered by the server against its current
 camera and scene with `{hit, worldPosition, objectIdentity?}`. What the

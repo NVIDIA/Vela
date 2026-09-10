@@ -102,7 +102,6 @@ void ViewportPasses::setup(vsr::rendering::ImagePipeline &pipeline,
     vsr::rendering::AnariSceneRenderPass *scenePass,
     anari::Device device)
 {
-  m_device = device;
   m_scenePass = scenePass;
 
   m_primitiveIdSupported = vsr::rendering::deviceSupportsExtension(
@@ -152,7 +151,6 @@ void ViewportPasses::teardown()
   m_primitiveOutlinePass = nullptr;
   m_outlinePass = nullptr;
   m_boundsPass = nullptr;
-  m_device = nullptr;
   m_pickArmed = false;
   m_pickSample.reset();
   m_idChannelEnabled = false;
@@ -255,7 +253,7 @@ void ViewportPasses::syncChannels()
 // Per frame //////////////////////////////////////////////////////////////////
 
 void ViewportPasses::updateWorldBounds(
-    anari::World world, const vsr::scene::Object *camera)
+    const vsr::math::box3 &bounds, const vsr::scene::Object *camera)
 {
   if (!m_boundsPass)
     return;
@@ -263,20 +261,14 @@ void ViewportPasses::updateWorldBounds(
   const auto subtype = camera ? camera->subtype() : vsr::core::Token();
   const bool perspective = subtype == vsr::scene::tokens::camera::perspective;
   const bool orthographic = subtype == vsr::scene::tokens::camera::orthographic;
+  const bool haveBounds = bounds.lower.x <= bounds.upper.x
+      && bounds.lower.y <= bounds.upper.y && bounds.lower.z <= bounds.upper.z;
   const bool enabled =
-      m_settings.showWorldBounds && world && (perspective || orthographic);
+      m_settings.showWorldBounds && haveBounds && (perspective || orthographic);
   m_boundsPass->setEnabled(enabled);
   if (!enabled)
     return;
 
-  vsr::math::box3 bounds{{0.f, 0.f, 0.f}, {0.f, 0.f, 0.f}};
-  anariGetProperty(m_device,
-      world,
-      "bounds",
-      ANARI_FLOAT32_BOX3,
-      &bounds,
-      sizeof(bounds),
-      ANARI_WAIT);
   m_boundsPass->setBox(bounds);
 
   const auto view = readCameraView(*camera);

@@ -939,6 +939,9 @@ void StudioServer::sendRenderedFrame()
   // server's frame time next to the rate it receives frames at.
   header.renderMs = m_renderMs;
   header.pipelineMs = m_pipelineMs;
+  // What prepareViewportPasses() read before this render: the scene these
+  // pixels show, for the client's Reset View.
+  header.worldBounds = m_worldBounds;
   m_session.frameInFlight = m_server->send(
       encodeFrame(header, m_encodedPixels.data(), m_encodedPixels.size()));
 }
@@ -1021,8 +1024,12 @@ const vsr::scene::Object *StudioServer::shotCameraObject() const
 
 void StudioServer::prepareViewportPasses()
 {
-  m_viewport.updateWorldBounds(
-      m_renderIndex ? m_renderIndex->world() : nullptr, shotCameraObject());
+  // Queried once per frame, here: the world-bounds box draws with it and the
+  // frame header carries it, so the client frames its view on the same scene
+  // the pixels show.
+  m_worldBounds =
+      m_renderIndex ? m_renderIndex->worldBounds() : vsr::math::box3{};
+  m_viewport.updateWorldBounds(m_worldBounds, shotCameraObject());
 }
 
 bool StudioServer::servicePendingPick()

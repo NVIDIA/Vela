@@ -46,6 +46,14 @@ struct CameraPose
   int mode{static_cast<int>(ManipulatorMode::Orbit)};
 };
 
+// The view that frames `bounds`: centered on the box, an orbit distance of
+// 1.25x its diagonal (also the fixed distance), az/el (0, 20) and the +y up
+// axis. This is what every "reset view" in the project starts from, wherever
+// the bounds came from -- an ANARI world queried in process, or a server's
+// world reported over the wire. An empty box (a world with nothing in it)
+// frames the unit box instead, so the result is always a usable view.
+CameraPose defaultViewForBounds(const vsr::math::box3 &bounds);
+
 /*
  * Orbit-style camera controller that tracks az/el/distance to a center point
  * and exposes rotate/zoom/pan operations for interactive or scripted

@@ -38,6 +38,10 @@ namespace vsr::scivis_studio::client {
  * the MirrorUpdateDelegate turns those writes into SetObjectParameter. A
  * viewport resize is reported once per settled size as SetFrameConfig.
  *
+ * Reset View works as the monolith's does, on the world bounds every frame
+ * header carries: the client frames the same scene the pixels show without
+ * asking the server for anything.
+ *
  * Picking follows the monolith's gestures: a double-click asks the server
  * for the object under the mouse (Pick) and selects its mirror object; with
  * Shift held it re-centres the arcball on the hit point instead. Selection
@@ -102,6 +106,10 @@ struct StudioViewport : public vsr::ui::imgui::BaseViewport
   void imagePipeline_populate(vsr::rendering::ImagePipeline &p) override;
   void viewport_reshape(vsr::math::int2 newWindowSize) override;
 
+  // The view that frames the world bounds the last frame was rendered
+  // against; empty (with a warning) before the first frame, when the client
+  // knows of no scene to frame.
+  std::optional<vsr::rendering::CameraPose> serverDefaultView() const;
   void camera_resetView(bool resetAzEl = true) override;
   void camera_centerView() override;
   void renderer_clone() override;

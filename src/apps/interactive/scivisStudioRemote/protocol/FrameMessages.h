@@ -9,6 +9,7 @@
 #include "vsr/network/Message.hpp"
 // vsr_core
 #include "vsr/core/DataTree.hpp"
+#include "vsr/core/VSRMath.hpp"
 // std
 #include <cstddef>
 #include <cstdint>
@@ -83,9 +84,16 @@ struct FrameHeaderFixed
   // had no measurement, not an instant frame.
   float renderMs{0.f};
   float pipelineMs{0.f};
+  // The bounds of the server's world when this frame was rendered, which is
+  // all a thin client has to frame a view on the scene with (Reset View).
+  // Carried by every frame rather than pushed on scene changes, so a scene
+  // that grows or shrinks as time advances is framed at the time on screen.
+  // Empty (the default, lower above upper) when the server's device reports
+  // no bounds.
+  vsr::math::box3 worldBounds;
 };
 
-static_assert(sizeof(FrameHeaderFixed) == 24,
+static_assert(sizeof(FrameHeaderFixed) == 48,
     "FrameHeaderFixed is a wire format and must stay padding-free");
 
 // What a frame carries about itself: the fixed part plus the shot it was

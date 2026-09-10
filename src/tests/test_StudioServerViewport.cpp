@@ -347,6 +347,19 @@ SCENARIO("StudioServer composites the viewport passes into its frames",
   REQUIRE(beauty.size() == FRAME_WIDTH * FRAME_HEIGHT * 4);
   REQUIRE_FALSE(session.server->viewport().idChannelEnabled());
 
+  THEN("every frame carries the world's bounds, the triangle's here")
+  {
+    const auto frame = decodeFrame(client.last(StudioMessageType::Frame));
+    REQUIRE(frame);
+    const auto &bounds = frame->header.worldBounds;
+    REQUIRE(bounds.lower.x == Approx(0.f).margin(1e-4));
+    REQUIRE(bounds.lower.y == Approx(0.f).margin(1e-4));
+    REQUIRE(bounds.lower.z == Approx(0.f).margin(1e-4));
+    REQUIRE(bounds.upper.x == Approx(1.f).margin(1e-4));
+    REQUIRE(bounds.upper.y == Approx(1.f).margin(1e-4));
+    REQUIRE(bounds.upper.z == Approx(0.f).margin(1e-4));
+  }
+
   GIVEN("the picked surface's identity")
   {
     const auto picked = session.pick(FRAME_WIDTH / 2, FRAME_HEIGHT / 2);

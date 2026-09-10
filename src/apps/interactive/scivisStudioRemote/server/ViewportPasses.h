@@ -89,7 +89,7 @@ vsr::math::float3 pickWorldPosition(const CameraView &view,
  *   passes.setup(pipeline, scenePass, device);
  *   passes.apply(settings);                 // a latched ViewportSettings
  *   passes.setOutline(identity, scene);     // a latched SetOutline
- *   passes.updateWorldBounds(world, camera); // before each render
+ *   passes.updateWorldBounds(bounds, camera); // before each render
  *   pipeline.render();
  */
 struct ViewportPasses
@@ -121,10 +121,12 @@ struct ViewportPasses
 
   // Per frame //
 
-  // When showWorldBounds is on: the world's bounds and the view of `camera`
-  // (a perspective or orthographic camera object; anything else hides the
-  // box). Call before every render.
-  void updateWorldBounds(anari::World world, const vsr::scene::Object *camera);
+  // When showWorldBounds is on: the world's bounds (the server queries them
+  // once per frame, for the box and for the frame header both) and the view
+  // of `camera` (a perspective or orthographic camera object; anything else,
+  // or empty bounds, hides the box). Call before every render.
+  void updateWorldBounds(
+      const vsr::math::box3 &bounds, const vsr::scene::Object *camera);
 
   // Picking //
 
@@ -139,7 +141,6 @@ struct ViewportPasses
   void syncChannels();
   bool doPrimitiveOutline() const;
 
-  anari::Device m_device{nullptr};
   vsr::rendering::AnariSceneRenderPass *m_scenePass{nullptr};
   vsr::rendering::PickPass *m_pickPass{nullptr};
   vsr::rendering::VisualizeAOVPass *m_aovPass{nullptr};

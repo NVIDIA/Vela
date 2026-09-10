@@ -292,13 +292,19 @@ remote links need ≥30:1 reduction).
   encoding tag, plus `shotId` and the integer `frame` the image was rendered
   at (see [Playback](#playback-and-time)), and what the frame cost the server
   (`pipelineMs`, the wall time of its pass chain, and `renderMs`, the ANARI
-  device's own frame duration inside it). Today's payload is untagged bytes
+  device's own frame duration inside it), plus the `worldBounds` the frame was
+  rendered against. Today's payload is untagged bytes
   validated only by length; the header is the cheapest, most load-bearing
   protocol change.
 - **The frame's cost travels with the frame**, so the client's overlay shows
   the server's render time beside the rate frames arrive at: the two together
   say whether the render or the link is the limit. Measured per frame, never
   averaged on the server — the client decides how to present it.
+- **The world's bounds travel with the frame**, which is how a client with no
+  scene of its own frames a view on one: Reset View reads the last frame's
+  bounds and computes the same default view the monolith does. Per frame
+  rather than pushed on scene changes, so a scene that grows or shrinks as
+  time advances is framed at the time on screen.
 - **Encoding is negotiated at session setup** (client advertises supported
   decodings, server picks; RFB's SetEncodings is the model) and may switch
   per-frame via the tag — which is what enables the standard

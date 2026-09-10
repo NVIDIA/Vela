@@ -254,7 +254,18 @@ latch slots (latest-wins); `RequestArrayHistogram` is a sync Project Op. See
   whole (absent fields mean defaults), `SetOutline` of anything but a surface
   or volume clears the outline, and both reset to defaults when a new client
   connects. World bounds come from the render index world's `bounds`
-  property every frame the box is shown.
+  property, read once before every render and used twice: the
+  `BoxOutlineRenderPass` draws them when the box is shown, and every frame
+  header carries them.
+- **Reset View.** The client frames its view with the world bounds off the
+  last frame's header and `vsr::rendering::defaultViewForBounds()`, the same
+  helper `RenderIndex::computeDefaultView()` uses, so `Center`, `Distance`
+  and `Angle + Distance + Center` behave as they do in the monolith. Nothing
+  is asked of the server: the new pose reaches it as the camera parameter
+  edits any manipulator change makes. Before the first frame the menu items
+  do nothing but log -- there is no scene to frame yet -- and during playback
+  of an animated scene the bounds are the ones the picture on screen was
+  rendered against.
 - **Histogram limits.** `RequestArrayHistogram` bins a scalar host array on
   the loop thread (frames pause for the duration; linear in the element
   count): `binCount` is clamped to `[MIN_HISTOGRAM_BINS, MAX_HISTOGRAM_BINS]`
@@ -1738,7 +1749,7 @@ decisions, `M7-n`).
 | Shot outputs stay in `<project>/renders/<shotId>/` | implemented | `scivisStudio/RenderShot.cpp` | listable with `ListDirectory` |
 | **Frame delivery** | | | |
 | Two encodings: raw and turbojpeg (quality 85-95, 4:4:4) | implemented | `protocol/FrameCodec.cpp` | quality fixed at 90, `TJSAMP_444` |
-| Every frame carries a header (size, format, encoding, shotId, frame, render times) | implemented | `FrameMessages.h` | `pipelineMs` (pass-chain wall time) and `renderMs` (ANARI `duration`), shown in the client's viewport overlay |
+| Every frame carries a header (size, format, encoding, shotId, frame, render times, world bounds) | implemented | `FrameMessages.h` | `pipelineMs` (pass-chain wall time) and `renderMs` (ANARI `duration`), shown in the client's viewport overlay; `worldBounds` is what Reset View frames |
 | Encoding negotiated at session setup, may switch per frame via the tag | implemented | `SetEncodings`, `StudioServer.cpp` | `SetEncodings` is accepted at any time; the server never switches on its own in v1 |
 | Latest-frame-wins, one in flight | implemented | `StudioServer::renderAndSendFrame` | also a single slot in the client core |
 | Reserved for v2: NVENC, typed-channel framing | implemented (reserved) | -- | |

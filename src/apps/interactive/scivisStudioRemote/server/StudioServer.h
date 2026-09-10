@@ -375,6 +375,9 @@ struct StudioServer
   vsr::rendering::AnariSceneRenderPass *m_scenePass{nullptr};
   std::vector<uint8_t> m_colorBytes; // RGBA8, filled by the pipeline
   std::vector<std::byte> m_encodedPixels;
+  // The world's bounds as of the last prepareViewportPasses(); empty until
+  // the first render of a session, or when the device reports none.
+  vsr::math::box3 m_worldBounds;
   // What the last renderPipeline() cost, in milliseconds: the ANARI device's
   // reported frame duration and the wall time of the whole pass chain.
   float m_renderMs{0.f};

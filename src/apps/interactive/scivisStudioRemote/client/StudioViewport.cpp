@@ -582,16 +582,71 @@ void StudioViewport::viewport_reshape(vsr::math::int2 newWindowSize)
   m_connection->setFrameConfig(size.x, size.y);
 }
 
-void StudioViewport::camera_resetView(bool /*resetAzEl*/)
+// The monolith reads the bounds off its own render index; the client reads
+// them off the last frame's header, which is the same world one render older.
+std::optional<vsr::rendering::CameraPose> StudioViewport::serverDefaultView()
+    const
 {
-  vsr::core::logWarning(
-      "[StudioViewport] camera view reset is not available in the client yet");
+  if (!m_camera.current || !m_hasFrame) {
+    vsr::core::logWarning(
+        "[StudioViewport] no frame from the server yet: nothing to frame the"
+        " view on");
+    return {};
+  }
+  return vsr::rendering::defaultViewForBounds(m_lastHeader.worldBounds);
+}
+
+void StudioViewport::camera_resetView(bool resetAzEl)
+{
+  const auto defaultView = serverDefaultView();
+  if (!defaultView)
+    return;
+
+  const auto mode = m_camera.arcball->mode();
+  auto axis = m_camera.arcball->axis();
+  auto azel =
+      resetAzEl ? vsr::math::float2(0.f, 20.f) : m_camera.arcball->azel();
+  auto pose = *defaultView;
+  pose.mode = static_cast<int>(mode);
+  pose.upAxis = static_cast<int>(axis);
+  if (mode == vsr::rendering::ManipulatorMode::Look && !resetAzEl) {
+    m_camera.arcball->setDistance(pose.azeldist.z);
+    m_camera.arcball->setFixedDistance(pose.fixedDist);
+  } else {
+    m_camera.arcball->setConfig(pose);
+    m_camera.arcball->setFixedDistance(pose.fixedDist);
+    m_camera.arcball->setAzel(azel);
+  }
+  // The new pose is written into the mirror camera on the next updateCamera(),
+  // which the MirrorUpdateDelegate sends on as SetObjectParameter.
+  m_camera.arcballToken = 0;
 }
 
 void StudioViewport::camera_centerView()
 {
-  vsr::core::logWarning(
-      "[StudioViewport] camera centering is not available in the client yet");
+  const auto defaultView = serverDefaultView();
+  if (!defaultView)
+    return;
+
+  const auto mode = m_camera.arcball->mode();
+  auto axis = m_camera.arcball->axis();
+  auto azel = m_camera.arcball->azel();
+  auto dist = m_camera.arcball->distance();
+  auto fixedDist = m_camera.arcball->fixedDistance();
+  auto pose = *defaultView;
+  pose.mode = static_cast<int>(mode);
+  pose.upAxis = static_cast<int>(axis);
+  if (mode == vsr::rendering::ManipulatorMode::Look) {
+    m_camera.arcball->setCenter(pose.lookat);
+    m_camera.arcball->setFixedDistance(fixedDist);
+  } else {
+    m_camera.arcball->setConfig(pose);
+    m_camera.arcball->setAzel(azel);
+    m_camera.arcball->setDistance(dist);
+    m_camera.arcball->setFixedDistance(fixedDist);
+  }
+  m_camera.arcball->setAxis(axis);
+  m_camera.arcballToken = 0;
 }
 
 // Required by BaseViewport, but unreachable: the Renderer menu is built

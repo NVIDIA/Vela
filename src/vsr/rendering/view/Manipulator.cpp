@@ -7,6 +7,24 @@
 
 namespace vsr::rendering {
 
+CameraPose defaultViewForBounds(const vsr::math::box3 &bounds)
+{
+  auto box = bounds;
+  if (!(box.lower.x <= box.upper.x && box.lower.y <= box.upper.y
+          && box.lower.z <= box.upper.z))
+    box = vsr::math::box3(vsr::math::float3(-1.f), vsr::math::float3(1.f));
+
+  const auto center = 0.5f * (box.lower + box.upper);
+  const auto diag = box.upper - box.lower;
+
+  CameraPose pose;
+  pose.fixedDist = 1.25f * vsr::math::length(diag);
+  pose.lookat = center;
+  pose.azeldist = {0.f, 20.f, pose.fixedDist};
+  pose.upAxis = static_cast<int>(UpAxis::POS_Y);
+  return pose;
+}
+
 void Manipulator::setConfig(const CameraPose &p)
 {
   m_mode = static_cast<ManipulatorMode>(p.mode);

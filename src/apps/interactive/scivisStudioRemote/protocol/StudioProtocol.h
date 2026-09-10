@@ -35,7 +35,9 @@ bool parsePort(const std::string &text, uint16_t &port);
 //    server sends no UIState (107), since the client owns its layout.
 // 9: a frame header carries what the frame cost the server (renderMs,
 //    pipelineMs), so the client shows render times, not just arrival rate.
-constexpr int PROTOCOL_VERSION = 9;
+// 10: a frame header also carries the world bounds it was rendered against,
+//    so the client can reset its view to the scene the way the monolith does.
+constexpr int PROTOCOL_VERSION = 10;
 
 /*
  * Complete v1 message set of the SciVis Studio client-server protocol, as one
