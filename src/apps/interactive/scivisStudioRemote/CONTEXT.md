@@ -88,6 +88,15 @@ moves no panel. A UI-state node an opened project's manifest carries (the
 monolith writes one) is held by the server only to be written back on save.
 _Avoid_: layout sync, project layout, window settings message
 
+**Object Metadata**:
+Free-form keyed values a scene object carries beside its parameters -- a
+camera's `manipulator.*`, a volume's `opacityControlPoints`. Unlike a
+parameter it never reaches ANARI and carries no description, range or usage
+hint, but it crosses the wire on the same optimistic, one-way path
+(`SetObjectMetadata`) and rides the enclosing parameter batch. Unrelated to
+`__vsr_metadata`, the Data Tree file envelope, which shares only the word.
+_Avoid_: user data, object properties, custom attributes
+
 ### Client-held state
 
 **Structural Mirror**:
