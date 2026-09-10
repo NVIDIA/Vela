@@ -880,8 +880,25 @@ void StudioServer::renderAndSendFrame()
     return;
 
   prepareViewportPasses();
-  m_pipeline.render();
+  renderPipeline();
   sendRenderedFrame();
+}
+
+void StudioServer::renderPipeline()
+{
+  const auto start = std::chrono::steady_clock::now();
+  m_pipeline.render();
+  const auto end = std::chrono::steady_clock::now();
+  m_pipelineMs = std::chrono::duration<float, std::milli>(end - start).count();
+
+  // The device's own account of the render, which is what the pipeline's
+  // wall time is mostly made of. The scene pass renders synchronously here
+  // (setRunAsync(false)), so the frame is finished and ANARI_NO_WAIT reads
+  // the duration of the one just composited.
+  float duration = 0.f;
+  if (auto frame = m_scenePass ? m_scenePass->getFrame() : nullptr)
+    anari::getProperty(m_device, frame, "duration", duration, ANARI_NO_WAIT);
+  m_renderMs = duration * 1000.f;
 }
 
 void StudioServer::sendRenderedFrame()
@@ -918,6 +935,10 @@ void StudioServer::sendRenderedFrame()
   // Time in Motion: the playback tick ran before this render, so this is the
   // frame the pixels show.
   header.frame = shot ? shot->currentFrame : 0;
+  // What the render that made these pixels cost, so the client can show the
+  // server's frame time next to the rate it receives frames at.
+  header.renderMs = m_renderMs;
+  header.pipelineMs = m_pipelineMs;
   m_session.frameInFlight = m_server->send(
       encodeFrame(header, m_encodedPixels.data(), m_encodedPixels.size()));
 }
@@ -1023,7 +1044,7 @@ bool StudioServer::servicePendingPick()
 
   m_viewport.armPick(pick.x, pick.y);
   prepareViewportPasses();
-  m_pipeline.render();
+  renderPipeline();
   const auto sample = m_viewport.takePick();
 
   PickReply reply;

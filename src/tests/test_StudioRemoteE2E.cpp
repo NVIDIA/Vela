@@ -756,6 +756,11 @@ SCENARIO("scivisStudioServer and the client core run a session end to end",
       REQUIRE(frame->header.encoding == expected);
       REQUIRE(frame->header.pixelFormat == PixelFormat::RGBA8_sRGB);
       REQUIRE(frame->header.shotId == server->project().activeShotId);
+      // The server timed the render that made these pixels: the pass chain's
+      // wall time, and helide's own frame duration inside it (a device that
+      // does not report one would leave renderMs at zero).
+      REQUIRE(frame->header.pipelineMs > 0.f);
+      REQUIRE(frame->header.renderMs > 0.f);
       std::vector<uint8_t> pixels;
       REQUIRE(decodeFramePixels(*frame, pixels));
       REQUIRE(pixels.size() == 64 * 48 * 4);

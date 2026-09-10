@@ -222,6 +222,14 @@ server skips rendering rather than queueing pictures, so the client always
 shows the newest state and a slow link never builds a backlog.
 _Avoid_: frame queue, frame buffer depth
 
+**Frame Cost**:
+What one Frame took the server to make, carried in its header: `pipelineMs`,
+the wall time of the whole server-side pass chain, and `renderMs`, the ANARI
+device's own frame duration inside it. It is per frame and never averaged on
+the wire; the client shows it beside the rate frames arrive at, which is a
+property of the link, not of the render.
+_Avoid_: server fps, frame rate (a cost is a time, not a rate)
+
 **Pick**:
 A request naming a viewport pixel, answered by the server against its current
 camera and scene with `{hit, worldPosition, objectIdentity?}`. What the

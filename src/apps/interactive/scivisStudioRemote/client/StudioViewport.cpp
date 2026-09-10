@@ -257,6 +257,11 @@ void StudioViewport::ui_overlay()
             m_lastHeader.shotId.c_str(),
             m_lastHeader.frame);
       }
+      // The server's own frame time, next to the rate frames arrive at:
+      // together they say whether the render or the link is the limit.
+      ImGui::Text("server: %.2f ms  (ANARI %.2f ms)",
+          m_lastHeader.pipelineMs,
+          m_lastHeader.renderMs);
       ImGui::Text("received: %.0f fps", receivedFps());
     } else {
       ImGui::TextUnformatted("no frame received");

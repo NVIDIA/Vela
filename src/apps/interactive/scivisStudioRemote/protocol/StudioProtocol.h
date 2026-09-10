@@ -33,7 +33,9 @@ bool parsePort(const std::string &text, uint16_t &port);
 //    keeps the archive's own).
 // 8: no UI state on the wire: SaveProject carries no `uiState` and the
 //    server sends no UIState (107), since the client owns its layout.
-constexpr int PROTOCOL_VERSION = 8;
+// 9: a frame header carries what the frame cost the server (renderMs,
+//    pipelineMs), so the client shows render times, not just arrival rate.
+constexpr int PROTOCOL_VERSION = 9;
 
 /*
  * Complete v1 message set of the SciVis Studio client-server protocol, as one

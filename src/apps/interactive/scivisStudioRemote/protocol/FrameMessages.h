@@ -23,7 +23,8 @@ namespace vsr::scivis_studio::protocol {
  * Frame delivery: the binary Frame message (header + image bytes, never a
  * DataTree) and the small DataTree payloads that configure it. The header is
  * the sole carrier of in-motion time, so every image arrives paired with the
- * shot and integer frame it was rendered at.
+ * shot and integer frame it was rendered at, and with what that render cost
+ * the server.
  *
  * Example:
  *   FrameHeader h;
@@ -76,9 +77,15 @@ struct FrameHeaderFixed
   FrameEncoding encoding{FrameEncoding::Raw};
   uint8_t reserved[2]{0, 0};
   int32_t frame{0};
+  // What the server spent making these pixels, in milliseconds: pipelineMs
+  // is the wall time of its whole pass chain, renderMs the ANARI device's
+  // own account of the render inside it. Zero for either means the server
+  // had no measurement, not an instant frame.
+  float renderMs{0.f};
+  float pipelineMs{0.f};
 };
 
-static_assert(sizeof(FrameHeaderFixed) == 16,
+static_assert(sizeof(FrameHeaderFixed) == 24,
     "FrameHeaderFixed is a wire format and must stay padding-free");
 
 // What a frame carries about itself: the fixed part plus the shot it was

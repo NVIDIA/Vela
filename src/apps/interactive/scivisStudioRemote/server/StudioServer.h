@@ -332,6 +332,10 @@ struct StudioServer
   void applyEdit(const protocol::RemoveObjectParameter &edit);
   void applyEdit(const protocol::SetNodeTransform &edit);
   void renderAndSendFrame();
+  // Runs the pass chain and records what it cost in m_renderMs/m_pipelineMs;
+  // every render of the interactive pipeline goes through here, so the frame
+  // it produced is sent with its own times.
+  void renderPipeline();
   // Encodes m_colorBytes as this iteration's Frame and sends it.
   void sendRenderedFrame();
   void send(vsr::network::Message &&msg);
@@ -371,6 +375,10 @@ struct StudioServer
   vsr::rendering::AnariSceneRenderPass *m_scenePass{nullptr};
   std::vector<uint8_t> m_colorBytes; // RGBA8, filled by the pipeline
   std::vector<std::byte> m_encodedPixels;
+  // What the last renderPipeline() cost, in milliseconds: the ANARI device's
+  // reported frame duration and the wall time of the whole pass chain.
+  float m_renderMs{0.f};
+  float m_pipelineMs{0.f};
   ServerPushDelegate *m_sceneRecorder{nullptr};
 
   // Viewport (loop thread)

@@ -69,6 +69,9 @@ SCENARIO("Frame encodings and pixel formats", "[StudioProtocol]")
       FrameHeader header;
       REQUIRE(header.pixelFormat == PixelFormat::RGBA8_sRGB);
       REQUIRE(header.encoding == FrameEncoding::Raw);
+      // No measurement rather than an instant frame.
+      REQUIRE(header.renderMs == 0.f);
+      REQUIRE(header.pipelineMs == 0.f);
     }
   }
 }
@@ -84,6 +87,8 @@ SCENARIO("Frame encode/decode", "[StudioProtocol]")
     header.encoding = FrameEncoding::Raw;
     header.shotId = "shot-a";
     header.frame = -3;
+    header.renderMs = 12.5f;
+    header.pipelineMs = 18.25f;
     const auto pixels = makePixels(header.width, header.height);
     const auto msg = encodeFrame(header, pixels.data(), pixels.size());
 
@@ -107,6 +112,8 @@ SCENARIO("Frame encode/decode", "[StudioProtocol]")
       REQUIRE(view->header.encoding == FrameEncoding::Raw);
       REQUIRE(view->header.shotId == "shot-a");
       REQUIRE(view->header.frame == -3);
+      REQUIRE(view->header.renderMs == 12.5f);
+      REQUIRE(view->header.pipelineMs == 18.25f);
       REQUIRE(sameBytes(*view, pixels));
       REQUIRE(view->data >= msg.payload.data());
       REQUIRE(

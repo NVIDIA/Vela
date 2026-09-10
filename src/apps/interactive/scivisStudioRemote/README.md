@@ -1738,7 +1738,7 @@ decisions, `M7-n`).
 | Shot outputs stay in `<project>/renders/<shotId>/` | implemented | `scivisStudio/RenderShot.cpp` | listable with `ListDirectory` |
 | **Frame delivery** | | | |
 | Two encodings: raw and turbojpeg (quality 85-95, 4:4:4) | implemented | `protocol/FrameCodec.cpp` | quality fixed at 90, `TJSAMP_444` |
-| Every frame carries a header (size, format, encoding, shotId, frame) | implemented | `FrameMessages.h` | |
+| Every frame carries a header (size, format, encoding, shotId, frame, render times) | implemented | `FrameMessages.h` | `pipelineMs` (pass-chain wall time) and `renderMs` (ANARI `duration`), shown in the client's viewport overlay |
 | Encoding negotiated at session setup, may switch per frame via the tag | implemented | `SetEncodings`, `StudioServer.cpp` | `SetEncodings` is accepted at any time; the server never switches on its own in v1 |
 | Latest-frame-wins, one in flight | implemented | `StudioServer::renderAndSendFrame` | also a single slot in the client core |
 | Reserved for v2: NVENC, typed-channel framing | implemented (reserved) | -- | |
