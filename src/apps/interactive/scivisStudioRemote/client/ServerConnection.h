@@ -75,6 +75,20 @@ enum class SessionPhase
 
 const char *toString(SessionPhase phase);
 
+// Which of the two wholesale mirror replacements is about to happen.
+// Bootstrap: BootstrapBegin's emptying, or the emptying a loss inside the
+// bracket declares -- either way the mirror holds no scene afterwards, and
+// only BootstrapEnd puts one back. MidSession: a TransferScene pushed
+// outside a bootstrap, which is what every scene-changing commit sends; the
+// mirror holds the new whole scene the moment it is applied.
+enum class MirrorReplace
+{
+  Bootstrap,
+  MidSession
+};
+
+const char *toString(MirrorReplace kind);
+
 // Liveness and retry timings. The spec's numbers are suggestions, not
 // contract; tests shrink them.
 struct ConnectionTimings
@@ -233,10 +247,14 @@ struct ServerConnection
   std::function<void(const vsr::network::Message &)> onMessage;
 
   std::function<void(ConnectionState from, ConnectionState to)> onStateChanged;
-  // The mirror is about to be wholesale-replaced (BootstrapBegin, or a
-  // TransferScene pushed outside a bootstrap), so anything pointing into it
-  // (selection, cached refs) must be dropped now, before the objects go.
-  std::function<void()> onMirrorReplaceBegin;
+  // The mirror is about to be wholesale-replaced, so anything pointing into
+  // it (selection, cached refs) must be dropped now, before the objects go.
+  // The kind says what will be left behind: a Bootstrap empties the mirror
+  // and refills it over the messages that follow (and leaves it empty for
+  // good if the bracket is cut short), while a mid-session replacement puts
+  // a whole scene back in the one message. A UI that greys itself while
+  // there is no scene to browse must not do so for the second.
+  std::function<void(MirrorReplace)> onMirrorReplaceBegin;
   // BootstrapEnd received: mirror and replica are fresh.
   std::function<void()> onBootstrapComplete;
   // A Project Snapshot replaced the replica (project() is new; pointers into
@@ -285,7 +303,7 @@ struct ServerConnection
   void handleHello(const vsr::network::Message &msg);
   void applySceneMessage(
       protocol::StudioMessageType type, const vsr::network::Message &msg);
-  void announceMirrorReplace();
+  void announceMirrorReplace(MirrorReplace kind);
   void clearMirror();
   Clock::time_point lastTraffic() const;
 

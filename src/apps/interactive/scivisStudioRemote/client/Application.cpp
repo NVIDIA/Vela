@@ -202,7 +202,9 @@ Application::Application(int argc, const char **argv)
                                      ConnectionState from, ConnectionState to) {
     onStateChanged(from, to);
   };
-  m_connection->onMirrorReplaceBegin = [this] { onMirrorReplaceBegin(); };
+  m_connection->onMirrorReplaceBegin = [this](MirrorReplace kind) {
+    onMirrorReplaceBegin(kind);
+  };
   m_connection->onBootstrapComplete = [this] { onBootstrapComplete(); };
   m_connection->onProjectReplaced = [this] { onProjectReplaced(); };
   m_connection->onServerError = [](const std::string &message) {
@@ -711,12 +713,13 @@ void Application::disconnect()
 // cleared: selection (LayerNodeRefs), the layer tree's anchor/hover/menu
 // nodes and layer index, the histogram plotted from an array of the scene
 // going away, and the viewport's use-counted camera and renderer refs,
-// which would otherwise release against recreated slots.
+// which would otherwise release against recreated slots. Dropping those
+// references is all it does: whether a scene is there to browse afterwards
+// is the caller's to say, and a mid-session replace leaves one behind.
 void Application::releaseMirror()
 {
   auto *ctx = appContext();
   ctx->clearSelected();
-  ctx->vsr.sceneLoadComplete = false;
   if (m_layerTree)
     m_layerTree->dropSceneReferences();
   if (m_histogram)
@@ -742,9 +745,19 @@ void Application::onStateChanged(ConnectionState from, ConnectionState to)
   }
 }
 
-void Application::onMirrorReplaceBegin()
+// Both kinds of wholesale replacement land here, and they differ in what
+// they leave behind. A Bootstrap empties the mirror and refills it over the
+// messages that follow, so there is no scene for the object editors to
+// browse until onBootstrapComplete puts the flag back. A mid-session
+// TransferScene -- what every scene-changing commit pushes -- leaves the
+// whole new scene behind, so it drops references and nothing more: clearing
+// the flag here would grey the object editors from the first import to the
+// end of the session, with only a reconnect to bring them back.
+void Application::onMirrorReplaceBegin(MirrorReplace kind)
 {
   releaseMirror();
+  if (kind == MirrorReplace::Bootstrap)
+    appContext()->vsr.sceneLoadComplete = false;
 }
 
 // Any snapshot may have swapped the active shot or its camera object

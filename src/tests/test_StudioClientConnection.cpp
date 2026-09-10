@@ -32,6 +32,9 @@ using namespace std::chrono_literals;
 
 namespace {
 
+constexpr auto Bootstrap = MirrorReplace::Bootstrap;
+constexpr auto MidSession = MirrorReplace::MidSession;
+
 Message makeFrame(int frame)
 {
   FrameHeader header;
@@ -58,6 +61,10 @@ struct Fixture : MirroredClient
   std::vector<ConnectionState> transitions;
   int mirrorReplaces{0};
   bool mirrorPopulatedAtReplace{false};
+  // The kind each onMirrorReplaceBegin reported, in order: what the client's
+  // Application reads to tell a Bootstrap's emptying apart from a mid-session
+  // replacement.
+  std::vector<MirrorReplace> replaceKinds;
 };
 
 Fixture::Fixture(int helloVersion, ConnectionTimings timings)
@@ -68,9 +75,10 @@ Fixture::Fixture(int helloVersion, ConnectionTimings timings)
   connection.onStateChanged = [this](ConnectionState, ConnectionState to) {
     transitions.push_back(to);
   };
-  connection.onMirrorReplaceBegin = [this]() {
+  connection.onMirrorReplaceBegin = [this](MirrorReplace kind) {
     mirrorReplaces++;
     mirrorPopulatedAtReplace = mirror.numberOfObjects(ANARI_GEOMETRY) != 0;
+    replaceKinds.push_back(kind);
   };
 }
 
@@ -505,6 +513,82 @@ SCENARIO("ServerConnection announces a mid-session scene replacement",
             return f.server.count(StudioMessageType::SetObjectParameter) == 1;
           }));
         }
+      }
+    }
+  }
+}
+
+SCENARIO("ServerConnection names which mirror replacement is happening",
+    "[StudioClient]")
+{
+  // Regression: both wholesale replacements announce through the one
+  // onMirrorReplaceBegin hook, and a client that greys its object editors
+  // while there is no scene to browse must be able to tell them apart. A
+  // mid-session TransferScene is what every scene-changing commit now
+  // pushes, so a client that treats it as a Bootstrap's emptying greys those
+  // editors from the first import to the end of the session -- edits stop
+  // reaching the wire and nothing in the viewport moves.
+  GIVEN("a connected, bootstrapped client")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+    REQUIRE(f.replaceKinds == std::vector<MirrorReplace>{Bootstrap});
+
+    WHEN("the server pushes a whole TransferScene outside a bootstrap")
+    {
+      messages::TransferScene resend(&f.source, false);
+      f.server.send(
+          encodeSceneMessage<StudioMessageType::TransferScene>(resend));
+
+      THEN("the replacement is a mid-session one, and leaves a whole scene")
+      {
+        REQUIRE(pollUntil(f.connection, [&] { return f.mirrorReplaces == 2; }));
+        REQUIRE(
+            f.replaceKinds == std::vector<MirrorReplace>{Bootstrap, MidSession});
+        REQUIRE(f.mirrorHasGeometry());
+      }
+    }
+
+    WHEN("a reconnect's bootstrap replaces the mirror again")
+    {
+      f.server.channel->restart();
+
+      THEN("that replacement is a Bootstrap's")
+      {
+        REQUIRE(f.waitConnectedAndBootstrapped(2));
+        REQUIRE(
+            f.replaceKinds == std::vector<MirrorReplace>{Bootstrap, Bootstrap});
+      }
+    }
+  }
+
+  GIVEN("a client whose reconnect bootstrap is cut short by a close")
+  {
+    auto timings = fastTimings();
+    timings.lossAfterSilence = 3s; // loss must come from the hook, not this
+    Fixture f(PROTOCOL_VERSION, timings);
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+    f.server.holdBootstrapEnd = true;
+    f.server.channel->restart();
+    REQUIRE(pollUntil(f.connection,
+        [&] { return f.connection.state() == ConnectionState::Lost; }));
+    REQUIRE(pollUntil(f.connection, [&] {
+      return f.connection.bootstrapping() && f.mirrorHasGeometry();
+    }));
+
+    WHEN("the server closes mid-bracket")
+    {
+      f.server.channel->stop();
+
+      THEN("the emptying the loss announces is a Bootstrap's too")
+      {
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.connection.state() == ConnectionState::Lost; }));
+        REQUIRE(f.mirror.numberOfObjects(ANARI_GEOMETRY) == 0);
+        REQUIRE(f.replaceKinds
+            == std::vector<MirrorReplace>{Bootstrap, Bootstrap, Bootstrap});
       }
     }
   }

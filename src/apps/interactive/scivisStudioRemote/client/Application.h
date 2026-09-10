@@ -102,7 +102,7 @@ class Application : public vsr::ui::imgui::Application
   void connect();
   void disconnect();
   void onStateChanged(ConnectionState from, ConnectionState to);
-  void onMirrorReplaceBegin();
+  void onMirrorReplaceBegin(MirrorReplace kind);
   void onBootstrapComplete();
   void onProjectReplaced();
   void releaseMirror();

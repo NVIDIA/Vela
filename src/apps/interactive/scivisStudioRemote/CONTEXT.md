@@ -144,6 +144,18 @@ may send an edit (`ServerConnection::canSend`). Named after the server's
 (each awaits the peer's Hello), `Bootstrapping` (the same bracket); `Ready`
 is the client's side of the server's `Established`.
 
+**Mirror Replacement**:
+One of the two moments the whole Structural Mirror is swapped, announced
+before the objects go so the UI can drop what points into them
+(`MirrorReplace`). A **Bootstrap** replacement empties the mirror and refills
+it over the messages that follow -- there is no scene to browse until
+BootstrapEnd, and none at all if a loss cuts the bracket short. A
+**MidSession** replacement is the TransferScene every scene-changing commit
+pushes: one message, a whole scene the moment it applies. Only the first
+leaves the client without a scene, so only the first may grey the panels that
+browse one.
+_Avoid_: mirror reset, scene reload
+
 ### Files
 
 **Data Root**:

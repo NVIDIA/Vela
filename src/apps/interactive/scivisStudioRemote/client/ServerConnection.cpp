@@ -79,6 +79,17 @@ const char *toString(SessionPhase phase)
   return "Unknown";
 }
 
+const char *toString(MirrorReplace kind)
+{
+  switch (kind) {
+  case MirrorReplace::Bootstrap:
+    return "Bootstrap";
+  case MirrorReplace::MidSession:
+    return "MidSession";
+  }
+  return "Unknown";
+}
+
 // Construction ///////////////////////////////////////////////////////////////
 
 ServerConnection::ServerConnection(
@@ -605,7 +616,7 @@ void ServerConnection::declareLoss(const std::string &reason)
     // new scene arrived, which is nothing to show. Empty beats half-built;
     // the replica is still the previous session's (its snapshot comes last
     // in the bracket) and stays as display data.
-    announceMirrorReplace();
+    announceMirrorReplace(MirrorReplace::Bootstrap);
     clearMirror();
   }
   closeChannel();
@@ -723,7 +734,7 @@ void ServerConnection::handleMessage(const vsr::network::Message &msg)
     return;
   case StudioMessageType::BootstrapBegin:
     setPhase(SessionPhase::Bootstrapping);
-    announceMirrorReplace();
+    announceMirrorReplace(MirrorReplace::Bootstrap);
     clearMirror();
     // Task records: the server dropped the old session's queue without a
     // word, and a restarted server mints ids from 1 again, so every open
@@ -882,7 +893,7 @@ void ServerConnection::applySceneMessage(
     // replaces every object too; inside one BootstrapBegin already announced
     // it and the mirror is empty.
     if (!bootstrapping())
-      announceMirrorReplace();
+      announceMirrorReplace(MirrorReplace::MidSession);
     applied = messages::TransferScene(msg, m_mirror).execute();
     break;
   case StudioMessageType::TransferLayer:
@@ -912,10 +923,10 @@ void ServerConnection::applySceneMessage(
   }
 }
 
-void ServerConnection::announceMirrorReplace()
+void ServerConnection::announceMirrorReplace(MirrorReplace kind)
 {
   if (onMirrorReplaceBegin)
-    onMirrorReplaceBegin();
+    onMirrorReplaceBegin(kind);
 }
 
 void ServerConnection::clearMirror()
