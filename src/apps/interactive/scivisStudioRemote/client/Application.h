@@ -130,6 +130,7 @@ class Application : public vsr::ui::imgui::Application
   void uiMenu_Studio();
   void uiMenu_Client();
   void uiMenu_Server();
+  void uiMenu_View();
   void uiTaskIndicator();
   void uiLostBanner();
   void uiConfirmation();

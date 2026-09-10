@@ -357,7 +357,7 @@ void Application::uiMainMenuBar()
   uiMenu_Studio();
   uiMenu_Client();
   uiMenu_Server();
-  uiMainMenuBar_View();
+  uiMenu_View();
   uiTaskIndicator();
 }
 
@@ -489,6 +489,27 @@ void Application::uiMenu_Server()
     ImGui::EndMenu();
   }
   ImGui::EndDisabled();
+}
+
+// Replaces the base class' View menu, which has the window checkboxes but
+// nothing below them. Purely client-local: never gated on the connection.
+void Application::uiMenu_View()
+{
+  if (!ImGui::BeginMenu("View"))
+    return;
+
+  for (auto *w : m_windows) {
+    ImGui::PushID(w);
+    ImGui::Checkbox(w->name(), w->visiblePtr());
+    ImGui::PopID();
+  }
+
+  ImGui::Separator();
+
+  if (ImGui::MenuItem("Restore Default Layout"))
+    ImGui::LoadIniSettingsFromMemory(getDefaultLayout());
+
+  ImGui::EndMenu();
 }
 
 // Right-aligned in the menu bar while any Server Task is queued or running.
