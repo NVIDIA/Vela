@@ -79,10 +79,11 @@ struct StudioViewport : public vsr::ui::imgui::BaseViewport
   // camera. A null camera leaves the viewport without one; input then changes
   // nothing.
   void adoptCamera(vsr::scene::CameraAppRef camera);
-  // Lists the mirror's renderers for the Renderer menu, making the one at
-  // `rendererIndex` current (the first one when that index is not a
-  // renderer). Parameter edits flow out as SetObjectParameter; which renderer
-  // the server draws with is not a client choice in this milestone.
+  // Takes the mirror's renderer at `rendererIndex` -- the one the active shot
+  // renders with -- as the renderer the Renderer menu edits (the first
+  // renderer when that index is not one). Parameter edits flow out as
+  // SetObjectParameter; which renderer the server draws with is the shot's
+  // choice, not the client's, so the menu offers no way to switch.
   void adoptRenderer(size_t rendererIndex);
   // Lets go of the camera and renderers. Required BEFORE the mirror is
   // cleared or wholesale-replaced: the refs count uses on mirror objects and

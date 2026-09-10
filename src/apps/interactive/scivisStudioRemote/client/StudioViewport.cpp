@@ -144,8 +144,8 @@ void StudioViewport::ui_menubar(bool connected)
   }
 
   ImGui::BeginDisabled(!connected);
-  if (!m_renderers.objects.empty())
-    BaseViewport::ui_menubar_Renderer();
+  if (m_renderers.current)
+    BaseViewport::ui_menubar_Renderer(false);
   if (m_camera.current)
     BaseViewport::ui_menubar_Camera();
   ImGui::EndDisabled();
@@ -432,17 +432,13 @@ void StudioViewport::adoptRenderer(size_t rendererIndex)
   auto &scene = appContext()->vsr.scene;
   m_renderers.objects.clear();
   m_renderers.current = {};
+  if (rendererIndex != VSR_INVALID_INDEX)
+    m_renderers.current = scene.getObject<vsr::scene::Renderer>(rendererIndex);
   const size_t count = scene.numberOfObjects(ANARI_RENDERER);
-  for (size_t i = 0; i < count; ++i) {
-    auto renderer = scene.getObject<vsr::scene::Renderer>(i);
-    if (!renderer)
-      continue;
-    m_renderers.objects.push_back(renderer);
-    if (i == rendererIndex)
-      m_renderers.current = renderer;
-  }
-  if (!m_renderers.current && !m_renderers.objects.empty())
-    m_renderers.current = m_renderers.objects.front();
+  for (size_t i = 0; i < count && !m_renderers.current; ++i)
+    m_renderers.current = scene.getObject<vsr::scene::Renderer>(i);
+  if (m_renderers.current)
+    m_renderers.objects.push_back(m_renderers.current);
 }
 
 void StudioViewport::dropMirrorReferences()
@@ -593,6 +589,8 @@ void StudioViewport::camera_centerView()
       "[StudioViewport] camera centering is not available in the client yet");
 }
 
+// Required by BaseViewport, but unreachable: the Renderer menu is built
+// without renderer selection, so it offers neither.
 void StudioViewport::renderer_clone()
 {
   vsr::core::logWarning(

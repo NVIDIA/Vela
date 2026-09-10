@@ -472,10 +472,10 @@ void BaseViewport::ui_animationSlider()
   ImGui::PopStyleColor();
 }
 
-void BaseViewport::ui_menubar_Renderer()
+void BaseViewport::ui_menubar_Renderer(bool selectableRenderers)
 {
   if (ImGui::BeginMenu("Renderer")) {
-    if (m_renderers.objects.size() > 1) {
+    if (selectableRenderers && m_renderers.objects.size() > 1) {
       ImGui::Text("Subtype:");
       ImGui::Indent(INDENT_AMOUNT);
       for (int i = 0; i < m_renderers.objects.size(); i++) {
@@ -491,12 +491,14 @@ void BaseViewport::ui_menubar_Renderer()
       ImGui::Unindent(INDENT_AMOUNT);
     }
 
-    ImGui::Separator();
+    if (selectableRenderers) {
+      ImGui::Separator();
 
-    if (ImGui::MenuItem("Clone Current Renderer"))
-      renderer_clone();
+      if (ImGui::MenuItem("Clone Current Renderer"))
+        renderer_clone();
 
-    ImGui::Separator();
+      ImGui::Separator();
+    }
 
     if (!m_renderers.objects.empty()) {
       ImGui::Text("Parameters:");
@@ -509,17 +511,20 @@ void BaseViewport::ui_menubar_Renderer()
           objectEditPolicy());
 
       ImGui::Unindent(INDENT_AMOUNT);
-      ImGui::Separator();
-      ImGui::Separator();
-      ImGui::Indent(INDENT_AMOUNT);
 
-      if (ImGui::BeginMenu("Reset to Defaults?")) {
-        if (ImGui::MenuItem("Yes"))
-          renderer_resetParameterDefaults();
-        ImGui::EndMenu();
+      if (selectableRenderers) {
+        ImGui::Separator();
+        ImGui::Separator();
+        ImGui::Indent(INDENT_AMOUNT);
+
+        if (ImGui::BeginMenu("Reset to Defaults?")) {
+          if (ImGui::MenuItem("Yes"))
+            renderer_resetParameterDefaults();
+          ImGui::EndMenu();
+        }
+
+        ImGui::Unindent(INDENT_AMOUNT);
       }
-
-      ImGui::Unindent(INDENT_AMOUNT);
     }
     ImGui::EndMenu();
   }

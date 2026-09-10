@@ -65,7 +65,13 @@ struct BaseViewport : public Window
   void ui_gizmo();
   bool ui_orientationWidget(); // returns true if widget consumed mouse input
   void ui_animationSlider();
-  void ui_menubar_Renderer();
+  // The Renderer menu: the renderer subtypes to pick from, then the current
+  // renderer's parameters. Pass false when the viewport does not own which
+  // renderer is active -- a thin client whose server picks it, say -- and the
+  // menu leaves out everything that changes that choice (the subtype list,
+  // cloning, and the reset to the device's defaults), showing the current
+  // renderer's parameters alone.
+  void ui_menubar_Renderer(bool selectableRenderers = true);
   void ui_menubar_Camera();
   void ui_menubar_TransformManipulator();
   /////////////////////////////////////////////////////////////////////////////
