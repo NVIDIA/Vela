@@ -59,8 +59,7 @@ constexpr std::array ALL_MESSAGE_TYPES = {
   StudioMessageType::ProjectOpReply, StudioMessageType::ProjectSnapshot,
   StudioMessageType::TaskProgress, StudioMessageType::TaskCompleted,
   StudioMessageType::TaskFailed, StudioMessageType::TimeAdvanceWarning,
-  StudioMessageType::PickReply, StudioMessageType::UIState,
-  StudioMessageType::TransferScene, StudioMessageType::TransferLayer,
+  StudioMessageType::PickReply, StudioMessageType::TransferScene, StudioMessageType::TransferLayer,
   StudioMessageType::ObjectAdded, StudioMessageType::ObjectRemoved,
   StudioMessageType::SetObjectParameter,
   StudioMessageType::RemoveObjectParameter,
@@ -133,7 +132,6 @@ SCENARIO("StudioMessageType enum", "[StudioProtocol]")
           StudioMessageType::TaskFailed,
           StudioMessageType::TimeAdvanceWarning,
           StudioMessageType::PickReply,
-          StudioMessageType::UIState,
           StudioMessageType::TransferScene,
           StudioMessageType::TransferLayer,
           StudioMessageType::ObjectAdded,
@@ -571,7 +569,7 @@ SCENARIO("Opaque subtrees", "[StudioProtocol]")
     {
       vsr::core::DataTree tree;
       writeChild(tree.root(), "requestId", uint64_t(9));
-      writeSubtree(tree.root(), "uiState", subtree);
+      writeSubtree(tree.root(), "results", subtree);
       writeSubtree(tree.root(), "absent", SubtreePtr{});
       REQUIRE_FALSE(hasChild(tree.root(), "absent"));
 
@@ -584,7 +582,7 @@ SCENARIO("Opaque subtrees", "[StudioProtocol]")
       REQUIRE(readChild(copy.root(), "requestId", requestId));
       REQUIRE(requestId == 9);
 
-      auto out = readSubtree(copy.root(), "uiState");
+      auto out = readSubtree(copy.root(), "results");
       REQUIRE(out);
       const auto &o = out->root();
       REQUIRE(o.name() == "<root>");
@@ -600,9 +598,9 @@ SCENARIO("Opaque subtrees", "[StudioProtocol]")
     THEN("the copy is independent of the source")
     {
       vsr::core::DataTree tree;
-      writeSubtree(tree.root(), "uiState", subtree);
+      writeSubtree(tree.root(), "results", subtree);
       r["settings"]["theme"] = std::string("light");
-      auto out = readSubtree(tree.root(), "uiState");
+      auto out = readSubtree(tree.root(), "results");
       REQUIRE(out);
       REQUIRE(out->root()
                   .child("settings")

@@ -385,30 +385,6 @@ const std::vector<CommandRunner::ValueSpec> &CommandRunner::namedValues()
             }
             return recordField(TASK_FIELDS, *task, "task", name, field, error);
           }},
-      {"uiState.present",
-          "whether the server has sent a `UIState` tree (a Bootstrap's, or the"
-          " one that follows an `open-project`); `disconnect` forgets it",
-          [](R &self, S, S, std::string &) -> Value {
-            return std::string(boolText(self.m_session->uiState() != nullptr));
-          }},
-      {"uiState.<key>",
-          "the string leaf `windows/<key>` of the newest `UIState` tree, as"
-          " `set-ui-state` writes it (FAIL when there is no tree or no such"
-          " leaf)",
-          [](R &self, S name, S key, std::string &error) -> Value {
-            const auto &tree = self.m_session->uiState();
-            if (!tree) {
-              error = name + ": the server has sent no UIState tree";
-              return {};
-            }
-            const auto *windows = tree->root().child("windows");
-            const auto *leaf = windows ? windows->child(key) : nullptr;
-            if (!leaf) {
-              error = name + ": the UIState tree has no windows/" + key;
-              return {};
-            }
-            return anyText(leaf->getValue());
-          }},
       {"replies.failed",
           "replies with `ok=false`",
           [](R &self, S, S, std::string &) -> Value {

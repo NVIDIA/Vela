@@ -59,43 +59,28 @@ SCENARIO("Project request payloads", "[StudioProtocol]")
     }
   }
 
-  GIVEN("SaveProject with a directory and UI state")
+  GIVEN("SaveProject with a directory")
   {
     SaveProject req;
     req.requestId = 43;
     req.directory = std::filesystem::path("/projects/demo");
-    req.uiState = makeSubtree();
-    req.uiState->root()["windows"]["viewport"]["open"] = true;
-    req.uiState->root()["layout"] = std::string("[Window][Viewport]");
-    req.uiState->root()["settings"]["theme"] = std::string("dark");
 
-    THEN("everything round-trips, including the opaque subtree")
+    THEN("everything round-trips")
     {
       const auto out = roundTrip(req);
       REQUIRE(out.requestId == 43);
       REQUIRE(out.directory);
       REQUIRE(*out.directory == std::filesystem::path("/projects/demo"));
-      REQUIRE(out.uiState);
-      const auto &ui = out.uiState->root();
-      REQUIRE(ui.child("windows")
-                  ->child("viewport")
-                  ->child("open")
-                  ->getValueOr(false));
-      REQUIRE(ui.child("layout")->getValueOr(std::string())
-          == "[Window][Viewport]");
-      REQUIRE(ui.child("settings")->child("theme")->getValueOr(std::string())
-          == "dark");
     }
   }
 
-  GIVEN("SaveProject with no directory and no UI state")
+  GIVEN("SaveProject with no directory")
   {
     SaveProject req;
     req.requestId = 44;
     const auto out = roundTrip(req);
     REQUIRE(out.requestId == 44);
     REQUIRE_FALSE(out.directory);
-    REQUIRE_FALSE(out.uiState);
 
     THEN("a mistyped directory is rejected rather than ignored")
     {

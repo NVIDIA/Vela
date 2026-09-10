@@ -191,20 +191,27 @@ ShotID RenderSession::prepareSavedShot(const std::filesystem::path &projectDir,
   return active->id;
 }
 
-SubtreePtr testUIState()
+// Puts a UI-state node into a saved project's manifest, as the monolith
+// writes one: `windows`, `layout` and `settings` beside "scivisStudio".
+void writeManifestUIState(const std::filesystem::path &projectDir)
 {
-  auto tree = makeSubtree();
-  tree->root()["layout"] = LAYOUT_MARKER;
-  tree->root()["windows"]["Viewport"]["viewport.scale"] = 2.f;
-  tree->root()["settings"]["fontScale"] = 1.5f;
-  return tree;
+  const auto manifest = projectDir / "project.vsr";
+  vsr::core::DataTree tree;
+  REQUIRE(tree.load(manifest.string().c_str()));
+  auto &root = tree.root();
+  root["layout"] = LAYOUT_MARKER;
+  root["windows"]["Viewport"]["viewport.scale"] = 2.f;
+  root["settings"]["fontScale"] = 1.5f;
+  REQUIRE(tree.save(manifest.string().c_str()));
 }
 
-std::string layoutOf(const std::optional<UIState> &state)
+// The manifest's `layout` leaf, empty when it carries none.
+std::string manifestLayout(const std::filesystem::path &projectDir)
 {
-  if (!state || !state->tree)
+  vsr::core::DataTree tree;
+  if (!tree.load((projectDir / "project.vsr").string().c_str()))
     return {};
-  if (const auto *layout = state->tree->root().child("layout"))
+  if (const auto *layout = tree.root().child("layout"))
     return layout->getValueOr<std::string>("");
   return {};
 }
@@ -485,14 +492,14 @@ SCENARIO(
       THEN("the bootstrap replays the finished render before the snapshot")
       {
         const auto begin = other.indexOf(StudioMessageType::BootstrapBegin);
-        const auto uiState =
-            indexOfFrom(other, StudioMessageType::UIState, begin);
+        const auto config =
+            indexOfFrom(other, StudioMessageType::FrameConfig, begin);
         const auto snapshot =
             indexOfFrom(other, StudioMessageType::ProjectSnapshot, begin);
         // Every ending since the last bootstrap is replayed (the import and
         // the save among them); the render's is what matters here.
-        const auto completed = other.indexOfCompletedFrom(taskId, uiState);
-        REQUIRE(uiState < completed);
+        const auto completed = other.indexOfCompletedFrom(taskId, config);
+        REQUIRE(config < completed);
         REQUIRE(completed < snapshot);
         const auto ending = decode<TaskCompleted>(other.messages()[completed]);
         REQUIRE(ending);
@@ -522,12 +529,12 @@ SCENARIO(
       THEN("the render ran anyway and the next bootstrap tells how it ended")
       {
         const auto begin = other.indexOf(StudioMessageType::BootstrapBegin);
-        const auto uiState =
-            indexOfFrom(other, StudioMessageType::UIState, begin);
+        const auto config =
+            indexOfFrom(other, StudioMessageType::FrameConfig, begin);
         const auto snapshot =
             indexOfFrom(other, StudioMessageType::ProjectSnapshot, begin);
-        const auto completed = other.indexOfCompletedFrom(taskId, uiState);
-        REQUIRE(uiState < completed);
+        const auto completed = other.indexOfCompletedFrom(taskId, config);
+        REQUIRE(config < completed);
         REQUIRE(completed < snapshot);
         const auto ending = decode<TaskCompleted>(other.messages()[completed]);
         REQUIRE(ending);
@@ -549,8 +556,8 @@ SCENARIO(
   }
 }
 
-SCENARIO("StudioServer hands the project's UI state back after an open",
-    "[StudioServer]")
+SCENARIO(
+    "StudioServer preserves the UI state a project carries", "[StudioServer]")
 {
   if (!helideAvailable()) {
     WARN("helide ANARI library unavailable, skipping the UI state tests");
@@ -559,72 +566,44 @@ SCENARIO("StudioServer hands the project's UI state back after an open",
 
   RenderFixture data;
 
-  GIVEN("a project saved with a client-supplied UI-state tree")
+  GIVEN("a saved project whose manifest carries a UI-state tree")
   {
-    auto session = std::make_unique<RenderSession>(data.root);
-    auto &client = session->client;
-    session->prepareSavedShot(data.projectDir, 4);
-    SaveProject save;
-    save.directory = data.projectDir;
-    save.uiState = testUIState();
-    const auto saved =
-        session->waitForTaskEnd(startedTaskId(session->request(save)));
-    REQUIRE(saved);
-    REQUIRE(saved->completed);
-    client.clear();
-
-    WHEN("the project is opened again")
     {
-      const auto reply = session->request(OpenProject{0, data.projectDir});
-      const auto taskId = startedTaskId(reply);
-      const auto end = session->waitForTaskEnd(taskId);
-      REQUIRE(end);
-      REQUIRE(end->completed);
+      RenderSession session(data.root);
+      session.prepareSavedShot(data.projectDir, 4);
+    }
+    writeManifestUIState(data.projectDir);
+    REQUIRE(manifestLayout(data.projectDir) == LAYOUT_MARKER);
 
-      THEN("UIState arrives after the reply and before the snapshot")
+    WHEN("a server opens it (--project) and saves it again")
+    {
+      RenderSession session(data.root, data.projectDir);
+      const auto saved =
+          session.waitForTaskEnd(startedTaskId(session.request(SaveProject{})));
+      REQUIRE(saved);
+      REQUIRE(saved->completed);
+
+      THEN("the manifest still carries it, though no client ever saw it")
       {
-        const auto replyIndex = client.indexOfReply(reply.requestId);
-        const auto uiIndex =
-            indexOfFrom(client, StudioMessageType::UIState, replyIndex);
-        const auto endIndex = indexOfTaskEnd(client, taskId);
-        const auto snapshot =
-            indexOfFrom(client, StudioMessageType::ProjectSnapshot, replyIndex);
-        REQUIRE(replyIndex < uiIndex);
-        REQUIRE(uiIndex < endIndex);
-        REQUIRE(uiIndex < snapshot);
-        REQUIRE(layoutOf(client.lastDecoded<UIState>()) == LAYOUT_MARKER);
+        REQUIRE(manifestLayout(data.projectDir) == LAYOUT_MARKER);
       }
     }
 
-    WHEN("a server starts on that project (--project)")
+    WHEN("a client opens it and saves it again")
     {
-      session.reset();
-      RenderSession fromDisk(data.root, data.projectDir);
+      RenderSession session(data.root);
+      const auto opened = session.waitForTaskEnd(
+          startedTaskId(session.request(OpenProject{0, data.projectDir})));
+      REQUIRE(opened);
+      REQUIRE(opened->completed);
+      const auto saved =
+          session.waitForTaskEnd(startedTaskId(session.request(SaveProject{})));
+      REQUIRE(saved);
+      REQUIRE(saved->completed);
 
-      THEN("its bootstrap carries the saved tree")
+      THEN("the tree the open read is written back unchanged")
       {
-        const auto state = fromDisk.client.lastDecoded<UIState>();
-        REQUIRE(state);
-        REQUIRE(state->tree);
-        REQUIRE(layoutOf(state) == LAYOUT_MARKER);
-        const auto *windows = state->tree->root().child("windows");
-        REQUIRE(windows);
-        REQUIRE(windows->child("Viewport"));
-
-        AND_THEN("a save without a tree keeps it")
-        {
-          auto &client = fromDisk.client;
-          client.clear();
-          const auto saved = fromDisk.waitForTaskEnd(
-              startedTaskId(fromDisk.request(SaveProject{})));
-          REQUIRE(saved);
-          REQUIRE(saved->completed);
-          const auto reopened = fromDisk.waitForTaskEnd(
-              startedTaskId(fromDisk.request(OpenProject{0, data.projectDir})));
-          REQUIRE(reopened);
-          REQUIRE(reopened->completed);
-          REQUIRE(layoutOf(client.lastDecoded<UIState>()) == LAYOUT_MARKER);
-        }
+        REQUIRE(manifestLayout(data.projectDir) == LAYOUT_MARKER);
       }
     }
   }

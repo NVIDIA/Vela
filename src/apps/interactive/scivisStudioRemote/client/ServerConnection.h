@@ -179,8 +179,6 @@ struct ServerConnection
   const std::optional<protocol::TimeAdvanceWarning> &lastTimeAdvanceWarning()
       const;
   void clearTimeAdvanceWarning();
-  // The opaque UI-state tree the bootstrap handed over; null when none.
-  const protocol::SubtreePtr &uiState() const;
 
   // User intentions //
 
@@ -245,9 +243,6 @@ struct ServerConnection
   // the old one are dead). Fires for the bootstrap's snapshot too, before
   // onBootstrapComplete.
   std::function<void()> onProjectReplaced;
-  // A UIState arrived (uiState() holds it): inside every bootstrap, and
-  // after an OpenProject completed. The tree may be null.
-  std::function<void(const protocol::SubtreePtr &)> onUIState;
   std::function<void(const std::string &)> onServerError;
   // The server failed to load a frame's data and kept playing; non-modal.
   std::function<void(const protocol::TimeAdvanceWarning &)>
@@ -325,7 +320,6 @@ struct ServerConnection
   std::unique_ptr<ProjectOps> m_projectOps;
   std::optional<protocol::TimeAdvanceWarning> m_timeAdvanceWarning;
   std::optional<protocol::FrameHeader> m_lastFrameHeader;
-  protocol::SubtreePtr m_uiState;
   // The reason of the server's farewell (a Disconnect) on this connection,
   // if it sent one: the loss that follows is explained by it.
   std::string m_farewellReason;

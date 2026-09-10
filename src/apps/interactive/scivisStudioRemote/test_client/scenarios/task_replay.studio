@@ -3,10 +3,10 @@
 #
 # Task-status replay: a render keeps running after its client disconnects,
 # its TaskCompleted goes to a closed socket, and the next client's Bootstrap
-# carries it (between UIState and the ProjectSnapshot) so the outcome is not
-# lost. The reconnect is bootstrapped only once the render body returns, so
-# `reconnect` waits for the whole render; the replayed end rebuilds the task
-# record the disconnect had cleared.
+# carries it (between the FrameConfig and the ProjectSnapshot) so the
+# outcome is not lost. The reconnect is bootstrapped only once the render
+# body returns, so `reconnect` waits for the whole render; the replayed end
+# rebuilds the task record the disconnect had cleared.
 
 copy-fixture fixtures/triangle.obj
 connect

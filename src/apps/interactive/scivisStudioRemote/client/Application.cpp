@@ -32,6 +32,7 @@
 // vsr_app
 #include "vsr/app/UIStateTree.h"
 // vsr_core
+#include "vsr/core/DataTree.hpp"
 #include "vsr/core/Logging.hpp"
 // imgui
 #include <imgui.h>
@@ -39,6 +40,9 @@
 #include <SDL3/SDL.h>
 // std
 #include <algorithm>
+#include <cstdlib>
+#include <exception>
+#include <filesystem>
 #include <iterator>
 #include <optional>
 #include <string>
@@ -201,7 +205,6 @@ Application::Application(int argc, const char **argv)
   m_connection->onMirrorReplaceBegin = [this] { onMirrorReplaceBegin(); };
   m_connection->onBootstrapComplete = [this] { onBootstrapComplete(); };
   m_connection->onProjectReplaced = [this] { onProjectReplaced(); };
-  m_connection->onUIState = [this](const SubtreePtr &tree) { onUIState(tree); };
   m_connection->onServerError = [](const std::string &message) {
     vsr::core::logError("[Client] server reported: %s", message.c_str());
   };
@@ -300,8 +303,7 @@ vsr_ui::WindowArray Application::setupWindows()
   m_projectLocationDialog =
       std::make_unique<modals::ProjectLocationDialog>(this,
           std::make_unique<RemoteBrowseProvider>(this, &m_editorContext),
-          std::make_unique<RemoteProjectLocationAction>(
-              &m_editorContext, [this] { return buildUIState(); }));
+          std::make_unique<RemoteProjectLocationAction>(&m_editorContext));
   m_addStaticDatasetDialog =
       std::make_unique<modals::AddStaticDatasetDialog>(this,
           std::make_unique<RemoteBrowseProvider>(this, &m_editorContext),
@@ -310,6 +312,9 @@ vsr_ui::WindowArray Application::setupWindows()
       std::make_unique<modals::AddFileAnimationDatasetDialog>(this,
           std::make_unique<RemoteBrowseProvider>(this, &m_editorContext),
           std::make_unique<RemoteFileAnimationAction>(&m_editorContext));
+
+  // After setWindowArray(): the restore addresses the windows by name.
+  loadClientUIState();
 
   if (m_options.connectAtStartup)
     m_autoConnectInFrames = AUTO_CONNECT_DELAY_FRAMES;
@@ -363,6 +368,7 @@ void Application::uiMainMenuBar()
 
 void Application::teardown()
 {
+  saveClientUIState();
   const auto state = m_connection->state();
   if (state == ConnectionState::Connected || state == ConnectionState::Lost)
     disconnect();
@@ -624,7 +630,6 @@ void Application::saveProject()
     return;
   }
   SaveProject save; // in place: no directory
-  save.uiState = buildUIState();
   m_connection->projectOps().sendForResult<TaskStartedResult>(std::move(save),
       [this](const ProjectOpReply &reply,
           const std::optional<TaskStartedResult> &) {
@@ -653,21 +658,6 @@ void Application::requestDirtyAction(
     return;
   }
   m_confirmation = Confirmation{std::move(message), std::move(action)};
-}
-
-SubtreePtr Application::buildUIState()
-{
-  SubtreePtr tree = makeSubtree();
-  auto &root = tree->root();
-  auto &windows = root[vsr::app::UI_STATE_WINDOWS];
-  for (auto *window : m_windows)
-    window->saveSettings(windows[window->name()]);
-  root[vsr::app::UI_STATE_LAYOUT] =
-      std::string(ImGui::SaveIniSettingsToMemory());
-  auto &settings = root[vsr::app::UI_STATE_SETTINGS];
-  settings["fontScale"] = m_uiConfig.fontScale;
-  settings["uiRounding"] = m_uiConfig.rounding;
-  return tree;
 }
 
 // Notifications //////////////////////////////////////////////////////////////
@@ -773,14 +763,6 @@ void Application::onBootstrapComplete()
 {
   appContext()->vsr.sceneLoadComplete = true;
 
-  // The project's layout wins only over no layout: a reconnect after Lost
-  // keeps what the user has on screen. Before onServerReady(), which sends
-  // the viewport settings the tree may have just loaded.
-  if (!m_layoutLive) {
-    applyUIState(m_connection->uiState());
-    m_layoutLive = true;
-  }
-
   m_viewport->sendFrameConfig();
   m_connection->setEncodings(encodingPreference());
   m_connection->startRendering();
@@ -789,30 +771,11 @@ void Application::onBootstrapComplete()
   resolveActiveShotCamera();
 }
 
-// Inside a bootstrap the tree waits for onBootstrapComplete (the windows it
-// configures may still be pointing into the mirror being rebuilt); outside
-// one it follows an OpenProject and is the opened project's layout, applied
-// as the monolith applies it on open.
-void Application::onUIState(const SubtreePtr &tree)
-{
-  if (m_connection->bootstrapping())
-    return;
-  applyUIState(tree);
-}
-
-void Application::applyUIState(const SubtreePtr &tree)
-{
-  // Between NewFrame and Render, as the monolith does.
-  if (tree)
-    applyUIStateTree(tree->root());
-}
-
 void Application::enterHomeState()
 {
   auto *ctx = appContext();
   ctx->vsr.sceneLoadComplete = false;
   ctx->clearSelected();
-  m_layoutLive = false;
   if (m_viewport)
     m_viewport->reset();
 }
@@ -863,6 +826,81 @@ std::vector<FrameEncoding> Application::encodingPreference() const
 }
 
 // Layout /////////////////////////////////////////////////////////////////////
+
+// Beside the base class' application settings, and in the same shape a
+// project's UI state has, minus `settings`: font scale and rounding are
+// application settings and stay in appSettings.vsr, so there is one writer
+// for each.
+std::filesystem::path Application::clientUIStateFile() const
+{
+#ifdef _WIN32
+  if (const char *appData = std::getenv("APPDATA"); appData != nullptr)
+    return std::filesystem::path(appData) / "vsr" / "studioClientUI.vsr";
+#else
+  if (const char *home = std::getenv("HOME"); home != nullptr) {
+    return std::filesystem::path(home) / ".config" / "vsr"
+        / "studioClientUI.vsr";
+  }
+#endif
+
+  return std::filesystem::path("studioClientUI.vsr");
+}
+
+// At exit, with the ImGui context alive and no frame open.
+void Application::saveClientUIState()
+{
+  const auto filename = clientUIStateFile();
+  const auto directory = filename.parent_path();
+
+  try {
+    if (!directory.empty())
+      std::filesystem::create_directories(directory);
+  } catch (const std::exception &e) {
+    vsr::core::logError("[Client] failed to create config directory '%s': %s",
+        directory.string().c_str(),
+        e.what());
+    return;
+  }
+
+  vsr::core::DataTree tree;
+  auto &root = tree.root();
+  auto &windows = root[vsr::app::UI_STATE_WINDOWS];
+  for (auto *window : m_windows)
+    window->saveSettings(windows[window->name()]);
+  root[vsr::app::UI_STATE_LAYOUT] =
+      std::string(ImGui::SaveIniSettingsToMemory());
+
+  if (!tree.save(filename.string().c_str())) {
+    vsr::core::logError("[Client] failed to save the layout to '%s'",
+        filename.string().c_str());
+    return;
+  }
+
+  vsr::core::logStatus(
+      "[Client] saved the layout to '%s'", filename.string().c_str());
+}
+
+// At startup, after the base class applied the built-in default layout, so a
+// file that is missing (first run) or unreadable leaves that default
+// standing. --noDefaultLayout means "impose no layout" and skips this too.
+void Application::loadClientUIState()
+{
+  if (!commandLineOptions()->useDefaultLayout)
+    return;
+
+  const auto filename = clientUIStateFile();
+  if (!std::filesystem::exists(filename))
+    return;
+
+  vsr::core::DataTree tree;
+  if (!tree.load(filename.string().c_str())) {
+    vsr::core::logWarning("[Client] failed to load the layout from '%s'",
+        filename.string().c_str());
+    return;
+  }
+
+  applyUIStateTree(tree.root());
+}
 
 const char *Application::getDefaultLayout() const
 {

@@ -269,12 +269,6 @@ struct TestSession
   // TimeAdvanceWarnings received, and the newest one (empty until the first).
   size_t warningsReceived() const;
   const std::optional<protocol::TimeAdvanceWarning> &lastWarning() const;
-  // The newest UIState tree the server sent (a Bootstrap's, or the one that
-  // follows an OpenProject); null until one, when it was null, and once the
-  // session is Disconnected. Opaque here as everywhere: asserts read
-  // `windows/<key>` leaves, nothing interprets them.
-  const protocol::SubtreePtr &uiState() const;
-
   // Session //
 
   // Connects, exchanges Hellos and waits for the complete Bootstrap. False

@@ -304,8 +304,6 @@ struct CommandRunner
   Failure dumpLayers(const Command &);
   Failure dumpProject(const Command &);
   Failure dumpFrame(const Command &);
-  Failure setUIState(const Command &);
-  Failure dumpUIState(const Command &);
   Failure assertValue(const Command &);
 
   // The request commands with arguments of their own (RequestCommands.cpp);
@@ -442,10 +440,6 @@ struct CommandRunner
   // The reply of the last pick, and the result of the last ok histogram.
   std::optional<protocol::PickReply> m_lastPick;
   std::optional<protocol::ArrayHistogramResult> m_histogram;
-  // The UI state tree set-ui-state builds (`windows/<key>` string leaves),
-  // sent with every save-project from then on; null until the first
-  // set-ui-state and after `set-ui-state none`, when save-project sends none.
-  protocol::SubtreePtr m_uiStateToSave;
 };
 
 // Inlined definitions ////////////////////////////////////////////////////////

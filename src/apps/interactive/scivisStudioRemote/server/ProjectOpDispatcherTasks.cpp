@@ -8,7 +8,6 @@
 
 #include "ProjectOpDispatcher.h"
 // vsr_scivis_studio_protocol
-#include "ProjectSnapshot.h" // UIState
 #include "StudioCodec.h"
 // vsr_scivis_studio_model
 #include "ProjectPersistence.h"
@@ -128,11 +127,9 @@ void ProjectOpDispatcher::handle(const OpenProject &req)
           auto uiState = makeSubtree();
           if (!context().openStagedProject(stage, &uiState->root(), &error))
             return taskFailure(error);
+          // Held, never sent: the client owns its layout, so this tree only
+          // exists so the next save writes back what the project came with.
           *m_host.uiState = uiState;
-          // The opened project's layout reaches the client that asked
-          // before the snapshot that follows the task; a bootstrap
-          // carries it too.
-          m_host.send(encode(UIState{*m_host.uiState}));
           return TaskResult{};
         });
       });
@@ -152,7 +149,7 @@ void ProjectOpDispatcher::handle(const SaveProject &req)
   startTask(req.requestId,
       named ? "save project to '" + named->string() + "'"
             : std::string("save project"),
-      [this, named, uiState = req.uiState](const TaskControl &progress) {
+      [this, named](const TaskControl &progress) {
         return runTaskBody([&] {
           std::string error;
           auto directory = named;
@@ -167,15 +164,14 @@ void ProjectOpDispatcher::handle(const SaveProject &req)
               return taskFailure(error);
           }
           progress("writing");
-          // A save without UI state keeps what the project opened with,
-          // so a headless save never drops the user's layout.
-          const auto &tree = uiState ? uiState : *m_host.uiState;
+          // The project is written back with whatever UI state it opened
+          // with, so a project authored by the monolith keeps its layout
+          // even though no client here has one to send.
+          const auto &tree = *m_host.uiState;
           if (!context().saveProject(
                   *directory, tree ? &tree->root() : nullptr, &error)) {
             return taskFailure(error);
           }
-          if (uiState)
-            *m_host.uiState = uiState;
           return TaskResult{};
         });
       });

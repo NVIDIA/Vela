@@ -171,10 +171,6 @@ const std::vector<CommandRunner::CommandSpec> &CommandRunner::commands()
           &CommandRunner::dumpScene,
           "one EVT Object line per mirror object: type, index, subtype, name,"
           " params count"},
-      {"dump-ui-state", "", 0, 0, K::Session,
-          &CommandRunner::dumpUIState,
-          "one EVT UIState present= children= line for the newest tree the"
-          " server sent, then one EVT UIStateEntry path= value= per leaf"},
       {"expect-error", "[substring]", 0, 1, K::Session,
           &CommandRunner::expectError,
           "the next server message other than a Frame or a liveness Pong must"
@@ -311,8 +307,7 @@ const std::vector<CommandRunner::CommandSpec> &CommandRunner::commands()
           "sync"},
       {"save-project", "[directory]", 0, 1, K::Request,
           &CommandRunner::saveProject,
-          "task: save to DIR, or to the project's own directory; sends the UI"
-          " state tree set-ui-state built, if any"},
+          "task: save to DIR, or to the project's own directory"},
       {"send-raw", "<typeByte 0..255> [hex bytes...]", 1, -1, K::Session,
           &CommandRunner::sendRaw,
           "send a message of that type byte with the given payload bytes,"
@@ -347,11 +342,6 @@ const std::vector<CommandRunner::CommandSpec> &CommandRunner::commands()
           "one-way scrub (latest-wins); while paused the server commits Time"
           " at Rest with one debounced snapshot; a SHOT that is not active is"
           " ignored silently"},
-      {"set-ui-state", "<key>=<value>... | none", 1, -1, K::Session,
-          &CommandRunner::setUIState,
-          "build the UI state tree the next save-projects send, one string"
-          " leaf windows/<key> per edit (repeated commands compose); none"
-          " drops the tree"},
       {"shutdown", "", 0, 0, K::Session,
           &CommandRunner::shutdown,
           "send Shutdown and await the server closing the socket ->"

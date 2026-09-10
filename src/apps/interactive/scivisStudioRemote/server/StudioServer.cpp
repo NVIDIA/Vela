@@ -201,9 +201,8 @@ bool StudioServer::loadDevice(std::string *error)
 bool StudioServer::setupProject(std::string *error)
 {
   if (!m_options.projectDirectory.empty()) {
-    // The same tree the dispatcher keeps after an OpenProject: the
-    // bootstrap hands it to the client and a save without one writes it
-    // back.
+    // The same tree the dispatcher keeps after an OpenProject: no client
+    // ever sees it, and a save writes it back untouched.
     auto uiState = makeSubtree();
     std::string openError;
     if (!m_projectContext.openProject(
@@ -748,7 +747,6 @@ void StudioServer::bootstrap()
   config.width = m_frameWidth;
   config.height = m_frameHeight;
   send(encode(config));
-  send(encode(UIState{m_uiState}));
   // Task-status replay: how the tasks this client never heard about ended.
   m_tasks.replayTo([this](Message &&msg) { send(std::move(msg)); });
   sendProjectSnapshot();

@@ -31,7 +31,9 @@ bool parsePort(const std::string &text, uint16_t &port);
 //    instead of the whole Shot.
 // 7: LoadDatasetArchive carries the name the loaded dataset takes (empty
 //    keeps the archive's own).
-constexpr int PROTOCOL_VERSION = 7;
+// 8: no UI state on the wire: SaveProject carries no `uiState` and the
+//    server sends no UIState (107), since the client owns its layout.
+constexpr int PROTOCOL_VERSION = 8;
 
 /*
  * Complete v1 message set of the SciVis Studio client-server protocol, as one
@@ -116,7 +118,8 @@ constexpr int PROTOCOL_VERSION = 7;
   X(TaskFailed,                  104, ServerToClient)            \
   X(TimeAdvanceWarning,          105, ServerToClient)            \
   X(PickReply,                   106, ServerToClient)            \
-  X(UIState,                     107, ServerToClient)            \
+  /* 107 was UIState: the client owns its own layout, which  */  \
+  /* no longer travels with the project. Not reused.         */  \
   /* Scene pushes (120..) */                                     \
   X(TransferScene,               120, ServerToClient)            \
   X(TransferLayer,               121, ServerToClient)            \

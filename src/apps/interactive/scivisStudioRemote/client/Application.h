@@ -16,6 +16,7 @@
 #include "vsr/ui/imgui/Application.h"
 // std
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -55,9 +56,10 @@ struct ClientCommandLine
  * Object Editor, Database Editor, Log) browsing the mirror, and the client's
  * copies of the Studio editors (Project, Dataset Editor, Shot Editor, Light
  * Rig, Camera Rig) reading the Project Replica and sending Project Ops. The
- * Tasks panel lists Server Tasks. Nothing here touches ProjectContext,
- * persistence or files; every path is a server path chosen through Remote
- * Browse.
+ * Tasks panel lists Server Tasks. Nothing here touches ProjectContext or
+ * project persistence, and every project path is a server path chosen
+ * through Remote Browse; the one local file is the client's own layout
+ * (clientUIStateFile()).
  *
  * Connection State drives the UI: Connected enables the menus and editors;
  * Lost freezes the last frame under a banner (auto-retry, then Retry and
@@ -103,10 +105,6 @@ class Application : public vsr::ui::imgui::Application
   void onMirrorReplaceBegin();
   void onBootstrapComplete();
   void onProjectReplaced();
-  void onUIState(const protocol::SubtreePtr &tree);
-  // Windows, layout and settings from a project's UI-state tree, as the
-  // monolith applies them on open; a null tree keeps the current layout.
-  void applyUIState(const protocol::SubtreePtr &tree);
   void releaseMirror();
   void enterHomeState();
   void resolveActiveShotCamera();
@@ -115,9 +113,16 @@ class Application : public vsr::ui::imgui::Application
   // Runs `action` at once, or after the user agrees to discard a dirty
   // project.
   void requestDirtyAction(std::string message, std::function<void()> action);
-  // The opaque {windows, layout, settings} tree SaveProject stores with the
-  // project, in the monolith's shape so either app restores the other's.
-  protocol::SubtreePtr buildUIState();
+
+  // Layout //
+
+  // The client's own layout, kept beside the user's application settings
+  // rather than in the project: windows and the ImGui dock layout, saved at
+  // exit and restored at startup, so which project is open never moves a
+  // panel.
+  std::filesystem::path clientUIStateFile() const;
+  void saveClientUIState();
+  void loadClientUIState();
 
   // Notifications //
 
@@ -157,10 +162,6 @@ class Application : public vsr::ui::imgui::Application
   int m_port{0}; // the connect menu's InputInt edits it; 0..65535
   protocol::FrameEncoding m_preferredEncoding{protocol::FrameEncoding::Raw};
 
-  // The bootstrap's UIState is applied only when the client has no live
-  // layout of its own: the first bootstrap out of the home state, not the
-  // one a reconnect after Lost runs. Reset in enterHomeState().
-  bool m_layoutLive{false};
   // --connect waits until the dock layout has settled so the bootstrap
   // reports the viewport's real size, not the undocked first-frame size.
   int m_autoConnectInFrames{-1};

@@ -298,7 +298,7 @@ SCENARIO("StudioServer runs a viewer-parity session", "[StudioServer]")
         for (const auto &m : msgs)
           types.push_back(StudioMessageType(m.header.type));
 
-        REQUIRE(types.size() >= 6);
+        REQUIRE(types.size() >= 5);
         REQUIRE(types[0] == StudioMessageType::BootstrapBegin);
         REQUIRE(types[1] == StudioMessageType::TransferScene);
         size_t i = 2;
@@ -309,23 +309,17 @@ SCENARIO("StudioServer runs a viewer-parity session", "[StudioServer]")
           ++layers;
         }
         REQUIRE(layers >= 1);
-        REQUIRE(i + 4 == types.size());
+        REQUIRE(i + 3 == types.size());
         REQUIRE(types[i] == StudioMessageType::FrameConfig);
-        REQUIRE(types[i + 1] == StudioMessageType::UIState);
-        REQUIRE(types[i + 2] == StudioMessageType::ProjectSnapshot);
-        REQUIRE(types[i + 3] == StudioMessageType::BootstrapEnd);
+        REQUIRE(types[i + 1] == StudioMessageType::ProjectSnapshot);
+        REQUIRE(types[i + 2] == StudioMessageType::BootstrapEnd);
 
         const auto config = decode<FrameConfig>(msgs[i]);
         REQUIRE(config);
         REQUIRE(config->width == renderSettings.width);
         REQUIRE(config->height == renderSettings.height);
 
-        // A fresh project carries no UI state.
-        const auto uiState = decode<UIState>(msgs[i + 1]);
-        REQUIRE(uiState);
-        REQUIRE(uiState->tree == nullptr);
-
-        const auto snapshot = decode<ProjectSnapshot>(msgs[i + 2]);
+        const auto snapshot = decode<ProjectSnapshot>(msgs[i + 1]);
         REQUIRE(snapshot);
         REQUIRE(snapshot->project.activeShotId == shotId);
         REQUIRE(snapshot->project.shots.size() == 1);

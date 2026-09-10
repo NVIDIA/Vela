@@ -308,11 +308,6 @@ const std::optional<TimeAdvanceWarning> &TestSession::lastWarning() const
   return m_lastWarning;
 }
 
-const SubtreePtr &TestSession::uiState() const
-{
-  return m_connection.uiState();
-}
-
 // Session ////////////////////////////////////////////////////////////////////
 
 bool TestSession::connect(const std::string &host,
@@ -863,21 +858,6 @@ void TestSession::record(const Message &msg)
         TaskRecord::Status::Failed,
         std::move(failed->error),
         frames);
-    break;
-  }
-  case StudioMessageType::UIState: {
-    // Opaque to every client: kept for the uiState.* asserts, never read
-    // beyond the child names a script asks for. uiState() is the connection's
-    // copy; this decode is only for the record.
-    const auto state = decode<UIState>(msg);
-    if (!state) {
-      event.fields.emplace_back("malformed", "true");
-      break;
-    }
-    const auto &tree = state->tree;
-    event.fields.emplace_back("present", boolText(tree != nullptr));
-    event.fields.emplace_back(
-        "children", std::to_string(tree ? tree->root().numChildren() : 0));
     break;
   }
   default:

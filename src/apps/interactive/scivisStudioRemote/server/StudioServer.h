@@ -117,9 +117,9 @@ const char *toString(SessionState state);
  * before sending it (runOneTask), however the body left -- the last frame,
  * a cancel, or a throw -- so a client reacting to the ending loses nothing.
  * The bootstrap replays how tasks ended since the last one (task-status
- * replay) between UIState and the ProjectSnapshot. A second client connecting
- * over a live session replaces it; the replaced client is sent the farewell
- * Disconnect{"replaced by another client"} before its socket closes.
+ * replay) between the FrameConfig and the ProjectSnapshot. A second client
+ * connecting over a live session replaces it; the replaced client is sent the
+ * farewell Disconnect{"replaced by another client"} before its socket closes.
  *
  * Example:
  *   StudioServer server(options);
@@ -380,7 +380,9 @@ struct StudioServer
   DataRoots m_dataRoots;
   ServerTaskRunner m_tasks;
   ProjectOpDispatcher m_dispatcher;
-  protocol::SubtreePtr m_uiState; // null until a project with UI state opens
+  // The UI state of the opened project, preserved across saves; null until
+  // a project carrying one opens. Never leaves the server.
+  protocol::SubtreePtr m_uiState;
 
   std::shared_ptr<vsr::network::NetworkServer> m_server;
   bool m_started{false};

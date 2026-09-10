@@ -487,12 +487,11 @@ bool waitForReplies(
       client.connection, [&] { return replies.size() >= n; }, E2E_TIMEOUT);
 }
 
-// Saves the project in place, with `uiState` when given, and waits for the
-// task and the clean replica behind it.
-void saveInPlace(Client &client, protocol::SubtreePtr uiState = {})
+// Saves the project in place and waits for the task and the clean replica
+// behind it.
+void saveInPlace(Client &client)
 {
   SaveProject save; // in place
-  save.uiState = std::move(uiState);
   completeTask(client, save);
   REQUIRE(pollUntil(
       client.connection,
@@ -1168,15 +1167,9 @@ SCENARIO("scivisStudioServer and the client core render shots and recover",
     const auto port = server->port();
     Client client;
     int replaced = 0;
-    std::vector<SubtreePtr> uiStates;
     client.connection.onProjectReplaced = [&] { replaced++; };
-    client.connection.onUIState = [&](const SubtreePtr &tree) {
-      uiStates.push_back(tree);
-    };
     client.connect(port);
     REQUIRE(client.waitConnectedAndBootstrapped(1));
-    REQUIRE(uiStates.size() == 1); // every bootstrap carries one, null here
-    REQUIRE_FALSE(uiStates[0]);
     auto &ops = client.connection.projectOps();
     importMesh(client, mesh);
 
@@ -1406,13 +1399,9 @@ SCENARIO("scivisStudioServer and the client core render shots and recover",
       REQUIRE(client.connection.project()->activeShotId == shotA);
       REQUIRE(client.connection.project()->dirty);
       client.requireMirrorsServer(*server);
-      REQUIRE(uiStates.size() == 2);
-      REQUIRE_FALSE(uiStates[1]); // still no UI state saved
 
-      INFO("the UI state saved with the project returns on open");
-      auto tree = makeSubtree();
-      tree->root()["windows"]["viewport"] = std::string("abc");
-      saveInPlace(client, tree);
+      INFO("the saved project reopens after a new one");
+      saveInPlace(client);
 
       requestOk(client, NewProject{});
       REQUIRE(pollUntil(
@@ -1420,17 +1409,7 @@ SCENARIO("scivisStudioServer and the client core render shots and recover",
           [&] { return client.connection.project()->projectDirectory.empty(); },
           E2E_TIMEOUT));
 
-      uiStates.clear();
       openProject(client, scratch.saved);
-      // The UIState precedes the task's end and the snapshot.
-      REQUIRE(uiStates.size() == 1);
-      REQUIRE(uiStates[0]);
-      const auto *windows = uiStates[0]->root().child("windows");
-      REQUIRE(windows);
-      const auto *leaf = windows->child("viewport");
-      REQUIRE(leaf);
-      REQUIRE(leaf->getValueAs<std::string>() == "abc");
-      REQUIRE(client.connection.uiState() == uiStates[0]);
       REQUIRE(pollUntil(
           client.connection,
           [&] {

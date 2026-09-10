@@ -78,7 +78,7 @@ under [Variables](#variables). In the value position of `assert`, write
 The vocabulary is the server surface through milestone 7: the session,
 rendering and scene-edit commands, one request command per Project Op, Remote
 Browse and task message, the playback, picking and viewport commands, the
-offline render and the UI state round trip, and the waits that go with them.
+offline render, and the waits that go with them.
 The table below is generated from the runner's command table
 (`scivisStudioTestClient --markdown` prints it; a test checks this file
 carries it verbatim), so the names, arguments and one-line summaries here are
@@ -132,7 +132,6 @@ anything reaches the wire.
 | `dump-layers` | session | one EVT Layer line per mirror layer: index, name, nodes, active |
 | `dump-project` | session | one EVT Project line from the replica (name, activeShot, counts, dirty, directory), then one EVT Shot, Dataset, LightRig, CameraRig and ColorMap line per entity |
 | `dump-scene` | session | one EVT Object line per mirror object: type, index, subtype, name, params count |
-| `dump-ui-state` | session | one EVT UIState present= children= line for the newest tree the server sent, then one EVT UIStateEntry path= value= per leaf |
 | `expect-error [substring]` | session | the next server message other than a Frame or a liveness Pong must be an Error, containing SUBSTRING if given |
 | `expect-pong` | session | the next non-Frame server message must be a Pong |
 | `find-object <type> [first\|name=<name>]` | session | the first mirror object of that type, or the first one so named: one EVT Object line, and $lastObjectRef (type:index), $lastObjectType, $lastObjectIndex |
@@ -170,7 +169,7 @@ anything reaches the wire.
 | `save-dataset-archive <id> <file>` | request | task: write the dataset as a Dataset Archive |
 | `save-frame <path.ppm>` | session | decode the newest frame into a binary P6 PPM (relative to the working directory) |
 | `save-light-rig-archive <id> <file>` | request | sync |
-| `save-project [directory]` | request | task: save to DIR, or to the project's own directory; sends the UI state tree set-ui-state built, if any |
+| `save-project [directory]` | request | task: save to DIR, or to the project's own directory |
 | `send-raw <typeByte 0..255> [hex bytes...]` | session | send a message of that type byte with the given payload bytes, verbatim |
 | `set-active-shot <id>` | request | sync |
 | `set-encodings <name>[,<name>...]` | session | offer frame encodings, most preferred first (raw, turbojpeg; case-insensitive) |
@@ -180,7 +179,6 @@ anything reaches the wire.
 | `set-param <type> <index> <name> <anariType> <value...>` | session | optimistic edit: set a parameter on the mirror and on the wire (camera 1 fovy float32 0.9) |
 | `set-playing <shotId\|active> on\|off` | request | sync: start or stop playback of the active shot (another id is refused); the reply and a snapshot follow |
 | `set-time <shotId\|active> <frame>` | session | one-way scrub (latest-wins); while paused the server commits Time at Rest with one debounced snapshot; a SHOT that is not active is ignored silently |
-| `set-ui-state <key>=<value>... \| none` | session | build the UI state tree the next save-projects send, one string leaf windows/<key> per edit (repeated commands compose); none drops the tree |
 | `shutdown` | session | send Shutdown and await the server closing the socket -> Disconnected |
 | `sleep <ms>` | session | keep polling (events still print) for MS milliseconds; a loss meanwhile is the next command's to notice |
 | `start-rendering` | session | ask the server to stream frames |
@@ -201,9 +199,7 @@ true`. Where a command takes an object as `TYPE INDEX`, the one-token
 (`set-outline`, `request-array-histogram`). `find-object` looks every array
 kind up in the mirror's one `array` pool. `reconnect` retries refused
 attempts until its deadline, since a server being restarted refuses at
-once. `set-ui-state` composes: a key set again is overwritten, the others
-stay; after `set-ui-state none`, `save-project` sends no tree and the server
-keeps the one the project opened with. `sleep`'s MS, like every
+once. `sleep`'s MS, like every
 `timeout=MS`, must fit a deadline. `save-frame` writes relative to the
 working directory. `copy-fixture`, `kill-server` and `await-server` act on
 the server `--spawn-server` started and FAIL without one: `copy-fixture`
@@ -359,8 +355,6 @@ bytes are exactly two hex digits each.
 | `tasks.failed` | `TaskFailed` messages received, counted like `tasks.completed` |
 | `tasks.replayed` | task messages (progress or end) the newest Bootstrap carried between its Begin and End: the server's task-status replay of what ended since the previous Bootstrap, and the running task's status. 0 again at every `BootstrapBegin` |
 | `task.<id>.<field>` | a task record (`last` is `$lastTaskId`; FAIL when nothing has been heard of the id): `state`, `message`, `framesCompleted`, `current`, `total`; `state` is `Queued` from the launching reply, `Running` from the first `TaskProgress`, then `Completed` or `Failed`; `message` the completion message or the failure's error; `current` and `total` the newest progress (0 when indeterminate) |
-| `uiState.present` | whether the server has sent a `UIState` tree (a Bootstrap's, or the one that follows an `open-project`); `disconnect` forgets it |
-| `uiState.<key>` | the string leaf `windows/<key>` of the newest `UIState` tree, as `set-ui-state` writes it (FAIL when there is no tree or no such leaf) |
 | `replies.failed` | replies with `ok=false` |
 | `replies.pending` | `no-wait` requests awaiting collection |
 | `snapshots.received` | Project Snapshots applied, the Bootstrap's included |
@@ -463,7 +457,6 @@ own except those a fresh server mints deterministically (`shot_0001`,
 | `render_shot.studio` | a three-frame render of the fixture at 32x24: determinate progress, `framesCompleted == 3`, the output directory as the message (listed: three files), then the refusals on an unsaved project and an unknown shot |
 | `render_cancel.studio` | a 400-frame render cancelled after its first progress: a second `render-shot` and a `create-shot` sent meanwhile are latched behind the body and dispatched together after the cancel, so the second queues and the `create-shot` is refused with "render in progress"; the cancel's reply is ok, the task ends `Failed "cancelled"` with the frames written so far, the second render is cancelled too, and edits go through again afterwards |
 | `task_replay.studio` | a 60-frame render left running by a `disconnect`: the `reconnect` is bootstrapped once the render is done and its Bootstrap replays the `TaskCompleted` (`tasks.replayed >= 1`, `task.last.state == Completed`); the next Bootstrap replays nothing |
-| `ui_state.studio` | `set-ui-state` leaves saved with the project, absent on a fresh project, back after `open-project` (a `UIState` before the task's end) and in every later Bootstrap, and kept by a save that sends no tree |
 | `loss_during_task.studio` | the server killed (`kill-server`) while a 400-frame render of this client runs: Lost keeps the record `Running`, the reconnect's Bootstrap fails it with `connection lost`, the restarted server replays nothing |
 
 ### By hand

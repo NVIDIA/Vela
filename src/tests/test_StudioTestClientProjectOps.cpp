@@ -284,9 +284,7 @@ SCENARIO("the test client drives project ops against a fake server",
       }
     }
 
-    WHEN(
-        "a script composes its outline, viewport and UI-state edits and bins"
-        " an array")
+    WHEN("a script composes its outline and viewport edits and bins an array")
     {
       // What a scenario script cannot observe: the request each spelling puts
       // on the wire, and that a later edit is composed onto the remembered
@@ -303,8 +301,6 @@ SCENARIO("the test client drives project ops against a fake server",
           "viewport-settings showWorldBounds=on worldBoundsWidth=2"
           " worldBoundsColor=1,0,0,1\n"
           "viewport-settings\n"
-          "set-ui-state layout=abc theme=dark\n"
-          "set-ui-state theme=light\n"
           "save-project /data/p1\n"
           "await-task\n"
           "await-snapshot\n"
@@ -350,15 +346,7 @@ SCENARIO("the test client drives project ops against a fake server",
         // The bare call re-sends the remembered struct.
         REQUIRE(settings[2].showWorldBounds);
         REQUIRE(settings[2].visualizeAOV == vsr::rendering::AOVType::DEPTH);
-        const auto saves = server.requests<SaveProject>();
-        REQUIRE(saves.size() == 1);
-        REQUIRE(saves[0].uiState);
-        const auto *windows = saves[0].uiState->root().child("windows");
-        REQUIRE(windows);
-        REQUIRE(windows->numChildren() == 2);
-        REQUIRE(windows->child("layout")->getValueAs<std::string>() == "abc");
-        REQUIRE(windows->child("theme")->getValueAs<std::string>() == "light");
-        REQUIRE(saves[0].uiState->root().child("layout") == nullptr);
+        REQUIRE(server.requests<SaveProject>().size() == 1);
         const auto histograms = server.requests<RequestArrayHistogram>();
         REQUIRE(histograms.size() == 1);
         REQUIRE(histograms[0].array.type == ANARI_ARRAY);
@@ -448,7 +436,6 @@ SCENARIO("the test client drives project ops against a fake server",
     {
       const std::string script =
           "connect " + endpoint + "\n"
-          "assert uiState.present == false\n"
           // An unsaved project cannot render; the refusal is a reply.
           "expect-fail render-shot active\n"
           "assert lastReplyError contains saved\n"
@@ -527,7 +514,6 @@ SCENARIO("the test client drives project ops against a fake server",
             "EVT TaskFailed taskId=2 error=\"cancelled\" framesCompleted=1"));
         REQUIRE(hasLine(r, "OK expect-fail await-reply"));
         REQUIRE(hasLine(r, "OK assert lastReplyError contains progress"));
-        REQUIRE(hasLine(r, "EVT UIState present=false children=0"));
         REQUIRE(hasLine(r, "OK assert tasks.replayed == 3"));
         REQUIRE(hasLine(r, "OK assert tasks.completed == 4"));
         REQUIRE(hasLine(r, "OK assert tasks.replayed == 0"));

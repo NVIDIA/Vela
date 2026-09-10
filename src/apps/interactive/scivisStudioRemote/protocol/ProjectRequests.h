@@ -58,15 +58,14 @@ struct OpenProject
 };
 
 // Task: saves to `directory`, or to the project's own directory when absent.
-// `uiState` (windows, layout, settings) is opaque to the server; it is stored
-// with the project and handed back on open.
+// The client's UI layout is its own and never travels with the project; a
+// UI-state node an opened project already carries is preserved by the server.
 struct SaveProject
 {
   static constexpr StudioMessageType MESSAGE_TYPE =
       StudioMessageType::SaveProject;
   uint64_t requestId{0};
   std::optional<std::filesystem::path> directory;
-  SubtreePtr uiState;
 };
 
 // Dataset creation ///////////////////////////////////////////////////////////
@@ -286,7 +285,6 @@ void fields(V &v, SaveProject &r)
 {
   v.required("requestId", r.requestId);
   v.optional("directory", r.directory);
-  v.subtree("uiState", r.uiState);
 }
 
 template <typename V>

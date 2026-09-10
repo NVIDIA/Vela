@@ -69,10 +69,6 @@ CommandRunner::Failure CommandRunner::saveProject(
   SaveProject request;
   if (!command.args.empty())
     request.directory = std::filesystem::path(command.args[0]);
-  // The GUI sends its live layout with every save; this client sends the
-  // tree set-ui-state built, or none, when the server keeps the one the
-  // project opened with.
-  request.uiState = m_uiStateToSave;
   return sendRequest(std::move(request), deadline, modifiers, taskStarted());
 }
 

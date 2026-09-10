@@ -53,8 +53,8 @@ _Avoid_: background job, async request
 
 **Bootstrap**:
 The bracketed message sequence a server sends on every accepted connection —
-structural scene, layer snapshots, frame config, UI State, Task-Status
-Replay, then a Project Snapshot — leaving the client fully populated.
+structural scene, layer snapshots, frame config, Task-Status Replay, then a
+Project Snapshot — leaving the client fully populated.
 Connecting and reconnecting are the same act; the server's authoritative
 state is the session.
 _Avoid_: session restore, resync
@@ -79,13 +79,14 @@ afterwards; browse, histogram and cancel still go through. An exclusive task
 also outlives its session when it is merely queued.
 _Avoid_: blocking task, render lock
 
-**UI State**:
-The opaque `{windows, layout, settings}` tree a client attaches to
-`SaveProject` and receives back in every Bootstrap and after an
-`OpenProject` (`UIState`). The server stores and returns it without reading
-it, so a layout saved with a project follows the project to whichever client
-opens it next.
-_Avoid_: layout sync, window settings message
+**Client Layout**:
+The `{windows, layout}` tree the client keeps for itself -- each window's
+settings and the ImGui dock layout -- written to its own file beside the
+user's application settings at exit and restored at startup. It never
+travels on the wire and never belongs to a Project, so which project is open
+moves no panel. A UI-state node an opened project's manifest carries (the
+monolith writes one) is held by the server only to be written back on save.
+_Avoid_: layout sync, project layout, window settings message
 
 ### Client-held state
 

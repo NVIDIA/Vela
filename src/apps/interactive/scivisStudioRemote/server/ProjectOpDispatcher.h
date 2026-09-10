@@ -179,7 +179,8 @@ struct ProjectOpDispatcher
     std::function<void(vsr::network::Message &&)> send;
     // Sends one TransferScene iff this op changed the scene.
     std::function<void()> flushSceneSnapshot;
-    // The UI-state tree stored with the project (ui-state round trip).
+    // The UI-state tree the opened project carried, held so a save writes
+    // it back unchanged; never sent to a client.
     protocol::SubtreePtr *uiState{nullptr};
   };
 

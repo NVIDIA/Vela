@@ -38,32 +38,10 @@ struct ProjectSnapshot
   vsr::scivis_studio::Project project;
 };
 
-/*
- * Opaque UI-state tree (windows/layout/settings) the server stores with the
- * project and hands back during bootstrap without ever inspecting it. Null
- * `tree` means the project carries no UI state.
- */
-struct UIState
-{
-  static constexpr StudioMessageType MESSAGE_TYPE = StudioMessageType::UIState;
-  SubtreePtr tree;
-};
-
 // "project" is required and read with nodeToProject()'s Full-form policy:
 // a mistyped field, unknown enum spelling or malformed camera rig is
 // rejected.
 void toNode(const ProjectSnapshot &, vsr::core::DataNode &);
 bool fromNode(const vsr::core::DataNode &, ProjectSnapshot &);
-
-// UIState is a fields() description (PayloadCommon.h): the tree travels
-// under child "tree"; absent reads back as null.
-
-// Inlined definitions ////////////////////////////////////////////////////////
-
-template <typename V>
-void fields(V &v, UIState &u)
-{
-  v.subtree("tree", u.tree);
-}
 
 } // namespace vsr::scivis_studio::protocol

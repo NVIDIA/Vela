@@ -265,7 +265,6 @@ inline void FakeProjectServer::sendBootstrap()
   config.width = 640;
   config.height = 480;
   send(encode(config));
-  send(encode(UIState{})); // every bootstrap carries one, null here
   // The task-status replay: what ended while nobody was listening, or
   // since the last bootstrap.
   for (auto &end : finishedSinceBootstrap)
@@ -375,9 +374,7 @@ inline void FakeProjectServer::onRequest(const Message &msg)
       endTask(encode(failed));
       return;
     }
-    // The saved project again: its UI state goes out before the end.
     project.dirty = false;
-    send(encode(UIState{})); // the opened project's UI state, none here
     TaskCompleted completed;
     completed.taskId = taskId;
     endTask(encode(completed));

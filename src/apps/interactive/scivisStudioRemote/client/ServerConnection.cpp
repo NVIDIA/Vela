@@ -223,11 +223,6 @@ void ServerConnection::clearTimeAdvanceWarning()
   m_timeAdvanceWarning.reset();
 }
 
-const SubtreePtr &ServerConnection::uiState() const
-{
-  return m_uiState;
-}
-
 // User intentions ////////////////////////////////////////////////////////////
 
 void ServerConnection::connect(const std::string &host, uint16_t port)
@@ -271,7 +266,6 @@ void ServerConnection::dropSession(const std::string &status)
   m_frameConfig = {};
   m_timeAdvanceWarning.reset();
   m_lastFrameHeader.reset();
-  m_uiState.reset();
   m_farewellReason.clear();
   {
     std::lock_guard lock(m_inboundMutex);
@@ -822,17 +816,6 @@ void ServerConnection::handleMessage(const vsr::network::Message &msg)
       return;
     }
     m_projectOps->handlePickReply(*reply);
-    return;
-  }
-  case StudioMessageType::UIState: {
-    const auto state = decode<UIState>(msg);
-    if (!state) {
-      vsr::core::logError("[ServerConnection] undecodable UIState");
-      return;
-    }
-    m_uiState = state->tree;
-    if (onUIState)
-      onUIState(m_uiState);
     return;
   }
   default:

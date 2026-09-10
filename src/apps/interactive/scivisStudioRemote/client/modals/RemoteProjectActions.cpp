@@ -57,11 +57,6 @@ void RemoteFileAnimationAction::submit(
 
 // RemoteProjectLocationAction ////////////////////////////////////////////////
 
-RemoteProjectLocationAction::RemoteProjectLocationAction(
-    EditorContext *context, UIStateProvider uiState)
-    : RemoteAction(context), m_uiState(std::move(uiState))
-{}
-
 RemoteProjectLocationAction::~RemoteProjectLocationAction() = default;
 
 void RemoteProjectLocationAction::submit(
@@ -77,7 +72,6 @@ void RemoteProjectLocationAction::submit(
   } else {
     SaveProject save;
     save.directory = request.directory;
-    save.uiState = m_uiState ? m_uiState() : nullptr;
     m_pending.sendForResult<TaskStartedResult>(ops, std::move(save), onReply);
   }
 }

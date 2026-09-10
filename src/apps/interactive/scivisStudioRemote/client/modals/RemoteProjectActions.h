@@ -77,19 +77,12 @@ struct RemoteFileAnimationAction
 struct RemoteProjectLocationAction
     : public RemoteAction<modals::ProjectLocationDialog::Action>
 {
-  // What Save As attaches to SaveProject: the windows, layout and settings
-  // the Application builds.
-  using UIStateProvider = std::function<protocol::SubtreePtr()>;
-
-  RemoteProjectLocationAction(EditorContext *context, UIStateProvider uiState);
+  using RemoteAction::RemoteAction;
   ~RemoteProjectLocationAction() override;
 
   void submit(const modals::ProjectLocationDialog::Request &request,
       modals::ActionResult done) override;
   std::string initialDirectory(modals::ProjectLocationMode mode) const override;
-
- private:
-  UIStateProvider m_uiState;
 };
 
 // Inlined definitions ////////////////////////////////////////////////////////

@@ -119,8 +119,7 @@ Studio reuses the `vsr::network` transport as-is — Boost.Asio TCP,
 
 A **bracketed sequence, not a composite blob**: `BootstrapBegin`; then
 ordinary messages — structural scene transfer (descriptor-only arrays), layer
-snapshots, frame config, the project's opaque UI-state tree (`UIState`), and
-a task-status replay (the `TaskCompleted`/`TaskFailed` of every Server Task
+snapshots, frame config, and a task-status replay (the `TaskCompleted`/`TaskFailed` of every Server Task
 that ended since the previous bootstrap, then one `TaskProgress` for a task
 still running); then one `ProjectSnapshot` as the commit marker; then
 `BootstrapEnd`. The bracket gives the client its "suppress local reactions,
@@ -168,8 +167,7 @@ outside Studio's set is **rejected with an error**, never silently ignored.
   reason; the server's farewell names why it ends a session it did not lose
   (v3; "replaced by another client" when a second connection takes over).
 - **Project**: `NewProject` (sync), `OpenProject(dir)` (task),
-  `SaveProject(dir?, uiState)` (task); `UIState{tree}` (server→client, in
-  every bootstrap and after an `OpenProject` completes).
+  `SaveProject(dir?)` (task).
 - **Dataset**: static import, subtree-archive import, file-animation import
   (tasks); declared-dataset
   creation (sync — stats nothing, ADR 0023); `ReimportDataset` (task);
@@ -243,9 +241,10 @@ two), no bare save-state-file, no raw float update-time.
 - Studio's enum avoids the value 255: the demo's `ERROR = 255` collides with
   `MESSAGE_TYPE_INVALID = 255` (`Message.hpp`), an existing bug noted here so
   nobody copies it.
-- UI state (windows/layout/settings `DataNode`s) rides `SaveProject` and the
-  open/bootstrap path as an **opaque subtree** the server never inspects, so
-  a user reconnecting from anywhere gets their layout back.
+- UI state does **not** travel: the client owns its window and dock layout
+  and keeps it in its own config file, so opening a project never moves a
+  panel. A UI-state node an opened project's manifest carries is held by the
+  server only so a later save writes it back unchanged.
 
 ## File access
 
@@ -605,8 +604,7 @@ green; everything new sits behind `VSR_USE_NETWORKING`.
    `ViewportSettings` with the relocated pass suite.
 7. **Shot rendering + hardening.** `RenderShot` as a Server Task
    (pause-and-refuse semantics), task-status replay in bootstrap, `Shutdown`,
-   UI-state round-trip through save/open, and an end-to-end pass over the
-   loss/reconnect story.
+   and an end-to-end pass over the loss/reconnect story.
 
 ## How the deferred modes fit later
 

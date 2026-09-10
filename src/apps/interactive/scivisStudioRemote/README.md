@@ -140,8 +140,8 @@ listening -- and the client fails its open task records with "connection
 lost" at every `BootstrapBegin` for the same reason; the task-status replay
 inside the bracket revives the ones the server finished or is still running:
 the runner keeps the last 32 endings and the bootstrap sends each one not
-replayed before, `TaskCompleted`/`TaskFailed` verbatim, between `UIState`
-and the `ProjectSnapshot`, then a `TaskProgress{message = description}` for a
+replayed before, `TaskCompleted`/`TaskFailed` verbatim, between the
+`FrameConfig` and the `ProjectSnapshot`, then a `TaskProgress{message = description}` for a
 task running at that moment. `OpenProject` goes through `stageProjectOpen` then
 `ProjectContext::openStagedProject`, both on the loop thread, so a later
 worker-thread staging phase is a mechanical move. Task ids increase for the
@@ -276,13 +276,16 @@ pending request retires), and with a bare `Error{"malformed ..."}` otherwise.
 The client core covers the second case too: a bare `Error` that names the
 type of a pending request fails the oldest pending request of that type, so
 no control stays greyed until the connection is lost. `PROTOCOL_VERSION` is
-6: 2 when `TaskFailed` gained `framesCompleted` (optional on the wire), 3
+8: 2 when `TaskFailed` gained `framesCompleted` (optional on the wire), 3
 when `Disconnect` gained a reason, 4 when `UpdateShot` and `ProjectSnapshot`
 moved to the model's one Shot and Project serialization, 5 when a
 `SceneObjectRef` became one object-reference leaf, the task endings gained a
 `results` subtree (`RenderShotResult` replacing `framesCompleted`) and
 `ImportSubtreeDataset` split from `ImportStaticDataset`, 6 when `UpdateShot`
-became a `ShotPatch` of the fields to change (PR review fix-ups below).
+became a `ShotPatch` of the fields to change (PR review fix-ups below), 7
+when `LoadDatasetArchive` gained the loaded dataset's name, and 8 when the
+UI state left the wire (`SaveProject` lost `uiState`; the `UIState` message,
+107, is retired and its value not reused).
 
 ### Shot rendering
 
@@ -354,16 +357,14 @@ became a `ShotPatch` of the fields to change (PR review fix-ups below).
   announcing the new connection) so its banner names the reason; on a link
   too slow to drain a queued Frame in that time the client sees the plain
   close.
-- **UI state round trip.** The server keeps the `{windows, layout,
-  settings}` tree of the project it opened: from `--project` at startup
-  (`setupProject` reads it with the same out-params the dispatcher uses),
-  from `OpenProject` (whose body sends `UIState{tree}` before its
-  `TaskCompleted` and snapshot, so the client that asked can apply the
-  opened project's layout), and from a `SaveProject` that carried one.
-  `SaveProject` writes the client-supplied tree, or the retained one when
-  the request has none, so a headless save never drops a layout. Every
-  bootstrap sends `UIState` (null when no project with UI state was ever
-  opened) before the task-status replay.
+- **UI state stays out of it.** The client owns its layout (see "Layout"
+  below), so nothing about windows or docking travels on the wire. A project
+  authored by the monolith may still carry a `{windows, layout, settings}`
+  node in its manifest, and the server preserves it: it holds the tree the
+  open read -- from `--project` at startup (`setupProject`) or from
+  `OpenProject` -- and `SaveProject` writes that same tree back, so a save
+  from here never drops a layout the monolith wrote. No client ever sees
+  it.
 
 A fresh project (server start without `--project`, or `NewProject`) reports
 `dirty == false` in its snapshot: binding the server's renderer into a shot
@@ -387,9 +388,8 @@ the op that consumes the path is the authority.
 
 *File* holds New/Open/Save/Save As (Ctrl+S saves; Save As and Open go
 through the Project Location dialog), *Studio* holds Add Dataset (Static,
-File Animation) and Add Shot. Save attaches the `{windows, layout, settings}`
-UI-state tree in the monolith's shape; see "UI state" below for how it comes
-back.
+File Animation) and Add Shot. A save carries the project and nothing else:
+the layout is the client's, not the project's (see "Layout" below).
 
 ### Time, picking and passes (milestone 6)
 
@@ -415,14 +415,15 @@ The viewport's *View* menu holds the AOV combo (all names; the server decides
 whether PRIMITIVE_ID is available), the depth range and edge inversion,
 Highlight Selected, Outline Primitives and World Bounds with colour and
 width; every change sends the whole `ViewportSettings`, which persist in the
-window's UI state and are re-sent after every bootstrap.
+window's own settings (the client's layout file) and are re-sent after every
+bootstrap.
 
 The **Histogram** window (`client/windows/HistogramPanel.*`) lists the array
 parameters of the first selected object (and of a volume's spatial field),
 takes a bin count and asks the server with `RequestArrayHistogram`; the
 reply is plotted, a refusal shows the server's error text.
 
-### Rendering, task records, UI state, loss (milestone 7)
+### Rendering, task records, layout, loss (milestone 7)
 
 **Render Shot.** The Shot Editor's *Render Shot...* confirms the frame count
 and the output directory (`renders/<shotId>/` under the project) and sends
@@ -465,20 +466,19 @@ replayed before, whether or not this client saw it live), and the client's
 own "connection lost" failures are not endings (the banner said it), so the
 ending the replay brings for such a task still toasts.
 
-**UI state.** The bootstrap's `UIState` is applied in `onBootstrapComplete`
-exactly as the monolith applies a loaded project's: `windows/<name>` through
-each window's `loadSettings` (the window names match the monolith's, so a
-project saved by either restores the other's viewport and per-window
-settings), `layout` through `ImGui::LoadIniSettingsFromMemory`, and
-`settings/{fontScale, uiRounding}` through `loadApplicationSettings`. A null
-tree keeps the current layout. It is applied only when the client has no
-live layout of its own -- the first bootstrap out of the home state
-(NeverConnected or Disconnected) -- not on the re-bootstrap a reconnect after
-Lost runs, which would yank the layout the user is looking at. A `UIState`
-outside a bootstrap follows an `OpenProject` this session asked for and is
-applied at once, as opening a project in the monolith does. Save sends the
-current tree; the viewport settings the tree loads are sent to the server
-right after, by `onServerReady()`.
+**Layout.** The layout is the client's own, never the project's: which
+project is open moves no panel, and connecting, opening or saving never
+touches the docking. `Application::saveClientUIState()` writes `{windows,
+layout}` -- each window's `saveSettings` and
+`ImGui::SaveIniSettingsToMemory()` -- to `~/.config/vsr/studioClientUI.vsr`
+(`%APPDATA%\vsr\...` on Windows) in `teardown()`, and
+`loadClientUIState()` applies it through the base class'
+`applyUIStateTree` in `setupWindows()`, after the built-in default layout
+that stands when the file is missing (first run) or unreadable.
+`--noDefaultLayout` skips the restore too. `settings/{fontScale, uiRounding}`
+are not in the file: they are application settings and stay in the base
+class' `appSettings.vsr`, so each has one writer. *View -> Restore Default
+Layout* goes back to the built-in default at any time.
 
 **Loss and reconnect** (`ServerConnection`). A loss keeps the mirror,
 replica and last frame as a frozen read-only view; pending requests fail
@@ -1716,7 +1716,7 @@ decisions, `M7-n`).
 |-------------|--------|-------|------|
 | **Message inventory (v1)** | | | |
 | Session: `Hello`, `Ping`/`Pong`, `Disconnect{reason?}`, `Shutdown`, `BootstrapBegin`/`End` | implemented | `protocol/SessionMessages.h`, `server/StudioServer.cpp` | `Error` (2) is the bare error the spec's "rejected with an error" needs; `Disconnect.reason` (v3) is the server's farewell to an evicted client |
-| Project: `NewProject`, `OpenProject`, `SaveProject(dir?, uiState)` | implemented | `server/ProjectOpDispatcher.cpp`, `server/ProjectOpDispatcherTasks.cpp` | plus `UIState` server-to-client (107), sent in every bootstrap and by `OpenProject`'s body |
+| Project: `NewProject`, `OpenProject`, `SaveProject(dir?)` | implemented | `server/ProjectOpDispatcher.cpp`, `server/ProjectOpDispatcherTasks.cpp` | the UI state left the wire (`PROTOCOL_VERSION` 8): the client owns its layout and the server preserves a manifest's node across saves |
 | Dataset ops (imports, declare, reimport, rename/remove/unload/refresh, load, archive save/load, incorporate, discover) | implemented | `ProjectOpDispatcher.cpp` (sync), `ProjectOpDispatcherTasks.cpp` (tasks), types 23..35 | task/sync split as listed |
 | Shot: `CreateShot`, `RemoveShot`, `UpdateShot`, `SetActiveShot` | implemented | types 36..39 | `UpdateShot` carries a `ShotPatch` (v6) and has no `playing` field |
 | Rig: light rig create/clone/remove/rename, add/remove light, camera rig create/remove/rename, archives | implemented | types 40..52 | |
@@ -1773,7 +1773,7 @@ decisions, `M7-n`).
 | Single IO-thread-safe disconnect hook, UI thread polls | implemented | `ServerConnection::onChannelClosed`/`poll` | |
 | Freeze in place under a banner | implemented | `client/Application.cpp`, `client/StatusOverlay.cpp` | mirror, replica and last frame kept; a loss during a bootstrap empties the mirror (M7-6, item 8) |
 | Auto-retry with backoff for ~a minute, then manual | implemented | `ServerConnection::poll` | a retry greeted by another protocol version ends `Disconnected` with the mismatch text and no retry offer (M7-6, item 12) |
-| Reconnect does nothing special; a restarted server is a first connect | implemented | bootstrap | task records are failed at `BootstrapBegin` and revived by the replay (M7-4); the UI layout is not re-applied on the re-bootstrap after Lost |
+| Reconnect does nothing special; a restarted server is a first connect | implemented | bootstrap | task records are failed at `BootstrapBegin` and revived by the replay (M7-4); the layout is the client's own and no bootstrap touches it |
 | No v1 autosave | implemented | -- | |
 | Connection-scoped request failure only; no UI-thread blocking | implemented | `ProjectOps::failAllPending` | |
 | Crisp states `NeverConnected`/`Connected`/`Lost`/`Disconnected` | implemented | `ConnectionState` | an evicted client is `Lost` with the server's reason as status (M7-6, item 13) |

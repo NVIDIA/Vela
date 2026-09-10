@@ -19,7 +19,7 @@ namespace vsr::scivis_studio::test_client {
  * ANARI values as script text: the type names a script writes (`camera`,
  * `float32_vec3`, case-insensitive, the SDK's `ANARI_` spelling accepted
  * too), one token per component on the way in (`set-param`), and the one
- * string form of a mirror value on the way out (`assert`, `dump-ui-state`).
+ * string form of a mirror value on the way out (`assert`, `dump-scene`).
  * Numbers print as the shortest text that reads back as the same number, so a
  * float32 set from "0.9" prints "0.9". Nothing here knows about the runner.
  *

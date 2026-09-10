@@ -6,8 +6,8 @@
  * one-way messages: scene edits (set-param, remove-param,
  * set-node-transform), playback and the viewport (set-time, pick,
  * set-outline, viewport-settings, find-object), inspection (dump-scene,
- * dump-layers, dump-project, dump-frame), the UI state round trip
- * (set-ui-state, dump-ui-state) and assert. The table in CommandRunner.cpp
+ * dump-layers, dump-project, dump-frame) and assert. The table in
+ * CommandRunner.cpp
  * has checked each command's argument count before a handler runs.
  */
 
@@ -454,57 +454,6 @@ CommandRunner::Failure CommandRunner::dumpFrame(const Command &)
     return "no frame received yet";
   const auto view = decodeFrame(m_session->lastFrame());
   printRecord("EVT " + frameEvent(*header, view ? view->size : 0).text());
-  return {};
-}
-
-// UI state ///////////////////////////////////////////////////////////////////
-
-CommandRunner::Failure CommandRunner::setUIState(const Command &command)
-{
-  if (command.args.size() == 1 && lower(command.args[0]) == "none") {
-    // Back to sending no tree: the server then keeps the one it retains.
-    m_uiStateToSave.reset();
-    return {};
-  }
-  // The shape the GUI saves is {windows/<Window>/..., layout, settings/...};
-  // the server reads no further than those child names, so string leaves
-  // under windows/ are all a round trip needs. Repeated commands compose:
-  // a key set again is overwritten, the others stay.
-  auto tree = m_uiStateToSave ? m_uiStateToSave : makeSubtree();
-  auto &windows = tree->root()["windows"];
-  for (const auto &edit : command.args) {
-    const auto eq = edit.find('=');
-    if (eq == std::string::npos || eq == 0)
-      return "not a <key>=<value> edit: " + edit;
-    windows[edit.substr(0, eq)] = edit.substr(eq + 1);
-  }
-  m_uiStateToSave = tree;
-  return {};
-}
-
-CommandRunner::Failure CommandRunner::dumpUIState(const Command &)
-{
-  if (const auto pending = drainEvents())
-    return pending;
-  const auto &tree = m_session->uiState();
-  printRecord(std::string("EVT UIState present=") + boolText(tree != nullptr)
-      + " children=" + std::to_string(tree ? tree->root().numChildren() : 0));
-  if (!tree)
-    return {};
-  // One line per leaf, its path from the root written with slashes.
-  const std::function<void(const vsr::core::DataNode &, const std::string &)>
-      walk = [&](const vsr::core::DataNode &node, const std::string &path) {
-        if (node.numChildren() == 0) {
-          printRecord("EVT UIStateEntry path=" + quotedText(path)
-              + " value=" + quotedText(anyText(node.getValue())));
-          return;
-        }
-        node.foreach_child_const([&](const vsr::core::DataNode &child) {
-          walk(child, path.empty() ? child.name() : path + "/" + child.name());
-        });
-      };
-  tree->root().foreach_child_const(
-      [&](const vsr::core::DataNode &child) { walk(child, child.name()); });
   return {};
 }
 
