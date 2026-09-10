@@ -291,6 +291,67 @@ SCENARIO("Optimistic scene edit payloads", "[StudioProtocol]")
     }
   }
 
+  GIVEN("a SetObjectMetadata")
+  {
+    SetObjectMetadata edit;
+    edit.object = makeRef(ANARI_CAMERA, 3);
+
+    THEN("every entry round-trips with its type, in order")
+    {
+      edit.entries.push_back(
+          {"manipulator.at", vsr::core::Any(vsr::math::float3(1.f, 2.f, 3.f))});
+      edit.entries.push_back({"manipulator.distance", vsr::core::Any(4.f)});
+      edit.entries.push_back({"manipulator.up", vsr::core::Any(1)});
+      const auto out = roundTrip(edit);
+      REQUIRE(out.object.type == ANARI_CAMERA);
+      REQUIRE(out.object.objectIndex == 3);
+      REQUIRE(out.entries.size() == 3);
+      REQUIRE(out.entries[0].name == "manipulator.at");
+      REQUIRE(out.entries[0].value.is<vsr::math::float3>());
+      REQUIRE(out.entries[0].value.getAs<vsr::math::float3>()
+          == vsr::math::float3(1.f, 2.f, 3.f));
+      REQUIRE(out.entries[1].name == "manipulator.distance");
+      REQUIRE(out.entries[1].value.getAs<float>() == 4.f);
+      REQUIRE(out.entries[2].name == "manipulator.up");
+      REQUIRE(out.entries[2].value.is<int>());
+    }
+
+    THEN("an entry with no value round-trips as a removal")
+    {
+      edit.entries.push_back({"stale", vsr::core::Any()});
+      const auto out = roundTrip(edit);
+      REQUIRE(out.entries.size() == 1);
+      REQUIRE(out.entries[0].name == "stale");
+      REQUIRE_FALSE(out.entries[0].value.valid());
+    }
+
+    THEN("no entries round-trips as no entries")
+    {
+      const auto out = roundTrip(edit);
+      REQUIRE(out.entries.empty());
+    }
+
+    THEN("an array value is rejected")
+    {
+      vsr::core::DataTree tree;
+      writeChildNode(tree.root(), "object", edit.object);
+      auto &entry = tree.root()["entries"]["0"];
+      writeChild(entry, "name", std::string("opacityControlPoints"));
+      entry["value"].setValueAsArray(std::vector<float>{1.f, 2.f});
+      SetObjectMetadata out;
+      REQUIRE_FALSE(fromNode(tree.root(), out));
+    }
+
+    THEN("an entry with no name is rejected")
+    {
+      vsr::core::DataTree tree;
+      writeChildNode(tree.root(), "object", edit.object);
+      tree.root()["entries"]["0"]["value"] = 1.f;
+      SetObjectMetadata out;
+      REQUIRE_FALSE(fromNode(tree.root(), out));
+    }
+  }
+
   GIVEN("a RemoveObjectParameter")
   {
     RemoveObjectParameter remove;

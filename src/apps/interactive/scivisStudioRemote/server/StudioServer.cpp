@@ -830,7 +830,7 @@ void StudioServer::applyEdit(const SetObjectParameter &edit)
     return;
   }
   obj->addParameter(edit.name).setValue(edit.value);
-  followCameraEdit(obj);
+  followCameraEdit(obj, CameraEdit::Pose);
 }
 
 void StudioServer::applyEdit(const RemoveObjectParameter &edit)
@@ -846,6 +846,32 @@ void StudioServer::applyEdit(const RemoveObjectParameter &edit)
     return;
   }
   obj->removeParameter(edit.name);
+}
+
+void StudioServer::applyEdit(const SetObjectMetadata &edit)
+{
+  auto *obj =
+      m_ctx.vsr.scene.getObject(edit.object.type, edit.object.objectIndex);
+  if (!obj) {
+    vsr::core::logWarning(
+        "[StudioServer] SetObjectMetadata on unknown object (%s, %zu)",
+        anari::toString(edit.object.type),
+        edit.object.objectIndex);
+    return;
+  }
+  bool manipulatorChanged = false;
+  for (const auto &entry : edit.entries) {
+    if (entry.value.valid())
+      obj->setMetadataValue(entry.name, entry.value);
+    else
+      obj->removeMetadata(entry.name);
+    manipulatorChanged |= vsr::rendering::isManipulatorMetadataKey(entry.name);
+  }
+  // Only the manipulator keys say anything about the client's view; another
+  // key on the same camera must not re-apply metadata a parameter edit has
+  // since made stale.
+  if (manipulatorChanged)
+    followCameraEdit(obj, CameraEdit::Manipulator);
 }
 
 void StudioServer::applyEdit(const SetNodeTransform &edit)
@@ -957,16 +983,28 @@ bool StudioServer::sessionEstablished() const
   return m_state.load() == SessionState::Established;
 }
 
-void StudioServer::followCameraEdit(const vsr::scene::Object *object)
+void StudioServer::followCameraEdit(
+    const vsr::scene::Object *object, CameraEdit edit)
 {
   auto *shot = project::activeShot(m_projectContext.project());
   if (!shot || !object || object->type() != ANARI_CAMERA
       || m_projectContext.resolveShotCamera(*shot) != object)
     return;
 
+  const auto &camera = *static_cast<const vsr::scene::Camera *>(object);
   auto &manipulator = m_ctx.view.manipulator;
-  vsr::rendering::updateManipulatorFromCameraPose(
-      manipulator, *static_cast<const vsr::scene::Camera *>(object));
+  // The exact route when the client sent its manipulator state: an orbit
+  // centre and distance cannot be recovered from a position/direction/up
+  // triple, so the pose route would invent one and the rig would persist the
+  // fabrication (ADR 0036). A camera orbit sends its metadata ahead of the
+  // pose it wrote beside it, so the pose edit that follows re-derives the
+  // same centre from an eye and direction that now agree with it.
+  const bool exact = edit == CameraEdit::Manipulator
+      && vsr::rendering::hasManipulatorMetadata(camera);
+  if (exact)
+    vsr::rendering::updateManipulatorFromCamera(manipulator, camera);
+  else
+    vsr::rendering::updateManipulatorFromCameraPose(manipulator, camera);
   // Without keyframes the rig's current view is what applyActiveShot() writes
   // back into the camera on every time change; it follows the client's view
   // here (no snapshot: the view is in motion, like time under playback).
@@ -1184,6 +1222,9 @@ void StudioServer::onMessage(const Message &msg)
     return;
   case StudioMessageType::RemoveObjectParameter:
     latchEdit<RemoveObjectParameter>(msg);
+    return;
+  case StudioMessageType::SetObjectMetadata:
+    latchEdit<SetObjectMetadata>(msg);
     return;
   case StudioMessageType::SetNodeTransform:
     latchEdit<SetNodeTransform>(msg);

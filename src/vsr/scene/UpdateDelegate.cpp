@@ -162,4 +162,18 @@ void MultiUpdateDelegate::signalUpdateBatchEnd()
     d->signalUpdateBatchEnd();
 }
 
+void MultiUpdateDelegate::signalMetadataUpdated(
+    const Object *o, const char *name)
+{
+  for (auto &d : m_delegates)
+    d->signalMetadataUpdated(o, name);
+}
+
+void MultiUpdateDelegate::signalMetadataBatchUpdated(
+    const Object *o, const std::vector<std::string> &names)
+{
+  for (auto &d : m_delegates)
+    d->signalMetadataBatchUpdated(o, names);
+}
+
 } // namespace vsr::scene

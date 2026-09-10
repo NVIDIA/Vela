@@ -22,8 +22,12 @@
 #include "TaskMessages.h"
 #include "ViewportMessages.h"
 // vsr_scivis_studio_model
+#include "CameraRig.h"
 #include "Project.h"
 #include "Shot.h"
+// vsr_rendering
+#include "vsr/rendering/view/Manipulator.hpp"
+#include "vsr/rendering/view/ManipulatorToVSR.hpp"
 // vsr_scene
 #include "vsr/scene/Scene.hpp"
 #include "vsr/scene/UpdateDelegate.hpp"
@@ -171,6 +175,35 @@ void Client::requireMirrorsServer(RunningServer &server)
   REQUIRE(connection.project()->activeShotId == server.project().activeShotId);
   REQUIRE(totalObjects(mirror) == totalObjects(server.scene()));
   REQUIRE(mirror.numberOfLayers() == server.scene().numberOfLayers());
+}
+
+// Two positions agree to within the tolerance an orbit round-trip holds.
+void requireNear(const vsr::math::float3 &a, const vsr::math::float3 &b)
+{
+  REQUIRE(a.x == Approx(b.x).margin(1e-4f));
+  REQUIRE(a.y == Approx(b.y).margin(1e-4f));
+  REQUIRE(a.z == Approx(b.z).margin(1e-4f));
+}
+
+// Polls until the camera in `scene` carries `centre` as its orbit centre.
+// The bootstrap left the rig's own centre in that key, so the wait is for
+// the client's value, not for any value at all.
+bool waitForOrbitCentre(Client &client,
+    vsr::scene::Scene &scene,
+    size_t cameraIndex,
+    const vsr::math::float3 &centre)
+{
+  return pollUntil(
+      client.connection,
+      [&] {
+        auto *camera = scene.getObject(ANARI_CAMERA, cameraIndex);
+        if (!camera)
+          return false;
+        const auto at = camera->getMetadataValue("manipulator.at");
+        return at.is<vsr::math::float3>()
+            && at.get<vsr::math::float3>() == centre;
+      },
+      E2E_TIMEOUT);
 }
 
 // A directory under the server's Data Root (the temp directory) for the
@@ -832,6 +865,128 @@ SCENARIO("scivisStudioServer and the client core run a session end to end",
 
       REQUIRE(waitFor([&] { return server->finished(); }, 10s));
       REQUIRE(server->server->sessionState() == SessionState::Shutdown);
+    }
+  }
+}
+
+SCENARIO("scivisStudioServer follows a client orbit exactly", "[StudioRemote]")
+{
+  if (!helideAvailable()) {
+    WARN("helide ANARI library unavailable, skipping the end-to-end test");
+    return;
+  }
+
+  // Regression: the client orbits, disconnects and reconnects; the view is
+  // the same but the first drag jumps, because only position/direction/up
+  // crossed the wire and the server invented an orbit centre from them
+  // (ADR 0036).
+  GIVEN("a connected client whose mirror camera an orbit drove")
+  {
+    RunningServer server(tempRootServerOptions());
+    REQUIRE(server.started);
+    Client client;
+    client.connect(server.port());
+    REQUIRE(client.waitConnectedAndBootstrapped(1));
+    pauseServer(client, server);
+
+    const auto *shot = project::activeShot(server.project());
+    REQUIRE(shot);
+    const auto cameraIndex = shot->camera.objectIndex;
+    REQUIRE(cameraIndex != VSR_INVALID_INDEX);
+    auto *mirrorCamera = static_cast<vsr::scene::Camera *>(
+        client.mirror.getObject(ANARI_CAMERA, cameraIndex));
+    REQUIRE(mirrorCamera);
+    const auto revisionBefore = server.server->projectContext().revision();
+
+    // An orbit well off the default centre, at a distance and up axis the
+    // pose route could not guess.
+    const vsr::math::float3 centre(3.f, -4.f, 5.f);
+    vsr::rendering::Manipulator orbited;
+    orbited.setConfig(centre, 7.f, vsr::math::float2(35.f, 20.f));
+    vsr::rendering::updateCameraObject(*mirrorCamera, orbited);
+
+    THEN("the server's camera and rig carry the client's own orbit centre")
+    {
+      auto &scene = server.scene();
+      REQUIRE(waitForOrbitCentre(client, scene, cameraIndex, centre));
+
+      auto *camera = static_cast<vsr::scene::Camera *>(
+          scene.getObject(ANARI_CAMERA, cameraIndex));
+      REQUIRE(camera);
+      REQUIRE(vsr::rendering::hasManipulatorMetadata(*camera));
+      requireNear(
+          camera->getMetadataValue("manipulator.at").get<vsr::math::float3>(),
+          centre);
+      REQUIRE(camera->getMetadataValue("manipulator.distance").getAs<float>()
+          == Approx(7.f));
+
+      // What applyActiveShot() writes back on reconnect: the client's own
+      // orbit, not one recovered from the pose.
+      auto *rig = server.server->projectContext().activeShotCameraRig();
+      REQUIRE(rig);
+      REQUIRE(rig->keyframes.empty());
+      requireNear(rig->current.orbit.lookat, centre);
+      REQUIRE(rig->current.orbit.azeldist.z == Approx(7.f));
+
+      // A manipulator built from the server's camera is the client's again.
+      vsr::rendering::Manipulator restored;
+      vsr::rendering::updateManipulatorFromCamera(restored, *camera);
+      requireNear(restored.at(), orbited.at());
+      REQUIRE(restored.distance() == Approx(orbited.distance()));
+      requireNear(restored.eye(), orbited.eye());
+    }
+
+    THEN("orbiting is not a project modification")
+    {
+      auto &scene = server.scene();
+      int snapshots = 0;
+      client.connection.onProjectReplaced = [&] { snapshots++; };
+      REQUIRE(waitForOrbitCentre(client, scene, cameraIndex, centre));
+      pollFor(client.connection, 200ms);
+      REQUIRE(snapshots == 0);
+      REQUIRE(server.server->projectContext().revision() == revisionBefore);
+      REQUIRE_FALSE(server.project().dirty);
+      REQUIRE(client.errors.empty());
+    }
+
+    THEN("another key on the same camera does not re-apply the orbit")
+    {
+      auto &scene = server.scene();
+      REQUIRE(waitForOrbitCentre(client, scene, cameraIndex, centre));
+
+      // A pose-only edit, as a client that writes no manipulator metadata
+      // sends: the rig follows the pose and the camera's manipulator
+      // metadata is stale from here on.
+      const vsr::math::float3 eye(20.f, 0.f, 0.f);
+      mirrorCamera->setParameter("position", eye);
+      mirrorCamera->setParameter(
+          "direction", vsr::math::float3(-1.f, 0.f, 0.f));
+      mirrorCamera->setParameter("up", vsr::math::float3(0.f, 1.f, 0.f));
+      auto *rig = server.server->projectContext().activeShotCameraRig();
+      REQUIRE(rig);
+      REQUIRE(pollUntil(
+          client.connection,
+          [&] {
+            auto *camera = scene.getObject(ANARI_CAMERA, cameraIndex);
+            const auto position =
+                camera->parameterValueAs<vsr::math::float3>("position");
+            return position && position->x == Approx(eye.x);
+          },
+          E2E_TIMEOUT));
+      const auto followed = rig->current.orbit.lookat;
+      REQUIRE(followed.x != Approx(centre.x));
+
+      // An unrelated metadata key is not an account of the view.
+      mirrorCamera->setMetadataValue("uiCollapsed", true);
+      REQUIRE(pollUntil(
+          client.connection,
+          [&] {
+            auto *camera = scene.getObject(ANARI_CAMERA, cameraIndex);
+            return camera && camera->getMetadataValue("uiCollapsed").valid();
+          },
+          E2E_TIMEOUT));
+      pollFor(client.connection, 100ms);
+      requireNear(rig->current.orbit.lookat, followed);
     }
   }
 }

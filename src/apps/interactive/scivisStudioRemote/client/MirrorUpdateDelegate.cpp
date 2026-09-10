@@ -67,6 +67,20 @@ void MirrorUpdateDelegate::signalParameterRemoved(
   m_send(protocol::encode(edit));
 }
 
+void MirrorUpdateDelegate::signalMetadataUpdated(
+    const vsr::scene::Object *o, const char *name)
+{
+  if (m_enabled && name)
+    sendMetadata(o, {std::string(name)});
+}
+
+void MirrorUpdateDelegate::signalMetadataBatchUpdated(
+    const vsr::scene::Object *o, const std::vector<std::string> &names)
+{
+  if (m_enabled)
+    sendMetadata(o, names);
+}
+
 void MirrorUpdateDelegate::sendParameter(
     const vsr::scene::Object *o, const vsr::scene::Parameter *p)
 {
@@ -79,6 +93,24 @@ void MirrorUpdateDelegate::sendParameter(
   edit.object = refOf(o);
   edit.name = p->name().str();
   edit.value = value;
+  m_send(protocol::encode(edit));
+}
+
+void MirrorUpdateDelegate::sendMetadata(
+    const vsr::scene::Object *o, const std::vector<std::string> &names)
+{
+  if (!m_send || !o)
+    return;
+  protocol::SetObjectMetadata edit;
+  edit.object = refOf(o);
+  for (const auto &name : names) {
+    if (o->metadataHoldsArray(name))
+      continue; // arrays never ride this message
+    // An absent value is the removal the server applies.
+    edit.entries.push_back({name, o->getMetadataValue(name)});
+  }
+  if (edit.entries.empty())
+    return;
   m_send(protocol::encode(edit));
 }
 

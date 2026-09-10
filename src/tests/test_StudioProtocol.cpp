@@ -65,6 +65,7 @@ constexpr std::array ALL_MESSAGE_TYPES = {
   StudioMessageType::RemoveObjectParameter,
   StudioMessageType::SetNodeTransform, StudioMessageType::SetTime,
   StudioMessageType::SetOutline, StudioMessageType::ViewportSettings,
+  StudioMessageType::SetObjectMetadata,
   StudioMessageType::SetFrameConfig, StudioMessageType::FrameConfig,
   StudioMessageType::SetEncodings, StudioMessageType::StartRendering,
   StudioMessageType::StopRendering, StudioMessageType::Frame,

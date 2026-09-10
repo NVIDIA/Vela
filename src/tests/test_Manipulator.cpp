@@ -164,3 +164,55 @@ SCENARIO("Manipulator adopts an orthographic camera's eye and height",
     }
   }
 }
+
+SCENARIO(
+    "A camera is known to carry manipulator metadata by key", "[Manipulator]")
+{
+  GIVEN("A camera a manipulator wrote metadata onto")
+  {
+    vsr::scene::Scene scene;
+    auto camera = scene.createObject<vsr::scene::Camera>(
+        vsr::scene::tokens::camera::perspective);
+    rendering::Manipulator m;
+    m.setConfig(math::float3(1.f), 4.f, math::float2(30.f, 20.f));
+    rendering::updateCameraObject(*camera, m);
+
+    THEN("it carries manipulator metadata")
+    {
+      REQUIRE(rendering::hasManipulatorMetadata(*camera));
+    }
+
+    THEN("only the manipulator keys are named as its own")
+    {
+      REQUIRE(rendering::isManipulatorMetadataKey("manipulator.at"));
+      REQUIRE(rendering::isManipulatorMetadataKey("manipulator.mode"));
+      REQUIRE_FALSE(rendering::isManipulatorMetadataKey("uiCollapsed"));
+      REQUIRE_FALSE(rendering::isManipulatorMetadataKey("manipulator"));
+    }
+  }
+
+  GIVEN("A camera written without manipulator metadata")
+  {
+    vsr::scene::Scene scene;
+    auto camera = scene.createObject<vsr::scene::Camera>(
+        vsr::scene::tokens::camera::perspective);
+    rendering::Manipulator m;
+    rendering::updateCameraObject(*camera, m, false);
+
+    THEN("it carries none")
+    {
+      REQUIRE_FALSE(rendering::hasManipulatorMetadata(*camera));
+    }
+
+    WHEN("some unrelated metadata lands on it")
+    {
+      camera->setMetadataValue("uiCollapsed", true);
+
+      THEN("it still carries no manipulator metadata")
+      {
+        REQUIRE(camera->numMetadata() > 0);
+        REQUIRE_FALSE(rendering::hasManipulatorMetadata(*camera));
+      }
+    }
+  }
+}

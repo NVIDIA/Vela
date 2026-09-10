@@ -216,16 +216,25 @@ latch slots (latest-wins); `RequestArrayHistogram` is a sync Project Op. See
   one `TimeAdvanceWarning{shotId, frame, message}` per report while a
   session is up. Load failure never stops playback. The monolith sets no
   callback, so a report there is dropped (the binding logs it regardless).
-- **The manipulator follows client camera edits.** A `SetObjectParameter`
-  landing on the active shot's camera object updates the server's
-  `m_ctx.view.manipulator` from the camera pose (`followCameraEdit`), and a
-  camera rig without keyframes has its `current` view follow too. So
-  `applyActiveShot()`, which re-samples the camera from the rig on every time
-  change, writes the client's own pose back instead of a stale one, and a
-  scrub or `SetPlaying` never snaps the view; a rig with keyframes drives the
-  camera during playback as designed. An orthographic shot camera is followed
-  through its `height` and `position` too (`Manipulator::setFixedDistancePose`),
-  since `updateCameraObject` derives both from the manipulator's distances.
+- **The manipulator follows client camera edits.** An edit landing on the
+  active shot's camera object updates the server's `m_ctx.view.manipulator`
+  (`followCameraEdit`), and a camera rig without keyframes has its `current`
+  view follow too. A `SetObjectMetadata` carrying `manipulator.*` is taken
+  exactly (`updateManipulatorFromCamera`); a `SetObjectParameter` is taken
+  from the camera pose (`updateManipulatorFromCameraPose`), which cannot
+  recover an orbit centre from a position/direction/up triple and derives one
+  from the manipulator's own distance. The route is the edit's, not the
+  camera's: the server's camera always carries the manipulator metadata
+  `applyActiveShot()` derived from the rig, and a parameter edit has just
+  made it stale. A client orbit sends both, metadata first, so the pose edit
+  that follows re-derives the centre the metadata just set (ADR 0036,
+  `PROTOCOL_VERSION` 11). So `applyActiveShot()`, which re-samples the camera
+  from the rig on every time change, writes the client's own view back
+  instead of a stale one, and a scrub or `SetPlaying` never snaps the view; a
+  rig with keyframes drives the camera during playback as designed. An
+  orthographic shot camera is followed through its `height` and `position`
+  too (`Manipulator::setFixedDistancePose`), since `updateCameraObject`
+  derives both from the manipulator's distances.
 
 ### Viewport
 
@@ -530,7 +539,12 @@ reason. Nothing is silently open.
   opened project recreates each record's Array with default samples. The v1
   message set has no array-data upload (the spec's "Not in the set"), so
   transfer-function editing waits for a `SetArrayData`-style addition and a
-  version bump; the client shows color maps read-only.
+  version bump; the client shows color maps read-only. A second blocker sits
+  beside it: the editor writes the opacity curve as the Volume's
+  `opacityControlPoints` *metadata array*, and array-valued metadata does not
+  ride `SetObjectMetadata` for the same reason arrays do not ride
+  `SetObjectParameter` (ADR 0036 carried scalar metadata across; this leg
+  stays open). Landing `SetArrayData` alone does not complete the feature.
 - **Renderer library switches** -- *v1 behaviour.* `UpdateShot` accepts a
   `renderSettings.rendererObjectIndex` only when it names a Renderer of
   `renderSettings.rendererLibrary` (or is unset). The server renders with its
@@ -1735,7 +1749,7 @@ decisions, `M7-n`).
 | Remote Browse: `ListRoots`, `ListDirectory` | implemented | `server/RemoteBrowse.cpp` | |
 | Server Task family: task-id reply, `TaskProgress`, `TaskCompleted`/`TaskFailed`, `CancelTask` | implemented | `server/ServerTaskRunner.cpp`, `protocol/TaskMessages.h` | `TaskFailed.framesCompleted` added (v2), then both endings gained a `results` subtree carrying `RenderShotResult{framesCompleted}` (v5); the bootstrap replays endings since the previous bootstrap, not only the running task (M7-4; spec paragraph tightened) |
 | Playback: `SetPlaying`, `SetTime`, `TimeAdvanceWarning{frame, message}` | implemented | `protocol/PlaybackMessages.h` | the warning also names the `shotId` |
-| Scene client-to-server: `SetObjectParameter`, `RemoveObjectParameter`, `SetNodeTransform` | implemented | `protocol/SceneEditMessages.h` | |
+| Scene client-to-server: `SetObjectParameter`, `RemoveObjectParameter`, `SetObjectMetadata`, `SetNodeTransform` | implemented | `protocol/SceneEditMessages.h` | `SetObjectMetadata` (146) carries a batch of keys and skips array-valued ones (`PROTOCOL_VERSION` 11, ADR 0036) |
 | Scene server-to-client: `TransferScene`, `TransferLayer`, object added/removed, `ProjectSnapshot` | implemented | `protocol/SceneMessages.h`, `ProjectSnapshot.h` | |
 | Viewport: `Pick`, `SetOutline`, `ViewportSettings` | implemented | `protocol/ViewportMessages.h` | |
 | On-demand: `RequestArrayHistogram` | implemented | `server/ArrayHistogram.cpp` | |

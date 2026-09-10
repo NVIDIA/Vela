@@ -287,7 +287,7 @@ void RemoteViewport::updateCamera()
   }
 
   if (!m_manipulatorSynchronized && m_camera.current
-      && m_camera.current->numMetadata() > 0) {
+      && vsr::rendering::hasManipulatorMetadata(*m_camera.current)) {
     vsr::rendering::updateManipulatorFromCamera(
         *m_camera.arcball, *m_camera.current);
     m_manipulatorSynchronized = true;

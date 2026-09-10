@@ -169,6 +169,7 @@ struct StudioServer
  private:
   using SceneEdit = std::variant<protocol::SetObjectParameter,
       protocol::RemoveObjectParameter,
+      protocol::SetObjectMetadata,
       protocol::SetNodeTransform>;
 
   // Something that happened to a connection on the IO thread, tagged with
@@ -330,6 +331,7 @@ struct StudioServer
   void applyFrameConfig(uint32_t width, uint32_t height);
   void applyEdit(const protocol::SetObjectParameter &edit);
   void applyEdit(const protocol::RemoveObjectParameter &edit);
+  void applyEdit(const protocol::SetObjectMetadata &edit);
   void applyEdit(const protocol::SetNodeTransform &edit);
   void renderAndSendFrame();
   // Runs the pass chain and records what it cost in m_renderMs/m_pipelineMs;
@@ -341,10 +343,20 @@ struct StudioServer
   void send(vsr::network::Message &&msg);
   bool sessionEstablished() const;
 
-  // A client edit on the active shot camera: the manipulator adopts the
-  // camera's pose and a keyframe-less camera rig's current view follows, so
-  // the next applyActiveShot() writes the client's pose back, not a stale one.
-  void followCameraEdit(const vsr::scene::Object *object);
+  // Which of a camera's two accounts of the client's view an edit just
+  // changed, and so which one the manipulator must be rebuilt from.
+  enum class CameraEdit
+  {
+    Pose, // position/direction/up parameters: the lossy route, by necessity
+    Manipulator // manipulator.* metadata: the exact one
+  };
+  // A client edit on the active shot camera: the manipulator adopts what the
+  // edit carried and a keyframe-less camera rig's current view follows, so
+  // the next applyActiveShot() writes the client's view back, not a stale
+  // one. The route is the edit's, not the camera's: the server's own camera
+  // carries manipulator metadata that applyActiveShot() derived from the rig,
+  // which a parameter edit has just made stale (ADR 0036).
+  void followCameraEdit(const vsr::scene::Object *object, CameraEdit edit);
   void setState(SessionState state);
   void setStreaming(bool streaming);
   // Whether structural scene changes are recorded at all; off while the

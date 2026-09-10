@@ -533,7 +533,7 @@ void StudioViewport::updateCamera()
     // Adopt the server's view rather than imposing ours. Without manipulator
     // metadata there is nothing to adopt; the first interaction then
     // re-frames the camera from the manipulator.
-    if (m_camera.current->numMetadata() > 0) {
+    if (vsr::rendering::hasManipulatorMetadata(*m_camera.current)) {
       vsr::rendering::updateManipulatorFromCamera(
           *m_camera.arcball, *m_camera.current);
     } else {

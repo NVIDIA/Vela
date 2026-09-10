@@ -37,7 +37,10 @@ bool parsePort(const std::string &text, uint16_t &port);
 //    pipelineMs), so the client shows render times, not just arrival rate.
 // 10: a frame header also carries the world bounds it was rendered against,
 //    so the client can reset its view to the scene the way the monolith does.
-constexpr int PROTOCOL_VERSION = 10;
+// 11: object metadata travels the optimistic edit lane as SetObjectMetadata,
+//     so a camera's manipulator state reaches the server incrementally
+//     instead of only in bulk (ADR 0036).
+constexpr int PROTOCOL_VERSION = 11;
 
 /*
  * Complete v1 message set of the SciVis Studio client-server protocol, as one
@@ -139,6 +142,7 @@ constexpr int PROTOCOL_VERSION = 10;
   X(SetTime,                     143, ClientToServer)            \
   X(SetOutline,                  144, ClientToServer)            \
   X(ViewportSettings,            145, ClientToServer)            \
+  X(SetObjectMetadata,           146, ClientToServer)            \
   /* Rendering and frames (160..) */                             \
   X(SetFrameConfig,              160, ClientToServer)            \
   X(FrameConfig,                 161, ServerToClient)            \

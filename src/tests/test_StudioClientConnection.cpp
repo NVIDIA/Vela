@@ -594,6 +594,100 @@ SCENARIO("ServerConnection names which mirror replacement is happening",
   }
 }
 
+SCENARIO("The mirror sends object metadata as it is written", "[StudioClient]")
+{
+  GIVEN("a connected, bootstrapped client")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+    auto geometry = f.mirror.getObject<vsr::scene::Geometry>(0);
+    REQUIRE(geometry);
+
+    WHEN("one metadata value is written")
+    {
+      geometry->setMetadataValue("manipulator.distance", 4.f);
+
+      THEN("one SetObjectMetadata carries the one key")
+      {
+        REQUIRE(pollUntil(f.connection, [&] {
+          return f.server.count(StudioMessageType::SetObjectMetadata) == 1;
+        }));
+        const auto edits =
+            f.server.messagesOf(StudioMessageType::SetObjectMetadata);
+        const auto edit = decode<SetObjectMetadata>(edits.front());
+        REQUIRE(edit);
+        REQUIRE(edit->object.type == ANARI_GEOMETRY);
+        REQUIRE(edit->object.objectIndex == geometry->index());
+        REQUIRE(edit->entries.size() == 1);
+        REQUIRE(edit->entries[0].name == "manipulator.distance");
+        REQUIRE(edit->entries[0].value.get<float>() == 4.f);
+      }
+    }
+
+    WHEN("a batch writes several keys, the way a camera orbit does")
+    {
+      geometry->beginParameterBatch();
+      geometry->setMetadataValue("manipulator.at", vsr::math::float3(1.f));
+      geometry->setMetadataValue("manipulator.distance", 4.f);
+      geometry->setMetadataValue("manipulator.up", 1);
+      geometry->setParameter("radius", 0.5f);
+      geometry->endParameterBatch();
+
+      THEN("one SetObjectMetadata carries all of them")
+      {
+        REQUIRE(pollUntil(f.connection, [&] {
+          return f.server.count(StudioMessageType::SetObjectMetadata) == 1
+              && f.server.count(StudioMessageType::SetObjectParameter) == 1;
+        }));
+        pollFor(f.connection, 20ms);
+        REQUIRE(f.server.count(StudioMessageType::SetObjectMetadata) == 1);
+        const auto edits =
+            f.server.messagesOf(StudioMessageType::SetObjectMetadata);
+        const auto edit = decode<SetObjectMetadata>(edits.front());
+        REQUIRE(edit);
+        REQUIRE(edit->entries.size() == 3);
+      }
+    }
+
+    WHEN("a metadata key is removed")
+    {
+      geometry->setMetadataValue("stale", 1);
+      REQUIRE(pollUntil(f.connection, [&] {
+        return f.server.count(StudioMessageType::SetObjectMetadata) == 1;
+      }));
+      geometry->removeMetadata("stale");
+
+      THEN("the key travels with no value")
+      {
+        REQUIRE(pollUntil(f.connection, [&] {
+          return f.server.count(StudioMessageType::SetObjectMetadata) == 2;
+        }));
+        const auto edits =
+            f.server.messagesOf(StudioMessageType::SetObjectMetadata);
+        const auto edit = decode<SetObjectMetadata>(edits.back());
+        REQUIRE(edit);
+        REQUIRE(edit->entries.size() == 1);
+        REQUIRE(edit->entries[0].name == "stale");
+        REQUIRE_FALSE(edit->entries[0].value.valid());
+      }
+    }
+
+    WHEN("array-valued metadata is written")
+    {
+      const float points[2] = {0.f, 1.f};
+      geometry->setMetadataArray(
+          "opacityControlPoints", ANARI_FLOAT32, points, 2);
+
+      THEN("nothing is sent: arrays do not ride this message")
+      {
+        pollFor(f.connection, 50ms);
+        REQUIRE(f.server.count(StudioMessageType::SetObjectMetadata) == 0);
+      }
+    }
+  }
+}
+
 SCENARIO("ServerConnection rejects messages outside the Studio set",
     "[StudioClient]")
 {

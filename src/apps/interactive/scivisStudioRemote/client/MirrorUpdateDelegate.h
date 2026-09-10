@@ -9,6 +9,8 @@
 #include "vsr/scene/UpdateDelegate.hpp"
 // std
 #include <functional>
+#include <string>
+#include <vector>
 
 namespace vsr::scivis_studio::client {
 
@@ -19,9 +21,11 @@ using MessageSink = std::function<void(vsr::network::Message &&)>;
  * into the optimistic client->server messages of SceneEditMessages.h:
  * parameter set/batch -> one SetObjectParameter per parameter (array-typed
  * values are skipped: arrays never ride that message), parameter removed ->
- * RemoveObjectParameter. Everything else the mirror can signal (object
- * add/remove, layer structure, arrays) is not in the Studio message set and
- * is ignored.
+ * RemoveObjectParameter, metadata set/removed/batch -> one SetObjectMetadata
+ * naming every key that changed (array-valued keys are skipped for the same
+ * reason, so a volume's opacityControlPoints still does not travel).
+ * Everything else the mirror can signal (object add/remove, layer structure,
+ * arrays) is not in the Studio message set and is ignored.
  *
  * Layer transforms are also ignored: signalLayerTransformUpdated() names only
  * the Layer, not the node that moved, so SetNodeTransform cannot be built
@@ -50,10 +54,18 @@ struct MirrorUpdateDelegate : public vsr::scene::EmptyUpdateDelegate
       const std::vector<const vsr::scene::Parameter *> &ps) override;
   void signalParameterRemoved(
       const vsr::scene::Object *o, const vsr::scene::Parameter *p) override;
+  void signalMetadataUpdated(
+      const vsr::scene::Object *o, const char *name) override;
+  void signalMetadataBatchUpdated(const vsr::scene::Object *o,
+      const std::vector<std::string> &names) override;
 
  private:
   void sendParameter(
       const vsr::scene::Object *o, const vsr::scene::Parameter *p);
+  // One message for `names`, skipping array-valued keys; sends nothing when
+  // that leaves no entry.
+  void sendMetadata(
+      const vsr::scene::Object *o, const std::vector<std::string> &names);
 
   MessageSink m_send;
   bool m_enabled{false};

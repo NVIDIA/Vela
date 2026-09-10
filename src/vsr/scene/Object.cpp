@@ -340,6 +340,7 @@ void Object::setMetadataValue(std::string_view name, Any v)
   initMetadata();
   m_metadata->root().append(name) = v;
   m_versions.metadata++;
+  metadataChanged(name);
 }
 
 void Object::setMetadataArray(std::string_view name,
@@ -350,14 +351,24 @@ void Object::setMetadataArray(std::string_view name,
   initMetadata();
   m_metadata->root().append(name).setValueAsArray(type, v, numElements);
   m_versions.metadata++;
+  metadataChanged(name);
 }
 
 void Object::removeMetadata(std::string_view name)
 {
-  if (!m_metadata)
+  if (!m_metadata || m_metadata->root().child(name) == nullptr)
     return;
   m_metadata->root().remove(name);
   m_versions.metadata++;
+  metadataChanged(name);
+}
+
+bool Object::metadataHoldsArray(std::string_view name) const
+{
+  if (!m_metadata)
+    return false;
+  const auto *c = m_metadata->root().child(name);
+  return c != nullptr && c->holdsArray();
 }
 
 size_t Object::numMetadata() const
@@ -472,6 +483,18 @@ void Object::endParameterBatch()
 {
   m_inParameterBatch = false;
 
+  // Metadata first: a consumer of both sees the object's metadata before the
+  // parameters written beside it (a camera's manipulator state before its
+  // pose), so it never has to act on the pose alone.
+  auto &bm = m_batchedMetadata;
+  if (!bm.empty()) {
+    std::sort(bm.begin(), bm.end());
+    bm.erase(std::unique(bm.begin(), bm.end()), bm.end());
+    if (m_updateDelegate)
+      m_updateDelegate->signalMetadataBatchUpdated(this, bm);
+    bm.clear();
+  }
+
   auto &bp = m_batchedParameters;
 
   // Remove duplicates
@@ -551,6 +574,16 @@ void Object::updateAllANARIParameters(
 void Object::setUpdateDelegate(BaseUpdateDelegate *ud)
 {
   m_updateDelegate = ud;
+}
+
+void Object::metadataChanged(std::string_view name)
+{
+  if (m_inParameterBatch) {
+    m_batchedMetadata.emplace_back(name);
+  } else if (m_updateDelegate) {
+    const std::string key(name);
+    m_updateDelegate->signalMetadataUpdated(this, key.c_str());
+  }
 }
 
 void Object::parameterChanged(const Parameter *p, const Any &oldValue)

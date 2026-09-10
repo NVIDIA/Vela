@@ -24,4 +24,26 @@ bool fromNode(const vsr::core::DataNode &n, SetObjectParameter &p)
   return true;
 }
 
+void toNode(const ObjectMetadataEntry &e, vsr::core::DataNode &n)
+{
+  writeChild(n, "name", e.name);
+  if (e.value.valid())
+    n["value"].setValue(e.value);
+}
+
+bool fromNode(const vsr::core::DataNode &n, ObjectMetadataEntry &e)
+{
+  if (!readChild(n, "name", e.name))
+    return false;
+  const auto *value = n.child("value");
+  if (!value) {
+    e.value = {}; // the key was removed
+    return true;
+  }
+  if (value->holdsArray())
+    return false;
+  e.value = value->getValue();
+  return true;
+}
+
 } // namespace vsr::scivis_studio::protocol

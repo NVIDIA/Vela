@@ -36,6 +36,21 @@ void updateCameraObject(vsr::scene::Camera &c,
   c.endParameterBatch();
 }
 
+// The prefix updateCameraObject() writes every manipulator key under.
+constexpr std::string_view MANIPULATOR_METADATA_PREFIX = "manipulator.";
+
+bool isManipulatorMetadataKey(std::string_view name)
+{
+  return name.rfind(MANIPULATOR_METADATA_PREFIX, 0) == 0;
+}
+
+bool hasManipulatorMetadata(const vsr::scene::Camera &c)
+{
+  // The orbit centre: the one key updateManipulatorFromCamera() cannot
+  // reasonably default, and the reason the pose route is lossy.
+  return c.getMetadataValue("manipulator.at").valid();
+}
+
 void updateManipulatorFromCamera(Manipulator &m, const vsr::scene::Camera &c)
 {
   auto at = c.getMetadataValue("manipulator.at").getValueOr(m.at());

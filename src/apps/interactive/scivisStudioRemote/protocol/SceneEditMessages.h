@@ -13,6 +13,7 @@
 #include "vsr/core/VSRMath.hpp"
 // std
 #include <string>
+#include <vector>
 
 namespace vsr::scivis_studio::protocol {
 
@@ -26,6 +27,13 @@ namespace vsr::scivis_studio::protocol {
  * reference the Any supports round-trips with its ANARI type intact. Array
  * data never rides this message: dataset arrays are server-resident and a
  * node holding an array is rejected on read.
+ *
+ * SetObjectMetadata carries a run of an object's metadata keys, each with the
+ * Any the key now holds; an entry with no value means the key was removed.
+ * One message per key would be six per frame of a camera orbit, so a
+ * metadata batch travels as one message (ADR 0036). Array-valued metadata
+ * (a volume's opacityControlPoints) never rides it, for the same reason
+ * arrays never ride SetObjectParameter.
  *
  * Example:
  *   SetObjectParameter edit;
@@ -52,6 +60,21 @@ struct RemoveObjectParameter
   std::string name;
 };
 
+// An invalid `value` is a removal: the key is gone from the object.
+struct ObjectMetadataEntry
+{
+  std::string name;
+  vsr::core::Any value;
+};
+
+struct SetObjectMetadata
+{
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::SetObjectMetadata;
+  SceneObjectRef object;
+  std::vector<ObjectMetadataEntry> entries;
+};
+
 struct SetNodeTransform
 {
   static constexpr StudioMessageType MESSAGE_TYPE =
@@ -64,8 +87,15 @@ struct SetNodeTransform
 void toNode(const SetObjectParameter &, vsr::core::DataNode &);
 bool fromNode(const vsr::core::DataNode &, SetObjectParameter &);
 
-// The other two are fields() descriptions (PayloadCommon.h); every field is
-// required.
+// An entry's name is required and its value optional (absent is a removal);
+// an array value is rejected. SetObjectMetadata's object is required and its
+// entry list may be empty (nothing to apply).
+void toNode(const ObjectMetadataEntry &, vsr::core::DataNode &);
+bool fromNode(const vsr::core::DataNode &, ObjectMetadataEntry &);
+
+// The other three are fields() descriptions (PayloadCommon.h); every field
+// is required, and SetObjectMetadata's entry list reads its items through the
+// codec above.
 
 // Inlined definitions ////////////////////////////////////////////////////////
 
@@ -74,6 +104,13 @@ void fields(V &v, RemoveObjectParameter &p)
 {
   v.child("object", p.object);
   v.required("name", p.name);
+}
+
+template <typename V>
+void fields(V &v, SetObjectMetadata &m)
+{
+  v.child("object", m.object);
+  v.list("entries", m.entries);
 }
 
 template <typename V>
