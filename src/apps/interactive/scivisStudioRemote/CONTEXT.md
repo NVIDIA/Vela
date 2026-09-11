@@ -101,11 +101,22 @@ _Avoid_: user data, object properties, custom attributes
 
 **Structural Mirror**:
 The client's copy of the scene's objects, parameters, and layers without bulk
-array contents. Arrays exist client-side as descriptors (type, shape, element
-count, value range); its size is a function of project structure, not data
-size. Objects and layer nodes keep the server's indices, so a wire identity
+array contents. Arrays arrive as descriptors (type, shape, element count,
+value range) and hold no samples unless a panel has made one a Hydrated
+Array; its size is a function of project structure, not data size. Objects
+and layer nodes keep the server's indices, so a wire identity
 (SceneObjectRef, SceneNodeRef) names the same thing on both sides.
 _Avoid_: scene copy, full mirror
+
+**Hydrated Array**:
+A Structural Mirror array a panel has filled with the server's samples so it
+can be read and edited locally — the exception to descriptors-only, and the
+only way a client edits array contents at all. Hydration is per array and
+owned by the panel that asked for it, which drops it when the mirror is
+replaced; nothing hydrates at bootstrap and nothing hydrates on demand from
+the renderer. What keeps the mirror's size structural is that only what a
+user has opened an editor on is ever hydrated.
+_Avoid_: cached array, loaded array, array fetch
 
 **Project Replica**:
 The client's read-only copy of the real Project value structs, including
@@ -120,7 +131,7 @@ structure with every parameter, but arrays as descriptors only (type, shape,
 element count) — bulk contents stay on the server. Opacity is a property of
 array *contents*, never of structure. A client can name and edit every
 object a dataset creates, and asks the server about contents it cannot read
-(Array Histogram).
+(Array Histogram) or wants to edit (Hydrated Array).
 _Avoid_: partial dataset, dataset stub, subtree expansion
 
 **Edit Policy**:

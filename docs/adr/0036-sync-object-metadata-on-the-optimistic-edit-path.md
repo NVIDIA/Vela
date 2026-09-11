@@ -47,3 +47,15 @@ stored anywhere; a shot with no rig assigned has nowhere to store one; and
 two shots sharing a rig share a viewpoint. A distinct Working View is the
 answer if those are ever worth closing, and this ADR is the record that they
 were seen and left alone.
+
+Clarified by
+[ADR 0038](0038-separate-color-maps-from-transfer-functions.md): this ADR
+inherits ADR 0030's phrase "color-map transfer functions" and reads
+`opacityControlPoints` as one of two remaining blockers on editing them.
+There are two distinct concepts behind that phrase, and the one this ADR's
+example belongs to is a volume's Transfer Function, not the project's Color
+Map asset. The blocker count was also short: array-valued metadata does not
+ride `SetObjectMetadata`, and array samples have no message at all, but the
+client additionally holds arrays as proxies with no samples to open an editor
+on, and cannot create or bind the Array a scalar-color volume would need
+(closed by [ADR 0037](0037-give-every-transfer-function-volume-a-color-array.md)).

@@ -191,10 +191,21 @@ standalone dataset model until concrete use cases establish their lifecycle and
 persistence semantics.
 
 **Color Map**:
-A project-owned, named mapping from scalar values to color and opacity,
-usable by any shot in the project. Its identity and name are project state;
-the mapping's values live on a scene-side object the project entry refers to.
-_Avoid_: Transfer function (the editing widget, not the asset), palette
+A project-owned, named asset intended to be a reusable mapping from scalar
+values to color and opacity. Its identity and name are project state. No
+volume is bound to one, and nothing reads the samples of the scene-side Array
+paired with it by name, so a Color Map today names a mapping rather than
+supplying one; a volume's own mapping is its Transfer Function. The binding
+that would join them is deliberately unbuilt (ADR 0038).
+_Avoid_: Transfer function (a volume's own mapping, not this asset), palette
+
+**Transfer Function**:
+A volume's own mapping from its scalar values to color and opacity: the RGBA
+samples bound as the volume's color, the opacity control points beside them,
+and the value range they span. It belongs to the volume, is saved and
+restored with the dataset that owns it, and is unrelated to any Color Map
+(ADR 0038).
+_Avoid_: Color map (the project asset), TF, colormap
 
 **Shot**:
 A project-owned composition of datasets, a camera rig, and a light rig. A shot,

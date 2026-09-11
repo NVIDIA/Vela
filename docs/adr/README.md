@@ -47,7 +47,9 @@ wire vocabulary:
 | [0033](0033-give-studio-its-own-message-set.md) | Give Studio its own message set | |
 | [0034](0034-confirm-mutations-with-a-whole-project-snapshot.md) | Confirm mutations with a whole-project snapshot | |
 | [0035](0035-carry-in-motion-time-in-the-frame-header.md) | Carry in-motion time in the frame header | |
-| [0036](0036-sync-object-metadata-on-the-optimistic-edit-path.md) | Sync object metadata on the optimistic edit path | Amends [0030](0030-split-authority-between-round-tripped-structure-and-optimistic-parameters.md) |
+| [0036](0036-sync-object-metadata-on-the-optimistic-edit-path.md) | Sync object metadata on the optimistic edit path | Amends [0030](0030-split-authority-between-round-tripped-structure-and-optimistic-parameters.md); clarified by [0038](0038-separate-color-maps-from-transfer-functions.md) |
+| [0037](0037-give-every-transfer-function-volume-a-color-array.md) | Give every transfer-function Volume a color Array | |
+| [0038](0038-separate-color-maps-from-transfer-functions.md) | Separate Color Maps from Transfer Functions | |
 
 ## VSR Core data trees
 
