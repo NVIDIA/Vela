@@ -945,21 +945,21 @@ const char *Application::getDefaultLayout() const
 {
   return R"layout(
 [Window][MainDockSpace]
-Pos=0,56
-Size=3840,2206
+Pos=0,35
+Size=3840,1987
 Collapsed=0
 
 [Window][Viewport]
-Pos=957,56
-Size=2883,1683
+Pos=919,35
+Size=2921,1291
 Collapsed=0
 DockId=0x00000003,0
 
 [Window][Log]
-Pos=957,1741
-Size=2883,521
+Pos=919,1517
+Size=1482,505
 Collapsed=0
-DockId=0x0000000A,0
+DockId=0x00000008,0
 
 [Window][Debug##Default]
 Pos=60,60
@@ -967,79 +967,182 @@ Size=400,400
 Collapsed=0
 
 [Window][Project]
-Pos=0,56
-Size=955,1341
+Pos=0,35
+Size=917,663
 Collapsed=0
-DockId=0x00000005,0
+DockId=0x0000000B,0
 
 [Window][Dataset Editor]
-Pos=0,56
-Size=955,1341
+Pos=0,700
+Size=917,543
 Collapsed=0
-DockId=0x00000005,1
+DockId=0x0000000C,0
 
 [Window][Shot Editor]
-Pos=0,56
-Size=955,1341
+Pos=0,35
+Size=917,663
 Collapsed=0
-DockId=0x00000005,2
+DockId=0x0000000B,1
 
 [Window][Light Rig]
-Pos=0,56
-Size=955,1341
+Pos=0,700
+Size=917,543
 Collapsed=0
-DockId=0x00000005,3
+DockId=0x0000000C,2
 
 [Window][Camera Rig]
-Pos=0,56
-Size=955,1341
+Pos=0,700
+Size=917,543
 Collapsed=0
-DockId=0x00000005,4
+DockId=0x0000000C,1
 
 [Window][Layers]
-Pos=0,56
-Size=955,1341
+Pos=0,35
+Size=917,663
 Collapsed=0
-DockId=0x00000005,5
+DockId=0x0000000B,2
 
 [Window][Tasks]
-Pos=957,1741
-Size=2883,521
+Pos=2403,1517
+Size=1437,505
 Collapsed=0
-DockId=0x0000000A,1
+DockId=0x00000009,0
 
 [Window][Timeline]
-Pos=957,1741
-Size=2883,521
+Pos=919,1328
+Size=2921,187
 Collapsed=0
-DockId=0x0000000A,2
+DockId=0x00000004,0
 
 [Window][Object Editor]
-Pos=0,1399
-Size=955,863
+Pos=0,1245
+Size=917,777
 Collapsed=0
 DockId=0x00000006,0
 
 [Window][Database Editor]
-Pos=0,1399
-Size=955,863
+Pos=0,1245
+Size=917,777
 Collapsed=0
 DockId=0x00000006,1
 
 [Window][Histogram]
-Pos=0,1399
-Size=955,863
+Pos=0,1245
+Size=917,777
 Collapsed=0
 DockId=0x00000006,2
 
+[Window][Remote Browse]
+Pos=1505,703
+Size=830,616
+Collapsed=0
+
+[Window][Add Static Dataset]
+Pos=1518,886
+Size=803,250
+Collapsed=0
+
+[Table][0x413D162D,1]
+Column 0  Weight=1.0000
+
+[Table][0x5BB77325,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0x61093DA2,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0x093FB287,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0xE1C94C44,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0x85DADA6C,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0xD3AA420C,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0xEB97C355,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0xBDE75B35,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0xE11CC6FC,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0xB76C5E9C,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0x0269BFDF,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0x541927BF,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0x92286960,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0xB84BB7EB,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0xF1FE282D,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0x853097AE,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0x5162ADF6,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0x07C26EAB,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0x506C7953,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0xF26FDE71,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
+[Table][0xED968722,2]
+Column 0  Weight=1.0000
+Column 1  Weight=1.0000
+
 [Docking][Data]
-DockSpace       ID=0x80F5B4C5 Window=0x079D3A04 Pos=0,56 Size=3840,2206 Split=X
-  DockNode      ID=0x00000001 Parent=0x80F5B4C5 SizeRef=955,1054 Split=Y Selected=0xCD8384B1
-    DockNode    ID=0x00000005 Parent=0x00000001 SizeRef=547,640 Selected=0x5B7FA1DE
-    DockNode    ID=0x00000006 Parent=0x00000001 SizeRef=547,412 Selected=0x82B4C496
-  DockNode      ID=0x00000002 Parent=0x80F5B4C5 SizeRef=2883,1054 Split=Y Selected=0xC450F867
-    DockNode    ID=0x00000003 Parent=0x00000002 SizeRef=1371,1683 CentralNode=1 Selected=0xC450F867
-    DockNode    ID=0x0000000A Parent=0x00000002 SizeRef=1371,521 Selected=0x139FDA3F
+DockSpace         ID=0x80F5B4C5 Window=0x079D3A04 Pos=0,35 Size=3840,1987 Split=X
+  DockNode        ID=0x00000001 Parent=0x80F5B4C5 SizeRef=917,1054 Split=Y Selected=0xCD8384B1
+    DockNode      ID=0x00000005 Parent=0x00000001 SizeRef=547,640 Split=Y Selected=0xA530E01C
+      DockNode    ID=0x0000000B Parent=0x00000005 SizeRef=955,660 Selected=0x5CC9B8E1
+      DockNode    ID=0x0000000C Parent=0x00000005 SizeRef=955,541 Selected=0x4192BA76
+    DockNode      ID=0x00000006 Parent=0x00000001 SizeRef=547,412 Selected=0x59632AAE
+  DockNode        ID=0x00000002 Parent=0x80F5B4C5 SizeRef=2921,1054 Split=Y Selected=0xC450F867
+    DockNode      ID=0x00000003 Parent=0x00000002 SizeRef=1371,1284 CentralNode=1 Selected=0xC450F867
+    DockNode      ID=0x0000000A Parent=0x00000002 SizeRef=1371,694 Split=Y Selected=0x139FDA3F
+      DockNode    ID=0x00000004 Parent=0x0000000A SizeRef=2883,187 Selected=0x4F89F0DC
+      DockNode    ID=0x00000007 Parent=0x0000000A SizeRef=2883,505 Split=X Selected=0x139FDA3F
+        DockNode  ID=0x00000008 Parent=0x00000007 SizeRef=1482,505 Selected=0x139FDA3F
+        DockNode  ID=0x00000009 Parent=0x00000007 SizeRef=1437,505 Selected=0x1824BFC9
 )layout";
 }
 
