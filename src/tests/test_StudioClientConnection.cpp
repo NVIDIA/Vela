@@ -675,14 +675,29 @@ SCENARIO("The mirror sends object metadata as it is written", "[StudioClient]")
 
     WHEN("array-valued metadata is written")
     {
-      const float points[2] = {0.f, 1.f};
+      const float points[4] = {0.f, 0.f, 1.f, 1.f};
       geometry->setMetadataArray(
-          "opacityControlPoints", ANARI_FLOAT32, points, 2);
+          "opacityControlPoints", ANARI_FLOAT32_VEC2, points, 2);
 
-      THEN("nothing is sent: arrays do not ride this message")
+      THEN("it travels as an array entry, bytes and element type intact")
       {
-        pollFor(f.connection, 50ms);
-        REQUIRE(f.server.count(StudioMessageType::SetObjectMetadata) == 0);
+        REQUIRE(pollUntil(f.connection, [&] {
+          return f.server.count(StudioMessageType::SetObjectMetadata) == 1;
+        }));
+        const auto edits =
+            f.server.messagesOf(StudioMessageType::SetObjectMetadata);
+        const auto edit = decode<SetObjectMetadata>(edits.back());
+        REQUIRE(edit);
+        REQUIRE(edit->entries.size() == 1);
+        REQUIRE(edit->entries[0].name == "opacityControlPoints");
+        REQUIRE(edit->entries[0].holdsArray());
+        REQUIRE_FALSE(edit->entries[0].isRemoval());
+        REQUIRE(edit->entries[0].arrayElementType == ANARI_FLOAT32_VEC2);
+        REQUIRE(edit->entries[0].arrayElementCount == 2);
+        REQUIRE(edit->entries[0].arrayData.size() == sizeof(points));
+        REQUIRE(std::memcmp(
+                    edit->entries[0].arrayData.data(), points, sizeof(points))
+            == 0);
       }
     }
   }
@@ -824,6 +839,96 @@ SCENARIO("ServerConnection reports one session phase", "[StudioClient]")
             }
           }
         }
+      }
+    }
+  }
+}
+
+SCENARIO("A client sends array contents only for arrays it has opened",
+    "[StudioClient]")
+{
+  GIVEN("a connected client whose mirror holds an array")
+  {
+    Fixture f;
+    // The array reaches the mirror as a proxy, the way every array does; the
+    // bootstrap is rebuilt so the source carries one before the client sees it.
+    auto sourceArray = f.source.createArray(ANARI_FLOAT32_VEC4, 4);
+    const std::vector<vsr::math::float4> initial(4, vsr::math::float4(0.f));
+    sourceArray->setData(initial);
+    f.source.getObject<vsr::scene::Geometry>(0)->setParameterObject(
+        "color", *sourceArray);
+    f.server.bootstrap = makeFakeBootstrap(f.source);
+
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+
+    auto array = f.mirror.getObject<vsr::scene::Array>(sourceArray->index());
+    REQUIRE(array);
+    REQUIRE(array->isProxy());
+
+    // What a panel does when it hydrates: a proxy cannot be mapped at all.
+    array->convertProxyToHost();
+    const std::vector<vsr::math::float4> samples(4, vsr::math::float4(0.5f));
+
+    WHEN("the array is written before any panel declares it editable")
+    {
+      array->setData(samples);
+
+      THEN("nothing is sent: the client offers no arbitrary array write")
+      {
+        pollFor(f.connection, 50ms);
+        REQUIRE(f.server.count(StudioMessageType::SetArrayData) == 0);
+      }
+    }
+
+    WHEN("a panel declares it editable and writes it")
+    {
+      f.connection.setArrayEditable(array->index(), true);
+      array->setData(samples);
+
+      THEN("one SetArrayData carries the samples")
+      {
+        REQUIRE(pollUntil(f.connection, [&] {
+          return f.server.count(StudioMessageType::SetArrayData) == 1;
+        }));
+      }
+    }
+
+    WHEN("an editable array is rewritten several times inside one batch")
+    {
+      f.connection.setArrayEditable(array->index(), true);
+      f.mirror.beginUpdateBatch();
+      array->setData(samples);
+      array->setData(samples);
+      array->setData(samples);
+      f.mirror.endUpdateBatch();
+
+      THEN("one message leaves, not three")
+      {
+        REQUIRE(pollUntil(f.connection, [&] {
+          return f.server.count(StudioMessageType::SetArrayData) == 1;
+        }));
+        pollFor(f.connection, 50ms);
+        REQUIRE(f.server.count(StudioMessageType::SetArrayData) == 1);
+      }
+    }
+
+    WHEN("the mirror is replaced after a panel declared the array editable")
+    {
+      f.connection.setArrayEditable(array->index(), true);
+      f.server.send(encode(BootstrapBegin{}));
+      REQUIRE(pollUntil(f.connection, [&] { return f.mirrorReplaces >= 2; }));
+
+      THEN("the declaration went with it")
+      {
+        auto replaced =
+            f.mirror.getObject<vsr::scene::Array>(sourceArray->index());
+        if (replaced && replaced->isProxy())
+          replaced->convertProxyToHost();
+        if (replaced)
+          replaced->setData(samples);
+        pollFor(f.connection, 50ms);
+        REQUIRE(f.server.count(StudioMessageType::SetArrayData) == 0);
       }
     }
   }

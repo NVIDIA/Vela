@@ -73,6 +73,7 @@ using ProjectRequest = std::variant<protocol::NewProject,
     protocol::ListRoots,
     protocol::ListDirectory,
     protocol::RequestArrayHistogram,
+    protocol::RequestArrayData,
     protocol::RenderShot,
     protocol::CancelTask>;
 
@@ -254,6 +255,7 @@ struct ProjectOpDispatcher
   void handle(const protocol::CancelTask &);
   // Viewport
   void handle(const protocol::RequestArrayHistogram &);
+  void handle(const protocol::RequestArrayData &);
 
   // Sends `reply` after flushing scene pushes.
   void finish(const protocol::ProjectOpReply &reply);

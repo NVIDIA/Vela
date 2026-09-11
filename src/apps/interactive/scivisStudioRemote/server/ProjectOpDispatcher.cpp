@@ -151,6 +151,7 @@ VSR_REQUEST_KIND(RemoveColorMap,                 SyncMutating)
 VSR_REQUEST_KIND(ListRoots,                      Independent)
 VSR_REQUEST_KIND(ListDirectory,                  Independent)
 VSR_REQUEST_KIND(RequestArrayHistogram,          SyncReadOnly)
+VSR_REQUEST_KIND(RequestArrayData,               SyncReadOnly)
 VSR_REQUEST_KIND(RenderShot,                     RenderShot)
 VSR_REQUEST_KIND(CancelTask,                     Independent)
 // clang-format on
@@ -616,6 +617,34 @@ void ProjectOpDispatcher::handle(const RequestArrayHistogram &req)
   if (!computeArrayHistogram(*array, req.binCount, result, &error)) {
     fail(req.requestId, error);
     return;
+  }
+  ok(req, result);
+}
+
+void ProjectOpDispatcher::handle(const RequestArrayData &req)
+{
+  auto *appContext = context().appContext();
+  const auto &ref = req.array;
+  vsr::scene::ArrayRef array;
+  if (appContext && ref.type == ANARI_ARRAY)
+    array = appContext->vsr.scene.getObject<vsr::scene::Array>(ref.objectIndex);
+  if (!array) {
+    fail(req.requestId,
+        std::string("(") + anari::toString(ref.type) + ", "
+            + std::to_string(ref.objectIndex) + ") is not an array");
+    return;
+  }
+  if (array->isProxy()) {
+    fail(req.requestId, "array holds no data on this side either");
+    return;
+  }
+
+  ArrayDataResult result;
+  result.elementType = array->elementType();
+  result.elementCount = array->size();
+  if (!array->isEmpty()) {
+    const auto *bytes = static_cast<const std::byte *>(array->data());
+    result.data.assign(bytes, bytes + array->size() * array->elementSize());
   }
   ok(req, result);
 }

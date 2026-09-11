@@ -16,12 +16,14 @@
 #include "ProjectOpReply.h"
 #include "ProjectRequests.h"
 #include "SceneEditMessages.h"
+#include "SceneMessages.h"
 #include "SessionMessages.h"
 #include "StudioCodec.h"
 #include "StudioProtocol.h"
 #include "TaskMessages.h"
 #include "ViewportMessages.h"
 // vsr_scene
+#include "vsr/network/messages/TransferArrayData.hpp"
 #include "vsr/scene/Scene.hpp"
 #include "vsr/scene/objects/Array.hpp"
 // vsr_core
@@ -724,6 +726,89 @@ SCENARIO("computeArrayHistogram bins host arrays", "[StudioServer]")
       REQUIRE(result.minValue == 0.f);
       REQUIRE(result.maxValue == 1.f);
       REQUIRE(result.bins == std::vector<uint64_t>{1, 1});
+    }
+  }
+}
+
+SCENARIO("StudioServer serves and accepts array contents", "[StudioServer]")
+{
+  if (!helideAvailable()) {
+    WARN("helide ANARI library unavailable, skipping the array data test");
+    return;
+  }
+
+  MeshFixture data;
+  ViewportSession session(data);
+  auto &client = session.client;
+  auto &scene = session.server->appContext().vsr.scene;
+
+  GIVEN("the scalar array the mesh carries")
+  {
+    auto array =
+        scene.getObject<vsr::scene::Array>(session.scalarArray.objectIndex);
+    REQUIRE(array);
+
+    WHEN("its contents are requested")
+    {
+      RequestArrayData req;
+      req.array = session.scalarArray;
+      const auto reply = session.request(req);
+
+      THEN("every sample comes back, typed, with no snapshot behind it")
+      {
+        REQUIRE(reply.ok);
+        const auto result = results<ArrayDataResult>(reply);
+        REQUIRE(result);
+        REQUIRE(result->elementType == array->elementType());
+        REQUIRE(result->elementCount == array->size());
+        REQUIRE(result->data.size() == array->size() * array->elementSize());
+        REQUIRE(std::memcmp(
+                    result->data.data(), array->data(), result->data.size())
+            == 0);
+        REQUIRE(client.count(StudioMessageType::ProjectSnapshot) == 0);
+      }
+    }
+
+    WHEN("an array that is not one is requested")
+    {
+      RequestArrayData req;
+      req.array = SceneObjectRef{ANARI_GEOMETRY, 0};
+      const auto reply = session.request(req);
+
+      THEN("the request is refused by name")
+      {
+        REQUIRE_FALSE(reply.ok);
+        REQUIRE(reply.error.find("is not an array") != std::string::npos);
+      }
+    }
+
+    WHEN("a client sends new contents for it")
+    {
+      const std::vector<float> replacement(array->size(), 0.25f);
+
+      // The wire form is TransferArrayData's, re-tagged; build it from an
+      // array that already holds what the client means to send.
+      vsr::scene::Scene sourceScene;
+      auto source =
+          sourceScene.createArray(array->elementType(), array->size());
+      source->setData(replacement);
+      // The index must name the server's array, not this scratch one.
+      REQUIRE(source->index() == session.scalarArray.objectIndex);
+
+      vsr::network::messages::TransferArrayData transfer(source.data());
+      client.channel->send(
+          encodeSceneMessage<StudioMessageType::SetArrayData>(transfer));
+
+      THEN("the server's array holds them")
+      {
+        REQUIRE(waitFor([&] {
+          const auto *samples = static_cast<const float *>(array->data());
+          return samples != nullptr && samples[0] == 0.25f;
+        }));
+        const auto *samples = static_cast<const float *>(array->data());
+        for (size_t i = 0; i < array->size(); ++i)
+          REQUIRE(samples[i] == 0.25f);
+      }
     }
   }
 }

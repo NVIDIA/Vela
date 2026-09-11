@@ -167,10 +167,20 @@ struct StudioServer
   const ViewportPasses &viewport() const;
 
  private:
+  // SetArrayData is the one edit whose payload is not a fields() struct: it
+  // re-tags vsr::network's TransferArrayData, which reads straight from the
+  // Message. The Message is carried through the queue and executed in turn,
+  // so array writes keep their order against the parameter edits beside them.
+  struct ArrayDataEdit
+  {
+    vsr::network::Message message;
+  };
+
   using SceneEdit = std::variant<protocol::SetObjectParameter,
       protocol::RemoveObjectParameter,
       protocol::SetObjectMetadata,
-      protocol::SetNodeTransform>;
+      protocol::SetNodeTransform,
+      ArrayDataEdit>;
 
   // Something that happened to a connection on the IO thread, tagged with
   // that connection's serial (see m_connectionSerial) so the loop can tell a
@@ -333,6 +343,7 @@ struct StudioServer
   void applyEdit(const protocol::RemoveObjectParameter &edit);
   void applyEdit(const protocol::SetObjectMetadata &edit);
   void applyEdit(const protocol::SetNodeTransform &edit);
+  void applyEdit(const ArrayDataEdit &edit);
   void renderAndSendFrame();
   // Runs the pass chain and records what it cost in m_renderMs/m_pipelineMs;
   // every render of the interactive pipeline goes through here, so the frame

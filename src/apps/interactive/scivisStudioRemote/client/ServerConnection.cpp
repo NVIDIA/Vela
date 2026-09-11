@@ -923,8 +923,19 @@ void ServerConnection::applySceneMessage(
   }
 }
 
+void ServerConnection::setArrayEditable(size_t arrayIndex, bool editable)
+{
+  if (m_delegate)
+    m_delegate->setArrayEditable(arrayIndex, editable);
+}
+
 void ServerConnection::announceMirrorReplace(MirrorReplace kind)
 {
+  // Every index a panel declared editable names a different array (or none)
+  // once the mirror is replaced, so the declarations go with it. Panels drop
+  // their own copies on the same signal.
+  if (m_delegate)
+    m_delegate->clearEditableArrays();
   if (onMirrorReplaceBegin)
     onMirrorReplaceBegin(kind);
 }

@@ -12,6 +12,7 @@
 #include "StudioCodec.h"
 #include "ViewportMessages.h"
 // std
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -592,6 +593,141 @@ SCENARIO("Viewport payloads", "[StudioProtocol]")
       writeChild(tree.root(), "minValue", 0.f);
       writeChild(tree.root(), "maxValue", 1.f);
       ArrayHistogramResult out;
+      REQUIRE_FALSE(fromNode(tree.root(), out));
+    }
+  }
+}
+
+SCENARIO("RequestArrayData names an array and ArrayDataResult carries it",
+    "[StudioProtocol]")
+{
+  GIVEN("a request for one array's contents")
+  {
+    RequestArrayData request;
+    request.requestId = 77;
+    request.array = SceneObjectRef{ANARI_ARRAY, 12};
+
+    THEN("it round-trips")
+    {
+      const auto out = roundTrip(request);
+      REQUIRE(out.requestId == 77);
+      REQUIRE(out.array.type == ANARI_ARRAY);
+      REQUIRE(out.array.objectIndex == 12);
+    }
+  }
+
+  GIVEN("a result carrying RGBA samples")
+  {
+    const std::vector<vsr::math::float4> samples{
+        {0.f, 0.f, 0.f, 0.f}, {1.f, 0.5f, 0.25f, 1.f}};
+
+    ArrayDataResult result;
+    result.elementType = ANARI_FLOAT32_VEC4;
+    result.elementCount = samples.size();
+    const auto *bytes = reinterpret_cast<const std::byte *>(samples.data());
+    result.data.assign(bytes, bytes + samples.size() * sizeof(samples[0]));
+
+    THEN("element type, count and bytes survive the trip")
+    {
+      const auto out = roundTripTree(result);
+      REQUIRE(out.elementType == ANARI_FLOAT32_VEC4);
+      REQUIRE(out.elementCount == samples.size());
+      REQUIRE(out.data.size() == result.data.size());
+      REQUIRE(std::memcmp(out.data.data(), samples.data(), out.data.size())
+          == 0);
+    }
+
+    THEN("an empty result reads back empty rather than stale")
+    {
+      ArrayDataResult empty;
+      ArrayDataResult stale;
+      stale.elementType = ANARI_FLOAT32;
+      stale.elementCount = 3;
+      stale.data.assign(12, std::byte{0xEE});
+      const auto out = roundTripTree(empty, stale);
+      REQUIRE(out.elementType == ANARI_UNKNOWN);
+      REQUIRE(out.elementCount == 0);
+      REQUIRE(out.data.empty());
+    }
+  }
+}
+
+SCENARIO("An ObjectMetadataEntry carries a value, an array, or a removal",
+    "[StudioProtocol]")
+{
+  GIVEN("an entry holding an opacity curve")
+  {
+    const std::vector<vsr::math::float2> points{{0.f, 0.f}, {1.f, 1.f}};
+
+    ObjectMetadataEntry entry;
+    entry.name = "opacityControlPoints";
+    entry.arrayElementType = ANARI_FLOAT32_VEC2;
+    entry.arrayElementCount = points.size();
+    const auto *bytes = reinterpret_cast<const std::byte *>(points.data());
+    entry.arrayData.assign(bytes, bytes + points.size() * sizeof(points[0]));
+
+    THEN("it round-trips as an array entry")
+    {
+      const auto out = roundTripTree(entry);
+      REQUIRE(out.name == "opacityControlPoints");
+      REQUIRE(out.holdsArray());
+      REQUIRE_FALSE(out.isRemoval());
+      REQUIRE(out.arrayElementType == ANARI_FLOAT32_VEC2);
+      REQUIRE(out.arrayElementCount == points.size());
+      REQUIRE(std::memcmp(
+                  out.arrayData.data(), points.data(), out.arrayData.size())
+          == 0);
+    }
+
+    THEN("a stale value entry is cleared when an array entry is read over it")
+    {
+      ObjectMetadataEntry stale;
+      stale.name = "stale";
+      stale.value = vsr::core::Any(3.f);
+      const auto out = roundTripTree(entry, stale);
+      REQUIRE(out.holdsArray());
+      REQUIRE_FALSE(out.value.valid());
+    }
+  }
+
+  GIVEN("an entry holding a single value")
+  {
+    ObjectMetadataEntry entry;
+    entry.name = "manipulator.distance";
+    entry.value = vsr::core::Any(4.f);
+
+    THEN("it round-trips as a value entry")
+    {
+      const auto out = roundTripTree(entry);
+      REQUIRE_FALSE(out.holdsArray());
+      REQUIRE_FALSE(out.isRemoval());
+      REQUIRE(out.value.get<float>() == 4.f);
+    }
+  }
+
+  GIVEN("an entry holding neither")
+  {
+    ObjectMetadataEntry entry;
+    entry.name = "gone";
+
+    THEN("it reads back as a removal")
+    {
+      const auto out = roundTripTree(entry);
+      REQUIRE_FALSE(out.holdsArray());
+      REQUIRE(out.isRemoval());
+    }
+  }
+
+  GIVEN("an entry carrying both an array type and a value")
+  {
+    vsr::core::DataTree tree;
+    writeChild(tree.root(), "name", std::string("confused"));
+    writeChild(tree.root(), "arrayElementType", int(ANARI_FLOAT32_VEC2));
+    tree.root()["value"].setValue(vsr::core::Any(1.f));
+
+    THEN("it is rejected")
+    {
+      ObjectMetadataEntry out;
       REQUIRE_FALSE(fromNode(tree.root(), out));
     }
   }

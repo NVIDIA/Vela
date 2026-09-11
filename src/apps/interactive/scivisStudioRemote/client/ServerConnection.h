@@ -184,6 +184,13 @@ struct ServerConnection
   // server actually rendered (Time in Motion while playing). Absent until a
   // frame was taken; kept while Lost, dropped by disconnect().
   const std::optional<protocol::FrameHeader> &lastFrameHeader() const;
+  // Whether local writes to this mirror array (by its index) are streamed to
+  // the server as SetArrayData. Off for every array until a panel hydrates
+  // one and says so, and cleared whenever the mirror is replaced -- the wire
+  // would carry any array, and this is what keeps the client from ever
+  // offering to send one nobody opened an editor on.
+  void setArrayEditable(size_t arrayIndex, bool editable);
+
   // Project Ops, Server Task records and Remote Browse; their callbacks run
   // from poll().
   ProjectOps &projectOps();

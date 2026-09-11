@@ -115,6 +115,29 @@ struct ArrayHistogramResult
   uint64_t nonFinite{0};
 };
 
+// The Structural Mirror holds arrays as proxies with no samples, so a client
+// that wants to edit one -- a volume's Transfer Function is the only case in
+// v12 -- asks for its contents first and hydrates its own copy (ADR 0037's
+// companion: the edit itself goes back as SetArrayData). The array is named
+// the way RequestArrayHistogram names it, by its server-minted index.
+struct RequestArrayData
+{
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::RequestArrayData;
+  uint64_t requestId{0};
+  SceneObjectRef array;
+};
+
+// Result carried in a ProjectOpReply's `results` subtree: one array's whole
+// contents, element type and count included so the receiver can check them
+// against the descriptor it already holds before filling anything.
+struct ArrayDataResult
+{
+  anari::DataType elementType{ANARI_UNKNOWN};
+  uint64_t elementCount{0};
+  std::vector<std::byte> data;
+};
+
 // Enumerator names ("NONE", "DEPTH", ..., "INSTANCE_ID"), "Unknown" otherwise.
 const char *toString(vsr::rendering::AOVType type);
 std::optional<vsr::rendering::AOVType> aovTypeFromString(std::string_view name);
@@ -129,11 +152,18 @@ std::optional<vsr::rendering::AOVType> aovTypeFromString(std::string_view name);
 //    absent, so a newer client can add toggles without breaking an older
 //    server; a present but mistyped field is rejected.
 //  - RequestArrayHistogram: requestId, array and binCount are required.
+//  - RequestArrayData: requestId and array are required.
 
 // bins travel as one UINT64 array leaf (absent when empty); minValue and
 // maxValue are required, nonFinite defaults to 0 when absent.
 void toNode(const ArrayHistogramResult &, vsr::core::DataNode &);
 bool fromNode(const vsr::core::DataNode &, ArrayHistogramResult &);
+
+// data travels as one typed array leaf carrying its own element type;
+// elementCount is read back from that leaf rather than sent beside it, so the
+// two can never disagree. An empty array writes no leaf.
+void toNode(const ArrayDataResult &, vsr::core::DataNode &);
+bool fromNode(const vsr::core::DataNode &, ArrayDataResult &);
 
 // Inlined definitions ////////////////////////////////////////////////////////
 
@@ -180,6 +210,13 @@ void fields(V &v, RequestArrayHistogram &r)
   v.required("requestId", r.requestId);
   v.child("array", r.array);
   v.required("binCount", r.binCount);
+}
+
+template <typename V>
+void fields(V &v, RequestArrayData &r)
+{
+  v.required("requestId", r.requestId);
+  v.child("array", r.array);
 }
 
 } // namespace vsr::scivis_studio::protocol

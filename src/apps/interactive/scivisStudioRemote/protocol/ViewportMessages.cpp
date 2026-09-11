@@ -67,4 +67,37 @@ bool fromNode(const vsr::core::DataNode &n, ArrayHistogramResult &r)
   return true;
 }
 
+// Array data /////////////////////////////////////////////////////////////////
+
+void toNode(const ArrayDataResult &r, vsr::core::DataNode &n)
+{
+  if (r.elementCount == 0 || r.data.empty())
+    return;
+  n["data"].setValueAsArray(r.elementType, r.data.data(), r.elementCount);
+}
+
+bool fromNode(const vsr::core::DataNode &n, ArrayDataResult &r)
+{
+  r.elementType = ANARI_UNKNOWN;
+  r.elementCount = 0;
+  r.data.clear();
+
+  const auto *data = n.child("data");
+  if (!data)
+    return true;
+
+  anari::DataType type = ANARI_UNKNOWN;
+  const void *ptr = nullptr;
+  size_t count = 0;
+  data->getValueAsArray(&type, &ptr, &count);
+  if (!ptr || type == ANARI_UNKNOWN)
+    return false;
+
+  const auto *bytes = static_cast<const std::byte *>(ptr);
+  r.elementType = type;
+  r.elementCount = count;
+  r.data.assign(bytes, bytes + count * anari::sizeOf(type));
+  return true;
+}
+
 } // namespace vsr::scivis_studio::protocol

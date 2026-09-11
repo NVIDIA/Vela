@@ -14,6 +14,7 @@
 // vsr_scivis_studio_model
 #include "CameraRig.h"
 // vsr_network
+#include "vsr/network/messages/TransferArrayData.hpp"
 #include "vsr/network/messages/TransferLayer.hpp"
 #include "vsr/network/messages/TransferScene.hpp"
 // vsr_rendering
@@ -861,10 +862,16 @@ void StudioServer::applyEdit(const SetObjectMetadata &edit)
   }
   bool manipulatorChanged = false;
   for (const auto &entry : edit.entries) {
-    if (entry.value.valid())
+    if (entry.holdsArray()) {
+      obj->setMetadataArray(entry.name,
+          entry.arrayElementType,
+          entry.arrayData.data(),
+          entry.arrayElementCount);
+    } else if (entry.value.valid()) {
       obj->setMetadataValue(entry.name, entry.value);
-    else
+    } else {
       obj->removeMetadata(entry.name);
+    }
     manipulatorChanged |= vsr::rendering::isManipulatorMetadataKey(entry.name);
   }
   // Only the manipulator keys say anything about the client's view; another
@@ -872,6 +879,17 @@ void StudioServer::applyEdit(const SetObjectMetadata &edit)
   // since made stale.
   if (manipulatorChanged)
     followCameraEdit(obj, CameraEdit::Manipulator);
+}
+
+void StudioServer::applyEdit(const ArrayDataEdit &edit)
+{
+  // TransferArrayData resolves the array, refuses a type or size that does
+  // not match the descriptor the client mirrors, and fills it through
+  // map()/unmap() -- which is also what marks the owning dataset dirty.
+  vsr::network::messages::TransferArrayData transfer(
+      edit.message, &m_ctx.vsr.scene);
+  if (!transfer.execute())
+    vsr::core::logWarning("[StudioServer] SetArrayData was not applied");
 }
 
 void StudioServer::applyEdit(const SetNodeTransform &edit)
@@ -1223,6 +1241,21 @@ void StudioServer::onMessage(const Message &msg)
   case StudioMessageType::RemoveObjectParameter:
     latchEdit<RemoveObjectParameter>(msg);
     return;
+  case StudioMessageType::SetArrayData: {
+    // The payload is TransferArrayData's own tree, not a fields() struct, so
+    // it is checked for its two nodes here and resolved against the scene on
+    // the loop thread, where every other edit is applied.
+    vsr::network::messages::TransferArrayData parsed(msg, nullptr);
+    const auto &root = parsed.tree().root();
+    if (root.child("a") == nullptr || root.child("d") == nullptr) {
+      refuseRequest(msg,
+          "malformed " + std::string(toString(*type)) + " payload");
+      return;
+    }
+    std::lock_guard lock(m_controlMutex);
+    m_control.edits.emplace_back(ArrayDataEdit{msg});
+    return;
+  }
   case StudioMessageType::SetObjectMetadata:
     latchEdit<SetObjectMetadata>(msg);
     return;

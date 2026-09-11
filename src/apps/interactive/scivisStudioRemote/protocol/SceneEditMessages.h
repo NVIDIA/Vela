@@ -32,8 +32,18 @@ namespace vsr::scivis_studio::protocol {
  * Any the key now holds; an entry with no value means the key was removed.
  * One message per key would be six per frame of a camera orbit, so a
  * metadata batch travels as one message (ADR 0036). Array-valued metadata
- * (a volume's opacityControlPoints) never rides it, for the same reason
- * arrays never ride SetObjectParameter.
+ * does ride it (v12): a volume's opacityControlPoints is the durable half of
+ * its Transfer Function, it is small, and unlike a dataset's arrays it is
+ * authored on the client. Bulk array *objects* still never ride here -- they
+ * have their own message, SetArrayData.
+ *
+ * SetArrayData is not declared in this header. It re-tags the existing
+ * vsr::network::messages::TransferArrayData with a Studio type value, the way
+ * SceneMessages.h re-tags the scene transfers, so both ends share one
+ * serializer and the proxy-fill and element-type/size guards that come with
+ * it. It is the client-to-server half; the server-to-client half is a reply
+ * (RequestArrayData / ArrayDataResult in ViewportMessages.h), because the
+ * client asks for samples rather than being pushed them.
  *
  * Example:
  *   SetObjectParameter edit;
@@ -60,11 +70,21 @@ struct RemoveObjectParameter
   std::string name;
 };
 
-// An invalid `value` is a removal: the key is gone from the object.
+// One metadata key in one of its three states. A key holding array data --
+// a volume's opacityControlPoints is the whole of v12's interest in it --
+// carries `arrayElementType` and its bytes; a key holding a single value
+// carries `value`; an entry with neither is a removal. `value` and the array
+// fields are never both set.
 struct ObjectMetadataEntry
 {
   std::string name;
   vsr::core::Any value;
+  anari::DataType arrayElementType{ANARI_UNKNOWN};
+  uint64_t arrayElementCount{0};
+  std::vector<std::byte> arrayData;
+
+  bool holdsArray() const { return arrayElementType != ANARI_UNKNOWN; }
+  bool isRemoval() const { return !holdsArray() && !value.valid(); }
 };
 
 struct SetObjectMetadata
@@ -87,9 +107,11 @@ struct SetNodeTransform
 void toNode(const SetObjectParameter &, vsr::core::DataNode &);
 bool fromNode(const vsr::core::DataNode &, SetObjectParameter &);
 
-// An entry's name is required and its value optional (absent is a removal);
-// an array value is rejected. SetObjectMetadata's object is required and its
-// entry list may be empty (nothing to apply).
+// An entry's name is required. `arrayElementType`, when present, makes the
+// entry an array one and its bytes are read from the `array` leaf beside it
+// (absent leaf reads as empty); otherwise `value` is optional and its absence
+// is a removal. An entry carrying both an array type and a value is rejected.
+// SetObjectMetadata's object is required and its entry list may be empty.
 void toNode(const ObjectMetadataEntry &, vsr::core::DataNode &);
 bool fromNode(const vsr::core::DataNode &, ObjectMetadataEntry &);
 

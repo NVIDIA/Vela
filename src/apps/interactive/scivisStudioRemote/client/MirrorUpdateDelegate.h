@@ -9,6 +9,8 @@
 #include "vsr/scene/UpdateDelegate.hpp"
 // std
 #include <functional>
+#include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -22,10 +24,19 @@ using MessageSink = std::function<void(vsr::network::Message &&)>;
  * parameter set/batch -> one SetObjectParameter per parameter (array-typed
  * values are skipped: arrays never ride that message), parameter removed ->
  * RemoveObjectParameter, metadata set/removed/batch -> one SetObjectMetadata
- * naming every key that changed (array-valued keys are skipped for the same
- * reason, so a volume's opacityControlPoints still does not travel).
- * Everything else the mirror can signal (object add/remove, layer structure,
- * arrays) is not in the Studio message set and is ignored.
+ * naming every key that changed, array-valued keys included (v12), so a
+ * volume's opacityControlPoints travels with the rest.
+ *
+ * Array *contents* travel too, but only for arrays the UI has declared
+ * editable with setArrayEditable(). The wire would carry any array; the
+ * client sends only the ones a panel has hydrated and opened an editor on,
+ * so an incidental map/unmap of a dataset's field data never becomes a
+ * multi-gigabyte upload. Inside an update batch the dirty arrays are
+ * collected and flushed once at the end, so dragging one knob sends one
+ * message however many times the widget rewrites the samples.
+ *
+ * Everything else the mirror can signal (object add/remove, layer structure)
+ * is not in the Studio message set and is ignored.
  *
  * Layer transforms are also ignored: signalLayerTransformUpdated() names only
  * the Layer, not the node that moved, so SetNodeTransform cannot be built
@@ -58,6 +69,16 @@ struct MirrorUpdateDelegate : public vsr::scene::EmptyUpdateDelegate
       const vsr::scene::Object *o, const char *name) override;
   void signalMetadataBatchUpdated(const vsr::scene::Object *o,
       const std::vector<std::string> &names) override;
+  void signalArrayUnmapped(const vsr::scene::Array *a) override;
+  void signalUpdateBatchBegin() override;
+  void signalUpdateBatchEnd() override;
+
+  // Whether local writes to this array (by its mirror index) are sent to the
+  // server. Off for every array until a panel hydrates one; a panel clears it
+  // when it drops the array, and a mirror replacement clears all of them.
+  void setArrayEditable(size_t arrayIndex, bool editable);
+  void clearEditableArrays();
+  bool arrayEditable(size_t arrayIndex) const;
 
  private:
   void sendParameter(
@@ -66,9 +87,15 @@ struct MirrorUpdateDelegate : public vsr::scene::EmptyUpdateDelegate
   // that leaves no entry.
   void sendMetadata(
       const vsr::scene::Object *o, const std::vector<std::string> &names);
+  void sendArray(const vsr::scene::Array *a);
 
   MessageSink m_send;
   bool m_enabled{false};
+  int m_batchDepth{0};
+  std::set<size_t> m_editableArrays;
+  // Arrays unmapped inside the open batch, by mirror index. Held as pointers
+  // because a batch never outlives the frame that opened it.
+  std::map<size_t, const vsr::scene::Array *> m_pendingArrays;
 };
 
 } // namespace vsr::scivis_studio::client

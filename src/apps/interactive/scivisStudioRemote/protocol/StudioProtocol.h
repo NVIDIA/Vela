@@ -40,7 +40,12 @@ bool parsePort(const std::string &text, uint16_t &port);
 // 11: object metadata travels the optimistic edit lane as SetObjectMetadata,
 //     so a camera's manipulator state reaches the server incrementally
 //     instead of only in bulk (ADR 0036).
-constexpr int PROTOCOL_VERSION = 11;
+// 12: array contents cross the wire in both directions, so a client can edit
+//     a volume's Transfer Function: RequestArrayData fetches an array's
+//     samples (ArrayDataResult) because the mirror holds only proxies, and
+//     SetArrayData streams an edited array back on the optimistic lane.
+//     SetObjectMetadata also carries array-valued entries, which it skipped.
+constexpr int PROTOCOL_VERSION = 12;
 
 /*
  * Complete v1 message set of the SciVis Studio client-server protocol, as one
@@ -117,6 +122,7 @@ constexpr int PROTOCOL_VERSION = 11;
   X(CancelTask,                   61, ClientToServer)            \
   X(Pick,                         62, ClientToServer)            \
   X(ImportSubtreeDataset,         63, ClientToServer)            \
+  X(RequestArrayData,             64, ClientToServer)            \
   /* Project/task replies (100..) */                             \
   X(ProjectOpReply,              100, ServerToClient)            \
   X(ProjectSnapshot,             101, ServerToClient)            \
@@ -143,6 +149,7 @@ constexpr int PROTOCOL_VERSION = 11;
   X(SetOutline,                  144, ClientToServer)            \
   X(ViewportSettings,            145, ClientToServer)            \
   X(SetObjectMetadata,           146, ClientToServer)            \
+  X(SetArrayData,                147, ClientToServer)            \
   /* Rendering and frames (160..) */                             \
   X(SetFrameConfig,              160, ClientToServer)            \
   X(FrameConfig,                 161, ServerToClient)            \

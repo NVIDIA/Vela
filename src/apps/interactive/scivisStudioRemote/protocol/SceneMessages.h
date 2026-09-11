@@ -20,10 +20,17 @@ namespace vsr::scivis_studio::protocol {
  *   StudioMessageType::TransferLayer  <-> messages::TransferLayer
  *   StudioMessageType::ObjectAdded    <-> messages::NewObject
  *   StudioMessageType::ObjectRemoved  <-> messages::RemoveObject
+ *   StudioMessageType::SetArrayData   <-> messages::TransferArrayData
  *
- * The last two have no current sender -- the server sends one TransferScene
- * at each commit point instead -- but both directions still encode and
- * decode them, so the pair stays a live part of the protocol.
+ * SetArrayData is the odd one: it is the only client-to-server member, an
+ * optimistic edit rather than a scene push, and it is how an edited array
+ * reaches the server (v12). Re-tagging rather than describing a Studio
+ * payload of its own means the element-type and size guards and the
+ * proxy-to-host fill in TransferArrayData::execute() are shared, not copied.
+ *
+ * ObjectAdded and ObjectRemoved have no current sender -- the server sends one
+ * TransferScene at each commit point instead -- but both directions still
+ * encode and decode them, so the pair stays a live part of the protocol.
  *
  * The receiver constructs the paired messages class from the Message and a
  * target Scene, then calls execute().
@@ -36,12 +43,12 @@ namespace vsr::scivis_studio::protocol {
  *     vsr::network::messages::TransferLayer(msg, &replica).execute();
  */
 
-// True for the four scene values listed above.
+// True for the five values listed above.
 constexpr bool isSceneMessageType(StudioMessageType type);
 
 // Re-tags an existing vsr::network StructuredMessage (TransferScene,
-// TransferLayer, NewObject, RemoveObject) with one of the four Studio scene
-// type values; any other TYPE is a compile error.
+// TransferLayer, NewObject, RemoveObject, TransferArrayData) with one of the
+// five Studio scene type values; any other TYPE is a compile error.
 template <StudioMessageType TYPE>
 vsr::network::Message encodeSceneMessage(
     vsr::network::StructuredMessage &message);
@@ -55,6 +62,7 @@ constexpr bool isSceneMessageType(StudioMessageType type)
   case StudioMessageType::TransferLayer:
   case StudioMessageType::ObjectAdded:
   case StudioMessageType::ObjectRemoved:
+  case StudioMessageType::SetArrayData:
     return true;
   default:
     return false;
@@ -66,7 +74,7 @@ inline vsr::network::Message encodeSceneMessage(
     vsr::network::StructuredMessage &message)
 {
   static_assert(isSceneMessageType(TYPE),
-      "encodeSceneMessage() carries only the four scene message types");
+      "encodeSceneMessage() carries only the five scene message types");
   return message.toMessage(uint8_t(TYPE));
 }
 
