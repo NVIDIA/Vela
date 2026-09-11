@@ -40,6 +40,7 @@
 #include <SDL3/SDL.h>
 // std
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
@@ -349,6 +350,11 @@ void Application::uiFrameStart()
   m_statusOverlay.drawToasts();
 
   const bool typing = ImGui::GetIO().WantTextInput;
+  // getDefaultLayout() is maintained by hand: arrange the docking, press F1,
+  // paste the dump over the string. The base class' key handling lives in
+  // the uiFrameStart() this one replaces, so F1 is repeated here.
+  if (!typing && ImGui::IsKeyPressed(ImGuiKey_F1, false))
+    printf("%s\n", ImGui::SaveIniSettingsToMemory());
   if (!typing && ImGui::IsKeyPressed(ImGuiKey_Escape))
     appContext()->clearSelected();
   if (!typing && ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_S)
@@ -510,6 +516,19 @@ void Application::uiMenu_View()
     ImGui::PushID(w);
     ImGui::Checkbox(w->name(), w->visiblePtr());
     ImGui::PopID();
+  }
+
+  ImGui::Separator();
+
+  // The one application setting this client exposes: it has no App Settings
+  // dialog, and a font too small to read is worth a menu of its own. The
+  // change applies at once and is saved with the layout.
+  ImGui::SetNextItemWidth(220.f);
+  if (ImGui::DragFloat("Font Scale", &uiConfig()->fontScale, 0.01f, 0.5f, 4.f))
+    m_appSettingsDialog->applySettings();
+  if (ImGui::MenuItem("Reset Font Scale")) {
+    uiConfig()->fontScale = 1.f;
+    m_appSettingsDialog->applySettings();
   }
 
   ImGui::Separator();
@@ -841,9 +860,11 @@ std::vector<FrameEncoding> Application::encodingPreference() const
 // Layout /////////////////////////////////////////////////////////////////////
 
 // Beside the base class' application settings, and in the same shape a
-// project's UI state has, minus `settings`: font scale and rounding are
-// application settings and stay in appSettings.vsr, so there is one writer
-// for each.
+// project's UI state has: `{windows, layout}` plus the one setting the View
+// menu edits, `settings/fontScale`. The client is that key's only writer --
+// it never calls the base class' "Save as Defaults" -- so a scale chosen
+// here comes back next run without disturbing appSettings.vsr, where
+// uiRounding and the rest of the application settings still live.
 std::filesystem::path Application::clientUIStateFile() const
 {
 #ifdef _WIN32
@@ -882,6 +903,7 @@ void Application::saveClientUIState()
     window->saveSettings(windows[window->name()]);
   root[vsr::app::UI_STATE_LAYOUT] =
       std::string(ImGui::SaveIniSettingsToMemory());
+  root[vsr::app::UI_STATE_SETTINGS]["fontScale"] = uiConfig()->fontScale;
 
   if (!tree.save(filename.string().c_str())) {
     vsr::core::logError("[Client] failed to save the layout to '%s'",
@@ -912,7 +934,11 @@ void Application::loadClientUIState()
     return;
   }
 
+  // Loads the windows, the dock layout and fontScale into m_uiConfig; the
+  // base class already applied appSettings.vsr and its own applySettings()
+  // before setupWindows(), so the new scale needs pushing into ImGui here.
   applyUIStateTree(tree.root());
+  m_appSettingsDialog->applySettings();
 }
 
 const char *Application::getDefaultLayout() const

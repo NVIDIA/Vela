@@ -117,9 +117,9 @@ class Application : public vsr::ui::imgui::Application
   // Layout //
 
   // The client's own layout, kept beside the user's application settings
-  // rather than in the project: windows and the ImGui dock layout, saved at
-  // exit and restored at startup, so which project is open never moves a
-  // panel.
+  // rather than in the project: windows, the ImGui dock layout and the View
+  // menu's font scale, saved at exit and restored at startup, so which
+  // project is open never moves a panel.
   std::filesystem::path clientUIStateFile() const;
   void saveClientUIState();
   void loadClientUIState();
