@@ -5832,3 +5832,64 @@ SCENARIO(
     }
   }
 }
+
+SCENARIO("Object metadata marks its dataset dirty", "[SciVisStudio]")
+{
+  // A volume's opacityControlPoints is the durable half of its Transfer
+  // Function and is metadata, not a parameter. It only ever reached disk
+  // because the editor rewrote the color Array beside it in the same breath;
+  // once the two travel as separate wire messages that coincidence is gone,
+  // and a clean dataset is skipped entirely on save.
+  vsr::app::Context appContext;
+  ProjectContext projectContext(&appContext);
+  projectContext.createUnsavedProject();
+  auto &project = projectContext.project();
+  auto &scene = appContext.vsr.scene;
+  auto *studio = scene.layer("studio");
+  auto datasetsRoot = findDirectChild(studio->root(), "datasets");
+  auto datasetRoot = scene.insertChildNode(datasetsRoot, "dataset_0001");
+
+  auto volume = scene.createObject<vsr::scene::Volume>(
+      vsr::scene::tokens::volume::transferFunction1D);
+  scene.insertChildObjectNode(datasetRoot, volume, "volume");
+
+  Dataset dataset;
+  dataset.id = "dataset_0001";
+  dataset.name = "Example";
+  dataset.sourceKind = DatasetSourceKind::Static;
+  dataset.importerType = "VOLUME";
+  dataset.status = DatasetStatus::Available;
+  dataset.rootNode = projectContext.refFor("studio", datasetRoot);
+  project.datasets.push_back(std::move(dataset));
+
+  GIVEN("A clean dataset holding a volume")
+  {
+    project.datasets.front().dirty = false;
+
+    WHEN("A metadata array on the volume is rewritten alone")
+    {
+      const vsr::math::float2 points[3]{
+          vsr::math::float2(0.f),
+          vsr::math::float2(0.5f, 0.25f),
+          vsr::math::float2(1.f),
+      };
+      volume->setMetadataArray(
+          "opacityControlPoints", ANARI_FLOAT32_VEC2, points, 3);
+
+      THEN("The dataset is dirty")
+      {
+        REQUIRE(project.datasets.front().dirty);
+      }
+    }
+
+    WHEN("A scalar metadata value on the volume is written alone")
+    {
+      volume->setMetadataValue("manipulator.distance", 2.f);
+
+      THEN("The dataset is dirty")
+      {
+        REQUIRE(project.datasets.front().dirty);
+      }
+    }
+  }
+}

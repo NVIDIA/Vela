@@ -105,6 +105,24 @@ struct DatasetDirtyDelegate : vsr::scene::EmptyUpdateDelegate
     context->markDatasetDirtyForObject(array);
   }
 
+  // Metadata dirties its dataset on its own merits. A volume's
+  // opacityControlPoints is the durable half of its Transfer Function, and
+  // the only reason an opacity-only edit used to reach disk is that the
+  // editor happened to rewrite the color Array beside it; once the two
+  // travel as separate messages that coincidence no longer holds, and a
+  // clean dataset is skipped entirely on save.
+  void signalMetadataUpdated(
+      const vsr::scene::Object *object, const char *) override
+  {
+    context->markDatasetDirtyForObject(object);
+  }
+
+  void signalMetadataBatchUpdated(const vsr::scene::Object *object,
+      const std::vector<std::string> &) override
+  {
+    context->markDatasetDirtyForObject(object);
+  }
+
   void signalObjectRemoved(const vsr::scene::Object *object) override
   {
     context->markDatasetDirtyForObject(object);

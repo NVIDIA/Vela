@@ -692,6 +692,13 @@ bool deserializeDatasetArchive(vsr::scene::Scene &scene,
     return false;
   }
 
+  // An archive written before ADR 0037 can hold a volume whose color is still
+  // a scalar. Give it its Array now that every index in the archive is
+  // assigned -- doing it during deserialization would shift the indices the
+  // archive asserts, and a thin client may not create one at all.
+  if (auto *volume = findDatasetVolume(loadedContent.root))
+    volume->ensureColorArray();
+
   datasetOut = std::move(validation.dataset);
   datasetOut.status = DatasetStatus::Available;
   rootOut = loadedContent.root;

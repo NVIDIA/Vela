@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "vsr/scene/objects/Volume.hpp"
+#include "vsr/core/ColorMapUtil.hpp"
 #include "vsr/scene/Scene.hpp"
 
 namespace vsr::scene {
@@ -37,6 +38,27 @@ Volume::Volume(Token stype) : Object(ANARI_VOLUME, stype)
         defaultOpacityControlPoints,
         2);
   }
+}
+
+void Volume::ensureColorArray()
+{
+  if (subtype() != tokens::volume::transferFunction1D)
+    return;
+
+  if (parameterValueAsObject<Array>("color") != nullptr)
+    return;
+
+  auto *s = scene();
+  if (s == nullptr)
+    return;
+
+  const auto samples = core::makeDefaultColorMap();
+  auto array = s->createArray(ANARI_FLOAT32_VEC4, samples.size());
+  if (!array)
+    return;
+
+  array->setData(samples);
+  setParameterObject("color", *array);
 }
 
 ObjectPoolRef<Volume> Volume::self() const

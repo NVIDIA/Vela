@@ -1,12 +1,23 @@
 # Give every transfer-function Volume a color Array
 
-A `Volume` of subtype `transferFunction1D` gets a 256-entry
-`ANARI_FLOAT32_VEC4` color Array the moment it exists, whatever created it.
-The scalar `float3` form of the `"color"` parameter is no longer a state any
-volume rests in: the importer already built the Array (`applyTransferFunction`
-in `import_volume.cpp`), and every other construction path now does the same.
+A `Volume` of subtype `transferFunction1D` reaches its consumers with a
+256-entry `ANARI_FLOAT32_VEC4` color Array already bound. The scalar `float3`
+form of the `"color"` parameter is no longer a state a volume rests in:
+`Volume::ensureColorArray` binds one if the parameter does not already hold
+an Array, every volume-creating importer and procedural generator calls it
+(most already bound an Array of their own and are unaffected), and a dataset
+archive written before this decision is migrated when it loads.
 `TransferFunctionEditor`'s promote-on-first-named-map branch becomes
 unreachable and the editor only ever overwrites samples in place.
+
+The invariant is a post-condition of creation rather than a constructor side
+effect, and deliberately does not run during deserialization. Creating an
+Array mid-restore would take the next object index and shift every index
+after it, which the archive's own index-mismatch check would reject and which
+would break the `LayerNodeNumbering::Preserved` parity the thin client's
+mirror depends on. A restored volume brings its own Array anyway; only an
+archive predating this decision does not, and that case is handled once the
+subtree is fully loaded and its indices are all assigned.
 
 The reason is the thin client. Promotion is `createArray` followed by
 `setParameterObject("color", ...)` -- an object creation and an array binding.
