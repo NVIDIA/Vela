@@ -6,6 +6,7 @@
 #include "StudioRemoteTestHelpers.h"
 #include "catch.hpp"
 // vsr_scivis_studio_client_core
+#include "ArrayHydration.h"
 #include "ProjectOps.h"
 #include "ServerConnection.h"
 // vsr_scivis_studio_protocol
@@ -1788,6 +1789,102 @@ SCENARIO(
 
         f.connection.disconnect();
         REQUIRE_FALSE(f.connection.lastFrameHeader());
+      }
+    }
+  }
+}
+
+SCENARIO("ArrayHydration fills a mirror proxy before letting it be edited",
+    "[StudioClient]")
+{
+  GIVEN("a connected client whose mirror holds a proxy array")
+  {
+    Fixture f;
+    auto sourceArray = f.source.createArray(ANARI_FLOAT32_VEC4, 4);
+    const std::vector<vsr::math::float4> served(4, vsr::math::float4(0.25f));
+    sourceArray->setData(served);
+    f.source.getObject<vsr::scene::Geometry>(0)->setParameterObject(
+        "color", *sourceArray);
+    f.server.bootstrap = makeFakeBootstrap(f.source);
+
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+
+    auto array = f.mirror.getObject<vsr::scene::Array>(sourceArray->index());
+    REQUIRE(array);
+    REQUIRE(array->isProxy());
+
+    ArrayHydration hydration(&f.connection);
+    REQUIRE_FALSE(hydration.hydrated(array->index()));
+
+    WHEN("hydration is requested and the server answers")
+    {
+      hydration.request(*array);
+
+      protocol::RequestArrayData seen;
+      REQUIRE(pollUntil(f.connection, [&] {
+        std::lock_guard lock(f.mutex);
+        for (const auto &request : f.seen) {
+          if (request.type != StudioMessageType::RequestArrayData)
+            continue;
+          const auto decoded = decode<protocol::RequestArrayData>(request.raw);
+          if (decoded)
+            seen = *decoded;
+          return decoded.has_value();
+        }
+        return false;
+      }));
+      REQUIRE(seen.array.objectIndex == sourceArray->index());
+
+      protocol::ArrayDataResult result;
+      result.elementType = ANARI_FLOAT32_VEC4;
+      result.elementCount = served.size();
+      const auto *bytes = reinterpret_cast<const std::byte *>(served.data());
+      result.data.assign(bytes, bytes + served.size() * sizeof(served[0]));
+
+      auto reply = makeOkReply(seen.requestId);
+      protocol::setResults(reply, result);
+      f.server.send(encode(reply));
+
+      THEN("the mirror array holds the samples and may now be edited")
+      {
+        REQUIRE(pollUntil(f.connection,
+            [&] { return hydration.hydrated(array->index()); }));
+        REQUIRE_FALSE(array->isProxy());
+        const auto *samples = array->dataAs<vsr::math::float4>();
+        REQUIRE(samples != nullptr);
+        REQUIRE(samples[0].x == 0.25f);
+
+        // The fill itself must not have echoed back as an edit: the array is
+        // declared editable only after its samples have landed.
+        std::lock_guard lock(f.mutex);
+        for (const auto &request : f.seen)
+          REQUIRE(request.type != StudioMessageType::SetArrayData);
+      }
+    }
+
+    WHEN("the reply says the array is gone")
+    {
+      hydration.request(*array);
+      uint64_t requestId = 0;
+      REQUIRE(pollUntil(f.connection, [&] {
+        std::lock_guard lock(f.mutex);
+        for (const auto &request : f.seen) {
+          if (request.type == StudioMessageType::RequestArrayData) {
+            requestId = request.requestId;
+            return true;
+          }
+        }
+        return false;
+      }));
+      f.server.send(encode(makeErrorReply(requestId, "is not an array")));
+
+      THEN("nothing is hydrated and the reason is kept")
+      {
+        REQUIRE(pollUntil(f.connection,
+            [&] { return !hydration.lastError().empty(); }));
+        REQUIRE_FALSE(hydration.hydrated(array->index()));
+        REQUIRE(array->isProxy());
       }
     }
   }

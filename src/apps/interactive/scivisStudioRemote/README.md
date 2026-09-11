@@ -443,6 +443,16 @@ parameters of the first selected object (and of a volume's spatial field),
 takes a bin count and asks the server with `RequestArrayHistogram`; the
 reply is plotted, a refusal shows the server's error text.
 
+The **TF Editor** window is `vsr_ui_imgui`'s stock `TransferFunctionEditor`,
+locked like the other editors and pointed at a `RemoteArrayAccess`
+(`client/RemoteArrayAccess.*` over `client/ArrayHydration.*`). It edits the
+Transfer Function of whichever volumes are selected: the colour ramp and the
+opacity curve travel as `SetArrayData` and `SetObjectMetadata`, the value
+range, opacity scale and unit distance as ordinary parameter writes. The
+first frame a volume is selected the window shows that it is fetching the
+samples, because the mirror holds its colour Array as a proxy; once they
+arrive the widget behaves exactly as it does in the monolith.
+
 ### Rendering, task records, layout, loss (milestone 7)
 
 **Render Shot.** The Shot Editor's *Render Shot...* confirms the frame count
@@ -554,19 +564,47 @@ reason. Nothing is silently open.
   than supplying one; binding volumes to Color Maps is a separate feature
   that has not been designed.
 
-- **Transfer-function editing** -- *in progress.* A Volume's Transfer
+- **Transfer-function editing** -- *implemented (v12).* A Volume's Transfer
   Function -- its `"color"` samples, its `opacityControlPoints`, and the
   `valueRange` / `opacity` / `unitDistance` parameters beside them -- is what
-  the editor edits and what the client needs. The parameter leg already works
-  on the optimistic path. Four things did not, and only two of them were
-  previously written down: array samples have no message; array-valued
-  metadata does not ride `SetObjectMetadata` (ADR 0036 carried only scalar
-  metadata); the client's mirror holds arrays as proxies, so there are no
-  samples to open an editor on and `map()` returns null; and a scalar-color
-  volume needs an Array created and bound, which the client may not do
-  (closed by ADR 0037, which gives every transfer-function Volume an Array up
-  front). Persistence was never a blocker -- a Volume's samples and metadata
-  arrays both serialize into its dataset's archive and round-trip correctly.
+  the editor edits. The parameter leg always worked on the optimistic path.
+  Four things did not, and only two of them had been written down:
+
+  1. *Array samples had no message.* `SetArrayData` re-tags
+     `vsr::network::messages::TransferArrayData` with a Studio type value,
+     the way `SceneMessages.h` re-tags the scene transfers.
+  2. *Array-valued metadata did not ride `SetObjectMetadata`* (ADR 0036
+     carried only scalar metadata). It does now; an entry is an array one, a
+     value one, or a removal.
+  3. *The client had no samples to open an editor on.* The mirror holds
+     arrays as proxies, and `map()` on a proxy returns null, so the stock
+     widget could not even draw one. `RequestArrayData` fetches an array's
+     contents, `ArrayHydration` fills the mirror's copy in place, and only
+     then is the array declared editable -- declaring it first would send the
+     server its own samples straight back.
+  4. *A scalar-color volume needed an Array created and bound*, which a
+     client may not do (`CreateObject` and `BindArray` are both refused, and
+     identity is server-minted). ADR 0037 removes the case instead of
+     transporting it: every transfer-function Volume carries an Array.
+
+  The widget itself is the stock `vsr_ui_imgui` one. Where its samples come
+  from is the single thing it asks through a seam
+  (`TransferFunctionArrayAccess`); the monolith sets none and reads its
+  host-resident arrays directly.
+
+  The client sends array contents only for arrays a panel has hydrated, and
+  drops every declaration when the mirror is replaced. The wire would carry
+  any array -- the server trusts the client here, as the optimistic parameter
+  lane always has -- but the client offers no way to write one nobody opened
+  an editor on. Inside an update batch the dirty arrays are flushed once, so
+  a knob drag sends one message per array however many times the widget
+  rewrites the samples.
+
+  Persistence was never a blocker: a Volume's colour samples and its metadata
+  arrays both serialize into its dataset's archive and round-trip. What was
+  missing was the dirty mark -- `DatasetDirtyDelegate` had no metadata
+  signal, so an opacity-only edit would have been applied, rendered, and
+  dropped at save time once the two halves stopped travelling together.
 - **Renderer library switches** -- *v1 behaviour.* `UpdateShot` accepts a
   `renderSettings.rendererObjectIndex` only when it names a Renderer of
   `renderSettings.rendererLibrary` (or is unset). The server renders with its
@@ -1775,6 +1813,7 @@ decisions, `M7-n`).
 | Scene server-to-client: `TransferScene`, `TransferLayer`, object added/removed, `ProjectSnapshot` | implemented | `protocol/SceneMessages.h`, `ProjectSnapshot.h` | |
 | Viewport: `Pick`, `SetOutline`, `ViewportSettings` | implemented | `protocol/ViewportMessages.h` | |
 | On-demand: `RequestArrayHistogram` | implemented | `server/ArrayHistogram.cpp` | |
+| On-demand: `RequestArrayData` | implemented | `server/ProjectOpDispatcher.cpp` | v12; answers with `ArrayDataResult` so a client can hydrate a mirror proxy it means to edit |
 | Rendering/frames: frame config, start/stop, header, encoding negotiation | implemented | `protocol/FrameMessages.h`, `FrameCodec.h` | |
 | Reserved, not implemented: subtree expansion, typed channels, NVENC | implemented (reserved) | `FrameMessages.h` comment | no value defined for any of the three |
 | **File access** | | | |

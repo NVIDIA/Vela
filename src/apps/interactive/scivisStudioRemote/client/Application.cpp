@@ -27,6 +27,7 @@
 #include "vsr/ui/imgui/windows/LayerTree.h"
 #include "vsr/ui/imgui/windows/Log.h"
 #include "vsr/ui/imgui/windows/ObjectEditor.h"
+#include "vsr/ui/imgui/windows/TransferFunctionEditor.h"
 // vsr_scene
 #include "vsr/scene/Scene.hpp"
 // vsr_app
@@ -277,6 +278,16 @@ vsr_ui::WindowArray Application::setupWindows()
   auto *timeline = new Timeline(this, &m_editorContext);
   auto *histogram = new HistogramPanel(this, &m_editorContext);
   m_histogram = histogram;
+
+  // The Transfer Function editor is the stock widget; what differs here is
+  // where its samples come from, which is the one thing it asks through a
+  // seam (ADR 0038's companion work). Locked with the other editors: a
+  // colour-ramp edit is a SetArrayData, so it needs a session to go to.
+  m_arrayAccess = std::make_unique<RemoteArrayAccess>(m_connection.get());
+  auto *transferFunctionEditor =
+      new LockableWindow<vsr_ui::TransferFunctionEditor>(
+          this, &m_editorContext);
+  transferFunctionEditor->setArrayAccess(m_arrayAccess.get());
   m_taskPanel = new TaskPanel(this, &m_editorContext);
 
   m_editors = {projectWindow,
@@ -300,6 +311,7 @@ vsr_ui::WindowArray Application::setupWindows()
   windows.emplace_back(databaseEditor);
   windows.emplace_back(objectEditor);
   windows.emplace_back(histogram);
+  windows.emplace_back(transferFunctionEditor);
 
   setWindowArray(windows);
 
@@ -743,6 +755,10 @@ void Application::releaseMirror()
     m_layerTree->dropSceneReferences();
   if (m_histogram)
     m_histogram->dropMirrorReferences();
+  // Hydration is per array index, and an index names something else (or
+  // nothing) on the other side of a mirror replacement.
+  if (m_arrayAccess)
+    m_arrayAccess->dropMirrorReferences();
   if (m_viewport)
     m_viewport->dropMirrorReferences();
 }
@@ -1031,6 +1047,12 @@ Pos=0,1245
 Size=917,777
 Collapsed=0
 DockId=0x00000006,2
+
+[Window][TF Editor]
+Pos=0,1245
+Size=917,777
+Collapsed=0
+DockId=0x00000006,3
 
 [Window][Remote Browse]
 Pos=1505,703

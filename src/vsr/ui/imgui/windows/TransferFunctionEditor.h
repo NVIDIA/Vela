@@ -16,11 +16,33 @@
 
 namespace vsr::ui::imgui {
 
+/*
+ * How the editor reaches an Array's samples. The monolith needs none of this:
+ * its arrays are host-resident, so reading and writing them in place is just
+ * a pointer away. A thin client's mirror holds proxies with no samples at
+ * all, and asking the server for them is a round trip, so the editor cannot
+ * assume the data is there the frame a volume is selected.
+ *
+ * ready() is asked every frame while a volume is selected. Until it answers
+ * true the editor draws pendingReason() instead of its body and touches no
+ * sample; the implementation is what turns the wait into a request.
+ */
+struct TransferFunctionArrayAccess
+{
+  virtual ~TransferFunctionArrayAccess() = default;
+  virtual bool ready(vsr::scene::Array &array) = 0;
+  virtual const char *pendingReason() const;
+};
+
 class TransferFunctionEditor : public Window
 {
  public:
   TransferFunctionEditor(Application *app, const char *name = "TF Editor");
   ~TransferFunctionEditor() override;
+
+  // Null (the default) means every array is readable where it stands.
+  // The access must outlive this window.
+  void setArrayAccess(TransferFunctionArrayAccess *access);
 
   void buildUI() override;
 
@@ -54,6 +76,9 @@ class TransferFunctionEditor : public Window
   std::vector<vsr::scene::Volume*> m_otherVolumes;
   vsr::scene::Array *m_colorMapArray{nullptr};
   vsr::scene::Volume *m_lastColorVolume{nullptr};
+  TransferFunctionArrayAccess *m_arrayAccess{nullptr};
+  // True while the selected volume's samples are not readable here yet.
+  bool m_awaitingSamples{false};
 
   // all available transfer functions
   std::vector<std::string> m_tfnsNames;

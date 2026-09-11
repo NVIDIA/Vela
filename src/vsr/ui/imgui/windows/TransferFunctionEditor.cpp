@@ -30,6 +30,13 @@ static int find_idx(const std::vector<T> &A, float p)
   return std::distance(A.begin(), found);
 }
 
+// TransferFunctionArrayAccess definitions ////////////////////////////////////
+
+const char *TransferFunctionArrayAccess::pendingReason() const
+{
+  return "{fetching samples...}";
+}
+
 // TransferFunctionEditor definitions /////////////////////////////////////////
 
 TransferFunctionEditor::TransferFunctionEditor(
@@ -50,9 +57,21 @@ TransferFunctionEditor::~TransferFunctionEditor()
     SDL_DestroyTexture(m_tfnPaletteTexture);
 }
 
+void TransferFunctionEditor::setArrayAccess(
+    TransferFunctionArrayAccess *access)
+{
+  m_arrayAccess = access;
+}
+
 void TransferFunctionEditor::buildUI()
 {
   setObjectPtrsFromSelectedObject();
+
+  if (m_volume && m_awaitingSamples) {
+    ImGui::Text("%s",
+        m_arrayAccess ? m_arrayAccess->pendingReason() : "{no samples}");
+    return;
+  }
 
   if (m_volume && m_nextMap != m_currentMap) {
     m_currentMap = m_nextMap;
@@ -435,6 +454,17 @@ void TransferFunctionEditor::setObjectPtrsFromSelectedObject()
   auto *firstVolume = m_volume;
   auto *colorArray =
       firstVolume->parameterValueAsObject<vsr::scene::Array>("color");
+
+  // Nothing below may read a sample until the access says it can. Asking
+  // every frame is what lets an implementation turn the first ask into a
+  // request and later asks into the answer.
+  m_awaitingSamples = colorArray != nullptr && m_arrayAccess != nullptr
+      && !m_arrayAccess->ready(*colorArray);
+  if (m_awaitingSamples) {
+    m_colorMapArray = nullptr;
+    m_lastColorVolume = nullptr;
+    return;
+  }
 
   if (colorArray != nullptr) {
     // Array path: existing behavior

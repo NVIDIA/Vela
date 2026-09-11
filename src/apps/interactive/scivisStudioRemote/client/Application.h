@@ -5,6 +5,7 @@
 
 // scivisStudioClient
 #include "EditorContext.h"
+#include "RemoteArrayAccess.h"
 #include "StatusOverlay.h"
 // vsr_scivis_studio_client_core
 #include "ServerConnection.h"
@@ -149,6 +150,9 @@ class Application : public vsr::ui::imgui::Application
   StudioViewport *m_viewport{nullptr};
   vsr::ui::imgui::LayerTree *m_layerTree{nullptr};
   HistogramPanel *m_histogram{nullptr};
+  // The Transfer Function editor and the hydration it reads through; the
+  // access must outlive the window that holds a pointer to it.
+  std::unique_ptr<RemoteArrayAccess> m_arrayAccess;
   std::vector<EditorWindow *> m_editors;
   TaskPanel *m_taskPanel{nullptr};
   std::unique_ptr<modals::ProjectLocationDialog> m_projectLocationDialog;
