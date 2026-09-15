@@ -341,7 +341,7 @@ SCENARIO("Frame headers name the frame their pixels show", "[StudioServer]")
       // Runs while the manager applies a time: getAnimationFrame() is the
       // frame being applied.
       animMgr.addAnimation("background")
-          .addCallbackBinding([renderer, &animMgr](float) mutable {
+          .addCallbackBinding([renderer, &animMgr, RED, BLUE](float) mutable {
             renderer->setParameter(
                 "background", animMgr.getAnimationFrame() % 2 ? RED : BLUE);
           });

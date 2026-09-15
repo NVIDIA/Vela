@@ -19,6 +19,7 @@
 #include <signal.h>
 #include <spawn.h>
 #include <sys/wait.h>
+#include <unistd.h>
 
 extern char **environ;
 
