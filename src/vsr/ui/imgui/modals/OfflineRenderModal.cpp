@@ -35,10 +35,12 @@ void OfflineRenderModal::buildUI()
 
 void OfflineRenderModal::start()
 {
+  auto *ctx = appContext();
+  ctx->initializeOfflineRenderer();
+
   m_timer.start();
   m_canceled = false;
   this->show();
-  auto *ctx = appContext();
   m_future = m_app->enqueueTask([this, ctx]() {
     vsr::app::renderAnimationSequence(*ctx,
         ctx->offline.output.outputDirectory,

@@ -520,7 +520,14 @@ src/apps/interactive/scivisStudioRemote/
   step.
 - **Build flags:** the new directory is gated behind the existing
   `VSR_USE_NETWORKING` (default OFF). No new flag.
-- **ANARI-free client is a design constraint, not a v1 gate.** It is
+- **No local ANARI devices in the client.** `scivisStudioClient` must run
+  without any installed ANARI device backends and must never load a local
+  device during startup, connection, editing, or reconnect. Rendering and
+  renderer information belong to the server; shared UI initialization must
+  not load a device for unused local offline-render settings. The ANARI
+  loader/shared library remains an allowed dependency. This is a runtime
+  requirement; removing ANARI types and linkage is a separate refactor.
+- **Removing all ANARI dependencies remains deferred.** It is
   impossible today: ANARI is baked into `vsr_core` (the math types are
   ANARI's linalg types; `Any`/`DataTree` use `anari::DataType` tags). An
   ANARI-free client first requires carving math/DataTree out of `vsr_core` —

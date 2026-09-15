@@ -20,6 +20,7 @@ struct AppSettingsDialog : public Modal
   void buildUI_offlineRenderSettings();
 
   std::vector<vsr::scene::CameraRef> m_menuCameraRefs;
+  bool m_offlineSettingsInitialized{false};
 };
 
 } // namespace vsr::ui::imgui

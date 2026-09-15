@@ -170,6 +170,7 @@ struct Context
 
   // Offline rendering //
 
+  void initializeOfflineRenderer();
   void setOfflineRenderingLibrary(const std::string &libName);
 
   // Selection //

@@ -10,12 +10,7 @@ namespace vsr::ui::imgui {
 
 AppSettingsDialog::AppSettingsDialog(Application *app)
     : Modal(app, "AppSettings")
-{
-  auto *ctx = appContext();
-  const auto &libraryList = ctx->anari.libraryList();
-  if (ctx->offline.renderer.activeRenderer < 0)
-    ctx->setOfflineRenderingLibrary(libraryList[0]);
-}
+{}
 
 void AppSettingsDialog::buildUI()
 {
@@ -86,6 +81,13 @@ void AppSettingsDialog::buildUI_applicationSettings()
 void AppSettingsDialog::buildUI_offlineRenderSettings()
 {
   auto *ctx = appContext();
+
+  // Shared UI setup also constructs this dialog in clients without devices.
+  // Initialize only when shown, and do not retry a failed load every frame.
+  if (!m_offlineSettingsInitialized) {
+    m_offlineSettingsInitialized = true;
+    ctx->initializeOfflineRenderer();
+  }
 
   ImGui::Text("Offline Render Settings (vsrRender):");
   ImGui::Indent(vsr::ui::INDENT_AMOUNT);

@@ -265,6 +265,18 @@ void Context::setLogEchoOutput(bool v)
   m_logging.echoOutput = v;
 }
 
+void Context::initializeOfflineRenderer()
+{
+  if (offline.renderer.activeRenderer >= 0)
+    return;
+
+  const auto &libraryList = anari.libraryList();
+  if (!offline.renderer.libraryName.empty())
+    setOfflineRenderingLibrary(offline.renderer.libraryName);
+  else if (!libraryList.empty())
+    setOfflineRenderingLibrary(libraryList.front());
+}
+
 void Context::setOfflineRenderingLibrary(const std::string &libName)
 {
   auto &dm = this->anari;
