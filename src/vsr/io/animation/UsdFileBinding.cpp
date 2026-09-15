@@ -61,6 +61,7 @@ bool UsdFileBinding::ensureSession()
     m_sessionFailed = true;
     logWarning(
         "[%s] failed to open stage '%s'", logTag(), m_stageFile.c_str());
+    reportLoadFailure(0, "failed to open USD stage '" + m_stageFile + "'");
   }
   return bool(m_session);
 }
@@ -79,6 +80,8 @@ bool UsdFileBinding::ensureSession()
     return false;
   m_sessionFailed = true;
   logError("[%s] USD not enabled in VSR build.", logTag());
+  reportLoadFailure(
+      0, "USD stage '" + m_stageFile + "' needs a build with VSR_USE_USD");
   return false;
 }
 

@@ -6,6 +6,8 @@
 #include "Message.hpp"
 // std
 #include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <deque>
 #include <future>
 #include <memory>
@@ -16,13 +18,25 @@
 namespace vsr::network {
 
 using MessageFuture = std::future<boost::system::error_code>;
+using ConnectHandler = std::function<void()>;
+using DisconnectHandler =
+    std::function<void(const boost::system::error_code &)>;
 
 /*
  * Shared base for network endpoints that manages an asio io_context, a TCP
  * socket, and a dispatch table mapping message type bytes to handler callbacks.
  *
+ * Connection lifecycle is observable through two hooks. The connect handler
+ * runs once per established connection; the disconnect handler runs at most
+ * once per connection when the socket closes for any reason (peer close,
+ * read/write/connect error, or a local disconnect()/stop()), and is re-armed
+ * by the next accept or connect. Both run on the IO thread, except that a
+ * local disconnect()/stop() reports on the calling thread. Handlers must only
+ * latch state for another thread to poll; never touch UI or exit from them.
+ *
  * Example:
  *   channel->registerHandler(MSG_UPDATE, [](auto msg) { handle(*msg); });
+ *   channel->setDisconnectHandler([&](auto ec) { lost.store(true); });
  *   channel->send(MSG_PING);
  */
 struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
@@ -38,8 +52,20 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
   void removeHandler(uint8_t messageType);
   void removeAllHandlers();
 
+  //// Connection lifecycle ////
+
+  void setConnectHandler(ConnectHandler handler);
+  void setDisconnectHandler(DisconnectHandler handler);
+
   //// Send messages ////
 
+  // Frames the message and queues it, returning a future settled when the
+  // write completes (or fails). The queueing is dispatched, not posted: a
+  // send() made on the IO thread -- a message handler answering, a replace
+  // handler's farewell -- has queued before it returns, so it is ordered
+  // ahead of anything the current handler posts afterwards. From any other
+  // thread dispatch degrades to a post, so callers off the IO thread are
+  // unaffected.
   MessageFuture send(Message &&msg);
   MessageFuture send(uint8_t type, StructuredMessage &&msg);
 
@@ -63,6 +89,20 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
   void log_asio_error(
       const boost::system::error_code &error, const char *context);
 
+  // A connection was just established: re-arms the disconnect latch and runs
+  // the connect handler.
+  void notify_connected();
+  // Closes the socket (if open) and runs the disconnect handler once.
+  void close_socket(const boost::system::error_code &reason);
+  // Settles every queued write with `error`.
+  void fail_pending_writes(const boost::system::error_code &error);
+  // Runs `fn` once nothing is queued or on the wire: at once when that is
+  // already so, else when the queue next drains (the last write's completion,
+  // or the queue failed with its socket). One at a time -- a later call
+  // replaces a continuation that has not run, and an empty `fn` disarms it.
+  // IO thread only, or after stop_messaging() has joined it.
+  void when_writes_idle(std::function<void()> fn);
+
   asio::io_context m_io_context;
   std::thread m_io_thread;
 
@@ -71,6 +111,18 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
 
   tcp::socket m_socket;
   HandlerMap m_handlers;
+  // True once the current connection's loss has been reported (or when there
+  // is no connection to report on); armed by notify_connected().
+  std::atomic<bool> m_disconnectReported{true};
+  // Bumped by notify_connected() and by the client's connect()/disconnect().
+  // Every read, write, resolve and connect completion carries the generation
+  // it was issued under and stands down when the socket has been replaced
+  // (or the attempt superseded) since, so a cut-off operation on the old
+  // socket never closes the new one.
+  std::atomic<uint64_t> m_socketGeneration{0};
+  // False from stop_messaging() until the next start_messaging(); the
+  // completions a stop cuts off see it false and stand down.
+  std::atomic<bool> m_messagingActive{false};
 
  private:
   struct PendingWrite
@@ -80,13 +132,15 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
     std::shared_ptr<std::atomic<bool>> completed;
   };
 
+  // Header and payload as they go on the wire.
+  static std::vector<std::byte> frame(const Message &msg);
   void enqueue_write(std::shared_ptr<PendingWrite> pending);
   void start_next_write();
-  void fail_pending_writes(const boost::system::error_code &error);
-  void complete_write(
-      const std::shared_ptr<PendingWrite> &pending,
+  void complete_write(const std::shared_ptr<PendingWrite> &pending,
       const boost::system::error_code &error);
-  void close_socket();
+  // Moves the armed continuation out (caller holds m_writeMutex).
+  std::function<void()> take_idle_continuation();
+  void notify_disconnected(const boost::system::error_code &reason);
 
   Message make_message(uint8_t type);
   Message make_message(uint8_t type, const std::string &data);
@@ -96,12 +150,19 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
   std::mutex m_writeMutex;
   std::deque<std::shared_ptr<PendingWrite>> m_pendingWrites;
   bool m_writeInProgress{false};
-  std::atomic<bool> m_messagingActive{false};
+  // The continuation when_writes_idle() holds until the queue drains.
+  std::function<void()> m_onWritesIdle;
+
+  std::mutex m_lifecycleMutex;
+  ConnectHandler m_connectHandler;
+  DisconnectHandler m_disconnectHandler;
 };
 
 /*
  * NetworkChannel that listens on a TCP port, accepts a single client
- * connection, and supports restart without re-creating the acceptor.
+ * connection, and supports restart without re-creating the acceptor. The
+ * constructor binds immediately and throws boost::system::system_error when
+ * the port is busy; port 0 asks the OS for a free port, read back via port().
  *
  * Example:
  *   NetworkServer srv(9000);
@@ -111,22 +172,59 @@ struct NetworkChannel : public std::enable_shared_from_this<NetworkChannel>
  */
 struct NetworkServer : public NetworkChannel
 {
-  NetworkServer(short port);
+  using ReplaceHandler = std::function<void()>;
+
+  NetworkServer(uint16_t port);
   ~NetworkServer() override = default;
+
+  // The port actually bound; differs from the constructor argument for 0.
+  uint16_t port() const;
+
+  // Runs on the IO thread when a new connection is about to replace a live
+  // one, before the old socket closes; a farewell to the client being
+  // replaced belongs here, sent with the ordinary send(). What it queues,
+  // and whatever was queued before it, gets REPLACE_DRAIN_TIMEOUT to leave
+  // before the old socket closes and the new connection is announced. Set
+  // before start().
+  void setReplaceHandler(ReplaceHandler handler);
 
   void start();
   void restart(); // must be running already
+  // Also drops a connection accepted during a replacement's drain window
+  // (it sees a plain close) and re-arms the accept.
   void stop();
 
  private:
+  // Queues one async_accept unless one is already pending, so repeated
+  // restart() calls do not stack accepts. A connection accepted over a live
+  // one replaces it: the old connection is closed and reported lost first.
   void start_accept();
+  // The accepted socket becomes the connection: announced, read from, and
+  // the next accept armed.
+  void adopt_connection(tcp::socket &&socket);
+  // Closes the old connection and adopts m_replacement; runs when the old
+  // connection's writes have drained or, failing that, when the drain
+  // deadline (m_replaceTimer) passes, whichever comes first.
+  void adopt_replacement();
 
   tcp::acceptor m_acceptor;
+  std::atomic<bool> m_acceptPending{false};
+  ReplaceHandler m_replaceHandler;
+  // The connection accepted over a live one, until that one's writes have
+  // drained. IO thread only, except that stop() drops it after the join.
+  std::shared_ptr<tcp::socket> m_replacement;
+  asio::steady_timer m_replaceTimer;
 };
 
 /*
  * NetworkChannel that initiates a TCP connection to a remote host and port;
- * can be connected and disconnected at any time after construction.
+ * can be connected and disconnected at any time after construction, and
+ * connect() may be called again after a failed or closed connection: it
+ * restarts the IO thread and reopens the socket.
+ *
+ * connect() never blocks on the network: name resolution and the connect
+ * both run on the IO thread, and their outcome arrives through the connect
+ * or disconnect handler.
  *
  * Example:
  *   NetworkClient client("127.0.0.1", 9000);
@@ -136,10 +234,13 @@ struct NetworkServer : public NetworkChannel
 struct NetworkClient : public NetworkChannel
 {
   NetworkClient() = default;
-  NetworkClient(const std::string &host, short port);
+  NetworkClient(const std::string &host, uint16_t port);
   ~NetworkClient() override = default;
 
-  void connect(const std::string &host, short port);
+  // Both bump m_socketGeneration, so a resolve or connect completion from
+  // an earlier attempt stands down instead of acting on the socket a later
+  // attempt owns.
+  void connect(const std::string &host, uint16_t port);
   void disconnect();
 };
 

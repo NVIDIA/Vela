@@ -3,6 +3,7 @@
 
 #include "DataStream.hpp"
 // std
+#include <cstdint>
 #include <stdexcept>
 
 namespace vsr::core {
@@ -75,11 +76,23 @@ FileWriter::operator bool() const
   return valid();
 }
 
+// DataReader definitions /////////////////////////////////////////////////////
+
+std::optional<size_t> DataReader::bytesRemaining() const
+{
+  return std::nullopt;
+}
+
 // BufferReader definitions ///////////////////////////////////////////////////
 
 BufferReader::BufferReader(const std::vector<std::byte> &buffer, size_t offset)
     : m_buffer(buffer), m_offset(offset)
 {}
+
+std::optional<size_t> BufferReader::bytesRemaining() const
+{
+  return m_offset < m_buffer.size() ? m_buffer.size() - m_offset : 0;
+}
 
 size_t BufferReader::read(void *ptr, size_t size, size_t count)
 {
@@ -115,6 +128,14 @@ void BufferReader::reset(size_t offset)
 FileReader::FileReader(const char *filename, const char *mode)
 {
   m_file = std::fopen(filename, mode);
+  // A source that cannot be sized (a pipe, a device) leaves m_fileSize unset;
+  // an empty file is sized, at 0.
+  if (m_file != nullptr && std::fseek(m_file, 0, SEEK_END) == 0) {
+    const long size = std::ftell(m_file);
+    if (size >= 0)
+      m_fileSize = size_t(size);
+    std::fseek(m_file, 0, SEEK_SET);
+  }
 }
 
 FileReader::~FileReader()
@@ -129,7 +150,18 @@ size_t FileReader::read(void *ptr, size_t size, size_t count)
     return 0;
   }
 
-  return std::fread(ptr, size, count, m_file);
+  const size_t numRead = std::fread(ptr, size, count, m_file);
+  m_position += numRead * size;
+  return numRead;
+}
+
+std::optional<size_t> FileReader::bytesRemaining() const
+{
+  if (m_file == nullptr)
+    return 0;
+  if (!m_fileSize)
+    return std::nullopt;
+  return m_position < *m_fileSize ? *m_fileSize - m_position : 0;
 }
 
 bool FileReader::valid() const

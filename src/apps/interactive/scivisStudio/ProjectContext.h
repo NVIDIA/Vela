@@ -8,7 +8,9 @@
 
 #include "vsr/app/Context.h"
 #include "vsr/io/importers.hpp"
+#include "vsr/scene/objects/Array.hpp"
 
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -40,8 +42,63 @@ struct ProjectContext
   Project &project();
   const Project &project() const;
 
+  // The Project's revision: a count of the whole-op mutations below that
+  // changed it. Every whole op of this class that writes the Project moves
+  // it by one -- a failed one that still left a mark too (an ImportFailed
+  // record, a dataset found Unavailable), and a save, which only clears the
+  // dirty flag -- while neither the per-frame playback write (the frame
+  // position is transient while time moves, ADR 0035) nor a scene edit's
+  // dataset dirty mark does. A mirror of the Project (the remote server's
+  // snapshot) updates once per change, however many ops made it, and never
+  // for a refused or no-op call (setActiveShot to the active shot,
+  // setPlaying to the state the shot is in).
+  uint64_t revision() const;
+  // Moves when what renders the active shot must be bound again: a new or
+  // opened project (a failed open too, whose apply reset the scene before
+  // failing), addShot, setActiveShot to another shot, removeShot of the
+  // active one, updateShot of the active one. The camera and renderer the
+  // shot renders with are read off its record, so a rig edit does not move
+  // it.
+  uint64_t activeShotRevision() const;
+  // A whole op outside this class wrote the Project -- the shot render
+  // putting the shot's playback state back, the server committing the frame
+  // a paused shot rests on (Time at Rest) -- and moves the revision as an op
+  // here would.
+  void markRevised();
+
   void createUnsavedProject();
   bool addShot(const std::string &name = "");
+  // Shot edits are whole operations, the only path that mutates a stored
+  // Shot: the monolith's editors, the remote server and the CLI all come
+  // through here (ShotOps.h holds the record side; these add the dirty mark
+  // and the re-sync). removeShot refuses the last shot and, when the active
+  // shot goes, makes the first remaining one active. updateShot replaces the
+  // stored Shot with a validated copy of `shot`: unknown rig ids and
+  // renderers of another library are rejected, bindings to unknown datasets
+  // are dropped, frame fields are clamped (shot::clampToValidRanges), the
+  // runtime camera ref is kept and `playing` is ignored (playback is driven
+  // through the AnimationManager, not this call); while the shot plays, the
+  // frame it is on is kept too. setActiveShot switches shots and re-syncs
+  // the animation manager. Each marks the project dirty when it changes it.
+  bool removeShot(const ShotID &id, std::string *error = nullptr);
+  bool updateShot(const Shot &shot, std::string *error = nullptr);
+  // The patch form: the stored Shot with `patch` applied goes through the
+  // same validation (shot::updateShot's patch overload).
+  bool updateShot(
+      const ShotID &id, const ShotPatch &patch, std::string *error = nullptr);
+  bool setActiveShot(const ShotID &id, std::string *error = nullptr);
+  // Playback as whole operations. setPlaying accepts the active shot only,
+  // starts or stops the manager and writes shot.playing. setActiveShotFrame
+  // seeks the active shot to `frame` (clamped); the manager's time-changed
+  // callback lands it in shot.currentFrame and applies the shot. When a
+  // non-looping shot plays off its end, the manager's stopped callback
+  // writes playing=false and currentFrame=last. None of these dirty the
+  // project: the playback position is transient state, as when a tick
+  // writes it. setPlaying and the auto-stop move the revision (time came to
+  // rest, or left it); a seek does not, since the frame is in motion until
+  // its caller commits it (markRevised).
+  bool setPlaying(const ShotID &id, bool playing, std::string *error = nullptr);
+  void setActiveShotFrame(int frame);
   Dataset *addStaticDataset(const std::string &name,
       const std::filesystem::path &sourcePath,
       vsr::io::ImporterType importerType);
@@ -77,13 +134,18 @@ struct ProjectContext
   bool unloadDataset(const DatasetID &id, std::string *error = nullptr);
   // Cheap on-demand availability hint for an Unloaded dataset: a missing
   // asset file is definitively Unavailable. The check never upgrades status —
-  // the authoritative assessment is the load attempt itself.
-  void refreshUnloadedDatasetAvailability(Dataset &dataset) const;
+  // the authoritative assessment is the load attempt itself; the second
+  // form runs it over every Unloaded dataset (one exists() each).
+  void refreshUnloadedDatasetAvailability(Dataset &dataset);
+  void refreshAllUnloadedDatasetAvailability();
   bool saveDatasetArchive(const DatasetID &id,
       const std::filesystem::path &file,
       std::string *error = nullptr);
-  Dataset *loadDatasetArchive(
-      const std::filesystem::path &file, std::string *error = nullptr);
+  // The loaded dataset takes `name`; empty keeps the archive's own name,
+  // de-duplicated against the project's datasets.
+  Dataset *loadDatasetArchive(const std::filesystem::path &file,
+      const std::string &name = {},
+      std::string *error = nullptr);
   std::vector<DatasetCandidate> discoverDatasetCandidates() const;
   Dataset *incorporateDatasetCandidate(const DatasetCandidate &candidate,
       const std::string &name,
@@ -91,17 +153,25 @@ struct ProjectContext
   void applyActiveShot();
   void syncAnimationManagerToActiveShot();
 
+  // The project's UI state is one {windows, layout, settings} tree, the shape
+  // the manifest, the wire and the applications' appliers share. saveProject
+  // stores those children of `uiState` (none when it is null; an empty
+  // layout is not written); the opens copy the manifest's into `uiStateOut`,
+  // replacing whatever it held.
   bool saveProject(const std::filesystem::path &directory,
-      vsr::core::DataNode *windows = nullptr,
-      const std::string &layout = "",
-      vsr::core::DataNode *settings = nullptr,
+      const vsr::core::DataNode *uiState = nullptr,
       std::string *error = nullptr);
   bool openProject(const std::filesystem::path &directory,
-      vsr::core::DataNode *windowsOut = nullptr,
-      std::string *layoutOut = nullptr,
-      vsr::core::DataNode *settingsOut = nullptr,
+      vsr::core::DataNode *uiStateOut = nullptr,
       std::string *error = nullptr,
       const ProjectOpenOptions &options = {});
+  // The second half of openProject(): installs a stage that stageProjectOpen()
+  // filled, replacing the live Scene and Project. Staging reads the directory
+  // without touching shared state, so a caller may run it elsewhere and
+  // finish here; on failure the live project is unchanged.
+  bool openStagedProject(ProjectOpenStage &stage,
+      vsr::core::DataNode *uiStateOut = nullptr,
+      std::string *error = nullptr);
 
   vsr::scene::LayerNodeRef resolve(const SceneNodeRef &ref) const;
   vsr::scene::Object *resolve(const SceneObjectRef &ref) const;
@@ -110,6 +180,16 @@ struct ProjectContext
   vsr::scene::LayerNodeRef resolveDatasetRoot(Dataset &dataset);
   vsr::scene::LayerNodeRef resolveLightRigRoot(LightRig &rig);
   vsr::scene::Object *resolveShotCamera(Shot &shot);
+  // Points `shot` at a renderer of `library`: its own pick when that is one
+  // of the library's renderers, else the first of them, creating the
+  // library's standard set on `device` when the scene has none (a fresh or
+  // reopened project). Records the pick (library, index, subtype) in the
+  // shot and nothing else: `shot` may be a draft or a record the caller will
+  // restore, so whether a rewritten pick is an edit is the caller's call.
+  // Returns the bound renderer, or null when the library offers none (the
+  // shot is then untouched).
+  vsr::scene::RendererAppRef bindShotRenderer(
+      Shot &shot, const std::string &library, anari::Device device);
   LightRig *createLightRig(const std::string &name = "");
   LightRig *cloneLightRig(const LightRigID &id);
   bool removeLightRig(const LightRigID &id);
@@ -124,11 +204,19 @@ struct ProjectContext
   vsr::scene::LayerNodeRef addLightToRig(
       LightRig &rig, const std::string &subtype);
   bool removeLightFromRig(LightRig &rig, vsr::scene::LayerNodeRef lightNode);
-  int shotUseCount(const LightRigID &id) const;
   CameraRig *createCameraRig(const std::string &name = "");
   bool removeCameraRig(const CameraRigID &id);
-  int cameraRigUseCount(const CameraRigID &id) const;
   CameraRig *activeShotCameraRig();
+
+  // Color maps (ColorMaps.h pairs the record with its scene Array): create
+  // de-duplicates the name and makes both, remove removes both, rename
+  // touches the record only; each marks the project dirty.
+  ColorMapRecord *createColorMap(const std::string &name = "");
+  bool renameColorMap(const ColorMapID &id,
+      const std::string &newName,
+      std::string *error = nullptr);
+  bool removeColorMap(const ColorMapID &id, std::string *error = nullptr);
+  vsr::scene::ArrayRef resolveColorMapArray(const ColorMapID &id) const;
 
   // Standalone rig Archive IO. Save writes the named rig to a .vsr file; Load
   // adds a new library entry (with a fresh id and a de-duplicated name) and
@@ -154,6 +242,15 @@ struct ProjectContext
       const FileAnimationDatasetOptions &options);
   void installDatasetDirtyDelegate();
   void markDatasetDirtyForObject(const vsr::scene::Object *object);
+  // An op changed the Project: dirty for the save, revised for the mirror.
+  void markProjectDirty();
+  void markActiveShotRevised();
+  // Both updateShot forms landed a validated Shot: dirty, and when it is the
+  // active shot, revised, re-synced and re-applied.
+  void onShotUpdated(const ShotID &id);
+  // The dataset's asset is missing or unreadable: Unavailable, and a
+  // revision when it was not known to be already.
+  void markDatasetUnavailable(Dataset &dataset);
   Dataset *loadDatasetArchiveImpl(const std::filesystem::path &file,
       const std::string &name,
       bool alreadyManaged,
@@ -170,6 +267,9 @@ struct ProjectContext
   CameraRig *ensureDefaultCameraRig();
   void installAnimationManagerCallback();
   void updateActiveShotFromAnimationTime();
+  void onAnimationPlaybackStopped();
+  // The manager's frame and playing flag into `shot`, clamped to its ranges.
+  void writeAnimationStateToShot(Shot &shot) const;
 
   vsr::app::Context *m_ctx{nullptr};
   Project m_project;
@@ -179,6 +279,8 @@ struct ProjectContext
   // per-object dirty tracking is meaningless (and O(n^2)) while they run.
   bool m_mutatingDatasetRuntime{false};
   vsr::scene::BaseUpdateDelegate *m_datasetDirtyDelegate{nullptr};
+  uint64_t m_revision{0};
+  uint64_t m_activeShotRevision{0};
 };
 
 const char *toString(vsr::io::ImporterType importerType);

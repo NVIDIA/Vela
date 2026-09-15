@@ -21,7 +21,8 @@ types built on Boost.Asio.
 - You are building a remote viewer/control workflow and need consistent wire
   formats for VSR scene edits.
 - You want asynchronous networking with simple callback registration and future-
-  based send completion.
+  based send completion. A `send()` from the IO thread queues before it
+  returns, so a handler can order a message ahead of what it posts next.
 - You need both coarse-grained (full scene transfer) and fine-grained
   (incremental object/parameter updates) synchronization options.
 

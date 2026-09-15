@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Server loss and recovery. The server is killed *externally* while the client
+# is connected: the client notices the closed socket, goes Lost with the
+# Structural Mirror and Project Replica frozen, and a `reconnect` to a
+# restarted server bootstraps it again.
+#
+# `kill-server` SIGKILLs the server the test client spawned (--spawn-server)
+# and starts a fresh one on the same port without waiting for it;
+# `await-server` waits for that one to reach Listening, so nothing here
+# sleeps for a guessed span. Without a spawned server (a plain `--script` run
+# against a server started by hand) `kill-server` FAILs, since there is
+# nothing of ours to kill.
+
+connect
+assert state == Connected
+assert scene.objects >= 1
+
+# The server goes away now, without a farewell.
+kill-server
+await-lost timeout=20000
+assert state == Lost
+
+# Lost keeps the last known state as a frozen view...
+assert scene.objects >= 1
+assert project.shots >= 1
+
+# ...while the replacement comes up.
+await-server timeout=30000
+reconnect timeout=10000
+assert state == Connected
+assert scene.objects >= 1
+assert project.shots >= 1
+ping
+expect-pong
+
+shutdown
+assert state == Disconnected

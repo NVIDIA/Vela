@@ -1,0 +1,79 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# The rejection paths of the project surface: unknown ids of every
+# collection, paths outside the Data Roots, and requests that need a saved
+# project. A sync op is refused with an error reply carrying the request's
+# id, never an Error message; a task op checks the Project only when its task
+# runs, so it is accepted and then fails. None of them changes the replica.
+
+connect
+list-roots
+assert project.shots == 1
+assert project.datasets == 0
+assert project.lightRigs == 1
+assert project.cameraRigs == 1
+
+# Unknown ids.
+expect-fail remove-shot shot_9999
+expect-fail set-active-shot shot_9999
+expect-fail rename-dataset dataset_9999 x
+expect-fail remove-dataset dataset_9999
+expect-fail unload-dataset dataset_9999
+expect-fail refresh-dataset-availability dataset_9999
+expect-fail clone-light-rig lightRig_9999
+expect-fail remove-light-rig lightRig_9999
+expect-fail rename-light-rig lightRig_9999 x
+expect-fail add-light lightRig_9999
+expect-fail remove-light lightRig_9999 studio 0
+expect-fail save-light-rig-archive lightRig_9999 $dataRoot/x.vsr
+expect-fail remove-camera-rig cameraRig_9999
+expect-fail rename-camera-rig cameraRig_9999 x
+expect-fail save-camera-rig-archive cameraRig_9999 $dataRoot/x.vsr
+expect-fail rename-color-map colorMap_9999 x
+expect-fail remove-color-map colorMap_9999
+expect-fail cancel-task 9999
+assert replies.failed == 18
+
+# Paths outside every Data Root are refused before anything is touched.
+expect-fail open-project /nonexistent/project
+expect-fail save-project /nonexistent/project
+expect-fail import-static-dataset /etc/hostname Host OBJ
+expect-fail load-dataset-archive /nonexistent/data.vsr
+expect-fail save-light-rig-archive lightRig_0001 /nonexistent/rig.vsr
+expect-fail load-light-rig-archive /nonexistent/rig.vsr
+expect-fail save-camera-rig-archive cameraRig_0001 /nonexistent/rig.vsr
+expect-fail load-camera-rig-archive /nonexistent/rig.vsr
+expect-fail incorporate-dataset-candidate /nonexistent/data.vsr
+expect-fail list-directory /nonexistent
+assert replies.failed == 28
+
+# An unsaved project has no candidates.
+discover-dataset-candidates
+assert replies.failed == 28
+
+# Task ops read the Project when they run: an unknown dataset id, a project
+# with no directory to save to, and a path inside the root that holds no
+# project are all accepted as tasks, which then fail.
+load-dataset dataset_9999
+expect-fail await-task
+reimport-dataset dataset_9999
+expect-fail await-task
+save-dataset-archive dataset_9999 $dataRoot/x.vsr
+expect-fail await-task
+save-project
+expect-fail await-task
+open-project $dataRoot/nowhere
+expect-fail await-task
+assert tasks.failed == 5
+assert tasks.completed == 0
+assert replies.failed == 28
+
+# Nothing moved.
+assert project.shots == 1
+assert project.datasets == 0
+assert project.lightRigs == 1
+assert project.cameraRigs == 1
+assert errors.received == 0
+
+disconnect

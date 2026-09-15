@@ -15,8 +15,26 @@
 // std
 #include <algorithm>
 #include <cstring>
+#include <string>
 
 namespace vsr::rendering {
+
+bool deviceSupportsExtension(anari::Device d, const char *extension)
+{
+  if (!d || !extension)
+    return false;
+
+  auto list = (const char *const *)anariGetObjectInfo(
+      d, ANARI_DEVICE, "default", "extension", ANARI_STRING_LIST);
+  if (!list)
+    return false;
+
+  for (const char *const *i = list; *i != nullptr; ++i) {
+    if (std::string(*i) == extension)
+      return true;
+  }
+  return false;
+}
 
 // Helper functions ///////////////////////////////////////////////////////////
 
@@ -361,17 +379,29 @@ void AnariSceneRenderPass::render(ImageBuffers &b, int stageId)
   if (m_pendingRestart)
     restartFrame();
 
-  startFirstFrame(false);
-
-  if (!m_runAsync)
+  // Asynchronous: the picture composited is the frame the previous call
+  // started, so the first call has nothing to show yet. Synchronous: this
+  // call's own render of the current scene state is what is composited, so
+  // the caller's picture and its state agree.
+  const bool nothingToShow = m_runAsync && m_firstFrame;
+  if (m_runAsync) {
+    startFirstFrame(false);
+  } else {
+    if (!m_firstFrame)
+      waitForCompletion();
+    anari::render(m_device, m_frame);
     waitForCompletion();
+    m_firstFrame = false;
+  }
 
   if (anari::isReady(m_device, m_frame)) {
     copyFrameData();
-    anari::render(m_device, m_frame);
+    // Only the asynchronous mode keeps a render in flight between calls.
+    if (m_runAsync)
+      anari::render(m_device, m_frame);
   }
 
-  if (!m_firstFrame)
+  if (!nothingToShow)
     composite(b, stageId);
   else {
     const auto size = getDimensions();

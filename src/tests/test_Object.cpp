@@ -6,8 +6,12 @@
 // vsr
 #include "vsr/scene/Object.hpp"
 #include "vsr/scene/Scene.hpp"
+#include "vsr/scene/UpdateDelegate.hpp"
 // std
+#include <algorithm>
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace {
 
@@ -20,6 +24,33 @@ struct MockObject : public vsr::scene::Object
   }
 
   bool notified{false};
+};
+
+// Records the metadata signals, and the order the batch hooks arrive in.
+struct RecordingDelegate : public vsr::scene::EmptyUpdateDelegate
+{
+  void signalMetadataUpdated(
+      const vsr::scene::Object *, const char *name) override
+  {
+    metadata.emplace_back(name);
+  }
+
+  void signalMetadataBatchUpdated(const vsr::scene::Object *,
+      const std::vector<std::string> &names) override
+  {
+    metadataBatches.push_back(names);
+    order.emplace_back("metadataBatch");
+  }
+
+  void signalParameterBatchUpdated(const vsr::scene::Object *,
+      const std::vector<const vsr::scene::Parameter *> &) override
+  {
+    order.emplace_back("parameterBatch");
+  }
+
+  std::vector<std::string> metadata;
+  std::vector<std::vector<std::string>> metadataBatches;
+  std::vector<std::string> order;
 };
 
 } // namespace
@@ -223,6 +254,136 @@ SCENARIO("vsr::Object clone for scene objects", "[Object]")
       REQUIRE(rendererClone->parameterValueAs<float>("ambientRadiance").value()
           == Approx(1.25f));
       REQUIRE(rendererClone->getMetadataValue("quality").getAs<int>() == 4);
+    }
+  }
+}
+
+SCENARIO("vsr::Object metadata notification", "[Object]")
+{
+  GIVEN("An object with a recording update delegate")
+  {
+    MockObject obj;
+    RecordingDelegate delegate;
+    obj.setUpdateDelegate(&delegate);
+
+    WHEN("A metadata value is set")
+    {
+      obj.setMetadataValue("manipulator.distance", 4.f);
+
+      THEN("The delegate is told which key changed")
+      {
+        REQUIRE(delegate.metadata
+            == std::vector<std::string>{"manipulator.distance"});
+        REQUIRE(delegate.metadataBatches.empty());
+      }
+    }
+
+    WHEN("A metadata array is set")
+    {
+      const int values[3] = {1, 2, 3};
+      obj.setMetadataArray("opacityControlPoints", ANARI_INT32, values, 3);
+
+      THEN("The delegate is told which key changed")
+      {
+        REQUIRE(delegate.metadata
+            == std::vector<std::string>{"opacityControlPoints"});
+      }
+    }
+
+    WHEN("A metadata value is removed")
+    {
+      obj.setMetadataValue("stale", 1);
+      delegate.metadata.clear();
+      obj.removeMetadata("stale");
+
+      THEN("The delegate is told which key changed")
+      {
+        REQUIRE(delegate.metadata == std::vector<std::string>{"stale"});
+      }
+    }
+
+    WHEN("Removing metadata from an object that has none")
+    {
+      obj.removeMetadata("never-set");
+
+      THEN("The delegate hears nothing")
+      {
+        REQUIRE(delegate.metadata.empty());
+      }
+    }
+
+    WHEN("Removing a key an object carrying other metadata never had")
+    {
+      obj.setMetadataValue("kept", 1);
+      delegate.metadata.clear();
+      obj.removeMetadata("never-set");
+
+      THEN("The delegate hears nothing")
+      {
+        REQUIRE(delegate.metadata.empty());
+        REQUIRE(obj.numMetadata() == 1);
+      }
+    }
+
+    WHEN("Metadata holds an array")
+    {
+      const int values[2] = {1, 2};
+      obj.setMetadataArray("bins", ANARI_INT32, values, 2);
+      obj.setMetadataValue("scalar", 1.f);
+
+      THEN("Only the array key says so")
+      {
+        REQUIRE(obj.metadataHoldsArray("bins"));
+        REQUIRE_FALSE(obj.metadataHoldsArray("scalar"));
+        REQUIRE_FALSE(obj.metadataHoldsArray("never-set"));
+      }
+    }
+
+    WHEN("Metadata is written inside a parameter batch")
+    {
+      obj.beginParameterBatch();
+      obj.setMetadataValue("manipulator.at", vsr::math::float3(1.f, 2.f, 3.f));
+      obj.setMetadataValue("manipulator.distance", 4.f);
+      obj.setMetadataValue("manipulator.distance", 5.f);
+      obj.setParameter("position", vsr::math::float3(0.f, 0.f, 1.f));
+
+      THEN("Nothing is signaled until the batch ends")
+      {
+        REQUIRE(delegate.metadata.empty());
+        REQUIRE(delegate.metadataBatches.empty());
+      }
+
+      obj.endParameterBatch();
+
+      THEN("The batch arrives once, deduplicated, with no per-key signals")
+      {
+        REQUIRE(delegate.metadata.empty());
+        REQUIRE(delegate.metadataBatches.size() == 1);
+        const auto &names = delegate.metadataBatches.front();
+        REQUIRE(names.size() == 2);
+        REQUIRE(std::find(names.begin(), names.end(), "manipulator.at")
+            != names.end());
+        REQUIRE(std::find(names.begin(), names.end(), "manipulator.distance")
+            != names.end());
+      }
+
+      THEN("The metadata batch precedes the parameter batch")
+      {
+        REQUIRE(delegate.order
+            == std::vector<std::string>{"metadataBatch", "parameterBatch"});
+      }
+    }
+
+    WHEN("A batch contains no metadata")
+    {
+      obj.beginParameterBatch();
+      obj.setParameter("position", vsr::math::float3(0.f, 0.f, 1.f));
+      obj.endParameterBatch();
+
+      THEN("No metadata batch is signaled")
+      {
+        REQUIRE(delegate.metadataBatches.empty());
+      }
     }
   }
 }

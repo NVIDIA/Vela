@@ -1,0 +1,935 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+// catch
+#include "StudioFakeServer.h"
+#include "StudioRemoteTestHelpers.h"
+#include "catch.hpp"
+// vsr_scivis_studio_client_core
+#include "ServerConnection.h"
+// vsr_scivis_studio_protocol
+#include "FrameMessages.h"
+#include "SceneEditMessages.h"
+#include "SceneMessages.h"
+#include "SessionMessages.h"
+#include "StudioCodec.h"
+#include "StudioProtocol.h"
+// vsr_network
+#include "vsr/network/messages/TransferScene.hpp"
+// vsr_scene
+#include "vsr/scene/Scene.hpp"
+// std
+#include <chrono>
+#include <string>
+#include <vector>
+
+using namespace vsr::scivis_studio;
+using namespace vsr::scivis_studio::protocol;
+using namespace vsr::scivis_studio::client;
+using vsr::network::Message;
+namespace messages = vsr::network::messages;
+using namespace std::chrono_literals;
+
+namespace {
+
+constexpr auto Bootstrap = MirrorReplace::Bootstrap;
+constexpr auto MidSession = MirrorReplace::MidSession;
+
+Message makeFrame(int frame)
+{
+  FrameHeader header;
+  header.width = 2;
+  header.height = 1;
+  header.frame = frame;
+  header.shotId = "shot";
+  std::vector<std::byte> pixels(2 * 1 * 4, std::byte(frame));
+  return encodeFrame(header, pixels.data(), pixels.size());
+}
+
+// A MirroredClient on a fake server, recording every state transition and
+// mirror replacement.
+struct Fixture : MirroredClient
+{
+  Fixture(int helloVersion = PROTOCOL_VERSION,
+      ConnectionTimings timings = fastTimings());
+
+  void connect();
+  bool mirrorHasGeometry() const;
+
+  vsr::scene::Scene source;
+  FakeStudioServer server;
+  std::vector<ConnectionState> transitions;
+  int mirrorReplaces{0};
+  bool mirrorPopulatedAtReplace{false};
+  // The kind each onMirrorReplaceBegin reported, in order: what the client's
+  // Application reads to tell a Bootstrap's emptying apart from a mid-session
+  // replacement.
+  std::vector<MirrorReplace> replaceKinds;
+};
+
+Fixture::Fixture(int helloVersion, ConnectionTimings timings)
+    : MirroredClient(timings), server(helloVersion)
+{
+  populateFakeScene(source);
+  server.bootstrap = makeFakeBootstrap(source);
+  connection.onStateChanged = [this](ConnectionState, ConnectionState to) {
+    transitions.push_back(to);
+  };
+  connection.onMirrorReplaceBegin = [this](MirrorReplace kind) {
+    mirrorReplaces++;
+    mirrorPopulatedAtReplace = mirror.numberOfObjects(ANARI_GEOMETRY) != 0;
+    replaceKinds.push_back(kind);
+  };
+}
+
+void Fixture::connect()
+{
+  MirroredClient::connect(server.port());
+}
+
+bool Fixture::mirrorHasGeometry() const
+{
+  if (mirror.numberOfObjects(ANARI_GEOMETRY) != 1)
+    return false;
+  auto geometry = mirror.getObject<vsr::scene::Geometry>(0);
+  return geometry && geometry->name() == FAKE_GEOMETRY_NAME;
+}
+
+} // namespace
+
+SCENARIO("ServerConnection handshakes and bootstraps", "[StudioClient]")
+{
+  GIVEN("a fake server holding BootstrapEnd back")
+  {
+    Fixture f;
+    f.server.holdBootstrapEnd = true;
+    REQUIRE(f.connection.state() == ConnectionState::NeverConnected);
+
+    WHEN("the client connects")
+    {
+      f.connect();
+
+      THEN("Hello is answered and the bootstrap populates the mirror")
+      {
+        // The snapshot is the last message before the held-back End; once it
+        // is in, everything before it has been applied.
+        REQUIRE(pollUntil(f.connection, [&] {
+          return f.connection.state() == ConnectionState::Connected
+              && f.connection.bootstrapping() && f.mirrorHasGeometry()
+              && f.connection.project() != nullptr;
+        }));
+        REQUIRE(f.server.count(StudioMessageType::Hello) == 1);
+        const auto hellos = f.server.messagesOf(StudioMessageType::Hello);
+        const auto hello = decode<Hello>(hellos.front());
+        REQUIRE(hello);
+        REQUIRE(hello->version == PROTOCOL_VERSION);
+        REQUIRE(f.mirror.layer(FAKE_LAYER_NAME) != nullptr);
+        REQUIRE(f.connection.frameConfig().width == 640);
+        REQUIRE(f.connection.frameConfig().height == 480);
+        REQUIRE(f.connection.project() != nullptr);
+        REQUIRE(f.connection.project()->name == "fake project");
+        REQUIRE(f.bootstraps == 0);
+        REQUIRE(f.mirrorReplaces == 1);
+        REQUIRE(f.transitions
+            == std::vector<ConnectionState>{ConnectionState::Connected});
+
+        AND_THEN("an edit during the bootstrap emits nothing")
+        {
+          auto geometry = f.mirror.getObject<vsr::scene::Geometry>(0);
+          geometry->setParameter("radius", 0.5f);
+          pollFor(f.connection, 50ms);
+          REQUIRE(f.server.count(StudioMessageType::SetObjectParameter) == 0);
+
+          AND_THEN("after BootstrapEnd an edit emits one SetObjectParameter")
+          {
+            f.server.sendBootstrapEnd();
+            REQUIRE(pollUntil(f.connection, [&] { return f.bootstraps == 1; }));
+            REQUIRE_FALSE(f.connection.bootstrapping());
+            REQUIRE(f.connection.state() == ConnectionState::Connected);
+
+            geometry->setParameter("radius", 0.75f);
+            REQUIRE(pollUntil(f.connection, [&] {
+              return f.server.count(StudioMessageType::SetObjectParameter) == 1;
+            }));
+            const auto edits =
+                f.server.messagesOf(StudioMessageType::SetObjectParameter);
+            const auto edit = decode<SetObjectParameter>(edits.front());
+            REQUIRE(edit);
+            REQUIRE(edit->object.type == ANARI_GEOMETRY);
+            REQUIRE(edit->object.objectIndex == geometry->index());
+            REQUIRE(edit->name == "radius");
+            REQUIRE(edit->value.is<float>());
+            REQUIRE(edit->value.get<float>() == 0.75f);
+
+            geometry->removeParameter("radius");
+            REQUIRE(pollUntil(f.connection, [&] {
+              return f.server.count(StudioMessageType::RemoveObjectParameter)
+                  == 1;
+            }));
+            pollFor(f.connection, 20ms);
+            REQUIRE(f.server.count(StudioMessageType::SetObjectParameter) == 1);
+          }
+        }
+      }
+    }
+  }
+
+  GIVEN("a fake server speaking another protocol version")
+  {
+    Fixture f(PROTOCOL_VERSION + 1);
+
+    WHEN("the client connects")
+    {
+      f.connect();
+
+      THEN("the attempt fails, names both versions and does not retry")
+      {
+        REQUIRE(pollUntil(f.connection, [&] {
+          return f.connection.statusText().find("mismatch")
+              != std::string::npos;
+        }));
+        REQUIRE(f.connection.state() == ConnectionState::NeverConnected);
+        REQUIRE_FALSE(f.connection.autoRetrying());
+        const auto &status = f.connection.statusText();
+        REQUIRE(status.find(std::to_string(PROTOCOL_VERSION + 1))
+            != std::string::npos);
+        REQUIRE(
+            status.find(std::to_string(PROTOCOL_VERSION)) != std::string::npos);
+        REQUIRE(f.server.count(StudioMessageType::Hello) == 0);
+        pollFor(f.connection, 300ms);
+        REQUIRE(f.server.accepts == 1);
+        REQUIRE(f.transitions.empty());
+      }
+    }
+  }
+}
+
+SCENARIO("ServerConnection watches liveness", "[StudioClient]")
+{
+  GIVEN("a connected client on a quiet link")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+
+    WHEN("the link stays quiet past pingAfterQuiet")
+    {
+      REQUIRE(pollUntil(f.connection,
+          [&] { return f.server.count(StudioMessageType::Ping) >= 1; }));
+
+      THEN("the Pong keeps the connection alive")
+      {
+        pollFor(f.connection, 2 * fastTimings().lossAfterSilence);
+        REQUIRE(f.connection.state() == ConnectionState::Connected);
+        REQUIRE(f.server.count(StudioMessageType::Ping) >= 2);
+        REQUIRE(f.server.accepts == 1);
+      }
+    }
+
+    WHEN("the server goes totally silent")
+    {
+      f.server.silent = true;
+
+      THEN("loss is declared, the view is frozen, and auto-retry reconnects")
+      {
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.connection.state() == ConnectionState::Lost; }));
+        REQUIRE(f.connection.autoRetrying());
+        REQUIRE(f.mirrorHasGeometry());
+        REQUIRE(f.connection.project() != nullptr);
+        REQUIRE(f.connection.statusText().find("reconnecting")
+            != std::string::npos);
+
+        f.server.silent = false;
+        REQUIRE(f.waitConnectedAndBootstrapped(2));
+        REQUIRE(f.server.accepts == 2);
+        REQUIRE(f.mirrorHasGeometry());
+        // The frozen mirror was still populated when the second bootstrap
+        // announced itself: the hook fires before the mirror is cleared.
+        REQUIRE(f.mirrorReplaces == 2);
+        REQUIRE(f.mirrorPopulatedAtReplace);
+        REQUIRE(f.transitions
+            == std::vector<ConnectionState>{ConnectionState::Connected,
+                ConnectionState::Lost,
+                ConnectionState::Connected});
+      }
+    }
+  }
+
+  GIVEN("a connected client whose server falls silent and comes back late")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+    f.server.silent = true;
+    REQUIRE(pollUntil(f.connection,
+        [&] { return f.connection.state() == ConnectionState::Lost; }));
+    REQUIRE(f.mirrorHasGeometry());
+
+    WHEN("the reconnect is greeted but its bootstrap has not started")
+    {
+      f.server.holdBootstrap = true;
+      f.server.silent = false;
+      REQUIRE(pollUntil(f.connection, [&] {
+        return f.connection.state() == ConnectionState::Connected
+            && f.server.count(StudioMessageType::Hello) == 2;
+      }));
+      REQUIRE(f.bootstraps == 1);
+      REQUIRE_FALSE(f.connection.bootstrapping());
+      // Connected is not populated: the replica is the old session's.
+      REQUIRE_FALSE(f.connection.bootstrapped());
+      REQUIRE(f.connection.project() != nullptr);
+
+      THEN("an edit to the frozen mirror emits nothing")
+      {
+        auto geometry = f.mirror.getObject<vsr::scene::Geometry>(0);
+        REQUIRE(geometry);
+        geometry->setParameter("radius", 0.9f);
+        pollFor(f.connection, 50ms);
+        REQUIRE(f.server.count(StudioMessageType::SetObjectParameter) == 0);
+
+        AND_THEN("edits flow again once the bootstrap has completed")
+        {
+          f.server.sendBootstrap();
+          REQUIRE(f.waitConnectedAndBootstrapped(2));
+          REQUIRE(f.connection.bootstrapped());
+          auto rebuilt = f.mirror.getObject<vsr::scene::Geometry>(0);
+          REQUIRE(rebuilt);
+          rebuilt->setParameter("radius", 0.6f);
+          REQUIRE(pollUntil(f.connection, [&] {
+            return f.server.count(StudioMessageType::SetObjectParameter) == 1;
+          }));
+        }
+      }
+    }
+  }
+
+  GIVEN("a connected client whose server comes back speaking another version")
+  {
+    auto timings = fastTimings();
+    timings.lossAfterSilence = 3s; // loss must come from the hook, not this
+    Fixture f(PROTOCOL_VERSION, timings);
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+    // The server drops the socket but keeps listening, like a restart.
+    f.server.channel->restart();
+    f.server.helloVersion = PROTOCOL_VERSION + 1;
+    REQUIRE(pollUntil(f.connection,
+        [&] { return f.connection.state() == ConnectionState::Lost; }));
+    REQUIRE(f.mirrorHasGeometry());
+
+    WHEN("the retry is greeted with a mismatched Hello")
+    {
+      THEN("the client is Disconnected with the mismatch as its status")
+      {
+        REQUIRE(pollUntil(f.connection, [&] {
+          return f.connection.state() == ConnectionState::Disconnected;
+        }));
+        REQUIRE(
+            f.connection.statusText().find("mismatch") != std::string::npos);
+        REQUIRE_FALSE(f.connection.autoRetrying());
+        REQUIRE(f.mirror.numberOfObjects(ANARI_GEOMETRY) == 0);
+        REQUIRE(f.connection.project() == nullptr);
+        const int accepts = f.server.accepts;
+        pollFor(f.connection, 300ms);
+        REQUIRE(f.connection.state() == ConnectionState::Disconnected);
+        REQUIRE(f.server.accepts == accepts); // no retry loop
+        REQUIRE(f.transitions
+            == std::vector<ConnectionState>{ConnectionState::Connected,
+                ConnectionState::Lost,
+                ConnectionState::Disconnected});
+      }
+    }
+  }
+
+  GIVEN("a client whose server drops it and returns with a slow bootstrap")
+  {
+    auto timings = fastTimings();
+    timings.lossAfterSilence = 3s; // loss must come from the hook, not this
+    Fixture f(PROTOCOL_VERSION, timings);
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+    f.server.holdBootstrapEnd = true;
+    f.server.channel->restart();
+    REQUIRE(pollUntil(f.connection,
+        [&] { return f.connection.state() == ConnectionState::Lost; }));
+
+    WHEN("the reconnect's bootstrap is cut short by a close")
+    {
+      REQUIRE(pollUntil(f.connection, [&] {
+        return f.connection.bootstrapping() && f.mirrorHasGeometry();
+      }));
+      REQUIRE(f.bootstraps == 1);
+      f.server.channel->stop();
+
+      THEN(
+          "loss leaves an empty mirror, no bootstrap in progress, and the"
+          " previous replica")
+      {
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.connection.state() == ConnectionState::Lost; }));
+        REQUIRE_FALSE(f.connection.bootstrapping());
+        REQUIRE(f.mirror.numberOfObjects(ANARI_GEOMETRY) == 0);
+        REQUIRE(f.connection.project() != nullptr);
+        REQUIRE(f.bootstraps == 1);
+        // The cut-short bracket announced its replacement once; the loss
+        // announced the emptying once more.
+        REQUIRE(f.mirrorReplaces == 3);
+      }
+    }
+  }
+
+  GIVEN("a connected client whose server closes the socket")
+  {
+    auto timings = fastTimings();
+    timings.lossAfterSilence = 3s; // loss must come from the hook, not this
+    Fixture f(PROTOCOL_VERSION, timings);
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+
+    WHEN("the server stops")
+    {
+      const auto closedAt = std::chrono::steady_clock::now();
+      f.server.channel->stop();
+
+      THEN("loss is declared promptly and disconnect() clears everything")
+      {
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.connection.state() == ConnectionState::Lost; }));
+        REQUIRE(std::chrono::steady_clock::now() - closedAt < 1s);
+        REQUIRE(f.mirrorHasGeometry());
+
+        f.connection.disconnect();
+        REQUIRE(f.connection.state() == ConnectionState::Disconnected);
+        REQUIRE_FALSE(f.connection.autoRetrying());
+        REQUIRE(f.mirror.numberOfObjects(ANARI_GEOMETRY) == 0);
+        REQUIRE(f.connection.project() == nullptr);
+        pollFor(f.connection, 100ms);
+        REQUIRE(f.connection.state() == ConnectionState::Disconnected);
+      }
+    }
+  }
+}
+
+SCENARIO("ServerConnection takes the loss reason from the server's farewell",
+    "[StudioClient]")
+{
+  GIVEN("a connected client whose link will not go quiet on its own")
+  {
+    auto timings = fastTimings();
+    timings.lossAfterSilence = 10s; // the loss must come from the close
+    Fixture f(PROTOCOL_VERSION, timings);
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+
+    WHEN("the server says Disconnect{reason} and closes long after")
+    {
+      Disconnect farewell;
+      farewell.reason = "replaced by another client";
+      f.server.send(encode(farewell));
+      // Well past the two seconds the old Error-then-close heuristic gave.
+      pollFor(f.connection, 2200ms);
+      REQUIRE(f.connection.state() == ConnectionState::Connected);
+      f.server.channel->restart();
+
+      THEN("the loss names the farewell's reason and no Error was involved")
+      {
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.connection.state() == ConnectionState::Lost; }));
+        REQUIRE(f.connection.statusText().find("replaced by another client")
+            != std::string::npos);
+        REQUIRE(f.errors.empty());
+        REQUIRE(f.connection.autoRetrying());
+      }
+    }
+
+    WHEN("the server sends a bare Error and then closes")
+    {
+      Error error;
+      error.message = "something else entirely";
+      f.server.send(encode(error));
+      REQUIRE(pollUntil(f.connection, [&] { return !f.errors.empty(); }));
+      f.server.channel->restart();
+
+      THEN("the Error was a toast; the loss reason is the socket's")
+      {
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.connection.state() == ConnectionState::Lost; }));
+        REQUIRE(
+            f.errors == std::vector<std::string>{"something else entirely"});
+        REQUIRE(f.connection.statusText().find("something else entirely")
+            == std::string::npos);
+      }
+    }
+  }
+}
+
+SCENARIO("ServerConnection announces a mid-session scene replacement",
+    "[StudioClient]")
+{
+  GIVEN("a connected, bootstrapped client")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+    REQUIRE(f.mirrorReplaces == 1);
+
+    WHEN("the server pushes a whole TransferScene outside a bootstrap")
+    {
+      auto second = f.source.createObject<vsr::scene::Geometry>("sphere");
+      second->setName("second geometry");
+      second->setParameter("radius", 0.25f);
+      messages::TransferScene resend(&f.source, false);
+      f.server.send(
+          encodeSceneMessage<StudioMessageType::TransferScene>(resend));
+
+      THEN(
+          "the hook fires while the old mirror still stands, then it is"
+          " replaced")
+      {
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.mirror.numberOfObjects(ANARI_GEOMETRY) == 2; }));
+        REQUIRE(f.mirrorReplaces == 2);
+        REQUIRE(f.mirrorPopulatedAtReplace);
+        REQUIRE(f.bootstraps == 1);
+        REQUIRE_FALSE(f.connection.bootstrapping());
+
+        AND_THEN("the replacement's objects carry their parameters")
+        {
+          // What the streaming ObjectAdded push could never deliver: it
+          // serialized an object at creation, before anything was set on it.
+          auto geometry = f.mirror.getObject<vsr::scene::Geometry>(1);
+          REQUIRE(geometry);
+          REQUIRE(geometry->name() == "second geometry");
+          REQUIRE(geometry->parameterValueAs<float>("radius") == 0.25f);
+        }
+
+        AND_THEN("edits still flow afterwards")
+        {
+          auto geometry = f.mirror.getObject<vsr::scene::Geometry>(1);
+          REQUIRE(geometry);
+          geometry->setParameter("radius", 0.3f);
+          REQUIRE(pollUntil(f.connection, [&] {
+            return f.server.count(StudioMessageType::SetObjectParameter) == 1;
+          }));
+        }
+      }
+    }
+  }
+}
+
+SCENARIO("ServerConnection names which mirror replacement is happening",
+    "[StudioClient]")
+{
+  // Regression: both wholesale replacements announce through the one
+  // onMirrorReplaceBegin hook, and a client that greys its object editors
+  // while there is no scene to browse must be able to tell them apart. A
+  // mid-session TransferScene is what every scene-changing commit now
+  // pushes, so a client that treats it as a Bootstrap's emptying greys those
+  // editors from the first import to the end of the session -- edits stop
+  // reaching the wire and nothing in the viewport moves.
+  GIVEN("a connected, bootstrapped client")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+    REQUIRE(f.replaceKinds == std::vector<MirrorReplace>{Bootstrap});
+
+    WHEN("the server pushes a whole TransferScene outside a bootstrap")
+    {
+      messages::TransferScene resend(&f.source, false);
+      f.server.send(
+          encodeSceneMessage<StudioMessageType::TransferScene>(resend));
+
+      THEN("the replacement is a mid-session one, and leaves a whole scene")
+      {
+        REQUIRE(pollUntil(f.connection, [&] { return f.mirrorReplaces == 2; }));
+        REQUIRE(
+            f.replaceKinds == std::vector<MirrorReplace>{Bootstrap, MidSession});
+        REQUIRE(f.mirrorHasGeometry());
+      }
+    }
+
+    WHEN("a reconnect's bootstrap replaces the mirror again")
+    {
+      f.server.channel->restart();
+
+      THEN("that replacement is a Bootstrap's")
+      {
+        REQUIRE(f.waitConnectedAndBootstrapped(2));
+        REQUIRE(
+            f.replaceKinds == std::vector<MirrorReplace>{Bootstrap, Bootstrap});
+      }
+    }
+  }
+
+  GIVEN("a client whose reconnect bootstrap is cut short by a close")
+  {
+    auto timings = fastTimings();
+    timings.lossAfterSilence = 3s; // loss must come from the hook, not this
+    Fixture f(PROTOCOL_VERSION, timings);
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+    f.server.holdBootstrapEnd = true;
+    f.server.channel->restart();
+    REQUIRE(pollUntil(f.connection,
+        [&] { return f.connection.state() == ConnectionState::Lost; }));
+    REQUIRE(pollUntil(f.connection, [&] {
+      return f.connection.bootstrapping() && f.mirrorHasGeometry();
+    }));
+
+    WHEN("the server closes mid-bracket")
+    {
+      f.server.channel->stop();
+
+      THEN("the emptying the loss announces is a Bootstrap's too")
+      {
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.connection.state() == ConnectionState::Lost; }));
+        REQUIRE(f.mirror.numberOfObjects(ANARI_GEOMETRY) == 0);
+        REQUIRE(f.replaceKinds
+            == std::vector<MirrorReplace>{Bootstrap, Bootstrap, Bootstrap});
+      }
+    }
+  }
+}
+
+SCENARIO("The mirror sends object metadata as it is written", "[StudioClient]")
+{
+  GIVEN("a connected, bootstrapped client")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+    auto geometry = f.mirror.getObject<vsr::scene::Geometry>(0);
+    REQUIRE(geometry);
+
+    WHEN("one metadata value is written")
+    {
+      geometry->setMetadataValue("manipulator.distance", 4.f);
+
+      THEN("one SetObjectMetadata carries the one key")
+      {
+        REQUIRE(pollUntil(f.connection, [&] {
+          return f.server.count(StudioMessageType::SetObjectMetadata) == 1;
+        }));
+        const auto edits =
+            f.server.messagesOf(StudioMessageType::SetObjectMetadata);
+        const auto edit = decode<SetObjectMetadata>(edits.front());
+        REQUIRE(edit);
+        REQUIRE(edit->object.type == ANARI_GEOMETRY);
+        REQUIRE(edit->object.objectIndex == geometry->index());
+        REQUIRE(edit->entries.size() == 1);
+        REQUIRE(edit->entries[0].name == "manipulator.distance");
+        REQUIRE(edit->entries[0].value.get<float>() == 4.f);
+      }
+    }
+
+    WHEN("a batch writes several keys, the way a camera orbit does")
+    {
+      geometry->beginParameterBatch();
+      geometry->setMetadataValue("manipulator.at", vsr::math::float3(1.f));
+      geometry->setMetadataValue("manipulator.distance", 4.f);
+      geometry->setMetadataValue("manipulator.up", 1);
+      geometry->setParameter("radius", 0.5f);
+      geometry->endParameterBatch();
+
+      THEN("one SetObjectMetadata carries all of them")
+      {
+        REQUIRE(pollUntil(f.connection, [&] {
+          return f.server.count(StudioMessageType::SetObjectMetadata) == 1
+              && f.server.count(StudioMessageType::SetObjectParameter) == 1;
+        }));
+        pollFor(f.connection, 20ms);
+        REQUIRE(f.server.count(StudioMessageType::SetObjectMetadata) == 1);
+        const auto edits =
+            f.server.messagesOf(StudioMessageType::SetObjectMetadata);
+        const auto edit = decode<SetObjectMetadata>(edits.front());
+        REQUIRE(edit);
+        REQUIRE(edit->entries.size() == 3);
+      }
+    }
+
+    WHEN("a metadata key is removed")
+    {
+      geometry->setMetadataValue("stale", 1);
+      REQUIRE(pollUntil(f.connection, [&] {
+        return f.server.count(StudioMessageType::SetObjectMetadata) == 1;
+      }));
+      geometry->removeMetadata("stale");
+
+      THEN("the key travels with no value")
+      {
+        REQUIRE(pollUntil(f.connection, [&] {
+          return f.server.count(StudioMessageType::SetObjectMetadata) == 2;
+        }));
+        const auto edits =
+            f.server.messagesOf(StudioMessageType::SetObjectMetadata);
+        const auto edit = decode<SetObjectMetadata>(edits.back());
+        REQUIRE(edit);
+        REQUIRE(edit->entries.size() == 1);
+        REQUIRE(edit->entries[0].name == "stale");
+        REQUIRE_FALSE(edit->entries[0].value.valid());
+      }
+    }
+
+    WHEN("array-valued metadata is written")
+    {
+      const float points[4] = {0.f, 0.f, 1.f, 1.f};
+      geometry->setMetadataArray(
+          "opacityControlPoints", ANARI_FLOAT32_VEC2, points, 2);
+
+      THEN("it travels as an array entry, bytes and element type intact")
+      {
+        REQUIRE(pollUntil(f.connection, [&] {
+          return f.server.count(StudioMessageType::SetObjectMetadata) == 1;
+        }));
+        const auto edits =
+            f.server.messagesOf(StudioMessageType::SetObjectMetadata);
+        const auto edit = decode<SetObjectMetadata>(edits.back());
+        REQUIRE(edit);
+        REQUIRE(edit->entries.size() == 1);
+        REQUIRE(edit->entries[0].name == "opacityControlPoints");
+        REQUIRE(edit->entries[0].holdsArray());
+        REQUIRE_FALSE(edit->entries[0].isRemoval());
+        REQUIRE(edit->entries[0].arrayElementType == ANARI_FLOAT32_VEC2);
+        REQUIRE(edit->entries[0].arrayElementCount == 2);
+        REQUIRE(edit->entries[0].arrayData.size() == sizeof(points));
+        REQUIRE(std::memcmp(
+                    edit->entries[0].arrayData.data(), points, sizeof(points))
+            == 0);
+      }
+    }
+  }
+}
+
+SCENARIO("ServerConnection rejects messages outside the Studio set",
+    "[StudioClient]")
+{
+  GIVEN("a connected client")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+
+    WHEN("the server sends the type bytes the enum never assigns")
+    {
+      // 0 is the sentinel, 255 the transport's MESSAGE_TYPE_INVALID.
+      for (int outsideType : {0, 255}) {
+        Message outside;
+        outside.header.type = uint8_t(outsideType);
+        f.server.send(std::move(outside));
+      }
+
+      THEN("each is answered with an Error naming the type")
+      {
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.server.count(StudioMessageType::Error) == 2; }));
+        const auto errors = f.server.messagesOf(StudioMessageType::Error);
+        std::vector<std::string> texts;
+        for (const auto &msg : errors) {
+          const auto error = decode<Error>(msg);
+          REQUIRE(error);
+          texts.push_back(error->message);
+        }
+        REQUIRE(texts[0].find("unknown message type 0") != std::string::npos);
+        REQUIRE(texts[1].find("unknown message type 255") != std::string::npos);
+        REQUIRE(f.connection.state() == ConnectionState::Connected);
+      }
+    }
+  }
+}
+
+SCENARIO("ServerConnection keeps only the latest frame", "[StudioClient]")
+{
+  GIVEN("a connected client")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+    Message frame;
+    REQUIRE_FALSE(f.connection.takeLatestFrame(frame));
+
+    WHEN("two frames arrive before the UI takes one")
+    {
+      f.server.send(makeFrame(1));
+      f.server.send(makeFrame(2));
+      Error marker;
+      marker.message = "marker";
+      f.server.send(encode(marker));
+      REQUIRE(pollUntil(f.connection, [&] { return f.errors.size() == 1; }));
+      REQUIRE(f.errors.front() == "marker");
+
+      THEN("only the second is taken, once")
+      {
+        REQUIRE(f.connection.takeLatestFrame(frame));
+        const auto view = decodeFrame(frame);
+        REQUIRE(view);
+        REQUIRE(view->header.frame == 2);
+        REQUIRE(view->header.shotId == "shot");
+        REQUIRE_FALSE(f.connection.takeLatestFrame(frame));
+      }
+    }
+  }
+}
+
+SCENARIO("ServerConnection reports one session phase", "[StudioClient]")
+{
+  GIVEN("a client that has never connected")
+  {
+    Fixture f;
+    REQUIRE(f.connection.phase() == SessionPhase::Idle);
+    REQUIRE_FALSE(f.connection.canSend());
+
+    WHEN("it connects and is bootstrapped")
+    {
+      f.connect();
+      REQUIRE(f.waitConnectedAndBootstrapped());
+
+      THEN("the phase is Ready and it may send")
+      {
+        REQUIRE(f.connection.phase() == SessionPhase::Ready);
+        REQUIRE(f.connection.bootstrapped());
+        REQUIRE_FALSE(f.connection.bootstrapping());
+        REQUIRE(f.connection.canSend());
+      }
+
+      AND_WHEN("the server goes silent")
+      {
+        f.server.silent = true;
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.connection.state() == ConnectionState::Lost; }));
+
+        THEN("the phase is Idle and the frozen replica may not be edited")
+        {
+          REQUIRE(f.connection.phase() == SessionPhase::Idle);
+          REQUIRE(f.connection.project() != nullptr);
+          REQUIRE_FALSE(f.connection.canSend());
+        }
+
+        AND_WHEN("the reconnect is greeted but its bootstrap is held")
+        {
+          f.server.holdBootstrap = true;
+          f.server.silent = false;
+          REQUIRE(pollUntil(f.connection, [&] {
+            return f.connection.state() == ConnectionState::Connected
+                && f.server.count(StudioMessageType::Hello) == 2;
+          }));
+
+          THEN("the phase is AwaitingBootstrap: Connected, replica, no edits")
+          {
+            REQUIRE(f.connection.phase() == SessionPhase::AwaitingBootstrap);
+            REQUIRE_FALSE(f.connection.bootstrapped());
+            REQUIRE_FALSE(f.connection.bootstrapping());
+            REQUIRE(f.connection.project() != nullptr);
+            REQUIRE_FALSE(f.connection.canSend());
+            REQUIRE_FALSE(f.connection.autoRetrying());
+
+            AND_THEN(
+                "Ready again once the bootstrap completes, Idle after "
+                "disconnect()")
+            {
+              f.server.sendBootstrap();
+              REQUIRE(f.waitConnectedAndBootstrapped(2));
+              REQUIRE(f.connection.phase() == SessionPhase::Ready);
+              REQUIRE(f.connection.canSend());
+              f.connection.disconnect();
+              REQUIRE(f.connection.phase() == SessionPhase::Idle);
+              REQUIRE_FALSE(f.connection.canSend());
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+SCENARIO("A client sends array contents only for arrays it has opened",
+    "[StudioClient]")
+{
+  GIVEN("a connected client whose mirror holds an array")
+  {
+    Fixture f;
+    // The array reaches the mirror as a proxy, the way every array does; the
+    // bootstrap is rebuilt so the source carries one before the client sees it.
+    auto sourceArray = f.source.createArray(ANARI_FLOAT32_VEC4, 4);
+    const std::vector<vsr::math::float4> initial(4, vsr::math::float4(0.f));
+    sourceArray->setData(initial);
+    f.source.getObject<vsr::scene::Geometry>(0)->setParameterObject(
+        "color", *sourceArray);
+    f.server.bootstrap = makeFakeBootstrap(f.source);
+
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+
+    auto array = f.mirror.getObject<vsr::scene::Array>(sourceArray->index());
+    REQUIRE(array);
+    REQUIRE(array->isProxy());
+
+    // What a panel does when it hydrates: a proxy cannot be mapped at all.
+    array->convertProxyToHost();
+    const std::vector<vsr::math::float4> samples(4, vsr::math::float4(0.5f));
+
+    WHEN("the array is written before any panel declares it editable")
+    {
+      array->setData(samples);
+
+      THEN("nothing is sent: the client offers no arbitrary array write")
+      {
+        pollFor(f.connection, 50ms);
+        REQUIRE(f.server.count(StudioMessageType::SetArrayData) == 0);
+      }
+    }
+
+    WHEN("a panel declares it editable and writes it")
+    {
+      f.connection.setArrayEditable(array->index(), true);
+      array->setData(samples);
+
+      THEN("one SetArrayData carries the samples")
+      {
+        REQUIRE(pollUntil(f.connection, [&] {
+          return f.server.count(StudioMessageType::SetArrayData) == 1;
+        }));
+      }
+    }
+
+    WHEN("an editable array is rewritten several times inside one batch")
+    {
+      f.connection.setArrayEditable(array->index(), true);
+      f.mirror.beginUpdateBatch();
+      array->setData(samples);
+      array->setData(samples);
+      array->setData(samples);
+      f.mirror.endUpdateBatch();
+
+      THEN("one message leaves, not three")
+      {
+        REQUIRE(pollUntil(f.connection, [&] {
+          return f.server.count(StudioMessageType::SetArrayData) == 1;
+        }));
+        pollFor(f.connection, 50ms);
+        REQUIRE(f.server.count(StudioMessageType::SetArrayData) == 1);
+      }
+    }
+
+    WHEN("the mirror is replaced after a panel declared the array editable")
+    {
+      f.connection.setArrayEditable(array->index(), true);
+      f.server.send(encode(BootstrapBegin{}));
+      REQUIRE(pollUntil(f.connection, [&] { return f.mirrorReplaces >= 2; }));
+
+      THEN("the declaration went with it")
+      {
+        auto replaced =
+            f.mirror.getObject<vsr::scene::Array>(sourceArray->index());
+        if (replaced && replaced->isProxy())
+          replaced->convertProxyToHost();
+        if (replaced)
+          replaced->setData(samples);
+        pollFor(f.connection, 50ms);
+        REQUIRE(f.server.count(StudioMessageType::SetArrayData) == 0);
+      }
+    }
+  }
+}

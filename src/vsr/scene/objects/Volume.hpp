@@ -24,6 +24,13 @@ struct Volume : public Object
 
   ObjectPoolRef<Volume> self() const;
 
+  // Give a transferFunction1D volume the RGBA sample Array its "color"
+  // parameter is meant to hold, unless it already holds one. Idempotent, and
+  // a no-op for every other subtype. Creating the Array is a structural act
+  // no thin client may perform, so a volume reaches every consumer with one
+  // already bound rather than acquiring one on first edit (ADR 0037).
+  void ensureColorArray();
+
   anari::Object makeANARIObject(anari::Device d) const override;
 };
 

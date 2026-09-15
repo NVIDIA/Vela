@@ -9,6 +9,7 @@
 #include "ProjectSerialization.h"
 
 #include "vsr/animation/AnimationManager.hpp"
+#include "vsr/app/UIStateTree.h"
 #include "vsr/core/DataTreeMetadata.hpp"
 #include "vsr/core/Logging.hpp"
 #include "vsr/io/archives/CameraArchive.hpp"
@@ -70,20 +71,6 @@ StagedArchive stageArchive(const std::filesystem::path &file)
     staged.error = "Archive is missing or unreadable";
   }
   return staged;
-}
-
-vsr::scene::LayerNodeRef findDirectChild(
-    vsr::scene::LayerNodeRef parent, const std::string &name)
-{
-  if (!parent)
-    return {};
-  auto child = parent->next();
-  while (child && child != parent) {
-    if ((*child)->name() == name)
-      return child;
-    child = child->sibling();
-  }
-  return {};
 }
 
 vsr::scene::LayerNodeRef ensureChild(
@@ -341,9 +328,8 @@ void hydrateDatasets(const detail::ProjectOpenState &state,
           resolveProjectFileForRead(
               state.directory / "datasets" / (inventoryEntry.name + ".vsr")),
           ec);
-      inventoryEntry.status = (assetExists && !ec)
-          ? DatasetStatus::Available
-          : DatasetStatus::Unavailable;
+      inventoryEntry.status = (assetExists && !ec) ? DatasetStatus::Available
+                                                   : DatasetStatus::Unavailable;
       if (inventoryEntry.status == DatasetStatus::Unavailable && logWarnings) {
         vsr::core::logWarning(
             "[SciVisStudio] Dataset '%s' has no asset on disk",
@@ -496,10 +482,11 @@ bool stageProjectOpen(const std::filesystem::path &directory,
     return fail("failed to load project.vsr", error);
 
   auto &root = state->manifest->root();
-  auto *model = root.child("scivisStudio");
+  const auto *model = root.child("scivisStudio");
   if (!model)
     return fail("project.vsr is missing scivisStudio section", error);
-  nodeToProject(*model, state->manifestProject);
+  if (!nodeToProject(*model, state->manifestProject, ProjectForm::Manifest))
+    return fail("project.vsr has a malformed scivisStudio section", error);
 
   const auto metadata = vsr::core::readDataTreeMetadata(root);
   state->schemaVersion = metadata.found()
@@ -591,12 +578,15 @@ bool stageProjectOpen(const std::filesystem::path &directory,
     }
   }
 
-  if (auto *windows = root.child("windows"))
-    stage.ui.root()["windows"] = *windows;
-  if (auto *layout = root.child("layout"))
-    stage.ui.root()["layout"] = layout->getValueAs<std::string>();
-  if (auto *settings = root.child("settings"))
-    stage.ui.root()["settings"] = *settings;
+  {
+    using namespace vsr::app;
+    if (auto *windows = root.child(UI_STATE_WINDOWS))
+      stage.ui.root()[UI_STATE_WINDOWS] = *windows;
+    if (auto *layout = root.child(UI_STATE_LAYOUT))
+      stage.ui.root()[UI_STATE_LAYOUT] = layout->getValueAs<std::string>();
+    if (auto *settings = root.child(UI_STATE_SETTINGS))
+      stage.ui.root()[UI_STATE_SETTINGS] = *settings;
+  }
 
   vsr::scene::Scene stagedScene;
   vsr::animation::AnimationManager stagedAnimations(&stagedScene);

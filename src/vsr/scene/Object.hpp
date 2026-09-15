@@ -108,6 +108,10 @@ struct Object : public ParameterObserver
       size_t numElements);
   void removeMetadata(std::string_view name);
 
+  // Whether `name` holds array data rather than a single value; false for a
+  // key the object does not carry.
+  bool metadataHoldsArray(std::string_view name) const;
+
   size_t numMetadata() const;
   const char *getMetadataName(size_t i) const;
 
@@ -176,12 +180,15 @@ struct Object : public ParameterObserver
   void decObjectUseCountParameter(const Parameter *p);
 
   void initMetadata() const;
+  // Signals the delegate that `name` changed, or collects it for the batch.
+  void metadataChanged(std::string_view name);
 
   Scene *m_scene{nullptr};
 
   ParameterMap m_parameters;
   bool m_inParameterBatch{false};
   std::vector<const Parameter *> m_batchedParameters;
+  std::vector<std::string> m_batchedMetadata;
 
   anari::DataType m_type{ANARI_UNKNOWN};
   Token m_subtype;

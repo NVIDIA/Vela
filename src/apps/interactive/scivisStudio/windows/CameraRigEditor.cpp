@@ -207,9 +207,9 @@ void CameraRigEditor::buildUI_rigControls()
   const bool activeShotUsesRig = shot && shot->cameraRigId == cameraRig.id;
   ImGui::BeginDisabled(!shot || activeShotUsesRig);
   if (ImGui::Button("Use for Active Shot") && shot) {
-    shot->cameraRigId = cameraRig.id;
-    project.markDirty();
-    m_projectContext->applyActiveShot();
+    Shot edit = *shot;
+    edit.cameraRigId = cameraRig.id;
+    m_projectContext->updateShot(edit);
   }
   ImGui::EndDisabled();
 
@@ -224,7 +224,7 @@ void CameraRigEditor::buildUI_rigControls()
 
   ImGui::SameLine();
   if (ImGui::Button("Remove Rig")) {
-    if (m_projectContext->cameraRigUseCount(cameraRig.id) > 0) {
+    if (project::cameraRigUseCount(project, cameraRig.id) > 0) {
       m_pendingDeleteRig = cameraRig.id;
       ImGui::OpenPopup("Delete Camera Rig?");
     } else {
@@ -237,9 +237,9 @@ void CameraRigEditor::buildUI_rigControls()
   if (ImGui::BeginPopupModal(
           "Delete Camera Rig?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
     auto *pending = camera_rig::findCameraRig(project, m_pendingDeleteRig);
-    const int useCount =
-        m_projectContext->cameraRigUseCount(m_pendingDeleteRig);
-    ImGui::Text("Delete '%s' and clear %d shot reference%s?",
+    const size_t useCount =
+        project::cameraRigUseCount(project, m_pendingDeleteRig);
+    ImGui::Text("Delete '%s' and clear %zu shot reference%s?",
         pending ? pending->name.c_str() : m_pendingDeleteRig.c_str(),
         useCount,
         useCount == 1 ? "" : "s");
@@ -389,13 +389,9 @@ void CameraRigEditor::buildUI_keyframes(CameraRig &cameraRig)
 
   ImGui::SameLine();
   ImGui::BeginDisabled(!shot || !hasSelection);
-  if (ImGui::Button("Jump")) {
-    shot->currentFrame = rig.keyframes[m_selectedKeyframe].frame;
-    if (ctx)
-      ctx->vsr.animationMgr.setAnimationFrame(shot->currentFrame);
-    else
-      m_projectContext->applyActiveShot();
-  }
+  if (ImGui::Button("Jump"))
+    m_projectContext->setActiveShotFrame(
+        rig.keyframes[m_selectedKeyframe].frame);
   vsr::ui::tooltipForPreviousItem("Jump Viewport To Keyframe");
   ImGui::EndDisabled();
 
@@ -437,13 +433,8 @@ void CameraRigEditor::buildUI_keyframes(CameraRig &cameraRig)
       if (ImGui::IsItemHovered()
           && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
         m_selectedKeyframe = i;
-        if (shot) {
-          shot->currentFrame = keyframe.frame;
-          if (ctx)
-            ctx->vsr.animationMgr.setAnimationFrame(shot->currentFrame);
-          else
-            m_projectContext->applyActiveShot();
-        }
+        if (shot)
+          m_projectContext->setActiveShotFrame(keyframe.frame);
       }
 
       ImGui::TableNextColumn();

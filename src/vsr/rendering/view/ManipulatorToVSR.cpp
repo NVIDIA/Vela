@@ -5,8 +5,12 @@
 
 namespace vsr::rendering {
 
-void updateCameraObject(
-    vsr::scene::Camera &c, const Manipulator &m, bool includeManipulatorMetadata)
+// An orthographic camera object's image height per unit of orbit distance.
+constexpr float ORTHOGRAPHIC_HEIGHT_PER_DISTANCE = 0.75f;
+
+void updateCameraObject(vsr::scene::Camera &c,
+    const Manipulator &m,
+    bool includeManipulatorMetadata)
 {
   c.beginParameterBatch();
 
@@ -15,7 +19,7 @@ void updateCameraObject(
 
   if (c.subtype() == scene::tokens::camera::orthographic) {
     c.setParameter("position", m.eye_FixedDistance());
-    c.setParameter("height", m.distance() * 0.75f);
+    c.setParameter("height", m.distance() * ORTHOGRAPHIC_HEIGHT_PER_DISTANCE);
   } else {
     c.setParameter("position", m.eye());
   }
@@ -30,6 +34,21 @@ void updateCameraObject(
   }
 
   c.endParameterBatch();
+}
+
+// The prefix updateCameraObject() writes every manipulator key under.
+constexpr std::string_view MANIPULATOR_METADATA_PREFIX = "manipulator.";
+
+bool isManipulatorMetadataKey(std::string_view name)
+{
+  return name.rfind(MANIPULATOR_METADATA_PREFIX, 0) == 0;
+}
+
+bool hasManipulatorMetadata(const vsr::scene::Camera &c)
+{
+  // The orbit centre: the one key updateManipulatorFromCamera() cannot
+  // reasonably default, and the reason the pose route is lossy.
+  return c.getMetadataValue("manipulator.at").valid();
 }
 
 void updateManipulatorFromCamera(Manipulator &m, const vsr::scene::Camera &c)
@@ -50,6 +69,35 @@ void updateManipulatorFromCamera(Manipulator &m, const vsr::scene::Camera &c)
   pose.mode = mode;
   m.setConfig(pose);
   m.setFixedDistance(fd);
+}
+
+void updateManipulatorFromCameraPose(
+    Manipulator &m, const vsr::scene::Camera &c)
+{
+  const auto *position = c.parameter("position");
+  const auto *direction = c.parameter("direction");
+  const auto *up = c.parameter("up");
+  if (!position || !direction || !up)
+    return;
+  if (!position->value().is<vsr::math::float3>()
+      || !direction->value().is<vsr::math::float3>()
+      || !up->value().is<vsr::math::float3>())
+    return;
+  const auto eye = position->value().get<vsr::math::float3>();
+  const auto dir = direction->value().get<vsr::math::float3>();
+  const auto upVector = up->value().get<vsr::math::float3>();
+  // An orthographic camera's position is the eye at the fixed distance and
+  // its height the orbit distance's image: adopt both, or updateCameraObject
+  // would write the manipulator's own back over the edit.
+  if (c.subtype() == scene::tokens::camera::orthographic) {
+    if (const auto height = c.parameterValueAs<float>("height");
+        height && *height > 0.f) {
+      m.setFixedDistancePose(
+          eye, dir, upVector, *height / ORTHOGRAPHIC_HEIGHT_PER_DISTANCE);
+      return;
+    }
+  }
+  m.setPose(eye, dir, upVector);
 }
 
 } // namespace vsr::rendering

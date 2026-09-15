@@ -43,30 +43,26 @@ anari::Camera RenderIndex::camera(size_t i)
   return (anari::Camera)m_cache.getHandle(ANARI_CAMERA, i, true);
 }
 
-CameraPose RenderIndex::computeDefaultView() const
+vsr::math::box3 RenderIndex::worldBounds() const
 {
-  vsr::math::float3 bounds[2] = {{-1.f, -1.f, -1.f}, {1.f, 1.f, 1.f}};
+  vsr::math::box3 bounds;
   if (!anariGetProperty(device(),
           world(),
           "bounds",
           ANARI_FLOAT32_BOX3,
-          &bounds[0],
+          &bounds,
           sizeof(bounds),
           ANARI_WAIT)) {
     vsr::core::logWarning(
-        "[RenderIndex::computeDefaultView] "
-        "anari::World returned no bounds!");
+        "[RenderIndex::worldBounds] anari::World returned no bounds!");
+    return {};
   }
+  return bounds;
+}
 
-  auto center = 0.5f * (bounds[0] + bounds[1]);
-  auto diag = bounds[1] - bounds[0];
-
-  CameraPose pose;
-  pose.fixedDist = 1.25f * vsr::math::length(diag);
-  pose.lookat = center;
-  pose.azeldist = {0.f, 20.f, pose.fixedDist};
-  pose.upAxis = static_cast<int>(UpAxis::POS_Y);
-  return pose;
+CameraPose RenderIndex::computeDefaultView() const
+{
+  return defaultViewForBounds(worldBounds());
 }
 
 void RenderIndex::logCacheInfo() const

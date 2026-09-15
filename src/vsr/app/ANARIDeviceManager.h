@@ -43,6 +43,10 @@ struct ANARIDeviceManager
 
   anari::Device loadDevice(const std::string &libName,
       const std::vector<DeviceInitParam> &initialDeviceParams = {});
+  // loadDevice(libName), falling back through libraryList() when that fails
+  // (or when `libName` names nothing loadable). On return `libName` names
+  // the library that loaded, or is empty when none did.
+  anari::Device loadFirstAvailableDevice(std::string &libName);
 
   const anari::Extensions *loadDeviceExtensions(const std::string &libName);
   vsr::rendering::RenderIndex *acquireRenderIndex(

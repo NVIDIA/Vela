@@ -54,6 +54,47 @@ if (TARGET vsr_scivis_studio_model)
     test_SciVisStudio.cpp
   )
 endif()
+if (TARGET vsr_network)
+  target_sources(${PROJECT_NAME} PRIVATE test_NetworkChannel.cpp)
+endif()
+if (TARGET vsr_scivis_studio_client_core)
+  target_sources(${PROJECT_NAME} PRIVATE
+    test_StudioClientConnection.cpp
+    test_StudioClientProjectOps.cpp
+  )
+endif()
+if (TARGET vsr_scivis_studio_server_core)
+  target_sources(${PROJECT_NAME} PRIVATE
+    test_StudioServer.cpp
+    test_StudioServerPlayback.cpp
+    test_StudioServerProjectOps.cpp
+    test_StudioServerRenderShot.cpp
+    test_StudioServerViewport.cpp
+  )
+endif()
+if (TARGET vsr_scivis_studio_client_core AND TARGET vsr_scivis_studio_server_core)
+  target_sources(${PROJECT_NAME} PRIVATE test_StudioRemoteE2E.cpp)
+endif()
+if (TARGET vsr_scivis_studio_test_client_core AND TARGET vsr_scivis_studio_server_core)
+  target_sources(${PROJECT_NAME} PRIVATE
+    test_StudioTestClientConnection.cpp
+    test_StudioTestClientProjectOps.cpp
+    test_StudioTestClientScript.cpp
+    test_StudioTestClientServer.cpp
+  )
+endif()
+if (TARGET vsr_scivis_studio_protocol)
+  target_sources(${PROJECT_NAME} PRIVATE
+    test_StudioProtocol.cpp
+    test_StudioProtocol_FrameCodec.cpp
+    test_StudioProtocol_Frames.cpp
+    test_StudioProtocol_ProjectRequests.cpp
+    test_StudioProtocol_Scene.cpp
+    test_StudioProtocol_ShotRigRequests.cpp
+    test_StudioProtocol_Tasks.cpp
+    test_StudioProtocol_Viewport.cpp
+  )
+endif()
 project_link_libraries(
 PRIVATE
   vsr_algorithms
@@ -66,6 +107,21 @@ PRIVATE
 )
 if (TARGET vsr_scivis_studio_model)
   target_link_libraries(${PROJECT_NAME} PRIVATE vsr_scivis_studio_model)
+endif()
+if (TARGET vsr_network)
+  target_link_libraries(${PROJECT_NAME} PRIVATE vsr_network)
+endif()
+if (TARGET vsr_scivis_studio_protocol)
+  target_link_libraries(${PROJECT_NAME} PRIVATE vsr_scivis_studio_protocol)
+endif()
+if (TARGET vsr_scivis_studio_client_core)
+  target_link_libraries(${PROJECT_NAME} PRIVATE vsr_scivis_studio_client_core)
+endif()
+if (TARGET vsr_scivis_studio_server_core)
+  target_link_libraries(${PROJECT_NAME} PRIVATE vsr_scivis_studio_server_core)
+endif()
+if (TARGET vsr_scivis_studio_test_client_core)
+  target_link_libraries(${PROJECT_NAME} PRIVATE vsr_scivis_studio_test_client_core)
 endif()
 
 add_test(NAME vsr::AnimationManager COMMAND ${PROJECT_NAME} "[AnimationManager]")
@@ -106,4 +162,22 @@ add_test(NAME vsr::Token         COMMAND ${PROJECT_NAME} "[Token]"        )
 add_test(NAME vsr::UsdImport     COMMAND ${PROJECT_NAME} "[UsdImport]"    )
 if (TARGET vsr_scivis_studio_model)
   add_test(NAME vsr::SciVisStudio COMMAND ${PROJECT_NAME} "[SciVisStudio]")
+endif()
+if (TARGET vsr_network)
+  add_test(NAME vsr::Network COMMAND ${PROJECT_NAME} "[Network]")
+endif()
+if (TARGET vsr_scivis_studio_protocol)
+  add_test(NAME vsr::StudioProtocol COMMAND ${PROJECT_NAME} "[StudioProtocol]")
+endif()
+if (TARGET vsr_scivis_studio_client_core)
+  add_test(NAME vsr::StudioClient COMMAND ${PROJECT_NAME} "[StudioClient]")
+endif()
+if (TARGET vsr_scivis_studio_server_core)
+  add_test(NAME vsr::StudioServer COMMAND ${PROJECT_NAME} "[StudioServer]")
+endif()
+if (TARGET vsr_scivis_studio_client_core AND TARGET vsr_scivis_studio_server_core)
+  add_test(NAME vsr::StudioRemote COMMAND ${PROJECT_NAME} "[StudioRemote]")
+endif()
+if (TARGET vsr_scivis_studio_test_client_core AND TARGET vsr_scivis_studio_server_core)
+  add_test(NAME vsr::StudioTestClient COMMAND ${PROJECT_NAME} "[StudioTestClient]")
 endif()

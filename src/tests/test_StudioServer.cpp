@@ -1,0 +1,707 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+// catch
+#include "StudioRemoteTestHelpers.h"
+#include "StudioServerTestHelpers.h"
+#include "catch.hpp"
+// vsr_scivis_studio_server_core
+#include "ServerOptions.h"
+#include "StudioServer.h"
+// vsr_scivis_studio_protocol
+#include "FrameCodec.h"
+#include "FrameMessages.h"
+#include "ProjectSnapshot.h"
+#include "SceneEditMessages.h"
+#include "SessionMessages.h"
+#include "StudioCodec.h"
+#include "StudioProtocol.h"
+// vsr_network
+#include "vsr/network/NetworkChannel.hpp"
+#include "vsr/network/messages/TransferLayer.hpp"
+#include "vsr/network/messages/TransferScene.hpp"
+// vsr_scene
+#include "vsr/scene/Scene.hpp"
+// vsr_core
+#include "vsr/core/Logging.hpp"
+// std
+#include <atomic>
+#include <chrono>
+#include <filesystem>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+
+using namespace vsr::scivis_studio;
+using namespace vsr::scivis_studio::server;
+using namespace vsr::scivis_studio::protocol;
+using vsr::network::Message;
+using namespace std::chrono_literals;
+
+namespace {
+
+// Records the status lines the server logs while it lives. run() logs from
+// the loop thread, so the lines are mutex-guarded.
+struct StatusLog
+{
+  StatusLog();
+  ~StatusLog();
+  bool contains(const std::string &text) const;
+
+  mutable std::mutex mutex;
+  std::vector<std::string> lines;
+};
+
+StatusLog::StatusLog()
+{
+  vsr::core::setLoggingCallback(
+      [this](vsr::core::LogLevel level, std::string message) {
+        if (level != vsr::core::STATUS)
+          return;
+        std::lock_guard<std::mutex> guard(mutex);
+        lines.push_back(std::move(message));
+      });
+}
+
+StatusLog::~StatusLog()
+{
+  vsr::core::setNoLogging();
+}
+
+bool StatusLog::contains(const std::string &text) const
+{
+  std::lock_guard<std::mutex> guard(mutex);
+  for (const auto &line : lines) {
+    if (line.find(text) != std::string::npos)
+      return true;
+  }
+  return false;
+}
+
+std::vector<std::string> argv(std::initializer_list<const char *> items)
+{
+  std::vector<std::string> out{"scivisStudioServer"};
+  out.insert(out.end(), items.begin(), items.end());
+  return out;
+}
+
+} // namespace
+
+SCENARIO("ServerOptions parses the server command line", "[StudioServer]")
+{
+  ServerOptions options;
+  std::string error;
+
+  GIVEN("only a data root")
+  {
+    REQUIRE(
+        parseServerOptions(argv({"--data-root", "/data"}), options, &error));
+
+    THEN("everything else keeps its default")
+    {
+      REQUIRE(options.port == DEFAULT_PORT);
+      REQUIRE(options.library.empty());
+      REQUIRE(options.dataRoots == std::vector<std::filesystem::path>{"/data"});
+      REQUIRE(options.projectDirectory.empty());
+      REQUIRE_FALSE(options.showHelp);
+    }
+  }
+
+  GIVEN("every flag, with repeated data roots")
+  {
+    REQUIRE(parseServerOptions(argv({"--port",
+                                   "4242",
+                                   "--library",
+                                   "visgl",
+                                   "--data-root",
+                                   "/a",
+                                   "--data-root",
+                                   "/b",
+                                   "--project",
+                                   "/a/proj"}),
+        options,
+        &error));
+
+    THEN("all values are recorded in order")
+    {
+      REQUIRE(options.port == 4242);
+      REQUIRE(options.library == "visgl");
+      REQUIRE(
+          options.dataRoots == std::vector<std::filesystem::path>{"/a", "/b"});
+      REQUIRE(options.projectDirectory == "/a/proj");
+    }
+  }
+
+  GIVEN("a project but no data root")
+  {
+    REQUIRE(parseServerOptions(
+        argv({"--project", "/projects/demo/"}), options, &error));
+
+    THEN("the project directory's parent becomes the root")
+    {
+      REQUIRE(
+          options.dataRoots == std::vector<std::filesystem::path>{"/projects"});
+      REQUIRE(options.projectDirectory == "/projects/demo/");
+    }
+  }
+
+  GIVEN("--help among other arguments")
+  {
+    REQUIRE(parseServerOptions(argv({"--port", "1", "-h"}), options, &error));
+
+    THEN("showHelp is set without validating the rest")
+    {
+      REQUIRE(options.showHelp);
+    }
+  }
+
+  GIVEN("malformed command lines")
+  {
+    THEN("an unknown flag is rejected by name")
+    {
+      REQUIRE_FALSE(parseServerOptions(
+          argv({"--data-root", "/d", "--bogus"}), options, &error));
+      REQUIRE(error.find("--bogus") != std::string::npos);
+    }
+    THEN("a missing value is rejected")
+    {
+      REQUIRE_FALSE(parseServerOptions(argv({"--data-root"}), options, &error));
+      REQUIRE(error.find("--data-root") != std::string::npos);
+    }
+    THEN("a non-numeric or out-of-range port is rejected")
+    {
+      REQUIRE_FALSE(parseServerOptions(
+          argv({"--data-root", "/d", "--port", "abc"}), options, &error));
+      REQUIRE(error.find("--port") != std::string::npos);
+      REQUIRE_FALSE(parseServerOptions(
+          argv({"--data-root", "/d", "--port", "70000"}), options, &error));
+    }
+    THEN("port 0 asks the OS for a free port")
+    {
+      REQUIRE(parseServerOptions(
+          argv({"--data-root", "/d", "--port", "0"}), options, &error));
+      REQUIRE(options.port == 0);
+    }
+    THEN("no data root and no project is rejected")
+    {
+      REQUIRE_FALSE(parseServerOptions(argv({}), options, &error));
+      REQUIRE(error.find("--data-root") != std::string::npos);
+    }
+    THEN("two projects are rejected")
+    {
+      REQUIRE_FALSE(parseServerOptions(
+          argv({"--project", "/a", "--project", "/b"}), options, &error));
+    }
+  }
+
+  GIVEN("the usage text")
+  {
+    const auto usage = serverUsage("scivisStudioServer");
+
+    THEN("it names every flag and the default port")
+    {
+      for (const char *flag :
+          {"--port", "--library", "--data-root", "--project", "--help"})
+        REQUIRE(usage.find(flag) != std::string::npos);
+      REQUIRE(usage.find(std::to_string(DEFAULT_PORT)) != std::string::npos);
+    }
+  }
+}
+
+SCENARIO(
+    "StudioServer's Listening line names the port it bound", "[StudioServer]")
+{
+  if (!helideAvailable()) {
+    WARN("helide ANARI library unavailable, skipping the Listening line test");
+    return;
+  }
+
+  // The launcher contract: scivisStudioTestClient reads the port of a server
+  // it spawned with --port 0 out of this line, so it must keep naming the
+  // port the OS picked.
+  GIVEN("a server started on port 0, with the status log captured")
+  {
+    // Declared first so it outlives the server that logs through it.
+    StatusLog log;
+    RunningServer running(testServerOptions());
+    INFO(running.startError);
+    REQUIRE(running.started);
+    REQUIRE(running.port() != 0);
+
+    THEN("the logged Listening line names that port")
+    {
+      REQUIRE(waitFor([&] {
+        return log.contains("[StudioServer] Listening on port "
+            + std::to_string(running.port()));
+      }));
+    }
+  }
+}
+
+SCENARIO("StudioServer runs a viewer-parity session", "[StudioServer]")
+{
+  if (!helideAvailable()) {
+    WARN("helide ANARI library unavailable, skipping the session test");
+    return;
+  }
+
+  GIVEN("a server on a fresh project and a free port")
+  {
+    // Before run(): the last moment this thread may read the project.
+    ShotID shotId;
+    size_t cameraIndex = VSR_INVALID_INDEX;
+    ShotRenderSettings renderSettings;
+    RunningServer running(
+        testServerOptions({std::filesystem::temp_directory_path()}),
+        [&](StudioServer &server) {
+          const auto &project = server.projectContext().project();
+          shotId = project.activeShotId;
+          if (const auto *shot = project::activeShot(project)) {
+            cameraIndex = shot->camera.objectIndex;
+            renderSettings = shot->renderSettings;
+          }
+        });
+    INFO(running.startError);
+    REQUIRE(running.started);
+    auto &server = *running.server;
+    REQUIRE(server.libraryName() == "helide");
+    const auto port = server.port();
+    REQUIRE(port != 0);
+    REQUIRE_FALSE(shotId.empty());
+    REQUIRE(cameraIndex != VSR_INVALID_INDEX);
+    const SceneObjectRef cameraRef{ANARI_CAMERA, cameraIndex};
+
+    WHEN("a client connects and answers the Hello")
+    {
+      TestClient client;
+      client.connect(port);
+      REQUIRE(client.waitForCount(StudioMessageType::Hello, 1));
+      const auto hello = decode<Hello>(client.last(StudioMessageType::Hello));
+      REQUIRE(hello);
+      REQUIRE(hello->version == PROTOCOL_VERSION);
+      REQUIRE(hello->buildInfo.find("helide") != std::string::npos);
+      REQUIRE(waitFor([&] {
+        return server.sessionState() == SessionState::AwaitingHello;
+      }));
+
+      client.clear();
+      client.send(Hello{});
+      REQUIRE(client.waitForCount(StudioMessageType::BootstrapEnd, 1));
+
+      THEN("the bootstrap arrives as one ordered bracket")
+      {
+        const auto msgs = client.messages();
+        std::vector<StudioMessageType> types;
+        for (const auto &m : msgs)
+          types.push_back(StudioMessageType(m.header.type));
+
+        REQUIRE(types.size() >= 5);
+        REQUIRE(types[0] == StudioMessageType::BootstrapBegin);
+        REQUIRE(types[1] == StudioMessageType::TransferScene);
+        size_t i = 2;
+        size_t layers = 0;
+        while (
+            i < types.size() && types[i] == StudioMessageType::TransferLayer) {
+          ++i;
+          ++layers;
+        }
+        REQUIRE(layers >= 1);
+        REQUIRE(i + 3 == types.size());
+        REQUIRE(types[i] == StudioMessageType::FrameConfig);
+        REQUIRE(types[i + 1] == StudioMessageType::ProjectSnapshot);
+        REQUIRE(types[i + 2] == StudioMessageType::BootstrapEnd);
+
+        const auto config = decode<FrameConfig>(msgs[i]);
+        REQUIRE(config);
+        REQUIRE(config->width == renderSettings.width);
+        REQUIRE(config->height == renderSettings.height);
+
+        const auto snapshot = decode<ProjectSnapshot>(msgs[i + 1]);
+        REQUIRE(snapshot);
+        REQUIRE(snapshot->project.activeShotId == shotId);
+        REQUIRE(snapshot->project.shots.size() == 1);
+        REQUIRE(
+            snapshot->project.shots.front().camera.objectIndex == cameraIndex);
+
+        vsr::scene::Scene mirror;
+        vsr::network::messages::TransferScene(msgs[1], &mirror).execute();
+        auto *camera = mirror.getObject(ANARI_CAMERA, cameraIndex);
+        REQUIRE(camera);
+        REQUIRE(camera->name() == shotId + "_camera");
+        REQUIRE(mirror.layer("studio") != nullptr);
+        REQUIRE(waitFor([&] {
+          return server.sessionState() == SessionState::Established;
+        }));
+
+        AND_THEN("StartRendering streams frames at the requested config")
+        {
+          client.clear();
+          SetEncodings encodings;
+          encodings.supported = {FrameEncoding::Raw};
+          client.send(encodings);
+          SetFrameConfig frameConfig;
+          frameConfig.width = 64;
+          frameConfig.height = 48;
+          client.send(frameConfig);
+          client.send(StartRendering{});
+
+          REQUIRE(client.waitForCount(StudioMessageType::Frame, 1));
+          REQUIRE(server.streaming());
+          const auto frame = decodeFrame(client.last(StudioMessageType::Frame));
+          REQUIRE(frame);
+          REQUIRE(frame->header.width == 64);
+          REQUIRE(frame->header.height == 48);
+          REQUIRE(frame->header.encoding == FrameEncoding::Raw);
+          REQUIRE(frame->header.pixelFormat == PixelFormat::RGBA8_sRGB);
+          REQUIRE(frame->header.shotId == shotId);
+          REQUIRE(frame->header.frame == 0);
+          REQUIRE(frame->size == 64 * 48 * 4);
+
+          REQUIRE(client.waitForCount(StudioMessageType::FrameConfig, 1));
+          const auto ack =
+              decode<FrameConfig>(client.last(StudioMessageType::FrameConfig));
+          REQUIRE(ack);
+          REQUIRE(ack->width == 64);
+          REQUIRE(ack->height == 48);
+
+          AND_THEN("unknown and malformed messages are refused loudly")
+          {
+            // 0 and 255 are the type bytes the enum never assigns (255 is the
+            // transport's MESSAGE_TYPE_INVALID); 200 is a gap in the middle.
+            for (int outsideType : {200, 0, 255}) {
+              client.clear();
+              Message outside;
+              outside.header.type = uint8_t(outsideType);
+              client.channel->send(std::move(outside));
+              REQUIRE(client.waitForCount(StudioMessageType::Error, 1));
+              const auto refused =
+                  decode<Error>(client.last(StudioMessageType::Error));
+              REQUIRE(refused);
+              REQUIRE(refused->message.find(
+                          "unknown message type " + std::to_string(outsideType))
+                  != std::string::npos);
+            }
+
+            // A payload-less Pick decodes to nothing: refused as malformed
+            // rather than serviced.
+            client.clear();
+            Message pick;
+            pick.header.type = uint8_t(StudioMessageType::Pick);
+            client.channel->send(std::move(pick));
+            REQUIRE(client.waitForCount(StudioMessageType::Error, 1));
+            const auto refused =
+                decode<Error>(client.last(StudioMessageType::Error));
+            REQUIRE(refused);
+            REQUIRE(refused->message.find("malformed Pick payload")
+                != std::string::npos);
+
+            // Every type a client may send has a handler: a payload-less
+            // one of each is refused as malformed (never as unimplemented or
+            // unserved), except the types that carry no payload at all and
+            // those whose fields all have defaults, so an empty payload is a
+            // valid message (SetOutline clears, SetEncodings means Raw only).
+            for (int value = 1; value < 0xff; ++value) {
+              if (!isStudioMessageType(uint8_t(value)))
+                continue;
+              const auto type = StudioMessageType(value);
+              if (isServerToClient(type))
+                continue;
+              switch (type) {
+              case StudioMessageType::Hello:
+              case StudioMessageType::Error:
+              case StudioMessageType::Ping:
+              case StudioMessageType::Pong:
+              case StudioMessageType::Disconnect:
+              case StudioMessageType::Shutdown:
+              case StudioMessageType::StartRendering:
+              case StudioMessageType::StopRendering:
+              case StudioMessageType::SetOutline:
+              case StudioMessageType::ViewportSettings:
+              case StudioMessageType::SetEncodings:
+                continue;
+              default:
+                break;
+              }
+              client.clear();
+              Message empty;
+              empty.header.type = uint8_t(value);
+              client.channel->send(std::move(empty));
+              INFO(toString(type));
+              REQUIRE(client.waitForCount(StudioMessageType::Error, 1));
+              const auto malformed =
+                  decode<Error>(client.last(StudioMessageType::Error));
+              REQUIRE(malformed);
+              REQUIRE(malformed->message
+                  == "malformed " + std::string(toString(type)) + " payload");
+            }
+          }
+
+          AND_THEN("StopRendering pauses and an edit reaches the server scene")
+          {
+            client.send(StopRendering{});
+            REQUIRE(waitFor([&] { return !server.streaming(); }));
+
+            SetObjectParameter edit;
+            edit.object = cameraRef;
+            edit.name = "fovy";
+            edit.value = vsr::core::Any(0.5f);
+            client.send(edit);
+            auto &scene = server.appContext().vsr.scene;
+            REQUIRE(waitFor([&] {
+              auto *camera = scene.getObject(ANARI_CAMERA, cameraIndex);
+              const auto fovy = camera->parameterValueAs<float>("fovy");
+              return fovy && *fovy == 0.5f;
+            }));
+            // Parameter edits are one-way: nothing echoes back.
+            REQUIRE(client.count(StudioMessageType::ObjectAdded) == 0);
+            REQUIRE(client.count(StudioMessageType::TransferScene) == 0);
+
+            AND_THEN(
+                "a replacement client greeting right after the drop is"
+                " served")
+            {
+              // No wait for Listening: the drop, the accept and the Hello may
+              // all reach the loop in one latch batch, and the accepted Hello
+              // must survive the old session's teardown.
+              client.channel->disconnect();
+              TestClient next;
+              next.connect(port);
+              REQUIRE(next.waitForCount(StudioMessageType::Hello, 1));
+              next.send(Hello{});
+              REQUIRE(next.waitForCount(StudioMessageType::BootstrapEnd, 1));
+
+              next.clear();
+              SetFrameConfig resize;
+              resize.width = 32;
+              resize.height = 24;
+              next.send(resize);
+              REQUIRE(next.waitForCount(StudioMessageType::FrameConfig, 1));
+              REQUIRE(next.count(StudioMessageType::Error) == 0);
+            }
+
+            AND_THEN("a dropped client returns the server to Listening")
+            {
+              client.channel->disconnect();
+              REQUIRE(waitFor([&] {
+                return server.sessionState() == SessionState::Listening;
+              }));
+
+              AND_THEN("a version-mismatched Hello is refused and closed")
+              {
+                TestClient other;
+                other.connect(port);
+                REQUIRE(other.waitForCount(StudioMessageType::Hello, 1));
+                Hello wrong;
+                wrong.version = PROTOCOL_VERSION + 1;
+                other.send(wrong);
+                REQUIRE(other.waitForCount(StudioMessageType::Error, 1));
+                const auto refused =
+                    decode<Error>(other.last(StudioMessageType::Error));
+                REQUIRE(refused);
+                REQUIRE(refused->message.find("version") != std::string::npos);
+                REQUIRE(waitFor([&] { return other.disconnects == 1; }));
+                REQUIRE(waitFor([&] {
+                  return server.sessionState() == SessionState::Listening;
+                }));
+                REQUIRE(other.count(StudioMessageType::BootstrapBegin) == 0);
+
+                AND_THEN("Shutdown makes run() return")
+                {
+                  TestClient last;
+                  last.connect(port);
+                  REQUIRE(last.waitForCount(StudioMessageType::Hello, 1));
+                  last.send(Hello{});
+                  REQUIRE(
+                      last.waitForCount(StudioMessageType::BootstrapEnd, 1));
+                  last.send(Shutdown{});
+                  REQUIRE(waitFor([&] { return running.finished(); }));
+                  REQUIRE(server.sessionState() == SessionState::Shutdown);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+SCENARIO(
+    "StudioServer tells a replaced client why it was closed", "[StudioServer]")
+{
+  if (!helideAvailable()) {
+    WARN("helide ANARI library unavailable, skipping the replace test");
+    return;
+  }
+
+  GIVEN("a server with one bootstrapped client")
+  {
+    ServerSession session;
+    auto &server = *session.server;
+    const auto port = session.port();
+    auto &first = session.client;
+    first.clear();
+
+    WHEN("a second client connects")
+    {
+      TestClient second;
+      second.connect(port);
+      REQUIRE(second.waitForCount(StudioMessageType::Hello, 1));
+
+      THEN("the first hears the reason, then loses the connection")
+      {
+        // The farewell is a Disconnect naming the reason, not a bare Error.
+        REQUIRE(first.waitForCount(StudioMessageType::Disconnect, 1));
+        const auto farewell =
+            decode<Disconnect>(first.last(StudioMessageType::Disconnect));
+        REQUIRE(farewell);
+        REQUIRE(farewell->reason == "replaced by another client");
+        REQUIRE(first.count(StudioMessageType::Error) == 0);
+        REQUIRE(waitFor([&] { return first.disconnects == 1; }));
+
+        AND_THEN("the second bootstraps as the session's client")
+        {
+          second.send(Hello{});
+          REQUIRE(second.waitForCount(StudioMessageType::BootstrapEnd, 1));
+          REQUIRE(second.count(StudioMessageType::Error) == 0);
+          REQUIRE(waitFor([&] {
+            return server.sessionState() == SessionState::Established;
+          }));
+        }
+      }
+    }
+  }
+}
+
+namespace {
+
+// The names of a layer's nodes by forest index; empty slots stay empty.
+std::vector<std::string> namesByIndex(const vsr::scene::Layer &layer)
+{
+  std::vector<std::string> names(layer.capacity());
+  for (size_t i = 0; i < layer.capacity(); ++i) {
+    if (auto node = layer.at(i))
+      names[i] = (*node)->name();
+  }
+  return names;
+}
+
+// Where a node falls in the layer's traversal order.
+size_t traversalPosition(
+    const vsr::scene::Layer &layer, vsr::scene::LayerNodeRef target)
+{
+  size_t position = 0;
+  size_t found = VSR_INVALID_INDEX;
+  layer.traverse_const(
+      layer.root(), [&](const vsr::scene::LayerNode &node, int) {
+        if (node.index() == target.index())
+          found = position;
+        ++position;
+        return true;
+      });
+  return found;
+}
+
+// Rebuild a mirror from the scene and layer transfers of one bootstrap.
+void applySceneTransfers(
+    vsr::scene::Scene &mirror, const std::vector<Message> &msgs)
+{
+  for (const auto &msg : msgs) {
+    switch (StudioMessageType(msg.header.type)) {
+    case StudioMessageType::TransferScene:
+      vsr::network::messages::TransferScene(msg, &mirror).execute();
+      break;
+    case StudioMessageType::TransferLayer:
+      vsr::network::messages::TransferLayer(msg, &mirror).execute();
+      break;
+    default:
+      break;
+    }
+  }
+}
+
+} // namespace
+
+SCENARIO("StudioServer applies SetNodeTransform to the addressed node",
+    "[StudioServer]")
+{
+  if (!helideAvailable()) {
+    WARN("helide ANARI library unavailable, skipping the node transform test");
+    return;
+  }
+
+  GIVEN("a started server whose studio layer is sparse")
+  {
+    // Before run(): start() is the last thing on this thread that may touch
+    // the scene. Two transform nodes bracket a removed one so the addressed
+    // node's forest index is not its traversal position.
+    vsr::scene::Layer *layer = nullptr;
+    size_t targetIndex = VSR_INVALID_INDEX;
+    size_t firstIndex = VSR_INVALID_INDEX;
+    std::vector<std::string> serverNames;
+    ServerSession session(
+        testServerOptions({std::filesystem::temp_directory_path()}),
+        [&](StudioServer &server) {
+          auto &scene = server.appContext().vsr.scene;
+          layer = scene.layer("studio");
+          REQUIRE(layer != nullptr);
+          auto first = scene.insertChildTransformNode(
+              layer->root(), vsr::math::IDENTITY_MAT4, "first");
+          auto doomed = scene.insertChildTransformNode(
+              layer->root(), vsr::math::IDENTITY_MAT4, "doomed");
+          auto target = scene.insertChildTransformNode(
+              layer->root(), vsr::math::IDENTITY_MAT4, "target");
+          scene.removeNode(doomed);
+          targetIndex = target.index();
+          firstIndex = first.index();
+          REQUIRE(traversalPosition(*layer, target) != targetIndex);
+          serverNames = namesByIndex(*layer);
+        });
+    auto &client = session.client;
+    const SceneNodeRef targetRef{"studio", targetIndex};
+
+    WHEN("the bootstrap is applied to a mirror")
+    {
+      vsr::scene::Scene mirror;
+      applySceneTransfers(mirror, client.messages());
+
+      THEN("the mirror names every studio node by the server's index")
+      {
+        const auto *mirrorLayer = mirror.layer("studio");
+        REQUIRE(mirrorLayer != nullptr);
+        REQUIRE(namesByIndex(*mirrorLayer) == serverNames);
+        auto mirrored = mirrorLayer->at(targetRef.nodeIndex);
+        REQUIRE(mirrored);
+        REQUIRE((*mirrored)->name() == "target");
+      }
+    }
+
+    WHEN("the client sets the transform of the addressed node")
+    {
+      client.clear();
+      SetNodeTransform edit;
+      edit.node = targetRef;
+      edit.transform = vsr::math::mat4{{2.f, 0.f, 0.f, 0.f},
+          {0.f, 2.f, 0.f, 0.f},
+          {0.f, 0.f, 2.f, 0.f},
+          {5.f, 6.f, 7.f, 1.f}};
+      client.send(edit);
+
+      THEN("that node, and no other, takes the transform on the server")
+      {
+        REQUIRE(waitFor([&] {
+          return (*layer->at(targetIndex))->getTransform() == edit.transform;
+        }));
+        REQUIRE((*layer->at(firstIndex))->getTransform()
+            == vsr::math::IDENTITY_MAT4);
+        REQUIRE(client.count(StudioMessageType::Error) == 0);
+        // Origin-based echo suppression: the client's own edit is not pushed
+        // back as a layer transfer.
+        REQUIRE(client.count(StudioMessageType::TransferLayer) == 0);
+      }
+    }
+  }
+}

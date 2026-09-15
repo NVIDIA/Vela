@@ -58,8 +58,31 @@ struct ProjectValidationResult
   std::filesystem::path manifestPath;
 };
 
-void projectToNode(const Project &project, vsr::core::DataNode &node);
-bool nodeToProject(vsr::core::DataNode &node, Project &project);
+// The Project's one serializer; Shot.h explains ProjectForm. Manifest writes
+// what project.vsr stores under "scivisStudio" and is byte-for-byte what it
+// has always written; Full adds every runtime field inline under its entity,
+// so a receiver that cannot rebuild them (the client's Project Replica) gets
+// the whole Project in one pass:
+//
+//   datasets/<i>/{status, sourceKind, importerType,
+//       source/{sourcePath, importerSettings/<key>},
+//       sourceFiles/<i>/{path, resolvedPath}, rootNode, dirty, declared,
+//       pendingExtraction, pendingSourceListMigration, persistedName}
+//   shots/<i>/camera
+//   lightRigs/<i>/{rootNode, persistedName}
+//   cameraRigs/<i>/{rig (cameraRigToNode), persistedName}
+//
+// nodeToProject() reads the form it is told, assigns `project` only on
+// success, and fails on a malformed tree: an entity without an id, a child
+// of the wrong type, an unknown enum spelling, or a rig that
+// nodeToCameraRig() rejects. Manifest reads take the v1-v4 compatibility
+// paths (inline dataset metadata, inline shot camera rigs) and leave the
+// runtime fields at the defaults the open path rebuilds from; Full reads the
+// runtime fields and skips the compatibility paths.
+void projectToNode(
+    const Project &project, vsr::core::DataNode &node, ProjectForm form);
+bool nodeToProject(
+    const vsr::core::DataNode &node, Project &project, ProjectForm form);
 
 // Rig names double as on-disk filenames ("<name>.vsr"), so they are restricted
 // to a portable character set (letters, digits, space, '_', '-', '(', ')') with

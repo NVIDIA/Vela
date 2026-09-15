@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "vsr/io/serialization/Layer.hpp"
+#include "vsr/io/serialization/serialization_internal.hpp"
+// vsr_core
+#include "vsr/core/Logging.hpp"
 // vsr_scene
 #include "vsr/scene/Scene.hpp"
 // std
@@ -35,6 +38,22 @@ void deserializeLayerNodeInstanceParameters(
   }
 }
 
+// A node recorded with LayerNodeNumbering::Preserved goes back into its
+// recorded slot, or nowhere (an empty ref) when that slot is taken; anything
+// else is appended densely.
+scene::LayerNodeRef insertLayerNode(
+    core::DataNode &node, scene::LayerNodeRef parent, scene::Layer &layer)
+{
+  if (auto *index = node.child("index"); index != nullptr) {
+    const auto slot = index->getValueOr(core::INVALID_INDEX);
+    auto placed = parent->insert_last_child_at(slot, {&layer});
+    if (!placed)
+      core::logError("[deserialize_Layer] node slot %zu unavailable", slot);
+    return placed;
+  }
+  return parent->insert_last_child({&layer});
+}
+
 } // namespace
 
 namespace detail {
@@ -42,7 +61,8 @@ namespace detail {
 void serialize_LayerSubtree(const scene::Layer &layer,
     scene::LayerNodeRef start,
     core::DataNode &node,
-    const std::vector<scene::LayerNodeRef> *excluded)
+    const std::vector<scene::LayerNodeRef> *excluded,
+    LayerNodeNumbering numbering)
 {
   const auto isExcludedNode = [&](const scene::LayerNode &layerNode) {
     if (!excluded)
@@ -80,6 +100,8 @@ void serialize_LayerSubtree(const scene::Layer &layer,
           currentNode = &currentParentNode->child("children")->append();
 
         currentNode->append("name") = layerNode->name();
+        if (numbering == LayerNodeNumbering::Preserved)
+          currentNode->append("index") = layerNode.index();
         currentNode->append("value") = layerNode->getValueRaw();
         if (layerNode->isTransform()) {
           currentNode->append("transformSRT") = layerNode->getTransformSRT();
@@ -94,9 +116,11 @@ void serialize_LayerSubtree(const scene::Layer &layer,
 
 } // namespace detail
 
-void serialize_Layer(const scene::Layer &layer, core::DataNode &node)
+void serialize_Layer(const scene::Layer &layer,
+    core::DataNode &node,
+    LayerNodeNumbering numbering)
 {
-  serialize_LayerSubtree(layer, layer.root(), node);
+  detail::serialize_LayerSubtree(layer, layer.root(), node, nullptr, numbering);
 }
 
 void serialize_LayerSubtree(
@@ -105,7 +129,7 @@ void serialize_LayerSubtree(
   detail::serialize_LayerSubtree(layer, start, node, nullptr);
 }
 
-void deserialize_Layer(
+bool deserialize_Layer(
     core::DataNode &rootNode, scene::Layer &layer, scene::Scene &)
 {
   layer.clear();
@@ -114,7 +138,10 @@ void deserialize_Layer(
   scene::LayerNodeRef currentParentNode;
   scene::LayerNodeRef currentNode = layer.root();
   int currentLevel = -1;
+  bool placed = true;
   rootNode.traverse([&](core::DataNode &node, int level) {
+    if (!placed)
+      return false;
     if (level & 0x1 || !node.child("children"))
       return true;
 
@@ -133,7 +160,11 @@ void deserialize_Layer(
     if (level == 0) {
       currentNode = layer.root();
     } else {
-      currentNode = currentParentNode->insert_last_child({&layer});
+      currentNode = insertLayerNode(node, currentParentNode, layer);
+      if (!currentNode) {
+        placed = false;
+        return false;
+      }
       if (auto *child = node.child("transformSRT"); child != nullptr)
         (*currentNode)->setAsTransform(child->getValueAs<math::mat3>());
       else
@@ -145,6 +176,10 @@ void deserialize_Layer(
 
     return true;
   });
+
+  if (!placed)
+    layer.clear();
+  return placed;
 }
 
 } // namespace vsr::io

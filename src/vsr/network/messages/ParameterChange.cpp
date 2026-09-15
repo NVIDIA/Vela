@@ -24,7 +24,7 @@ ParameterChange::ParameterChange(const vsr::scene::Object *obj,
     return;
   }
 
-  auto root = m_tree.root();
+  auto &root = m_tree.root();
   root["o"] = vsr::core::Any(obj->type(), obj->index()); // object
 
   auto &ps = root["p"];
@@ -48,12 +48,12 @@ ParameterChange::ParameterChange(const Message &msg, vsr::scene::Scene *scene)
 #endif
 }
 
-void ParameterChange::execute()
+bool ParameterChange::execute()
 {
   if (!m_scene) {
     vsr::core::logError(
         "[message::ParameterChange] No scene provided for exec");
-    return;
+    return false;
   }
 
   auto &root = m_tree.root();
@@ -64,7 +64,7 @@ void ParameterChange::execute()
         "[message::ParameterChange] Unable to find object (%s, %zu)",
         anari::toString(o.type()),
         o.getAsObjectIndex());
-    return;
+    return false;
   }
 
   auto &pn = root["p"];
@@ -74,6 +74,7 @@ void ParameterChange::execute()
     auto &p = obj->addParameter(paramName.c_str()); // parameter may be new
     vsr::io::deserialize_Parameter(child["v"], p);
   });
+  return true;
 }
 
 } // namespace vsr::network::messages

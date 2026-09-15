@@ -7,6 +7,8 @@
 #include "vsr/core/DataTree.hpp"
 // vsr_app
 #include "vsr/app/Context.h"
+// vsr_ui_imgui
+#include "vsr/ui/imgui/vsr_ui_imgui.h"
 // imgui
 #include <imgui.h>
 // std
@@ -42,6 +44,9 @@ struct Window
   virtual int windowFlags() const;
   virtual int pushStyle();
   vsr::app::Context *appContext() const;
+  // What the application lets the object editors offer; pass it to
+  // buildUI_object()/buildUI_parameter().
+  const vsr::ui::ObjectEditPolicy &objectEditPolicy() const;
 
   Application *m_app{nullptr};
   std::string m_name;

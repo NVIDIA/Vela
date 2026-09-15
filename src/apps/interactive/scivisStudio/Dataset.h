@@ -32,6 +32,16 @@ struct SceneObjectRef
   size_t objectIndex{VSR_INVALID_INDEX};
 };
 
+inline bool operator==(const SceneObjectRef &a, const SceneObjectRef &b)
+{
+  return a.type == b.type && a.objectIndex == b.objectIndex;
+}
+
+inline bool operator!=(const SceneObjectRef &a, const SceneObjectRef &b)
+{
+  return !(a == b);
+}
+
 enum class DatasetSourceKind
 {
   Static,

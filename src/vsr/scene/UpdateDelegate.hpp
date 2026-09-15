@@ -9,6 +9,7 @@
 #include "Layer.hpp"
 // std
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace vsr::scene {
@@ -19,7 +20,8 @@ struct Parameter;
 
 /*
  * Abstract observer interface that receives all mutating signals produced by
- * a Scene: object creation/removal, parameter changes, and layer edits.
+ * a Scene: object creation/removal, parameter changes, object metadata
+ * changes, and layer edits.
  * Subclass to drive downstream systems (e.g. renderers).
  *
  * Example:
@@ -61,6 +63,19 @@ struct BaseUpdateDelegate
   // nothing to coalesce need not say so.
   virtual void signalUpdateBatchBegin() {}
   virtual void signalUpdateBatchEnd() {}
+
+  // Object metadata changed under `name`: set, replaced or removed. The
+  // signal names the key only; read the object for the new value, whose
+  // absence means the key was removed. Inside a parameter batch the keys
+  // are collected and arrive as one signalMetadataBatchUpdated() when the
+  // batch ends, ahead of that batch's parameters, so a consumer sees the
+  // object's metadata before the parameters written beside it. Optional
+  // hooks (STYLEGUIDE section 13): a delegate that does not care about
+  // metadata need not say so.
+  virtual void signalMetadataUpdated(const Object *o, const char *name) {}
+  virtual void signalMetadataBatchUpdated(
+      const Object *o, const std::vector<std::string> &names)
+  {}
 
   VSR_NOT_COPYABLE(BaseUpdateDelegate)
   VSR_DEFAULT_MOVEABLE(BaseUpdateDelegate)
@@ -146,6 +161,9 @@ struct MultiUpdateDelegate : public BaseUpdateDelegate
   void signalInvalidateCachedObjects() override;
   void signalUpdateBatchBegin() override;
   void signalUpdateBatchEnd() override;
+  void signalMetadataUpdated(const Object *o, const char *name) override;
+  void signalMetadataBatchUpdated(
+      const Object *o, const std::vector<std::string> &names) override;
 
  private:
   std::vector<std::unique_ptr<BaseUpdateDelegate>> m_delegates;

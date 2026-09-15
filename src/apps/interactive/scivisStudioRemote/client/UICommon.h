@@ -1,0 +1,130 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+#pragma once
+
+// vsr_scivis_studio_modals
+#include "modals/ModalUI.h"
+// imgui
+#include <imgui.h>
+// std
+#include <array>
+#include <filesystem>
+#include <functional>
+#include <optional>
+#include <string>
+#include <vector>
+
+namespace vsr::scivis_studio::client::ui {
+
+/*
+ * Small ImGui helpers the adapted editors share: colours, the buffered name
+ * field and the remove-confirmation modal every editor has, and the archive
+ * path conventions. Nothing here reads the filesystem: the path helpers are
+ * lexical and operate on server paths.
+ *
+ * Example:
+ *   if (auto name = m_nameField.draw(rig.id, rig.name, m_rename.busy(ops))) {
+ *     RenameLightRig rename;
+ *     rename.lightRigId = rig.id;
+ *     rename.newName = *name;
+ *     m_rename.send(ops, std::move(rename), ...);
+ *   }
+ *   archive.file = ui::withVsrExtension(chosen);
+ */
+
+// The message colours and archive extensions are the shared modals'
+// (modals/ModalUI.h); the editors reach them through this namespace.
+using modals::ARCHIVE_EXTENSIONS;
+using modals::archiveExtensions;
+using modals::ERROR_TEXT_COLOR;
+using modals::errorText;
+using modals::WARNING_TEXT_COLOR;
+using modals::warningText;
+
+constexpr ImVec4 PROJECT_DIRECTORY_COLOR{0.55f, 0.8f, 1.f, 1.f};
+
+// Rig and dataset archives default to .vsr when the user typed no extension.
+std::filesystem::path withVsrExtension(const std::filesystem::path &file);
+
+/*
+ * Buffered, reject-on-commit name field: the user edits a copy, a commit
+ * (Enter or leaving the field) with a changed value is the caller's cue to
+ * send the rename, and the reply either clears the error or shows it and
+ * snaps the buffer back to the replica's name. The buffer is refilled when
+ * the entity changes and, after markStale(), at the next frame where nothing
+ * is being edited and no rename is in flight, so a snapshot never yanks a
+ * half-typed name away.
+ */
+struct BufferedNameField
+{
+  // Draws the field for `entityId`, whose replica name is `name`; greyed
+  // while `renamePending`. Returns the committed name when it differs from
+  // `name`. `errorPrefix` heads the error text ("Invalid name: ").
+  std::optional<std::string> draw(const std::string &entityId,
+      const std::string &name,
+      bool renamePending,
+      const char *errorPrefix = "");
+  // The rename reply for `entityId`.
+  void onReply(const std::string &entityId, bool ok, const std::string &error);
+  // The replica changed: re-read the name when the user lets go.
+  void markStale();
+
+ private:
+  std::string m_entityId;
+  std::string m_buffer;
+  std::string m_error;
+  bool m_stale{false};
+};
+
+/*
+ * An integer field whose value lives in the replica: the caller passes the
+ * replica's value each UI frame and gets the edited one back once, when the
+ * field deactivates. ImGui keeps a typed edit in progress itself, but the
+ * +/- step buttons change the value on the click frame only, so the value in
+ * progress is held here while the item is active; a snapshot landing
+ * meanwhile cannot yank either kind of edit away.
+ *
+ * Example:
+ *   int frameCount = 0;
+ *   if (m_frameCountField.draw("Frames", shot.frameCount, frameCount, 1, 10))
+ *     commit(shot, patchOf(frameCount));
+ */
+struct IntField
+{
+  // Draws the field showing `current` (or the edit in progress). True with
+  // `committed` set when the field just deactivated after an edit.
+  bool draw(const char *label,
+      int current,
+      int &committed,
+      int step = 1,
+      int stepFast = 100);
+
+ private:
+  std::optional<int> m_editing;
+};
+
+enum class ConfirmChoice
+{
+  Pending,
+  Confirmed,
+  Cancelled
+};
+
+// The remove/delete confirmation every editor has: a modal `popupId` (the
+// caller opened it with ImGui::OpenPopup at window scope) showing `message`,
+// then `body` (extra controls, optional), then the confirm button labelled
+// `confirmLabel` (greyed unless `confirmEnabled`) beside Cancel; Escape
+// cancels. Closes itself on either choice.
+ConfirmChoice confirmModal(const char *popupId,
+    const std::string &message,
+    const char *confirmLabel,
+    bool confirmEnabled,
+    const std::function<void()> &body = {});
+
+// "12.3 MB" style sizes for the browse table.
+std::string formatByteCount(uint64_t bytes);
+// Local time "YYYY-MM-DD HH:MM"; "" for 0.
+std::string formatUnixSeconds(int64_t seconds);
+
+} // namespace vsr::scivis_studio::client::ui

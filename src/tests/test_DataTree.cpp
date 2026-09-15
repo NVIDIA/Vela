@@ -11,6 +11,9 @@
 #include "vsr/core/Logging.hpp"
 // std
 #include <algorithm>
+#include <cstdio>
+#include <cstring>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -1002,6 +1005,47 @@ SCENARIO("Reading into a DataNode replaces what it held", "[DataTree]")
   }
 }
 
+SCENARIO("A corrupt buffer is rejected without allocating for it", "[DataTree]")
+{
+  GIVEN("A buffer whose leaf count and lengths are garbage")
+  {
+    std::vector<std::byte> buffer;
+    for (int i = 0; i < 64; ++i)
+      buffer.push_back(std::byte(0xA5 ^ (i * 37)));
+
+    WHEN("It is read into a node")
+    {
+      vsr::core::DataTree destination;
+      bool ok = true;
+
+      THEN("The read fails instead of throwing")
+      {
+        REQUIRE_NOTHROW(ok = destination.root().read(buffer));
+        REQUIRE_FALSE(ok);
+        REQUIRE(destination.root().numChildren() == 0);
+      }
+    }
+  }
+
+  GIVEN("A valid buffer whose first string length is overwritten")
+  {
+    vsr::core::DataTree source;
+    source.root()["a"]["b"] = 1;
+    std::vector<std::byte> buffer;
+    REQUIRE(source.write(buffer));
+    const size_t hugeLength = size_t(1) << 60;
+    std::memcpy(buffer.data() + sizeof(size_t), &hugeLength, sizeof(size_t));
+
+    THEN("The read fails instead of throwing")
+    {
+      vsr::core::DataTree destination;
+      bool ok = true;
+      REQUIRE_NOTHROW(ok = destination.root().read(buffer));
+      REQUIRE_FALSE(ok);
+    }
+  }
+}
+
 SCENARIO("A failed read leaves the node empty", "[DataTree]")
 {
   GIVEN("A truncated buffer and a populated node")
@@ -1157,6 +1201,51 @@ SCENARIO("Loaded anonymous names are claimed against the counter", "[DataTree]")
         REQUIRE(items.numChildren() == 1 + NUM_APPENDS);
         REQUIRE(items[futureName].getValueAs<int>() == 1);
       }
+    }
+  }
+}
+
+SCENARIO(
+    "A DataReader tells an empty source from an unsizeable one", "[DataTree]")
+{
+  GIVEN("an empty buffer")
+  {
+    const std::vector<std::byte> empty;
+    vsr::core::BufferReader reader(empty);
+    THEN("no bytes remain, and that is known")
+    {
+      REQUIRE(reader.bytesRemaining() == size_t(0));
+    }
+  }
+
+  GIVEN("an empty file")
+  {
+    const auto path = std::filesystem::temp_directory_path()
+        / "vsr_test_DataTree_empty_reader.bin";
+    std::fclose(std::fopen(path.string().c_str(), "wb"));
+    {
+      vsr::core::FileReader reader(path.string().c_str());
+      REQUIRE(reader.valid());
+      THEN("no bytes remain, and that is known")
+      {
+        REQUIRE(reader.bytesRemaining() == size_t(0));
+      }
+    }
+    std::filesystem::remove(path);
+  }
+
+  GIVEN("a reader that cannot be sized")
+  {
+    struct Unsized : public vsr::core::DataReader
+    {
+      size_t read(void *, size_t, size_t) override
+      {
+        return 0;
+      }
+    } reader;
+    THEN("the remaining count is unknown rather than a sentinel")
+    {
+      REQUIRE_FALSE(reader.bytesRemaining().has_value());
     }
   }
 }

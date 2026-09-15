@@ -46,9 +46,27 @@ void LayerTree::buildUI()
   buildUI_setActiveLayersSceneMenus();
 }
 
-void LayerTree::setEnableAddRemoveLayers(bool enable)
+void LayerTree::setEditMode(EditMode mode)
 {
-  m_enableAddRemove = enable;
+  m_editMode = mode;
+}
+
+void LayerTree::dropSceneReferences()
+{
+  m_anchorNode = {};
+  m_hoveredNode = VSR_INVALID_INDEX;
+  m_menuNode = VSR_INVALID_INDEX;
+  m_layerIdx = 0;
+}
+
+bool LayerTree::canEdit() const
+{
+  return m_editMode != EditMode::ReadOnly;
+}
+
+bool LayerTree::canAddRemoveLayers() const
+{
+  return m_editMode == EditMode::Full;
 }
 
 void LayerTree::buildUI_layerHeader()
@@ -58,12 +76,14 @@ void LayerTree::buildUI_layerHeader()
 
   if (scene.numberOfLayers() == 0) {
     ImGui::Text("No layers in scene");
-    ImGui::BeginDisabled(!m_enableAddRemove);
-    if (ImGui::Button("new")) {
-      s_newLayerName.clear();
-      ImGui::OpenPopup("LayerTree_contextMenu_newLayer");
+    if (canEdit()) {
+      ImGui::BeginDisabled(!canAddRemoveLayers());
+      if (ImGui::Button("new")) {
+        s_newLayerName.clear();
+        ImGui::OpenPopup("LayerTree_contextMenu_newLayer");
+      }
+      ImGui::EndDisabled();
     }
-    ImGui::EndDisabled();
     return;
   }
 
@@ -75,12 +95,19 @@ void LayerTree::buildUI_layerHeader()
       layers.size());
 
   if (ImGui::IsItemHovered()) {
-    tooltipForPreviousItem("right-click to set layer visibility", false);
+    tooltipForPreviousItem(canEdit() ? "right-click to set layer visibility"
+                                     : "right-click to view layer visibility",
+        false);
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
       ImGui::OpenPopup("LayerTree_contextMenu_setActiveLayers");
       m_activeLayerMenuTriggered = true;
     }
   }
+
+  // Everything below mutates the scene or layer structure, so it is hidden
+  // outright in read-only mode.
+  if (!canEdit())
+    return;
 
   if (ImGui::Button("clear")) {
     appContext()->clearSelected();
@@ -89,7 +116,7 @@ void LayerTree::buildUI_layerHeader()
 
   ImGui::SameLine();
 
-  ImGui::BeginDisabled(!m_enableAddRemove);
+  ImGui::BeginDisabled(!canAddRemoveLayers());
   if (ImGui::Button("new")) {
     s_newLayerName.clear();
     ImGui::OpenPopup("LayerTree_contextMenu_newLayer");
@@ -98,7 +125,7 @@ void LayerTree::buildUI_layerHeader()
 
   ImGui::SameLine();
 
-  ImGui::BeginDisabled(!m_enableAddRemove || m_layerIdx == 0);
+  ImGui::BeginDisabled(!canAddRemoveLayers() || m_layerIdx == 0);
   if (ImGui::Button("delete")) {
     auto to_delete = layers.at_index(m_layerIdx);
     scene.removeLayer(to_delete.first);
@@ -331,8 +358,9 @@ void LayerTree::buildUI_tree()
         // mouse release if no drag occurred.
       }
 
-      // Drag and drop source
-      if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+      // Drag and drop source (reparenting is a mutation, so the whole
+      // drag/drop affordance is off in read-only mode)
+      if (canEdit() && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
         // Get parent-only nodes from the selection
         auto draggedNodes = appContext()->getParentOnlySelectedNodes();
 
@@ -376,8 +404,9 @@ void LayerTree::buildUI_tree()
         }
       }
 
-      // Drag and drop target
-      if (ImGui::BeginDragDropTarget()) {
+      // Drag and drop target (reparenting is a mutation, so no drop target
+      // exists in read-only mode)
+      if (canEdit() && ImGui::BeginDragDropTarget()) {
         // Peek at the payload to validate before accepting
         if (const ImGuiPayload *payload = ImGui::GetDragDropPayload()) {
           if (payload->IsDataType("LAYER_TREE_NODE")) {
@@ -428,8 +457,9 @@ void LayerTree::buildUI_tree()
     layer.traverse(layer.root(), onNodeEntryBuildUI, onNodeExitTreePop);
     ImGui::EndTable();
 
-    // Drag and drop target on the panel itself. Will drop under the root node.
-    if (ImGui::BeginDragDropTarget()) {
+    // Drag and drop target on the panel itself. Will drop under the root
+    // node. Off in read-only mode, same as the per-node drop targets above.
+    if (canEdit() && ImGui::BeginDragDropTarget()) {
       if (const ImGuiPayload *payload =
               ImGui::AcceptDragDropPayload("LAYER_TREE_NODE")) {
         dragAndDropTarget = layer.root();
@@ -464,7 +494,7 @@ void LayerTree::buildUI_activateObjectSceneMenu()
     }
 
     // Check for Delete key to delete selected nodes
-    if (ImGui::IsKeyPressed(ImGuiKey_Delete, false)) {
+    if (canEdit() && ImGui::IsKeyPressed(ImGuiKey_Delete, false)) {
       auto &scene = appContext()->vsr.scene;
       auto parentOnlyNodes = appContext()->getParentOnlySelectedNodes();
 
@@ -494,6 +524,38 @@ void LayerTree::buildUI_activateObjectSceneMenu()
 }
 
 void LayerTree::buildUI_handleSelection()
+{
+  ImGuiIO &io = ImGui::GetIO();
+
+  // Cut/copy/paste are all mutation-adjacent (paste and cut-then-paste both
+  // mutate the layer tree), so the whole trio is off in read-only mode.
+  if (canEdit())
+    buildUI_clipboardShortcuts();
+
+  // Check for Ctrl+A to select all nodes in the current layer
+  if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A, false)) {
+    auto &scene = appContext()->vsr.scene;
+    if (scene.numberOfLayers() > 0) {
+      auto &layer = *scene.layer(m_layerIdx);
+      std::vector<vsr::scene::LayerNodeRef> allNodes;
+
+      // Traverse the layer and collect all nodes (except root)
+      layer.traverse(layer.root(), [&](auto &node, int level) {
+        if (level > 0) { // Skip root node (level 0)
+          allNodes.push_back(layer.at(node.index()));
+        }
+        return true;
+      });
+
+      // Select all collected nodes
+      if (!allNodes.empty()) {
+        appContext()->setSelected(allNodes);
+      }
+    }
+  }
+}
+
+void LayerTree::buildUI_clipboardShortcuts()
 {
   ImGuiIO &io = ImGui::GetIO();
 
@@ -555,28 +617,6 @@ void LayerTree::buildUI_handleSelection()
       }
     }
   }
-
-  // Check for Ctrl+A to select all nodes in the current layer
-  if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A, false)) {
-    auto &scene = appContext()->vsr.scene;
-    if (scene.numberOfLayers() > 0) {
-      auto &layer = *scene.layer(m_layerIdx);
-      std::vector<vsr::scene::LayerNodeRef> allNodes;
-
-      // Traverse the layer and collect all nodes (except root)
-      layer.traverse(layer.root(), [&](auto &node, int level) {
-        if (level > 0) { // Skip root node (level 0)
-          allNodes.push_back(layer.at(node.index()));
-        }
-        return true;
-      });
-
-      // Select all collected nodes
-      if (!allNodes.empty()) {
-        appContext()->setSelected(allNodes);
-      }
-    }
-  }
 }
 
 void LayerTree::buildUI_objectSceneMenu()
@@ -593,212 +633,21 @@ void LayerTree::buildUI_objectSceneMenu()
   bool clearSelectedNode = false;
 
   if (ImGui::BeginPopup("LayerTree_contextMenu_object")) {
-    bool enabled = (*menuNode)->isEnabled();
-    if (nodeSelected && ImGui::Checkbox("visible", &enabled)) {
-      (*menuNode)->setEnabled(enabled);
-      scene.signalLayerStructureChanged(&layer);
-    }
-
-    if (nodeSelected && ImGui::MenuItem("show all")) {
-      layer.traverse(menuNode, [&](auto &n, int) {
-        n->setEnabled(true);
-        return true;
-      });
-      scene.signalLayerStructureChanged(&layer);
-    }
-
-    if (nodeSelected && ImGui::MenuItem("hide all")) {
-      layer.traverse(menuNode, [&](auto &n, int) {
-        n->setEnabled(false);
-        return true;
-      });
-      scene.signalLayerStructureChanged(&layer);
-    }
-
-    if (nodeSelected)
-      ImGui::Separator();
-
-    if (nodeSelected && ImGui::BeginMenu("rename")) {
-      ImGui::InputText("##edit_node_name", &(*menuNode)->name());
-      ImGui::EndMenu();
-    }
-
-    if (ImGui::BeginMenu("add")) {
-      if (ImGui::MenuItem("transform")) {
-        scene.insertChildTransformNode(menuNode);
-        clearSelectedNode = true;
+    // The "visible" checkbox displays node state, so it stays rendered (but
+    // non-interactive) in read-only mode. The mutating items are not emitted
+    // at all in read-only mode; only the export/save items below survive.
+    if (nodeSelected) {
+      ImGui::BeginDisabled(!canEdit());
+      bool enabled = (*menuNode)->isEnabled();
+      if (ImGui::Checkbox("visible", &enabled)) {
+        (*menuNode)->setEnabled(enabled);
+        scene.signalLayerStructureChanged(&layer);
       }
-
-      ImGui::Separator();
-
-      if (ImGui::BeginMenu("new object")) {
-        if (ImGui::BeginMenu("light")) {
-          if (ImGui::MenuItem("directional")) {
-            scene.insertNewChildObjectNode<vsr::scene::Light>(menuNode,
-                vsr::scene::tokens::light::directional,
-                "directional light");
-            clearSelectedNode = true;
-          }
-
-          if (ImGui::MenuItem("point")) {
-            scene.insertNewChildObjectNode<vsr::scene::Light>(
-                menuNode, vsr::scene::tokens::light::point, "point light");
-            clearSelectedNode = true;
-          }
-
-          if (ImGui::MenuItem("quad")) {
-            scene.insertNewChildObjectNode<vsr::scene::Light>(
-                menuNode, vsr::scene::tokens::light::quad, "quad light");
-            clearSelectedNode = true;
-          }
-
-          if (ImGui::MenuItem("spot")) {
-            scene.insertNewChildObjectNode<vsr::scene::Light>(
-                menuNode, vsr::scene::tokens::light::spot, "spot light");
-            clearSelectedNode = true;
-          }
-
-          if (ImGui::MenuItem("ring")) {
-            scene.insertNewChildObjectNode<vsr::scene::Light>(
-                menuNode, vsr::scene::tokens::light::ring, "ring light");
-            clearSelectedNode = true;
-          }
-
-          if (ImGui::BeginMenu("hdri")) {
-            if (ImGui::MenuItem("simple dome")) {
-              vsr::io::generate_hdri_dome(scene, menuNode);
-              clearSelectedNode = true;
-            }
-
-            if (ImGui::MenuItem("test image")) {
-              vsr::io::generate_hdri_test_image(scene, menuNode);
-              clearSelectedNode = true;
-            }
-            ImGui::EndMenu(); // "hdri"
-          }
-
-          ImGui::EndMenu(); // "light"
-        }
-
-        if (ImGui::BeginMenu("surface")) {
-          vsr::scene::GeometryRef g;
-#define OBJECT_UI_MENU_ITEM(text, subtype)                                     \
-  if (ImGui::MenuItem(text)) {                                                 \
-    g = scene.createObject<vsr::scene::Geometry>(                              \
-        vsr::scene::tokens::geometry::subtype);                                \
-  }
-          OBJECT_UI_MENU_ITEM("cone", cone);
-          OBJECT_UI_MENU_ITEM("curve", curve);
-          OBJECT_UI_MENU_ITEM("cylinder", cylinder);
-          OBJECT_UI_MENU_ITEM("isosurface", isosurface);
-          OBJECT_UI_MENU_ITEM("neural", neural);
-          OBJECT_UI_MENU_ITEM("quad", quad);
-          OBJECT_UI_MENU_ITEM("sphere", sphere);
-          OBJECT_UI_MENU_ITEM("triangle", triangle);
-#undef OBJECT_UI_MENU_ITEM
-          if (g) {
-            auto s = scene.createSurface("", g, scene.defaultMaterial());
-            scene.insertChildObjectNode(menuNode, s, "surface");
-            clearSelectedNode = true;
-          }
-
-          ImGui::EndMenu(); // "surface"
-        }
-
-        ImGui::EndMenu(); // "new object"
-      }
-
-      if (ImGui::BeginMenu("existing object")) {
-#define OBJECT_UI_MENU_ITEM(text, type)                                        \
-  if (scene.numberOfObjects(type) > 0 && ImGui::BeginMenu(text)) {             \
-    auto t = type;                                                             \
-    if (auto i = vsr::ui::buildUI_objects_menulist(scene, t);                  \
-        i != VSR_INVALID_INDEX)                                                \
-      scene.insertChildObjectNode(menuNode, t, i);                             \
-    ImGui::EndMenu();                                                          \
-  }
-        OBJECT_UI_MENU_ITEM("light", ANARI_LIGHT);
-        OBJECT_UI_MENU_ITEM("surface", ANARI_SURFACE);
-        OBJECT_UI_MENU_ITEM("volume", ANARI_VOLUME);
-#undef OBJECT_UI_MENU_ITEM
-        ImGui::EndMenu();
-      }
-
-      ImGui::Separator();
-
-      if (ImGui::BeginMenu("procedural")) {
-        if (ImGui::MenuItem("cylinders")) {
-          vsr::io::generate_cylinders(scene, menuNode);
-          clearSelectedNode = true;
-        }
-
-        if (ImGui::MenuItem("emissive geometries")) {
-          vsr::io::generate_emissive_geometries(scene, menuNode);
-          clearSelectedNode = true;
-        }
-
-        if (ImGui::MenuItem("emissive MDL comparison")) {
-          vsr::io::generate_emissive_mdl_comparison(scene, menuNode);
-          clearSelectedNode = true;
-        }
-
-        if (ImGui::MenuItem("emissive MaterialX comparison")) {
-          vsr::io::generate_emissive_materialx_comparison(scene, menuNode);
-          clearSelectedNode = true;
-        }
-
-        if (ImGui::MenuItem("icosphere")) {
-          vsr::io::generate_icosphere(scene, menuNode);
-          clearSelectedNode = true;
-        }
-
-        if (ImGui::MenuItem("monkey")) {
-          vsr::io::generate_monkey(scene, menuNode);
-          clearSelectedNode = true;
-        }
-
-        if (ImGui::MenuItem("randomSpheres")) {
-          vsr::io::generate_randomSpheres(scene, menuNode);
-          clearSelectedNode = true;
-        }
-
-        if (ImGui::MenuItem("rtow")) {
-          vsr::io::generate_rtow(scene, menuNode);
-          clearSelectedNode = true;
-        }
-
-        if (ImGui::MenuItem("noise volume")) {
-          vsr::io::generate_noiseVolume(scene, menuNode);
-          clearSelectedNode = true;
-        }
-
-        if (ImGui::MenuItem("sphere set volume")) {
-          vsr::io::generate_sphereSetVolume(scene, menuNode);
-          clearSelectedNode = true;
-        }
-
-        ImGui::EndMenu();
-      }
-
-      ImGui::Separator();
-
-      if (ImGui::MenuItem("from file..."))
-        m_app->showImportFileDialog();
-
-      ImGui::EndMenu();
+      ImGui::EndDisabled();
     }
 
-    ImGui::Separator();
-
-    if (ImGui::BeginMenu("load VSR Archive")) {
-      if (ImGui::MenuItem("object"))
-        m_app->showLoadObjectArchiveDialog(menuNode);
-
-      if (ImGui::MenuItem("layer subtree"))
-        m_app->showLoadLayerSubtreeArchiveDialog(menuNode);
-
-      ImGui::EndMenu();
-    }
+    if (canEdit())
+      clearSelectedNode = buildUI_mutatingMenuItems(layer, menuNode);
 
     auto *menuObject = nodeSelected && (*menuNode)->isObject()
         ? (*menuNode)->getObject()
@@ -842,26 +691,6 @@ void LayerTree::buildUI_objectSceneMenu()
             m_app->showExportNanoVDBFileDialog();
         }
       }
-      ImGui::Separator();
-
-      if (ImGui::MenuItem("delete selected")) {
-        auto parentOnlyNodes = appContext()->getParentOnlySelectedNodes();
-
-        if (!parentOnlyNodes.empty()) {
-          for (const auto &node : parentOnlyNodes) {
-            if (node.valid()) {
-              scene.removeNode(node);
-            }
-          }
-          m_menuNode = VSR_INVALID_INDEX;
-          appContext()->clearSelected();
-        } else if (m_menuNode != VSR_INVALID_INDEX) {
-          // Fallback: delete the menu node if nothing is selected
-          scene.removeNode(layer.at(m_menuNode));
-          m_menuNode = VSR_INVALID_INDEX;
-          appContext()->clearSelected();
-        }
-      }
     }
 
     ImGui::EndPopup();
@@ -874,6 +703,240 @@ void LayerTree::buildUI_objectSceneMenu()
 
   if (!ImGui::IsPopupOpen("LayerTree_contextMenu_object"))
     m_menuVisible = false;
+}
+
+bool LayerTree::buildUI_mutatingMenuItems(
+    vsr::scene::Layer &layer, vsr::scene::LayerNodeRef menuNode)
+{
+  auto &scene = appContext()->vsr.scene;
+  const bool nodeSelected = m_menuNode != VSR_INVALID_INDEX;
+  bool clearSelectedNode = false;
+
+  if (nodeSelected && ImGui::MenuItem("show all")) {
+    layer.traverse(menuNode, [&](auto &n, int) {
+      n->setEnabled(true);
+      return true;
+    });
+    scene.signalLayerStructureChanged(&layer);
+  }
+
+  if (nodeSelected && ImGui::MenuItem("hide all")) {
+    layer.traverse(menuNode, [&](auto &n, int) {
+      n->setEnabled(false);
+      return true;
+    });
+    scene.signalLayerStructureChanged(&layer);
+  }
+
+  if (nodeSelected)
+    ImGui::Separator();
+
+  if (nodeSelected && ImGui::BeginMenu("rename")) {
+    ImGui::InputText("##edit_node_name", &(*menuNode)->name());
+    ImGui::EndMenu();
+  }
+
+  if (ImGui::BeginMenu("add")) {
+    if (ImGui::MenuItem("transform")) {
+      scene.insertChildTransformNode(menuNode);
+      clearSelectedNode = true;
+    }
+
+    ImGui::Separator();
+
+    if (ImGui::BeginMenu("new object")) {
+      if (ImGui::BeginMenu("light")) {
+        if (ImGui::MenuItem("directional")) {
+          scene.insertNewChildObjectNode<vsr::scene::Light>(menuNode,
+              vsr::scene::tokens::light::directional,
+              "directional light");
+          clearSelectedNode = true;
+        }
+
+        if (ImGui::MenuItem("point")) {
+          scene.insertNewChildObjectNode<vsr::scene::Light>(
+              menuNode, vsr::scene::tokens::light::point, "point light");
+          clearSelectedNode = true;
+        }
+
+        if (ImGui::MenuItem("quad")) {
+          scene.insertNewChildObjectNode<vsr::scene::Light>(
+              menuNode, vsr::scene::tokens::light::quad, "quad light");
+          clearSelectedNode = true;
+        }
+
+        if (ImGui::MenuItem("spot")) {
+          scene.insertNewChildObjectNode<vsr::scene::Light>(
+              menuNode, vsr::scene::tokens::light::spot, "spot light");
+          clearSelectedNode = true;
+        }
+
+        if (ImGui::MenuItem("ring")) {
+          scene.insertNewChildObjectNode<vsr::scene::Light>(
+              menuNode, vsr::scene::tokens::light::ring, "ring light");
+          clearSelectedNode = true;
+        }
+
+        if (ImGui::BeginMenu("hdri")) {
+          if (ImGui::MenuItem("simple dome")) {
+            vsr::io::generate_hdri_dome(scene, menuNode);
+            clearSelectedNode = true;
+          }
+
+          if (ImGui::MenuItem("test image")) {
+            vsr::io::generate_hdri_test_image(scene, menuNode);
+            clearSelectedNode = true;
+          }
+          ImGui::EndMenu(); // "hdri"
+        }
+
+        ImGui::EndMenu(); // "light"
+      }
+
+      if (ImGui::BeginMenu("surface")) {
+        vsr::scene::GeometryRef g;
+#define OBJECT_UI_MENU_ITEM(text, subtype)                                     \
+  if (ImGui::MenuItem(text)) {                                                 \
+    g = scene.createObject<vsr::scene::Geometry>(                              \
+        vsr::scene::tokens::geometry::subtype);                                \
+  }
+        OBJECT_UI_MENU_ITEM("cone", cone);
+        OBJECT_UI_MENU_ITEM("curve", curve);
+        OBJECT_UI_MENU_ITEM("cylinder", cylinder);
+        OBJECT_UI_MENU_ITEM("isosurface", isosurface);
+        OBJECT_UI_MENU_ITEM("neural", neural);
+        OBJECT_UI_MENU_ITEM("quad", quad);
+        OBJECT_UI_MENU_ITEM("sphere", sphere);
+        OBJECT_UI_MENU_ITEM("triangle", triangle);
+#undef OBJECT_UI_MENU_ITEM
+        if (g) {
+          auto s = scene.createSurface("", g, scene.defaultMaterial());
+          scene.insertChildObjectNode(menuNode, s, "surface");
+          clearSelectedNode = true;
+        }
+
+        ImGui::EndMenu(); // "surface"
+      }
+
+      ImGui::EndMenu(); // "new object"
+    }
+
+    if (ImGui::BeginMenu("existing object")) {
+#define OBJECT_UI_MENU_ITEM(text, type)                                        \
+  if (scene.numberOfObjects(type) > 0 && ImGui::BeginMenu(text)) {             \
+    auto t = type;                                                             \
+    if (auto i = vsr::ui::buildUI_objects_menulist(scene, t);                  \
+        i != VSR_INVALID_INDEX)                                                \
+      scene.insertChildObjectNode(menuNode, t, i);                             \
+    ImGui::EndMenu();                                                          \
+  }
+      OBJECT_UI_MENU_ITEM("light", ANARI_LIGHT);
+      OBJECT_UI_MENU_ITEM("surface", ANARI_SURFACE);
+      OBJECT_UI_MENU_ITEM("volume", ANARI_VOLUME);
+#undef OBJECT_UI_MENU_ITEM
+      ImGui::EndMenu();
+    }
+
+    ImGui::Separator();
+
+    if (ImGui::BeginMenu("procedural")) {
+      if (ImGui::MenuItem("cylinders")) {
+        vsr::io::generate_cylinders(scene, menuNode);
+        clearSelectedNode = true;
+      }
+
+      if (ImGui::MenuItem("emissive geometries")) {
+        vsr::io::generate_emissive_geometries(scene, menuNode);
+        clearSelectedNode = true;
+      }
+
+      if (ImGui::MenuItem("emissive MDL comparison")) {
+        vsr::io::generate_emissive_mdl_comparison(scene, menuNode);
+        clearSelectedNode = true;
+      }
+
+      if (ImGui::MenuItem("emissive MaterialX comparison")) {
+        vsr::io::generate_emissive_materialx_comparison(scene, menuNode);
+        clearSelectedNode = true;
+      }
+
+      if (ImGui::MenuItem("icosphere")) {
+        vsr::io::generate_icosphere(scene, menuNode);
+        clearSelectedNode = true;
+      }
+
+      if (ImGui::MenuItem("monkey")) {
+        vsr::io::generate_monkey(scene, menuNode);
+        clearSelectedNode = true;
+      }
+
+      if (ImGui::MenuItem("randomSpheres")) {
+        vsr::io::generate_randomSpheres(scene, menuNode);
+        clearSelectedNode = true;
+      }
+
+      if (ImGui::MenuItem("rtow")) {
+        vsr::io::generate_rtow(scene, menuNode);
+        clearSelectedNode = true;
+      }
+
+      if (ImGui::MenuItem("noise volume")) {
+        vsr::io::generate_noiseVolume(scene, menuNode);
+        clearSelectedNode = true;
+      }
+
+      if (ImGui::MenuItem("sphere set volume")) {
+        vsr::io::generate_sphereSetVolume(scene, menuNode);
+        clearSelectedNode = true;
+      }
+
+      ImGui::EndMenu();
+    }
+
+    ImGui::Separator();
+
+    if (ImGui::MenuItem("from file..."))
+      m_app->showImportFileDialog();
+
+    ImGui::EndMenu();
+  }
+
+  ImGui::Separator();
+
+  if (ImGui::BeginMenu("load VSR Archive")) {
+    if (ImGui::MenuItem("object"))
+      m_app->showLoadObjectArchiveDialog(menuNode);
+
+    if (ImGui::MenuItem("layer subtree"))
+      m_app->showLoadLayerSubtreeArchiveDialog(menuNode);
+
+    ImGui::EndMenu();
+  }
+
+  if (nodeSelected) {
+    ImGui::Separator();
+
+    if (ImGui::MenuItem("delete selected")) {
+      auto parentOnlyNodes = appContext()->getParentOnlySelectedNodes();
+
+      if (!parentOnlyNodes.empty()) {
+        for (const auto &node : parentOnlyNodes) {
+          if (node.valid()) {
+            scene.removeNode(node);
+          }
+        }
+        m_menuNode = VSR_INVALID_INDEX;
+        appContext()->clearSelected();
+      } else if (m_menuNode != VSR_INVALID_INDEX) {
+        // Fallback: delete the menu node if nothing is selected
+        scene.removeNode(layer.at(m_menuNode));
+        m_menuNode = VSR_INVALID_INDEX;
+        appContext()->clearSelected();
+      }
+    }
+  }
+
+  return clearSelectedNode;
 }
 
 void LayerTree::buildUI_newLayerSceneMenu()
@@ -915,25 +978,29 @@ void LayerTree::buildUI_setActiveLayersSceneMenus()
   if (ImGui::BeginPopup("LayerTree_contextMenu_setActiveLayers")) {
     auto &scene = appContext()->vsr.scene;
 
-    if (ImGui::Button("show all"))
+    // Activating/deactivating layers mutates scene state, so in read-only
+    // mode this popup only ever shows the current active/inactive state.
+    if (canEdit() && ImGui::Button("show all"))
       scene.setAllLayersActive();
 
     for (auto &ls : scene.layers()) {
       ImGui::PushID(ls.second.ptr.get());
       // Make sure at least one layer is always active
       ImGui::BeginDisabled(
-          scene.numberOfActiveLayers() < 2 && ls.second.active);
+          !canEdit() || (scene.numberOfActiveLayers() < 2 && ls.second.active));
 
       bool active = ls.second.active;
       if (ImGui::Checkbox(ls.first.c_str(), &active))
         scene.setLayerActive(ls.first, active);
 
-      ImGui::SameLine();
-      ImGui::Text("|");
-      ImGui::SameLine();
+      if (canEdit()) {
+        ImGui::SameLine();
+        ImGui::Text("|");
+        ImGui::SameLine();
 
-      if (ImGui::Button("o"))
-        scene.setOnlyLayerActive(ls.first);
+        if (ImGui::Button("o"))
+          scene.setOnlyLayerActive(ls.first);
+      }
 
       ImGui::EndDisabled();
       ImGui::PopID();

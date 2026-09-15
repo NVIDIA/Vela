@@ -1139,6 +1139,19 @@ inline bool DataNode::loadImpl(DataReader &reader)
     return ok;
   };
 
+  // Sizes come off the wire unverified, so a corrupt length must not become a
+  // giant allocation before the short read that would reject it: refuse any
+  // length the reader cannot possibly satisfy before allocating for it. A
+  // reader that cannot be sized is trusted to the short read.
+  auto canRead = [&](size_t numBytes) {
+    if (ok) {
+      const auto remaining = reader.bytesRemaining();
+      if (remaining && numBytes > *remaining)
+        ok = false;
+    }
+    return ok;
+  };
+
   auto finish = [&](bool succeeded) {
     if (!succeeded) {
       clearValueSilently();
@@ -1157,14 +1170,14 @@ inline bool DataNode::loadImpl(DataReader &reader)
     size_t size = 0;
 
     // name
-    if (!readExactly(&size, sizeof(size_t), 1))
+    if (!readExactly(&size, sizeof(size_t), 1) || !canRead(size))
       return finish(false);
     std::string name(size, '\0');
     if (!readExactly(name.data(), sizeof(char), size))
       return finish(false);
 
     // path
-    if (!readExactly(&size, sizeof(size_t), 1))
+    if (!readExactly(&size, sizeof(size_t), 1) || !canRead(size))
       return finish(false);
     std::string fullPath(size, '\0');
     if (!readExactly(fullPath.data(), sizeof(char), size))
@@ -1199,8 +1212,13 @@ inline bool DataNode::loadImpl(DataReader &reader)
       // array size + data
       if (!readExactly(&size, sizeof(size_t), 1))
         return finish(false);
+      const size_t elementSize = anari::sizeOf(type);
+      if (elementSize != 0 && size > SIZE_MAX / elementSize)
+        return finish(false);
+      if (!canRead(size * elementSize))
+        return finish(false);
       void *dataPtr = node.setValueAsArray(type, size);
-      if (!readExactly(dataPtr, anari::sizeOf(type), size))
+      if (!readExactly(dataPtr, elementSize, size))
         return finish(false);
     } else {
       if (anari::isObject(type)) {
@@ -1209,7 +1227,7 @@ inline bool DataNode::loadImpl(DataReader &reader)
           return finish(false);
         node.setValueObject(type, idx);
       } else if (type == ANARI_STRING) {
-        if (!readExactly(&size, sizeof(size_t), 1))
+        if (!readExactly(&size, sizeof(size_t), 1) || !canRead(size))
           return finish(false);
         std::string str(size, '\0');
         if (!readExactly(str.data(), sizeof(char), size))

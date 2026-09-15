@@ -8,6 +8,7 @@
 #include "LightRigIO.h"
 #include "ProjectSerialization.h"
 
+#include "vsr/app/UIStateTree.h"
 #include "vsr/core/DataTree.hpp"
 #include "vsr/core/DataTreeMetadata.hpp"
 #include "vsr/io/archives/CameraArchive.hpp"
@@ -111,20 +112,6 @@ bool copyDatasetArchiveFile(const std::filesystem::path &source,
   if (!archive.save(target.string().c_str()))
     return fail("failed to rename copied Dataset Archive", error);
   return true;
-}
-
-vsr::scene::LayerNodeRef findDirectChild(
-    vsr::scene::LayerNodeRef parent, const std::string &name)
-{
-  if (!parent)
-    return {};
-  auto child = parent->next();
-  while (child && child != parent) {
-    if ((*child)->name() == name)
-      return child;
-    child = child->sibling();
-  }
-  return {};
 }
 
 vsr::scene::LayerNodeRef resolveNode(
@@ -238,6 +225,20 @@ void addRemoval(ProjectSavePlan &plan, const std::filesystem::path &path)
 }
 
 } // namespace
+
+vsr::scene::LayerNodeRef findDirectChild(
+    vsr::scene::LayerNodeRef parent, const std::string &name)
+{
+  if (!parent)
+    return {};
+  auto child = parent->next();
+  while (child && child != parent) {
+    if ((*child)->name() == name)
+      return child;
+    child = child->sibling();
+  }
+  return {};
+}
 
 ProjectSaveRequest::ProjectSaveRequest(const Project &project,
     const vsr::scene::Scene &scene,
@@ -362,8 +363,10 @@ bool buildProjectSavePlan(const ProjectSaveRequest &request,
       } else {
         copyManagedAsset = true;
       }
-    } else if (auto datasetRoot = resolveProjectAssetRoot(
-                   request.scene, "datasets", liveDataset.id, liveDataset.rootNode)) {
+    } else if (auto datasetRoot = resolveProjectAssetRoot(request.scene,
+                   "datasets",
+                   liveDataset.id,
+                   liveDataset.rootNode)) {
       const auto dataset = savedDataset;
       auto *animationManager = &request.animationManager;
       write.writer = [dataset, datasetRoot, animationManager](
@@ -385,8 +388,8 @@ bool buildProjectSavePlan(const ProjectSaveRequest &request,
     if (copyManagedAsset) {
       if (request.project.projectDirectory.empty()
           || liveDataset.persistedName.empty()) {
-        return fail("dataset '" + savedDataset.name
-                + "' has no managed asset to copy",
+        return fail(
+            "dataset '" + savedDataset.name + "' has no managed asset to copy",
             error);
       }
       const auto source = request.project.projectDirectory / "datasets"
@@ -565,13 +568,19 @@ bool buildProjectSavePlan(const ProjectSaveRequest &request,
           PROJECT_FILE_TYPE,
           PROJECT_SCHEMA,
           SCHEMA_VERSION});
-  projectToNode(result.project, root["scivisStudio"]);
-  if (request.windows)
-    root["windows"] = *request.windows;
-  if (!request.layout.empty())
-    root["layout"] = request.layout;
-  if (request.settings)
-    root["settings"] = *request.settings;
+  projectToNode(result.project, root["scivisStudio"], ProjectForm::Manifest);
+  if (request.uiState) {
+    using namespace vsr::app;
+    if (auto *windows = request.uiState->child(UI_STATE_WINDOWS))
+      root[UI_STATE_WINDOWS] = *windows;
+    if (auto *layout = request.uiState->child(UI_STATE_LAYOUT)) {
+      const auto ini = layout->getValueOr<std::string>("");
+      if (!ini.empty())
+        root[UI_STATE_LAYOUT] = ini;
+    }
+    if (auto *settings = request.uiState->child(UI_STATE_SETTINGS))
+      root[UI_STATE_SETTINGS] = *settings;
+  }
 
   plan.manifest.description = "project manifest";
   plan.manifest.target = PROJECT_MANIFEST_FILENAME;

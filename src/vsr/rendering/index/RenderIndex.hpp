@@ -39,6 +39,9 @@ struct RenderIndex : public BaseUpdateDelegate
   anari::Renderer renderer(size_t i);
   anari::Camera camera(size_t i);
 
+  // The ANARI world's `bounds` property. An empty box when the device
+  // reports none, which defaultViewForBounds() then frames as the unit box.
+  vsr::math::box3 worldBounds() const;
   CameraPose computeDefaultView() const;
 
   void logCacheInfo() const;

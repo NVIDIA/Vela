@@ -4,6 +4,8 @@
 #include "catch.hpp"
 
 #include "CameraRig.h"
+#include "ColorMaps.h"
+#include "DataNodeFields.h"
 #include "DatasetIO.h"
 #include "LightRig.h"
 #include "ProjectContext.h"
@@ -11,11 +13,13 @@
 #include "ProjectSerialization.h"
 #include "RenderShot.h"
 #include "RenderShotCLI.h"
+#include "ShotOps.h"
 #include "StudioCLI.h"
 
 #include "vsr/app/ApplicationDump.h"
 #include "vsr/app/Context.h"
 #include "vsr/app/LegacyApplicationContext.h"
+#include "vsr/core/DataPath.hpp"
 #include "vsr/core/DataTree.hpp"
 #include "vsr/core/DataTreeMetadata.hpp"
 #include "vsr/io/animation/SpatialFieldFileBinding.hpp"
@@ -31,13 +35,17 @@
 #include "vsr/scene/objects/Renderer.hpp"
 #include "vsr/scene/objects/SpatialField.hpp"
 #include "vsr/scene/objects/Volume.hpp"
-
+// anari
+#include <anari/anari_cpp.hpp>
+// std
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <sstream>
+#include <stdexcept>
 #include <utility>
 
 using namespace vsr::scivis_studio;
@@ -55,18 +63,6 @@ struct CountingLayerUpdateDelegate : public vsr::scene::EmptyUpdateDelegate
   const vsr::scene::Layer *lastLayer{nullptr};
   int layerStructureUpdates{0};
 };
-
-vsr::scene::LayerNodeRef findDirectChild(
-    vsr::scene::LayerNodeRef parent, const std::string &name)
-{
-  auto child = parent->next();
-  while (child && child != parent) {
-    if ((*child)->name() == name)
-      return child;
-    child = child->sibling();
-  }
-  return {};
-}
 
 // Build the minimal file-animation dataset runtime — a volume with an initial
 // spatial field plus one runtime file animation over the given paths — and
@@ -264,8 +260,9 @@ SCENARIO("SciVis Studio static Dataset Archives are self-contained",
   std::filesystem::remove(file);
 }
 
-SCENARIO("SciVis Studio file-animation Dataset Archives externalize their "
-         "source list",
+SCENARIO(
+    "SciVis Studio file-animation Dataset Archives externalize their "
+    "source list",
     "[SciVisStudio]")
 {
   const auto file = std::filesystem::temp_directory_path()
@@ -460,8 +457,7 @@ SCENARIO("SciVis Studio Source List Files hold one trimmed path per line",
   std::filesystem::remove_all(directory);
 }
 
-SCENARIO(
-    "SciVis Studio legacy embedded sourceFiles load and mark migration",
+SCENARIO("SciVis Studio legacy embedded sourceFiles load and mark migration",
     "[SciVisStudio]")
 {
   const auto file = std::filesystem::temp_directory_path()
@@ -569,7 +565,7 @@ SCENARIO("SciVis Studio project model serialization", "[SciVisStudio]")
     project.cameraRigs.push_back(std::move(cameraRig));
 
     vsr::core::DataTree tree;
-    projectToNode(project, tree.root()["scivisStudio"]);
+    projectToNode(project, tree.root()["scivisStudio"], ProjectForm::Manifest);
     auto &serialized = tree.root()["scivisStudio"];
 
     REQUIRE(serialized["datasets"].child(0)->child("rootNode") == nullptr);
@@ -587,7 +583,7 @@ SCENARIO("SciVis Studio project model serialization", "[SciVisStudio]")
     REQUIRE(serialized["cameraRigs"].child(0)->child("name") != nullptr);
 
     Project loaded;
-    REQUIRE(nodeToProject(serialized, loaded));
+    REQUIRE(nodeToProject(serialized, loaded, ProjectForm::Manifest));
 
     THEN("IDs and bindings survive the manifest round trip")
     {
@@ -614,6 +610,304 @@ SCENARIO("SciVis Studio project model serialization", "[SciVisStudio]")
   }
 }
 
+namespace {
+
+// One line per node, indented by depth: name, then the value's ANARI type and
+// text when it has one. append()ed children carry a '<n>' name minted by a
+// process-wide counter, so they are spelled by ordinal instead; everything
+// else in the manifest is deterministic.
+void appendCanonicalDump(const vsr::core::DataNode &node,
+    size_t ordinal,
+    int depth,
+    std::string &out)
+{
+  out.append(size_t(depth) * 2, ' ');
+  if (vsr::core::isDelimitedNumber(node.name(),
+          vsr::core::ANONYMOUS_NAME_OPEN,
+          vsr::core::ANONYMOUS_NAME_CLOSE))
+    out += "[" + std::to_string(ordinal) + "]";
+  else
+    out += node.name();
+
+  const auto &v = node.getValue();
+  if (v.valid()) {
+    out += ": ";
+    out += anari::toString(v.type());
+    out += " ";
+    if (v.is<std::string>())
+      out += "\"" + v.getString() + "\"";
+    else if (v.is<bool>())
+      out += v.get<bool>() ? "true" : "false";
+    else if (v.is<int>())
+      out += std::to_string(v.get<int>());
+    else if (v.is<uint32_t>())
+      out += std::to_string(v.get<uint32_t>());
+    else if (v.is<uint64_t>())
+      out += std::to_string(v.get<uint64_t>());
+    else if (v.is<float>()) {
+      char buf[32];
+      std::snprintf(buf, sizeof(buf), "%g", double(v.get<float>()));
+      out += buf;
+    } else
+      out += "?";
+  }
+  out += "\n";
+  size_t childOrdinal = 0;
+  node.foreach_child_const([&](const vsr::core::DataNode &child) {
+    appendCanonicalDump(child, childOrdinal++, depth + 1, out);
+  });
+}
+
+std::string canonicalDump(const vsr::core::DataNode &node)
+{
+  std::string out;
+  appendCanonicalDump(node, 0, 0, out);
+  return out;
+}
+
+// Every manifest field populated away from its default, plus runtime-only
+// state the manifest must drop.
+Project makeManifestGoldenProject()
+{
+  Project project;
+  project.name = "Golden";
+  project.projectDirectory = "/data/projects/golden";
+  project.nextDatasetOrdinal = 7;
+  project.dirty = true;
+
+  Dataset wind;
+  wind.id = "dataset_0001";
+  wind.name = "Wind";
+  wind.sourceKind = DatasetSourceKind::FileAnimation;
+  wind.importerType = "VTK";
+  wind.source.sourcePath = "/data/wind/frames.sources";
+  wind.source.importerSettings.set("scalar", "velocity");
+  wind.status = DatasetStatus::Available;
+  wind.rootNode = {"datasets", 4};
+  wind.sourceFiles.push_back({"frame_000.vtk", "/data/wind/frame_000.vtk"});
+  wind.persistedName = "Wind";
+  project.datasets.push_back(std::move(wind));
+
+  Dataset parked;
+  parked.id = "dataset_0005";
+  parked.name = "Parked";
+  parked.residency = DatasetResidency::Unloaded;
+  project.datasets.push_back(std::move(parked));
+
+  Shot intro;
+  intro.id = "shot_0001";
+  intro.name = "Intro";
+  intro.frameCount = 240;
+  intro.fps = 30.f;
+  intro.currentFrame = 17;
+  intro.playing = true;
+  intro.loop = false;
+  intro.datasetBindings.push_back({"dataset_0001", true});
+  intro.datasetBindings.push_back({"dataset_0005", false});
+  intro.lightRigId = "lightRig_0001";
+  intro.cameraRigId = "cameraRig_0001";
+  intro.camera = {ANARI_CAMERA, 2};
+  intro.renderSettings.width = 1920;
+  intro.renderSettings.height = 1080;
+  intro.renderSettings.samples = 64;
+  intro.renderSettings.rendererLibrary = "visrtx";
+  intro.renderSettings.rendererObjectIndex = 9;
+  intro.renderSettings.rendererSubtype = "scivis";
+  intro.renderSettings.outputFilePrefix = "intro_";
+  project.shots.push_back(intro);
+
+  Shot outro;
+  outro.id = "shot_0002";
+  outro.name = "Outro";
+  project.shots.push_back(outro);
+  project.activeShotId = intro.id;
+
+  LightRig lights;
+  lights.id = "lightRig_0001";
+  lights.name = "Studio Lights";
+  lights.rootNode = {"lights", 11};
+  lights.persistedName = "Studio Lights";
+  project.lightRigs.push_back(lights);
+
+  CameraRig rig;
+  rig.id = "cameraRig_0001";
+  rig.name = "Fly-through";
+  rig.current.orbit.lookat = {1.f, 2.f, 3.f};
+  CameraKeyframe keyframe;
+  keyframe.frame = 12;
+  keyframe.name = "mid";
+  keyframe.interpolationToNext = CameraInterpolation::EaseOutIn;
+  rig.keyframes.push_back(keyframe);
+  rig.persistedName = "Fly-through";
+  project.cameraRigs.push_back(rig);
+
+  project.colorMaps.push_back({"colorMap_0001", "Viridis"});
+  return project;
+}
+
+// What projectToNode() wrote for makeManifestGoldenProject() before the Shot
+// and Project serializers were unified; the manifest form must not drift
+// from it, since this is what project.vsr stores under "scivisStudio".
+constexpr const char *MANIFEST_GOLDEN = R"(scivisStudio
+  name: ANARI_STRING "Golden"
+  projectDirectory: ANARI_STRING "/data/projects/golden"
+  activeShot: ANARI_STRING "shot_0001"
+  nextDatasetOrdinal: ANARI_UINT64 7
+  dirty: ANARI_BOOL true
+  datasets
+    [0]
+      id: ANARI_STRING "dataset_0001"
+      name: ANARI_STRING "Wind"
+      residency: ANARI_STRING "Loaded"
+    [1]
+      id: ANARI_STRING "dataset_0005"
+      name: ANARI_STRING "Parked"
+      residency: ANARI_STRING "Unloaded"
+  shots
+    [0]
+      id: ANARI_STRING "shot_0001"
+      name: ANARI_STRING "Intro"
+      frameCount: ANARI_INT32 240
+      fps: ANARI_FLOAT32 30
+      currentFrame: ANARI_INT32 17
+      playing: ANARI_BOOL true
+      loop: ANARI_BOOL false
+      lightRigId: ANARI_STRING "lightRig_0001"
+      cameraRigId: ANARI_STRING "cameraRig_0001"
+      renderSettings
+        width: ANARI_UINT32 1920
+        height: ANARI_UINT32 1080
+        samples: ANARI_UINT32 64
+        rendererLibrary: ANARI_STRING "visrtx"
+        rendererObjectIndex: ANARI_UINT64 9
+        rendererSubtype: ANARI_STRING "scivis"
+        outputFilePrefix: ANARI_STRING "intro_"
+      datasetBindings
+        [0]
+          datasetId: ANARI_STRING "dataset_0001"
+          enabled: ANARI_BOOL true
+        [1]
+          datasetId: ANARI_STRING "dataset_0005"
+          enabled: ANARI_BOOL false
+    [1]
+      id: ANARI_STRING "shot_0002"
+      name: ANARI_STRING "Outro"
+      frameCount: ANARI_INT32 120
+      fps: ANARI_FLOAT32 24
+      currentFrame: ANARI_INT32 0
+      playing: ANARI_BOOL false
+      loop: ANARI_BOOL true
+      lightRigId: ANARI_STRING ""
+      cameraRigId: ANARI_STRING ""
+      renderSettings
+        width: ANARI_UINT32 1024
+        height: ANARI_UINT32 768
+        samples: ANARI_UINT32 128
+        rendererLibrary: ANARI_STRING ""
+        rendererObjectIndex: ANARI_UINT64 18446744073709551615
+        rendererSubtype: ANARI_STRING "default"
+        outputFilePrefix: ANARI_STRING ""
+      datasetBindings
+  lightRigs
+    [0]
+      id: ANARI_STRING "lightRig_0001"
+      name: ANARI_STRING "Studio Lights"
+  cameraRigs
+    [0]
+      id: ANARI_STRING "cameraRig_0001"
+      name: ANARI_STRING "Fly-through"
+  colorMaps
+    [0]
+      id: ANARI_STRING "colorMap_0001"
+      name: ANARI_STRING "Viridis"
+)";
+
+} // namespace
+
+SCENARIO(
+    "SciVis Studio manifest form matches its golden dump", "[SciVisStudio]")
+{
+  GIVEN("A project populated away from every default")
+  {
+    vsr::core::DataTree tree;
+    projectToNode(makeManifestGoldenProject(),
+        tree.root()["scivisStudio"],
+        ProjectForm::Manifest);
+
+    THEN("The manifest form is unchanged")
+    {
+      const auto dump = canonicalDump(tree.root()["scivisStudio"]);
+      REQUIRE(dump == MANIFEST_GOLDEN);
+    }
+
+    THEN("Saving and reloading preserves the dump")
+    {
+      const auto file = std::filesystem::temp_directory_path()
+          / "vsr_scivis_studio_golden_manifest.vsr";
+      std::filesystem::remove(file);
+      REQUIRE(tree.save(file.string().c_str()));
+      vsr::core::DataTree loaded;
+      REQUIRE(loaded.load(file.string().c_str()));
+      std::filesystem::remove(file);
+      REQUIRE(canonicalDump(loaded.root()["scivisStudio"]) == MANIFEST_GOLDEN);
+    }
+
+    THEN("Reading it back leaves the runtime fields at the open defaults")
+    {
+      Project loaded;
+      REQUIRE(nodeToProject(
+          tree.root()["scivisStudio"], loaded, ProjectForm::Manifest));
+      REQUIRE(loaded.datasets.size() == 2);
+      REQUIRE(loaded.datasets[0].status == DatasetStatus::Unavailable);
+      REQUIRE_FALSE(loaded.datasets[0].dirty);
+      REQUIRE(loaded.datasets[0].persistedName == "Wind");
+      REQUIRE(loaded.datasets[0].rootNode.layerName.empty());
+      REQUIRE(loaded.shots[0].camera.type == ANARI_UNKNOWN);
+      REQUIRE(loaded.shots[0].datasetBindings.size() == 2);
+      REQUIRE_FALSE(loaded.shots[0].datasetBindings[1].enabled);
+      REQUIRE(loaded.cameraRigs[0].keyframes.empty());
+    }
+  }
+}
+
+SCENARIO("SciVis Studio rejects a malformed manifest", "[SciVisStudio]")
+{
+  GIVEN("A manifest written from a project")
+  {
+    vsr::core::DataTree tree;
+    projectToNode(
+        makeManifestGoldenProject(), tree.root(), ProjectForm::Manifest);
+    Project loaded;
+
+    THEN("A mistyped shot field is rejected")
+    {
+      (*tree.root()["shots"].child(0))["fps"] = std::string("fast");
+      REQUIRE_FALSE(nodeToProject(tree.root(), loaded, ProjectForm::Manifest));
+    }
+
+    THEN("A dataset without an id is rejected")
+    {
+      auto &dataset = tree.root()["datasets"].append();
+      dataset["name"] = std::string("nameless");
+      REQUIRE_FALSE(nodeToProject(tree.root(), loaded, ProjectForm::Manifest));
+    }
+
+    THEN("An unknown residency spelling is rejected")
+    {
+      (*tree.root()["datasets"].child(1))["residency"] = std::string("Parked");
+      REQUIRE_FALSE(nodeToProject(tree.root(), loaded, ProjectForm::Manifest));
+    }
+
+    THEN("A rejected read leaves the output untouched")
+    {
+      loaded.name = "Before";
+      (*tree.root()["shots"].child(0))["fps"] = std::string("fast");
+      REQUIRE_FALSE(nodeToProject(tree.root(), loaded, ProjectForm::Manifest));
+      REQUIRE(loaded.name == "Before");
+    }
+  }
+}
+
 SCENARIO("SciVis Studio dataset residency round-trips through the manifest",
     "[SciVisStudio]")
 {
@@ -631,12 +925,12 @@ SCENARIO("SciVis Studio dataset residency round-trips through the manifest",
     project.datasets.push_back(std::move(parked));
 
     vsr::core::DataTree tree;
-    projectToNode(project, tree.root());
+    projectToNode(project, tree.root(), ProjectForm::Manifest);
 
     THEN("Residency survives the manifest round trip")
     {
       Project loaded;
-      REQUIRE(nodeToProject(tree.root(), loaded));
+      REQUIRE(nodeToProject(tree.root(), loaded, ProjectForm::Manifest));
       REQUIRE(loaded.datasets.size() == 2);
       REQUIRE(loaded.datasets[0].residency == DatasetResidency::Loaded);
       REQUIRE(loaded.datasets[1].residency == DatasetResidency::Unloaded);
@@ -653,7 +947,7 @@ SCENARIO("SciVis Studio dataset residency round-trips through the manifest",
     THEN("An absent residency field means Loaded")
     {
       Project loaded;
-      REQUIRE(nodeToProject(legacy.root(), loaded));
+      REQUIRE(nodeToProject(legacy.root(), loaded, ProjectForm::Manifest));
       REQUIRE(loaded.datasets.size() == 1);
       REQUIRE(loaded.datasets.front().residency == DatasetResidency::Loaded);
     }
@@ -678,9 +972,9 @@ SCENARIO(
   REQUIRE(next != removedId);
 
   vsr::core::DataTree tree;
-  projectToNode(project, tree.root());
+  projectToNode(project, tree.root(), ProjectForm::Manifest);
   Project loaded;
-  REQUIRE(nodeToProject(tree.root(), loaded));
+  REQUIRE(nodeToProject(tree.root(), loaded, ProjectForm::Manifest));
   REQUIRE(project::nextDatasetId(loaded) == "dataset_0004");
 }
 
@@ -730,8 +1024,7 @@ SCENARIO("SciVis Studio camera interpolation modes", "[SciVisStudio]")
         REQUIRE(camera_rig::interpolationFromString(camera_rig::toString(mode))
             == mode);
 
-      REQUIRE(camera_rig::interpolationFromString("Unknown")
-          == CameraInterpolation::Linear);
+      REQUIRE_FALSE(camera_rig::interpolationFromString("Unknown").has_value());
     }
 
     THEN("Sampling applies easing to the segment interpolation factor")
@@ -936,8 +1229,7 @@ SCENARIO("SciVis Studio requires valid scene pool Archives", "[SciVisStudio]")
   REQUIRE(validation.error.find("cameras.vsr") != std::string::npos);
 
   std::string error;
-  REQUIRE_FALSE(
-      projectContext.openProject(root, nullptr, nullptr, nullptr, &error));
+  REQUIRE_FALSE(projectContext.openProject(root, nullptr, &error));
   REQUIRE(error.find("cameras.vsr") != std::string::npos);
 
   REQUIRE(projectContext.saveProject(root));
@@ -949,9 +1241,121 @@ SCENARIO("SciVis Studio requires valid scene pool Archives", "[SciVisStudio]")
   validation = validateProjectRoot(root);
   REQUIRE_FALSE(validation.ok);
   REQUIRE(validation.error.find("renderers.vsr") != std::string::npos);
-  REQUIRE_FALSE(
-      projectContext.openProject(root, nullptr, nullptr, nullptr, &error));
+  REQUIRE_FALSE(projectContext.openProject(root, nullptr, &error));
   REQUIRE(error.find("renderers.vsr") != std::string::npos);
+
+  std::filesystem::remove_all(root);
+}
+
+SCENARIO("SciVis Studio persists one UI-state tree with the project",
+    "[SciVisStudio]")
+{
+  const auto root =
+      std::filesystem::temp_directory_path() / "vsr_scivis_studio_ui_state";
+  std::filesystem::remove_all(root);
+
+  GIVEN("A project saved with a {windows, layout, settings} tree")
+  {
+    vsr::app::Context appContext;
+    ProjectContext projectContext(&appContext);
+    projectContext.createUnsavedProject();
+
+    vsr::core::DataTree uiState;
+    auto &ui = uiState.root();
+    ui["windows"]["Viewport"]["visible"] = std::string("yes");
+    ui["layout"] = std::string("[Window][Viewport]\nPos=0,0\n");
+    ui["settings"]["fontScale"] = 1.5f;
+    // Only the three named children are the project's UI state.
+    ui["theme"] = std::string("dark");
+
+    std::string error;
+    REQUIRE(projectContext.saveProject(root, &ui, &error));
+
+    THEN("The manifest carries the three children at its root")
+    {
+      vsr::core::DataTree manifest;
+      REQUIRE(
+          manifest.load((root / PROJECT_MANIFEST_FILENAME).string().c_str()));
+      auto &m = manifest.root();
+      REQUIRE(m.child("windows"));
+      REQUIRE(m["windows"]["Viewport"]["visible"].getValueAs<std::string>()
+          == "yes");
+      REQUIRE(m.child("layout"));
+      REQUIRE(m["layout"].getValueAs<std::string>()
+          == "[Window][Viewport]\nPos=0,0\n");
+      REQUIRE(m.child("settings"));
+      REQUIRE(m["settings"]["fontScale"].getValueAs<float>() == 1.5f);
+      REQUIRE_FALSE(m.child("theme"));
+    }
+
+    THEN("Opening the project hands the tree back, replacing what was there")
+    {
+      vsr::app::Context reopenedContext;
+      ProjectContext reopened(&reopenedContext);
+      vsr::core::DataTree out;
+      out.root()["stale"] = std::string("gone");
+      REQUIRE(reopened.openProject(root, &out.root(), &error));
+      auto &o = out.root();
+      REQUIRE_FALSE(o.child("stale"));
+      REQUIRE(o["windows"]["Viewport"]["visible"].getValueAs<std::string>()
+          == "yes");
+      REQUIRE(o["layout"].getValueAs<std::string>()
+          == "[Window][Viewport]\nPos=0,0\n");
+      REQUIRE(o["settings"]["fontScale"].getValueAs<float>() == 1.5f);
+      REQUIRE_FALSE(o.child("theme"));
+    }
+  }
+
+  GIVEN("A project saved with an empty layout and no windows or settings")
+  {
+    vsr::app::Context appContext;
+    ProjectContext projectContext(&appContext);
+    projectContext.createUnsavedProject();
+
+    vsr::core::DataTree uiState;
+    uiState.root()["layout"] = std::string();
+
+    std::string error;
+    REQUIRE(projectContext.saveProject(root, &uiState.root(), &error));
+
+    THEN("The manifest carries none of the UI-state keys")
+    {
+      vsr::core::DataTree manifest;
+      REQUIRE(
+          manifest.load((root / PROJECT_MANIFEST_FILENAME).string().c_str()));
+      auto &m = manifest.root();
+      REQUIRE_FALSE(m.child("windows"));
+      REQUIRE_FALSE(m.child("layout"));
+      REQUIRE_FALSE(m.child("settings"));
+    }
+
+    THEN("Opening the project hands back an empty tree")
+    {
+      vsr::core::DataTree out;
+      out.root()["stale"] = std::string("gone");
+      REQUIRE(projectContext.openProject(root, &out.root(), &error));
+      REQUIRE(out.root().numChildren() == 0);
+    }
+  }
+
+  GIVEN("A project saved without a tree")
+  {
+    vsr::app::Context appContext;
+    ProjectContext projectContext(&appContext);
+    projectContext.createUnsavedProject();
+    std::string error;
+    REQUIRE(projectContext.saveProject(root, nullptr, &error));
+
+    THEN("The manifest carries none of the UI-state keys")
+    {
+      vsr::core::DataTree manifest;
+      REQUIRE(
+          manifest.load((root / PROJECT_MANIFEST_FILENAME).string().c_str()));
+      REQUIRE_FALSE(manifest.root().child("windows"));
+      REQUIRE_FALSE(manifest.root().child("layout"));
+      REQUIRE_FALSE(manifest.root().child("settings"));
+    }
+  }
 
   std::filesystem::remove_all(root);
 }
@@ -1450,8 +1854,9 @@ SCENARIO(
   std::filesystem::remove_all(root);
 }
 
-SCENARIO("SciVis Studio projects persist file-animation source lists in "
-         "sibling Source List Files",
+SCENARIO(
+    "SciVis Studio projects persist file-animation source lists in "
+    "sibling Source List Files",
     "[SciVisStudio]")
 {
   const auto root = std::filesystem::temp_directory_path()
@@ -1616,8 +2021,7 @@ SCENARIO("SciVis Studio projects persist file-animation source lists in "
   std::filesystem::remove_all(root);
 }
 
-SCENARIO(
-    "SciVis Studio migrates legacy embedded sourceFiles on explicit save",
+SCENARIO("SciVis Studio migrates legacy embedded sourceFiles on explicit save",
     "[SciVisStudio]")
 {
   const auto root = std::filesystem::temp_directory_path()
@@ -1696,12 +2100,13 @@ SCENARIO(
   std::filesystem::remove_all(root);
 }
 
-SCENARIO("SciVis Studio sources edits rewrite the Source List File as an "
-         "external tool",
+SCENARIO(
+    "SciVis Studio sources edits rewrite the Source List File as an "
+    "external tool",
     "[SciVisStudio]")
 {
-  const auto root = std::filesystem::temp_directory_path()
-      / "vsr_scivis_studio_sources_edit";
+  const auto root =
+      std::filesystem::temp_directory_path() / "vsr_scivis_studio_sources_edit";
   std::filesystem::remove_all(root);
 
   const auto datasetFile = root / "datasets" / "Frames.vsr";
@@ -1738,8 +2143,9 @@ SCENARIO("SciVis Studio sources edits rewrite the Source List File as an "
       std::filesystem::file_time_type::clock::now() - std::chrono::hours(1);
   std::filesystem::last_write_time(datasetFile, sentinel);
   std::string error;
-  REQUIRE(writeDatasetSourceListEdit(
-      datasetFile, {"remapped/a.raw", "remapped/b.raw", "  spaced entry  "}, &error));
+  REQUIRE(writeDatasetSourceListEdit(datasetFile,
+      {"remapped/a.raw", "remapped/b.raw", "  spaced entry  "},
+      &error));
   REQUIRE(fileContents(sourcesFile)
       == "remapped/a.raw\nremapped/b.raw\n  spaced entry  \n");
   REQUIRE(std::filesystem::last_write_time(datasetFile) == sentinel);
@@ -1763,8 +2169,9 @@ SCENARIO("SciVis Studio sources edits rewrite the Source List File as an "
   std::filesystem::remove_all(root);
 }
 
-SCENARIO("SciVis Studio sources edits migrate legacy embedded source lists "
-         "in place",
+SCENARIO(
+    "SciVis Studio sources edits migrate legacy embedded source lists "
+    "in place",
     "[SciVisStudio]")
 {
   const auto root = std::filesystem::temp_directory_path()
@@ -1844,8 +2251,9 @@ SCENARIO("SciVis Studio sources edits migrate legacy embedded source lists "
   std::filesystem::remove_all(root);
 }
 
-SCENARIO("SciVis Studio declared file-animation datasets materialize on "
-         "first load",
+SCENARIO(
+    "SciVis Studio declared file-animation datasets materialize on "
+    "first load",
     "[SciVisStudio]")
 {
   const auto root = std::filesystem::temp_directory_path()
@@ -1895,7 +2303,8 @@ SCENARIO("SciVis Studio declared file-animation datasets materialize on "
     REQUIRE(fileContents(root / "datasets" / "Frames.sources")
         == entries[0] + "\n" + entries[1] + "\n");
     vsr::core::DataTree assetTree;
-    REQUIRE(assetTree.load((root / "datasets" / "Frames.vsr").string().c_str()));
+    REQUIRE(
+        assetTree.load((root / "datasets" / "Frames.vsr").string().c_str()));
     REQUIRE(assetTree.root()["dataset"].child("sourceFiles") == nullptr);
     REQUIRE_FALSE(project::findDataset(project, id)->dirty);
 
@@ -1930,8 +2339,8 @@ SCENARIO("SciVis Studio declared file-animation datasets materialize on "
     // from the Source List and marks the dataset dirty. Load itself never
     // writes to disk.
     const auto sourcesFile = root / "datasets" / "Frames.sources";
-    const auto sentinel = std::filesystem::file_time_type::clock::now()
-        - std::chrono::hours(1);
+    const auto sentinel =
+        std::filesystem::file_time_type::clock::now() - std::chrono::hours(1);
     std::filesystem::last_write_time(sourcesFile, sentinel);
     std::string error;
     REQUIRE(projectContext.loadDataset(id, &error));
@@ -2000,7 +2409,8 @@ SCENARIO("SciVis Studio opens legacy projects without rewriting them",
             PROJECT_FILE_TYPE,
             PROJECT_SCHEMA,
             version});
-    projectToNode(legacyProject, tree.root()["scivisStudio"]);
+    projectToNode(
+        legacyProject, tree.root()["scivisStudio"], ProjectForm::Manifest);
     vsr::app::detail::serializeLegacyApplicationContext(
         legacyContext, tree.root()["context"]);
     REQUIRE(tree.save((root / PROJECT_MANIFEST_FILENAME).string().c_str()));
@@ -2076,7 +2486,7 @@ SCENARIO("SciVis Studio extracts embedded v4 datasets only on save",
             PROJECT_FILE_TYPE,
             PROJECT_SCHEMA,
             4});
-    projectToNode(project, tree.root()["scivisStudio"]);
+    projectToNode(project, tree.root()["scivisStudio"], ProjectForm::Manifest);
     auto *datasetNode = tree.root()["scivisStudio"]["datasets"].child(0);
     REQUIRE(datasetNode);
     (*datasetNode)["sourceKind"] = "Static";
@@ -2160,7 +2570,7 @@ SCENARIO("SciVis Studio Save As reports unavailable datasets", "[SciVisStudio]")
           PROJECT_FILE_TYPE,
           PROJECT_SCHEMA,
           5});
-  projectToNode(project, tree.root()["scivisStudio"]);
+  projectToNode(project, tree.root()["scivisStudio"], ProjectForm::Manifest);
   vsr::scene::Scene scene;
   vsr::animation::AnimationManager animations(&scene);
   vsr::io::detail::LegacySceneSerializationOptions options;
@@ -2177,8 +2587,7 @@ SCENARIO("SciVis Studio Save As reports unavailable datasets", "[SciVisStudio]")
   REQUIRE(projectContext.saveProject(root));
 
   std::string error;
-  REQUIRE_FALSE(
-      projectContext.saveProject(destination, nullptr, "", nullptr, &error));
+  REQUIRE_FALSE(projectContext.saveProject(destination, nullptr, &error));
   REQUIRE(error.find("Save As requires every dataset to be available")
       != std::string::npos);
   REQUIRE(error.find("Missing Dataset") != std::string::npos);
@@ -2267,7 +2676,7 @@ SCENARIO("SciVis Studio dataset lifecycle workflows preserve asset semantics",
   REQUIRE_FALSE(std::filesystem::exists(root / "datasets" / "Renamed.vsr"));
   REQUIRE(std::filesystem::exists(root / "datasets" / "generic.vsr"));
 
-  auto *loaded = projectContext.loadDatasetArchive(savedArchive, &error);
+  auto *loaded = projectContext.loadDatasetArchive(savedArchive, {}, &error);
   REQUIRE(loaded);
   REQUIRE(loaded->id != originalId);
   REQUIRE(loaded->dirty);
@@ -2319,7 +2728,8 @@ SCENARIO("SciVis Studio treats the file-animation pair as one dataset asset",
 
   // Dataset Archive Load incorporates the pair with a fresh identity...
   std::string error;
-  auto *incorporated = projectContext.loadDatasetArchive(archiveFile, &error);
+  auto *incorporated =
+      projectContext.loadDatasetArchive(archiveFile, {}, &error);
   REQUIRE(incorporated);
   REQUIRE(incorporated->sourceFiles.size() == 2);
   REQUIRE(incorporated->sourceFiles[0].resolvedPath
@@ -2329,7 +2739,8 @@ SCENARIO("SciVis Studio treats the file-animation pair as one dataset asset",
   // ...and fails cleanly without the sibling.
   std::filesystem::remove(archiveDir / "Archived.sources");
   const auto datasetCount = project.datasets.size();
-  REQUIRE(projectContext.loadDatasetArchive(archiveFile, &error) == nullptr);
+  REQUIRE(
+      projectContext.loadDatasetArchive(archiveFile, {}, &error) == nullptr);
   REQUIRE(error.find("Source List File") != std::string::npos);
   REQUIRE(project.datasets.size() == datasetCount);
 
@@ -2342,8 +2753,8 @@ SCENARIO("SciVis Studio treats the file-animation pair as one dataset asset",
   }
   REQUIRE(projectContext.loadDataset(id, &error));
   REQUIRE(project::findDataset(project, id)->sourceFiles.size() == 1);
-  REQUIRE(project::findDataset(project, id)->sourceFiles[0].path
-      == "frames/z.raw");
+  REQUIRE(
+      project::findDataset(project, id)->sourceFiles[0].path == "frames/z.raw");
 
   // Discovery scans only dataset files, and a file-animation dataset file
   // without its sibling is not a valid Dataset Candidate.
@@ -2384,8 +2795,7 @@ SCENARIO("SciVis Studio treats the file-animation pair as one dataset asset",
     out << "frames/z.raw\n";
   }
   REQUIRE(projectContext.unloadDataset(id, &error));
-  REQUIRE(
-      projectContext.saveProject(destination, nullptr, "", nullptr, &error));
+  REQUIRE(projectContext.saveProject(destination, nullptr, &error));
   REQUIRE(validateDatasetAsset(destination / "datasets" / "Frames.vsr").ok);
   REQUIRE(fileContents(destination / "datasets" / "Frames.sources")
       == "frames/z.raw\n");
@@ -2436,12 +2846,11 @@ SCENARIO("SciVis Studio unloads a clean dataset without touching its asset",
     REQUIRE(record.residency == DatasetResidency::Unloaded);
     REQUIRE(record.status == DatasetStatus::Available);
     REQUIRE_FALSE(projectContext.resolveDatasetRoot(record));
-    REQUIRE(appContext.vsr.scene.numberOfObjects(ANARI_GEOMETRY)
-        < geometryCount);
+    REQUIRE(
+        appContext.vsr.scene.numberOfObjects(ANARI_GEOMETRY) < geometryCount);
     REQUIRE(record.id == datasetId);
     REQUIRE_FALSE(record.dirty);
-    REQUIRE(
-        shot::findDatasetBinding(*project::activeShot(project), datasetId));
+    REQUIRE(shot::findDatasetBinding(*project::activeShot(project), datasetId));
   }
 
   THEN("Unload marks the project dirty and never writes to disk")
@@ -2457,8 +2866,8 @@ SCENARIO("SciVis Studio unloads a clean dataset without touching its asset",
 SCENARIO("SciVis Studio Dataset Load recreates the runtime from the asset",
     "[SciVisStudio]")
 {
-  const auto root = std::filesystem::temp_directory_path()
-      / "vsr_scivis_studio_dataset_load";
+  const auto root =
+      std::filesystem::temp_directory_path() / "vsr_scivis_studio_dataset_load";
   const auto source = std::filesystem::temp_directory_path()
       / "vsr_scivis_studio_dataset_load.obj";
   std::filesystem::remove_all(root);
@@ -2498,10 +2907,9 @@ SCENARIO("SciVis Studio Dataset Load recreates the runtime from the asset",
     auto datasetRoot = projectContext.resolveDatasetRoot(record);
     REQUIRE(datasetRoot);
     REQUIRE((*datasetRoot)->isEnabled());
-    REQUIRE(appContext.vsr.scene.numberOfObjects(ANARI_GEOMETRY)
-        == geometryCount);
     REQUIRE(
-        shot::findDatasetBinding(*project::activeShot(project), datasetId));
+        appContext.vsr.scene.numberOfObjects(ANARI_GEOMETRY) == geometryCount);
+    REQUIRE(shot::findDatasetBinding(*project::activeShot(project), datasetId));
     REQUIRE(project.dirty);
   }
 
@@ -2514,8 +2922,8 @@ SCENARIO("SciVis Studio Dataset Load recreates the runtime from the asset",
   THEN("Loading an already-loaded dataset is a no-op success")
   {
     REQUIRE(projectContext.loadDataset(datasetId, &error));
-    REQUIRE(appContext.vsr.scene.numberOfObjects(ANARI_GEOMETRY)
-        == geometryCount);
+    REQUIRE(
+        appContext.vsr.scene.numberOfObjects(ANARI_GEOMETRY) == geometryCount);
   }
 
   std::filesystem::remove_all(root);
@@ -2593,8 +3001,7 @@ SCENARIO("SciVis Studio residency guards keep unloaded datasets read-only",
     THEN("An in-place asset rewrite requires loading first")
     {
       record.dirty = true;
-      REQUIRE_FALSE(
-          projectContext.saveProject(root, nullptr, "", nullptr, &error));
+      REQUIRE_FALSE(projectContext.saveProject(root, nullptr, &error));
       REQUIRE(error.find("read-only") != std::string::npos);
     }
 
@@ -2618,8 +3025,8 @@ SCENARIO("SciVis Studio residency guards keep unloaded datasets read-only",
       REQUIRE(record.residency == DatasetResidency::Unloaded);
       REQUIRE(record.status == DatasetStatus::Unavailable);
       REQUIRE_FALSE(projectContext.resolveDatasetRoot(record));
-      REQUIRE(appContext.vsr.scene.numberOfObjects(ANARI_GEOMETRY)
-          == objectCount);
+      REQUIRE(
+          appContext.vsr.scene.numberOfObjects(ANARI_GEOMETRY) == objectCount);
     }
   }
 
@@ -2641,8 +3048,8 @@ SCENARIO("SciVis Studio residency guards keep unloaded datasets read-only",
   std::filesystem::remove(source);
 }
 
-SCENARIO("SciVis Studio dataset residency survives save and open",
-    "[SciVisStudio]")
+SCENARIO(
+    "SciVis Studio dataset residency survives save and open", "[SciVisStudio]")
 {
   const auto root = std::filesystem::temp_directory_path()
       / "vsr_scivis_studio_residency_roundtrip";
@@ -2716,8 +3123,9 @@ SCENARIO("SciVis Studio dataset residency survives save and open",
   std::filesystem::remove(source);
 }
 
-SCENARIO("SciVis Studio bookkeeping open round-trips residency without "
-         "building runtimes",
+SCENARIO(
+    "SciVis Studio bookkeeping open round-trips residency without "
+    "building runtimes",
     "[SciVisStudio]")
 {
   const auto root = std::filesystem::temp_directory_path()
@@ -2741,10 +3149,12 @@ SCENARIO("SciVis Studio bookkeeping open round-trips residency without "
     auto &project = projectContext.project();
     auto &scene = appContext.vsr.scene;
     loadedId =
-        projectContext.addStaticDataset("Mesh A", source, vsr::io::ImporterType::OBJ)
+        projectContext
+            .addStaticDataset("Mesh A", source, vsr::io::ImporterType::OBJ)
             ->id;
     unloadedId =
-        projectContext.addStaticDataset("Mesh B", source, vsr::io::ImporterType::OBJ)
+        projectContext
+            .addStaticDataset("Mesh B", source, vsr::io::ImporterType::OBJ)
             ->id;
     auto datasetsRoot =
         findDirectChild(scene.layer("studio")->root(), "datasets");
@@ -2773,8 +3183,7 @@ SCENARIO("SciVis Studio bookkeeping open round-trips residency without "
     vsr::app::Context appContext;
     ProjectContext projectContext(&appContext);
     std::string error;
-    REQUIRE(projectContext.openProject(
-        root, nullptr, nullptr, nullptr, &error, bookkeeping));
+    REQUIRE(projectContext.openProject(root, nullptr, &error, bookkeeping));
     auto &project = projectContext.project();
 
     // No dataset runtime is built and recorded residency is untouched.
@@ -2799,8 +3208,8 @@ SCENARIO("SciVis Studio bookkeeping open round-trips residency without "
     {
       const auto assetFile = root / "datasets" / "Mesh A.vsr";
       const auto sourcesFile = root / "datasets" / "Frames.sources";
-      const auto sentinel = std::filesystem::file_time_type::clock::now()
-          - std::chrono::hours(1);
+      const auto sentinel =
+          std::filesystem::file_time_type::clock::now() - std::chrono::hours(1);
       std::filesystem::last_write_time(assetFile, sentinel);
       std::filesystem::last_write_time(sourcesFile, sentinel);
       project.shots.front().name = "Edited Shot";
@@ -2831,10 +3240,9 @@ SCENARIO("SciVis Studio bookkeeping open round-trips residency without "
     vsr::app::Context appContext;
     ProjectContext projectContext(&appContext);
     std::string error;
-    REQUIRE(projectContext.openProject(
-        root, nullptr, nullptr, nullptr, &error, bookkeeping));
+    REQUIRE(projectContext.openProject(root, nullptr, &error, bookkeeping));
     REQUIRE(projectContext.renameDataset(framesId, "Renamed Frames", &error));
-    REQUIRE(projectContext.saveProject(root, nullptr, "", nullptr, &error));
+    REQUIRE(projectContext.saveProject(root, nullptr, &error));
     REQUIRE(std::filesystem::exists(root / "datasets" / "Renamed Frames.vsr"));
     REQUIRE(fileContents(root / "datasets" / "Renamed Frames.sources")
         == "frames/a.raw\nframes/b.raw\n");
@@ -2847,7 +3255,7 @@ SCENARIO("SciVis Studio bookkeeping open round-trips residency without "
     REQUIRE(projectContext.unloadDataset(loadedId, &error));
     REQUIRE(projectContext.loadDataset(unloadedId, &error));
     REQUIRE(appContext.vsr.scene.numberOfObjects(ANARI_GEOMETRY) > 0);
-    REQUIRE(projectContext.saveProject(root, nullptr, "", nullptr, &error));
+    REQUIRE(projectContext.saveProject(root, nullptr, &error));
   }
 
   {
@@ -2906,8 +3314,7 @@ SCENARIO("SciVis Studio Save As copies unloaded datasets", "[SciVisStudio]")
   REQUIRE(projectContext.unloadDataset(parkedId));
 
   std::string error;
-  REQUIRE(
-      projectContext.saveProject(destination, nullptr, "", nullptr, &error));
+  REQUIRE(projectContext.saveProject(destination, nullptr, &error));
   REQUIRE(readBytes(destination / "datasets/Parked.vsr") == sourceBytes);
   REQUIRE(validateDatasetAsset(destination / "datasets/Parked.vsr").ok);
   REQUIRE(validateDatasetAsset(destination / "datasets/Resident.vsr").ok);
@@ -2965,8 +3372,7 @@ SCENARIO("SciVis Studio Save As renames colliding unloaded datasets",
   projectContext.project().markDirty();
 
   std::string error;
-  REQUIRE(
-      projectContext.saveProject(destination, nullptr, "", nullptr, &error));
+  REQUIRE(projectContext.saveProject(destination, nullptr, &error));
   const auto firstArchive =
       validateDatasetAsset(destination / "datasets/Duplicate.vsr");
   REQUIRE(firstArchive.ok);
@@ -3031,8 +3437,7 @@ SCENARIO("SciVis Studio --openUnloaded overrides initial residency",
     vsr::app::Context appContext;
     ProjectContext projectContext(&appContext);
     std::string error;
-    REQUIRE(projectContext.openProject(
-        root, nullptr, nullptr, nullptr, &error, openUnloaded));
+    REQUIRE(projectContext.openProject(root, nullptr, &error, openUnloaded));
     auto &project = projectContext.project();
     auto &record = project.datasets.front();
 
@@ -3053,14 +3458,12 @@ SCENARIO("SciVis Studio --openUnloaded overrides initial residency",
     vsr::app::Context appContext;
     ProjectContext projectContext(&appContext);
     std::string error;
-    REQUIRE(projectContext.openProject(
-        root, nullptr, nullptr, nullptr, &error, openUnloaded));
+    REQUIRE(projectContext.openProject(root, nullptr, &error, openUnloaded));
 
     THEN("An override that changes nothing leaves the project clean")
     {
       auto &project = projectContext.project();
-      REQUIRE(
-          project.datasets.front().residency == DatasetResidency::Unloaded);
+      REQUIRE(project.datasets.front().residency == DatasetResidency::Unloaded);
       REQUIRE_FALSE(project.dirty);
     }
   }
@@ -3099,7 +3502,8 @@ SCENARIO("SciVis Studio --openUnloaded overrides initial residency",
               PROJECT_FILE_TYPE,
               PROJECT_SCHEMA,
               4});
-      projectToNode(project, tree.root()["scivisStudio"]);
+      projectToNode(
+          project, tree.root()["scivisStudio"], ProjectForm::Manifest);
       auto *datasetNode = tree.root()["scivisStudio"]["datasets"].child(0);
       REQUIRE(datasetNode);
       (*datasetNode)["sourceKind"] = "Static";
@@ -3117,7 +3521,7 @@ SCENARIO("SciVis Studio --openUnloaded overrides initial residency",
       ProjectContext projectContext(&appContext);
       std::string error;
       REQUIRE(projectContext.openProject(
-          legacyRoot, nullptr, nullptr, nullptr, &error, openUnloaded));
+          legacyRoot, nullptr, &error, openUnloaded));
       auto &record = projectContext.project().datasets.front();
       REQUIRE(record.residency == DatasetResidency::Loaded);
       REQUIRE(record.status == DatasetStatus::Available);
@@ -3128,6 +3532,97 @@ SCENARIO("SciVis Studio --openUnloaded overrides initial residency",
 
   std::filesystem::remove_all(root);
   std::filesystem::remove(source);
+}
+
+SCENARIO(
+    "SciVis Studio shot rendering reports why it did not run", "[SciVisStudio]")
+{
+  vsr::app::Context appContext;
+  ProjectContext projectContext(&appContext);
+  projectContext.createUnsavedProject();
+
+  GIVEN("An unsaved project")
+  {
+    THEN("The render refuses with the reason and no frames")
+    {
+      const auto result = renderActiveShotToFrames(projectContext);
+      REQUIRE(result.outcome == RenderShotResult::Outcome::Failed);
+      REQUIRE(result.error == "Cannot render an unsaved project");
+      REQUIRE(result.framesCompleted == 0);
+      REQUIRE(result.outputDirectory.empty());
+    }
+  }
+}
+
+SCENARIO("SciVis Studio shot rendering restores the scene when a frame throws",
+    "[SciVisStudio]")
+{
+  // The frame loop needs a real device; builds without helide skip.
+  auto library = anari::loadLibrary("helide",
+      [](const void *,
+          ANARIDevice,
+          ANARIObject,
+          anari::DataType,
+          ANARIStatusSeverity,
+          ANARIStatusCode,
+          const char *) {});
+  if (!library) {
+    WARN("helide ANARI library unavailable, skipping the render throw test");
+    return;
+  }
+  anari::unloadLibrary(library);
+
+  const auto root =
+      std::filesystem::temp_directory_path() / "vsr_scivis_studio_render_throw";
+  std::filesystem::remove_all(root);
+
+  vsr::app::Context appContext;
+  ProjectContext projectContext(&appContext);
+  projectContext.createUnsavedProject();
+  REQUIRE(projectContext.saveProject(root));
+  auto *shot = project::activeShot(projectContext.project());
+  REQUIRE(shot);
+  shot->frameCount = 3;
+  shot->currentFrame = 2;
+  shot->playing = true;
+  shot->renderSettings.width = 8;
+  shot->renderSettings.height = 8;
+  shot->renderSettings.samples = 1;
+  // A fresh project has no renderer objects; bind one so the render reaches
+  // its frame loop.
+  auto device = appContext.anari.loadDevice("helide");
+  REQUIRE(device);
+  REQUIRE(projectContext.bindShotRenderer(*shot, "helide", device));
+  const auto delegates = appContext.vsr.scene.updateDelegate().size();
+
+  GIVEN("A frame hook that throws on the second frame")
+  {
+    RenderShotProgress progress;
+    progress.onFrame = [](int frame, int) {
+      if (frame == 1)
+        throw std::runtime_error("frame 1 refused to load");
+      return true;
+    };
+
+    THEN("The throw propagates and the render's scene state is undone")
+    {
+      REQUIRE_THROWS_WITH(renderActiveShotToFrames(projectContext, &progress),
+          "frame 1 refused to load");
+      // The render index the scene mirrored into is gone again.
+      REQUIRE(appContext.vsr.scene.updateDelegate().size() == delegates);
+      // The shot's time and playback state are back where they were.
+      REQUIRE(shot->currentFrame == 2);
+      REQUIRE(shot->playing);
+      // The one frame rendered before the throw is on disk, the next is not.
+      const auto frames = root / "renders" / shot->id;
+      REQUIRE(std::filesystem::exists(frames / (shot->id + "_0000.png")));
+      REQUIRE_FALSE(std::filesystem::exists(frames / (shot->id + "_0001.png")));
+    }
+  }
+
+  anari::release(device, device);
+  appContext.anari.releaseAllDevices();
+  std::filesystem::remove_all(root);
 }
 
 SCENARIO("SciVis Studio shot rendering materializes bound datasets",
@@ -3148,13 +3643,16 @@ SCENARIO("SciVis Studio shot rendering materializes bound datasets",
   ProjectContext projectContext(&appContext);
   projectContext.createUnsavedProject();
   const auto firstId =
-      projectContext.addStaticDataset("First", source, vsr::io::ImporterType::OBJ)
+      projectContext
+          .addStaticDataset("First", source, vsr::io::ImporterType::OBJ)
           ->id;
   const auto secondId =
-      projectContext.addStaticDataset("Second", source, vsr::io::ImporterType::OBJ)
+      projectContext
+          .addStaticDataset("Second", source, vsr::io::ImporterType::OBJ)
           ->id;
   const auto thirdId =
-      projectContext.addStaticDataset("Third", source, vsr::io::ImporterType::OBJ)
+      projectContext
+          .addStaticDataset("Third", source, vsr::io::ImporterType::OBJ)
           ->id;
   REQUIRE(projectContext.saveProject(root));
   REQUIRE(projectContext.unloadDataset(secondId));
@@ -3308,7 +3806,7 @@ SCENARIO("SciVis Studio stages every dirty dataset before replacement",
   projectContext.project().datasets[1].dirty = true;
 
   std::string error;
-  REQUIRE_FALSE(projectContext.saveProject(root, nullptr, "", nullptr, &error));
+  REQUIRE_FALSE(projectContext.saveProject(root, nullptr, &error));
   REQUIRE(error.find("Second") != std::string::npos);
   REQUIRE(readBytes(firstAsset) == before);
   for (const auto &entry :
@@ -3353,7 +3851,7 @@ SCENARIO("SciVis Studio pool Archive failures preserve the previous project",
   projectContext.project().markDirty();
 
   std::string error;
-  REQUIRE_FALSE(projectContext.saveProject(root, nullptr, "", nullptr, &error));
+  REQUIRE_FALSE(projectContext.saveProject(root, nullptr, &error));
   REQUIRE(error.find("Camera pool Archive") != std::string::npos);
   REQUIRE(readBytes(manifest) == manifestBefore);
   REQUIRE(readBytes(cameras) == camerasBefore);
@@ -3412,7 +3910,7 @@ SCENARIO("SciVis Studio save collisions leave files and live names unchanged",
   dataset->dirty = true;
   projectContext.project().markDirty();
   std::string error;
-  REQUIRE_FALSE(projectContext.saveProject(root, nullptr, "", nullptr, &error));
+  REQUIRE_FALSE(projectContext.saveProject(root, nullptr, &error));
   REQUIRE(error.find("unowned target") != std::string::npos);
   REQUIRE(dataset->name == "bad/name");
   REQUIRE(dataset->dirty);
@@ -3427,8 +3925,7 @@ SCENARIO("SciVis Studio save collisions leave files and live names unchanged",
   std::filesystem::copy_file(managed, destinationCollision);
   const auto destinationBefore = readBytes(destinationCollision);
   error.clear();
-  REQUIRE_FALSE(
-      projectContext.saveProject(destination, nullptr, "", nullptr, &error));
+  REQUIRE_FALSE(projectContext.saveProject(destination, nullptr, &error));
   REQUIRE(error.find("unowned target") != std::string::npos);
   REQUIRE(projectContext.project().projectDirectory == root);
   REQUIRE(readBytes(destinationCollision) == destinationBefore);
@@ -3476,6 +3973,130 @@ SCENARIO(
   projectContext.applyActiveShot();
   REQUIRE_FALSE((*defaultRoot)->isEnabled());
   REQUIRE_FALSE((*secondRoot)->isEnabled());
+}
+
+SCENARIO("SciVis Studio a new light rig starts hidden", "[SciVisStudio]")
+{
+  vsr::app::Context appContext;
+  ProjectContext projectContext(&appContext);
+  projectContext.createUnsavedProject();
+
+  auto &project = projectContext.project();
+  auto *defaultRig =
+      light_rig::findLightRig(project, project.shots.front().lightRigId);
+  REQUIRE(defaultRig != nullptr);
+  auto defaultRoot = projectContext.resolveLightRigRoot(*defaultRig);
+  REQUIRE(defaultRoot);
+
+  WHEN("a light rig is created")
+  {
+    auto *rig = projectContext.createLightRig("Fill");
+    REQUIRE(rig != nullptr);
+    auto root = projectContext.resolveLightRigRoot(*rig);
+    REQUIRE(root);
+
+    THEN("it is hidden like every rig the active shot does not use")
+    {
+      REQUIRE_FALSE((*root)->isEnabled());
+      REQUIRE((*defaultRoot)->isEnabled());
+    }
+  }
+}
+
+SCENARIO("SciVis Studio binds a shot's renderer to a library", "[SciVisStudio]")
+{
+  vsr::app::Context appContext;
+  auto device = appContext.anari.loadDevice("helide");
+  if (!device) {
+    WARN("helide ANARI library unavailable, skipping the renderer bind test");
+    return;
+  }
+
+  ProjectContext projectContext(&appContext);
+  projectContext.createUnsavedProject();
+  auto &project = projectContext.project();
+  auto &scene = appContext.vsr.scene;
+  auto *shot = project::activeShot(project);
+  REQUIRE(shot != nullptr);
+  auto &settings = shot->renderSettings;
+  REQUIRE(settings.rendererObjectIndex == VSR_INVALID_INDEX);
+  REQUIRE(scene.renderersOfDevice("helide").empty());
+
+  GIVEN("a shot that never picked a renderer")
+  {
+    WHEN("it is bound to helide")
+    {
+      auto renderer = projectContext.bindShotRenderer(*shot, "helide", device);
+
+      THEN(
+          "the standard renderers exist, the first is recorded, the project"
+          " stays clean")
+      {
+        REQUIRE(renderer);
+        const auto renderers = scene.renderersOfDevice("helide");
+        REQUIRE_FALSE(renderers.empty());
+        REQUIRE(renderer->index() == renderers.front()->index());
+        REQUIRE(settings.rendererLibrary == "helide");
+        REQUIRE(settings.rendererObjectIndex == renderer->index());
+        REQUIRE(settings.rendererSubtype == renderer->subtype().str());
+        REQUIRE_FALSE(project.dirty);
+      }
+    }
+
+    WHEN("it is bound without a device while the scene has no renderers")
+    {
+      auto renderer = projectContext.bindShotRenderer(*shot, "helide", nullptr);
+
+      THEN("nothing binds and the shot is untouched")
+      {
+        REQUIRE_FALSE(renderer);
+        REQUIRE(settings.rendererObjectIndex == VSR_INVALID_INDEX);
+        REQUIRE(scene.renderersOfDevice("helide").empty());
+        REQUIRE_FALSE(project.dirty);
+      }
+    }
+  }
+
+  GIVEN("helide's renderers, and a shot that picked one of them")
+  {
+    const auto renderers = scene.createStandardRenderers("helide", device);
+    REQUIRE_FALSE(renderers.empty());
+    const auto pick = renderers.back();
+    settings.rendererLibrary = "helide";
+    settings.rendererObjectIndex = pick->index();
+    settings.rendererSubtype = pick->subtype().str();
+
+    WHEN("it is bound to helide")
+    {
+      auto renderer = projectContext.bindShotRenderer(*shot, "helide", device);
+
+      THEN("the pick stands, no renderers are added, the project stays clean")
+      {
+        REQUIRE(renderer);
+        REQUIRE(renderer->index() == pick->index());
+        REQUIRE(settings.rendererObjectIndex == pick->index());
+        REQUIRE(scene.renderersOfDevice("helide").size() == renderers.size());
+        REQUIRE_FALSE(project.dirty);
+      }
+    }
+
+    WHEN("its pick names no helide renderer")
+    {
+      settings.rendererObjectIndex = 9999;
+      auto renderer = projectContext.bindShotRenderer(*shot, "helide", device);
+
+      THEN("the first renderer replaces it; the dirty flag is the caller's")
+      {
+        REQUIRE(renderer);
+        REQUIRE(renderer->index() == renderers.front()->index());
+        REQUIRE(settings.rendererObjectIndex == renderer->index());
+        REQUIRE(settings.rendererSubtype == renderer->subtype().str());
+        REQUIRE_FALSE(project.dirty);
+      }
+    }
+  }
+
+  anari::release(device, device);
 }
 
 SCENARIO(
@@ -3585,7 +4206,7 @@ SCENARIO("SciVis Studio v1 shot lights migrate to light rigs", "[SciVisStudio]")
             PROJECT_FILE_TYPE,
             PROJECT_SCHEMA,
             1});
-    projectToNode(project, tree.root()["scivisStudio"]);
+    projectToNode(project, tree.root()["scivisStudio"], ProjectForm::Manifest);
     vsr::app::detail::serializeLegacyApplicationContext(
         appContext, tree.root()["context"]);
     std::filesystem::create_directories(root);
@@ -3630,7 +4251,7 @@ SCENARIO("SciVis Studio v2 shot camera rigs migrate to camera rigs",
             PROJECT_FILE_TYPE,
             PROJECT_SCHEMA,
             2});
-    projectToNode(project, tree.root()["scivisStudio"]);
+    projectToNode(project, tree.root()["scivisStudio"], ProjectForm::Manifest);
 
     auto *shotNode = tree.root()["scivisStudio"]["shots"].child(0);
     REQUIRE(shotNode != nullptr);
@@ -3700,6 +4321,147 @@ SCENARIO("SciVis Studio shot time is driven by the animation manager",
 
   animMgr.setAnimationFrame(9);
   REQUIRE(shot.currentFrame == 9);
+}
+
+SCENARIO("SciVis Studio ProjectContext counts the Project's revisions",
+    "[SciVisStudio]")
+{
+  vsr::app::Context appContext;
+  ProjectContext projectContext(&appContext);
+  projectContext.createUnsavedProject();
+
+  GIVEN("a fresh project")
+  {
+    const auto revision = projectContext.revision();
+    const auto shotRevision = projectContext.activeShotRevision();
+    REQUIRE(revision > 0); // the creation itself was a mutation
+
+    WHEN("a shot is added")
+    {
+      REQUIRE(projectContext.addShot("Two"));
+
+      THEN("both the revision and the active-shot revision move")
+      {
+        REQUIRE(projectContext.revision() > revision);
+        REQUIRE(projectContext.activeShotRevision() > shotRevision);
+      }
+    }
+
+    WHEN("the active shot is selected again")
+    {
+      REQUIRE(
+          projectContext.setActiveShot(projectContext.project().activeShotId));
+
+      THEN("nothing changed, so neither revision moves")
+      {
+        REQUIRE(projectContext.revision() == revision);
+        REQUIRE(projectContext.activeShotRevision() == shotRevision);
+      }
+    }
+
+    WHEN("a light rig is created")
+    {
+      REQUIRE(projectContext.createLightRig("Fill"));
+
+      THEN("the revision moves; the active shot is as it was")
+      {
+        REQUIRE(projectContext.revision() > revision);
+        REQUIRE(projectContext.activeShotRevision() == shotRevision);
+      }
+    }
+
+    WHEN("a shot other than the active one is updated")
+    {
+      REQUIRE(projectContext.addShot("Two"));
+      const auto afterAdd = projectContext.revision();
+      const auto shotAfterAdd = projectContext.activeShotRevision();
+      Shot first = projectContext.project().shots.front();
+      first.name = "Renamed";
+      REQUIRE(projectContext.updateShot(first));
+
+      THEN("the revision moves and the active-shot revision does not")
+      {
+        REQUIRE(projectContext.revision() > afterAdd);
+        REQUIRE(projectContext.activeShotRevision() == shotAfterAdd);
+      }
+
+      AND_WHEN("the active shot is updated")
+      {
+        const auto beforeActive = projectContext.activeShotRevision();
+        Shot active = *project::activeShot(projectContext.project());
+        active.name = "Active renamed";
+        REQUIRE(projectContext.updateShot(active));
+
+        THEN("the active-shot revision moves too")
+        {
+          REQUIRE(projectContext.activeShotRevision() > beforeActive);
+        }
+      }
+    }
+
+    WHEN("a paused shot is sought to another frame")
+    {
+      auto &shot = *project::activeShot(projectContext.project());
+      shot.frameCount = 24;
+      projectContext.syncAnimationManagerToActiveShot();
+      const auto synced = projectContext.revision();
+      projectContext.setActiveShotFrame(9);
+
+      THEN("the frame moved without moving the revision (Time in Motion)")
+      {
+        REQUIRE(shot.currentFrame == 9);
+        REQUIRE(projectContext.revision() == synced);
+
+        AND_WHEN("the resting frame is committed")
+        {
+          projectContext.markRevised();
+
+          THEN("the revision moves once")
+          {
+            REQUIRE(projectContext.revision() == synced + 1);
+          }
+        }
+      }
+    }
+
+    WHEN("a non-looping shot plays off its end")
+    {
+      auto &shot = *project::activeShot(projectContext.project());
+      shot.frameCount = 4;
+      shot.fps = 10.f;
+      shot.loop = false;
+      projectContext.syncAnimationManagerToActiveShot();
+      const auto synced = projectContext.revision();
+      REQUIRE(projectContext.setPlaying(shot.id, true));
+      const auto playing = projectContext.revision();
+      REQUIRE(playing > synced);
+      // Asking for the state the shot is in is a no-op: nothing moves.
+      REQUIRE(projectContext.setPlaying(shot.id, true));
+      REQUIRE(projectContext.revision() == playing);
+
+      // One frame's worth of time: the shot advances but keeps playing.
+      appContext.vsr.animationMgr.tick(0.1f);
+      REQUIRE(shot.playing);
+      REQUIRE(shot.currentFrame == 1);
+
+      THEN("the per-frame tick does not move the revision")
+      {
+        REQUIRE(projectContext.revision() == playing);
+      }
+
+      AND_WHEN("the ticks carry it past the last frame")
+      {
+        for (int i = 0; i < 8 && shot.playing; ++i)
+          appContext.vsr.animationMgr.tick(0.1f);
+        REQUIRE_FALSE(shot.playing);
+
+        THEN("the auto-stop is one mutation")
+        {
+          REQUIRE(projectContext.revision() == playing + 1);
+        }
+      }
+    }
+  }
 }
 
 SCENARIO("SciVis Studio CLI parses noun-verb command lines", "[SciVisStudio]")
@@ -3843,8 +4605,8 @@ SCENARIO("SciVis Studio CLI addresses datasets by ID then unique name",
   std::string error;
   REQUIRE(resolveDatasetSelector(project, "dataset_0002", error)
       == &project.datasets[1]);
-  REQUIRE(resolveDatasetSelector(project, "other", error)
-      == &project.datasets[2]);
+  REQUIRE(
+      resolveDatasetSelector(project, "other", error) == &project.datasets[2]);
 
   // Exact ID wins before names are considered; a name matching several
   // datasets case-insensitively is ambiguous and lists the candidates.
@@ -3868,8 +4630,7 @@ SCENARIO("SciVis Studio CLI gathers source-list entries and remaps prefixes",
   // Positional entries win.
   commandLine.paths = {"a.raw", "b.raw"};
   std::istringstream unusedInput("ignored.raw\n");
-  REQUIRE(
-      gatherSourceListEntries(commandLine, unusedInput, entries, error));
+  REQUIRE(gatherSourceListEntries(commandLine, unusedInput, entries, error));
   REQUIRE(entries == std::vector<std::string>{"a.raw", "b.raw"});
 
   // stdin entries follow Source List File rules: trimmed, blanks skipped.
@@ -3913,8 +4674,8 @@ SCENARIO("SciVis Studio CLI drives a headless declared-dataset round trip",
   std::filesystem::remove_all(root);
   std::filesystem::remove_all(framesDir);
 
-  const auto run = [](std::vector<std::string> argv, const std::string &in =
-                                                         std::string()) {
+  const auto run = [](std::vector<std::string> argv,
+                       const std::string &in = std::string()) {
     argv.insert(argv.begin(), "scivisStudioCLI");
     StudioCommandLine commandLine;
     std::string error;
@@ -3947,7 +4708,8 @@ SCENARIO("SciVis Studio CLI drives a headless declared-dataset round trip",
   REQUIRE(declareOut.find("declared") != std::string::npos);
   REQUIRE(fileContents(root / "datasets" / "Frames.sources")
       == "/authoring/a_1x1x1_float32.raw\n/authoring/b_1x1x1_float32.raw\n");
-  REQUIRE(validateDatasetAsset(root / "datasets" / "Frames.vsr").dataset.declared);
+  REQUIRE(
+      validateDatasetAsset(root / "datasets" / "Frames.vsr").dataset.declared);
 
   auto [listCode, listOut] = run({"dataset", "list", root.string()});
   REQUIRE(listCode == 0);
@@ -3973,10 +4735,10 @@ SCENARIO("SciVis Studio CLI drives a headless declared-dataset round trip",
       != std::string::npos);
 
   // Loading before the files exist fails and leaves the project untouched.
-  auto [failCode, failOut] =
-      run({"dataset", "load", root.string(), "Frames"});
+  auto [failCode, failOut] = run({"dataset", "load", root.string(), "Frames"});
   REQUIRE(failCode != 0);
-  REQUIRE(validateDatasetAsset(root / "datasets" / "Frames.vsr").dataset.declared);
+  REQUIRE(
+      validateDatasetAsset(root / "datasets" / "Frames.vsr").dataset.declared);
 
   // Materialize: with the files in place, dataset load imports and the save
   // bakes the scene representation into the asset.
@@ -4022,8 +4784,8 @@ SCENARIO("SciVis Studio CLI drives a headless declared-dataset round trip",
 
   // Removal with --keep-asset persists the inventory change and leaves the
   // pair on disk.
-  auto [removeCode, removeOut] = run(
-      {"dataset", "remove", root.string(), "Sim Frames", "--keep-asset"});
+  auto [removeCode, removeOut] =
+      run({"dataset", "remove", root.string(), "Sim Frames", "--keep-asset"});
   REQUIRE(removeCode == 0);
   REQUIRE(std::filesystem::exists(root / "datasets" / "Sim Frames.vsr"));
   REQUIRE(std::filesystem::exists(root / "datasets" / "Sim Frames.sources"));
@@ -4352,4 +5114,782 @@ SCENARIO("SciVis Studio tolerates a missing Light Rig Archive on open",
   }
 
   std::filesystem::remove_all(root);
+}
+
+SCENARIO("SciVis Studio generated ids skip ids still in use", "[SciVisStudio]")
+{
+  vsr::app::Context appContext;
+  ProjectContext projectContext(&appContext);
+  projectContext.createUnsavedProject();
+  auto &project = projectContext.project();
+
+  GIVEN("a project whose second of three shots was removed")
+  {
+    REQUIRE(projectContext.addShot("two"));
+    REQUIRE(projectContext.addShot("three"));
+    const auto second = project.shots[1].id;
+    const auto third = project.shots[2].id;
+    REQUIRE(projectContext.removeShot(second));
+
+    THEN("the next shot id is not the surviving third shot's")
+    {
+      const auto next = project::nextShotId(project);
+      REQUIRE(next != third);
+      REQUIRE(project::findShot(project, next) == nullptr);
+      REQUIRE(projectContext.addShot("four"));
+      REQUIRE(project.shots.back().id == next);
+    }
+  }
+
+  GIVEN("rig and color map libraries with a gap")
+  {
+    auto *lightA = projectContext.createLightRig("A");
+    REQUIRE(lightA);
+    const auto lightAId = lightA->id;
+    REQUIRE(projectContext.createLightRig("B"));
+    REQUIRE(projectContext.removeLightRig(lightAId));
+
+    REQUIRE(projectContext.createCameraRig("A"));
+    REQUIRE(projectContext.createCameraRig("B"));
+    REQUIRE(projectContext.removeCameraRig(project.cameraRigs[1].id));
+
+    REQUIRE(projectContext.createColorMap("A"));
+    REQUIRE(projectContext.createColorMap("B"));
+    REQUIRE(projectContext.removeColorMap(project.colorMaps.front().id));
+
+    THEN("every generator mints an unused id")
+    {
+      REQUIRE(
+          light_rig::findLightRig(project, light_rig::nextLightRigId(project))
+          == nullptr);
+      REQUIRE(camera_rig::findCameraRig(
+                  project, camera_rig::nextCameraRigId(project))
+          == nullptr);
+      REQUIRE(project::findColorMap(project, project::nextColorMapId(project))
+          == nullptr);
+    }
+  }
+}
+
+SCENARIO(
+    "SciVis Studio shots are removed, updated and activated as whole "
+    "operations",
+    "[SciVisStudio]")
+{
+  vsr::app::Context appContext;
+  ProjectContext projectContext(&appContext);
+  projectContext.createUnsavedProject();
+  auto &project = projectContext.project();
+  auto &scene = appContext.vsr.scene;
+  std::string error;
+
+  GIVEN("a single-shot project")
+  {
+    THEN("the last shot cannot be removed")
+    {
+      REQUIRE_FALSE(
+          projectContext.removeShot(project.shots.front().id, &error));
+      REQUIRE(error.find("last shot") != std::string::npos);
+      REQUIRE(project.shots.size() == 1);
+    }
+
+    THEN("unknown ids are rejected by every shot call")
+    {
+      REQUIRE_FALSE(projectContext.removeShot("nope", &error));
+      REQUIRE(error == "shot not found");
+      REQUIRE_FALSE(projectContext.setActiveShot("nope", &error));
+      REQUIRE(error == "shot not found");
+      Shot stranger;
+      stranger.id = "nope";
+      REQUIRE_FALSE(projectContext.updateShot(stranger, &error));
+      REQUIRE(error == "shot not found");
+    }
+  }
+
+  GIVEN("two shots with the second active")
+  {
+    const auto firstId = project.shots.front().id;
+    REQUIRE(projectContext.addShot("second"));
+    const auto secondId = project.shots.back().id;
+    REQUIRE(project.activeShotId == secondId);
+    const auto cameraCount = scene.numberOfObjects(ANARI_CAMERA);
+
+    WHEN("the active shot is removed")
+    {
+      REQUIRE(projectContext.removeShot(secondId, &error));
+
+      THEN("the first shot becomes active and the camera object is gone")
+      {
+        REQUIRE(project.shots.size() == 1);
+        REQUIRE(project.activeShotId == firstId);
+        REQUIRE(scene.numberOfObjects(ANARI_CAMERA) == cameraCount - 1);
+        auto *layer = scene.layer("studio");
+        auto shotsRoot = findDirectChild(layer->root(), "shots");
+        REQUIRE_FALSE(findDirectChild(shotsRoot, secondId));
+        REQUIRE(findDirectChild(shotsRoot, firstId));
+        REQUIRE(project.dirty);
+      }
+    }
+
+    WHEN("the first shot is activated")
+    {
+      project.markClean();
+      REQUIRE(projectContext.setActiveShot(firstId, &error));
+
+      THEN("it is active, the project is dirty and the animation follows")
+      {
+        REQUIRE(project.activeShotId == firstId);
+        REQUIRE(project.dirty);
+        REQUIRE(appContext.vsr.animationMgr.getAnimationFrame()
+            == project.shots.front().currentFrame);
+      }
+    }
+
+    WHEN("the active shot is updated with out-of-range fields")
+    {
+      Shot edit = *project::findShot(project, secondId);
+      edit.name = "renamed";
+      edit.frameCount = 0;
+      edit.fps = 0.f;
+      edit.currentFrame = 50;
+      edit.playing = true;
+      edit.camera = {ANARI_CAMERA, 12345};
+      edit.renderSettings.width = 0;
+      edit.datasetBindings.push_back({"dataset_9999", true});
+      REQUIRE(projectContext.updateShot(edit, &error));
+
+      THEN("the stored shot is the normalized copy")
+      {
+        const auto *shot = project::findShot(project, secondId);
+        REQUIRE(shot->name == "renamed");
+        REQUIRE(shot->frameCount == 1);
+        REQUIRE(shot->fps == 1.f);
+        REQUIRE(shot->currentFrame == 0);
+        REQUIRE_FALSE(shot->playing);
+        REQUIRE(shot->camera.objectIndex != 12345);
+        REQUIRE(shot->renderSettings.width == 1);
+        REQUIRE(shot->datasetBindings.empty());
+      }
+    }
+
+    WHEN("the active shot is updated while it plays")
+    {
+      REQUIRE(projectContext.setActiveShot(secondId, &error));
+      REQUIRE(projectContext.setPlaying(secondId, true, &error));
+      projectContext.setActiveShotFrame(7);
+      REQUIRE(project::findShot(project, secondId)->currentFrame == 7);
+
+      Shot edit = *project::findShot(project, secondId);
+      edit.loop = false;
+      edit.currentFrame = 2; // the frame an editor last saw
+      REQUIRE(projectContext.updateShot(edit, &error));
+
+      THEN("the edit lands but the frame in motion is kept")
+      {
+        const auto *shot = project::findShot(project, secondId);
+        REQUIRE_FALSE(shot->loop);
+        REQUIRE(shot->playing);
+        REQUIRE(shot->currentFrame == 7);
+        REQUIRE(appContext.vsr.animationMgr.getAnimationFrame() == 7);
+        REQUIRE(appContext.vsr.animationMgr.isPlaying());
+      }
+    }
+
+    WHEN("an update names an unknown rig or a foreign renderer")
+    {
+      Shot edit = *project::findShot(project, secondId);
+      edit.lightRigId = "lightRig_9999";
+      REQUIRE_FALSE(projectContext.updateShot(edit, &error));
+      REQUIRE(error == "light rig not found");
+
+      edit = *project::findShot(project, secondId);
+      edit.cameraRigId = "cameraRig_9999";
+      REQUIRE_FALSE(projectContext.updateShot(edit, &error));
+      REQUIRE(error == "camera rig not found");
+
+      edit = *project::findShot(project, secondId);
+      edit.renderSettings.rendererObjectIndex = 7;
+      REQUIRE_FALSE(projectContext.updateShot(edit, &error));
+      REQUIRE(error.find("renderer") != std::string::npos);
+
+      THEN("the stored shot is untouched")
+      {
+        const auto *shot = project::findShot(project, secondId);
+        REQUIRE(shot->lightRigId == project.lightRigs.front().id);
+        REQUIRE(shot->renderSettings.rendererObjectIndex == VSR_INVALID_INDEX);
+      }
+    }
+  }
+}
+
+SCENARIO("SciVis Studio shot ops validate and replace the record on their own",
+    "[SciVisStudio]")
+{
+  Project project;
+  Shot first;
+  first.id = "shot_0001";
+  first.name = "first";
+  Shot second;
+  second.id = "shot_0002";
+  second.name = "second";
+  project.shots = {first, second};
+  project.activeShotId = second.id;
+  std::string error;
+  bool activeChanged = true;
+
+  GIVEN("an edit of the active shot with out-of-range fields, and no scene")
+  {
+    Shot edit = second;
+    edit.frameCount = 0;
+    edit.currentFrame = 9;
+    edit.playing = true;
+    edit.datasetBindings.push_back({"dataset_9999", true});
+    edit.renderSettings.rendererObjectIndex = 7; // unchecked without a scene
+
+    WHEN("it is applied")
+    {
+      REQUIRE(shot::updateShot(project, nullptr, edit, &error));
+
+      THEN("the record is the normalized copy and nothing is marked dirty")
+      {
+        const auto *shot = project::findShot(project, second.id);
+        REQUIRE(shot->frameCount == 1);
+        REQUIRE(shot->currentFrame == 0);
+        REQUIRE_FALSE(shot->playing);
+        REQUIRE(shot->datasetBindings.empty());
+        REQUIRE(shot->renderSettings.rendererObjectIndex == 7);
+        REQUIRE_FALSE(project.dirty);
+      }
+    }
+
+    WHEN("it names a rig the project does not have")
+    {
+      edit.lightRigId = "lightRig_9999";
+      REQUIRE_FALSE(shot::updateShot(project, nullptr, edit, &error));
+
+      THEN("it is rejected and the record is untouched")
+      {
+        REQUIRE(error == "light rig not found");
+        REQUIRE(project::findShot(project, second.id)->frameCount
+            == second.frameCount);
+      }
+    }
+  }
+
+  GIVEN("two shots, the second active")
+  {
+    WHEN("the inactive one is removed")
+    {
+      REQUIRE(
+          shot::removeShot(project, nullptr, first.id, activeChanged, &error));
+
+      THEN("the active shot stands and the last one cannot go")
+      {
+        REQUIRE_FALSE(activeChanged);
+        REQUIRE(project.activeShotId == second.id);
+        REQUIRE(project.shots.size() == 1);
+        REQUIRE_FALSE(shot::removeShot(
+            project, nullptr, second.id, activeChanged, &error));
+        REQUIRE(error == "cannot remove the last shot");
+        REQUIRE_FALSE(project.dirty);
+      }
+    }
+
+    WHEN("the active one is removed")
+    {
+      REQUIRE(
+          shot::removeShot(project, nullptr, second.id, activeChanged, &error));
+
+      THEN("the first remaining shot is reported as the new active one")
+      {
+        REQUIRE(activeChanged);
+        REQUIRE(project.activeShotId == first.id);
+      }
+    }
+
+    WHEN("an unknown id is removed")
+    {
+      REQUIRE_FALSE(
+          shot::removeShot(project, nullptr, "nope", activeChanged, &error));
+
+      THEN("it is reported and nothing changed")
+      {
+        REQUIRE(error == "shot not found");
+        REQUIRE_FALSE(activeChanged);
+        REQUIRE(project.shots.size() == 2);
+      }
+    }
+  }
+}
+
+SCENARIO("SciVis Studio shot patches edit the fields they carry and no other",
+    "[SciVisStudio]")
+{
+  Project project;
+  Shot shot;
+  shot.id = "shot_0001";
+  shot.name = "first";
+  shot.frameCount = 48;
+  shot.fps = 30.f;
+  shot.currentFrame = 7;
+  shot.playing = true;
+  shot.camera = {ANARI_CAMERA, 3};
+  shot.renderSettings.width = 640;
+  shot.renderSettings.outputFilePrefix = "out_";
+  shot.datasetBindings = {{"dataset_0001", true}, {"dataset_0002", false}};
+  project.shots = {shot};
+  project.activeShotId = shot.id;
+  project.datasets.resize(2);
+  project.datasets[0].id = "dataset_0001";
+  project.datasets[1].id = "dataset_0002";
+  std::string error;
+
+  GIVEN("a patch of a few fields")
+  {
+    ShotPatch patch;
+    patch.fps = 24.f;
+    patch.loop = false;
+    patch.renderSettings.samples = 4;
+    patch.datasetBindings = {{"dataset_0002", true}};
+
+    WHEN("it is applied to a copy")
+    {
+      Shot edited = shot;
+      shot::applyPatch(edited, patch);
+
+      THEN("the patched fields change and every other one stands")
+      {
+        REQUIRE(edited.fps == 24.f);
+        REQUIRE_FALSE(edited.loop);
+        REQUIRE(edited.renderSettings.samples == 4);
+        REQUIRE(shot::findDatasetBinding(edited, "dataset_0002")->enabled);
+        REQUIRE(shot::findDatasetBinding(edited, "dataset_0001")->enabled);
+        REQUIRE(edited.name == "first");
+        REQUIRE(edited.frameCount == 48);
+        REQUIRE(edited.currentFrame == 7);
+        REQUIRE(edited.playing);
+        REQUIRE(edited.camera.objectIndex == 3);
+        REQUIRE(edited.renderSettings.width == 640);
+        REQUIRE(edited.renderSettings.outputFilePrefix == "out_");
+      }
+    }
+
+    WHEN("an empty patch is applied")
+    {
+      Shot edited = shot;
+      shot::applyPatch(edited, ShotPatch{});
+
+      THEN("nothing changes")
+      {
+        REQUIRE(edited.fps == 30.f);
+        REQUIRE(edited.datasetBindings.size() == 2);
+      }
+    }
+
+    WHEN("a binding of a dataset the shot has no binding for is patched")
+    {
+      Shot edited = shot;
+      ShotPatch bind;
+      bind.datasetBindings = {{"dataset_0009", false}};
+      shot::applyPatch(edited, bind);
+
+      THEN("the binding is added")
+      {
+        REQUIRE(edited.datasetBindings.size() == 3);
+        REQUIRE_FALSE(
+            shot::findDatasetBinding(edited, "dataset_0009")->enabled);
+      }
+    }
+
+    WHEN("it goes through the shot op")
+    {
+      patch.frameCount = 0; // clamped by the validation
+      REQUIRE(shot::updateShot(project, nullptr, shot.id, patch, &error));
+
+      THEN("the record is the validated patched copy")
+      {
+        const auto *stored = project::findShot(project, shot.id);
+        REQUIRE(stored->fps == 24.f);
+        REQUIRE(stored->frameCount == 1);
+        REQUIRE(stored->currentFrame == 0);
+        REQUIRE(stored->name == "first");
+        REQUIRE(stored->camera.objectIndex == 3);
+      }
+    }
+
+    WHEN("the op names a shot the project does not have")
+    {
+      REQUIRE_FALSE(
+          shot::updateShot(project, nullptr, "shot_9999", patch, &error));
+
+      THEN("it is refused and the record is untouched")
+      {
+        REQUIRE(error == "shot not found");
+        REQUIRE(project::findShot(project, shot.id)->fps == 30.f);
+      }
+    }
+
+    WHEN("the op's patch names a rig the project does not have")
+    {
+      patch.cameraRigId = "cameraRig_9999";
+      REQUIRE_FALSE(shot::updateShot(project, nullptr, shot.id, patch, &error));
+
+      THEN("it is refused with the validation's reason")
+      {
+        REQUIRE(error == "camera rig not found");
+        REQUIRE(project::findShot(project, shot.id)->fps == 30.f);
+      }
+    }
+  }
+
+  GIVEN("a patch round-tripped through a DataNode")
+  {
+    ShotPatch patch;
+    patch.name = "Intro";
+    patch.currentFrame = 3;
+    patch.cameraRigId = "cameraRig_0001";
+    patch.renderSettings.rendererLibrary = "helide";
+    patch.renderSettings.rendererObjectIndex = 2;
+    patch.datasetBindings = {{"dataset_0001", false}};
+
+    THEN("only the engaged fields are written and they read back engaged")
+    {
+      vsr::core::DataTree tree;
+      toNode(patch, tree.root());
+      REQUIRE(tree.root().child("name"));
+      REQUIRE_FALSE(tree.root().child("fps"));
+      REQUIRE_FALSE(tree.root().child("loop"));
+      const auto *render = tree.root().child("renderSettings");
+      REQUIRE(render);
+      REQUIRE(render->child("rendererLibrary"));
+      REQUIRE_FALSE(render->child("width"));
+
+      ShotPatch out;
+      REQUIRE(fromNode(tree.root(), out));
+      REQUIRE(out.name == "Intro");
+      REQUIRE(out.currentFrame == 3);
+      REQUIRE(out.cameraRigId == "cameraRig_0001");
+      REQUIRE_FALSE(out.fps);
+      REQUIRE_FALSE(out.loop);
+      REQUIRE_FALSE(out.frameCount);
+      REQUIRE_FALSE(out.lightRigId);
+      REQUIRE(out.renderSettings.rendererLibrary == "helide");
+      REQUIRE(out.renderSettings.rendererObjectIndex == 2);
+      REQUIRE_FALSE(out.renderSettings.width);
+      REQUIRE(out.datasetBindings.size() == 1);
+      REQUIRE(out.datasetBindings[0].datasetId == "dataset_0001");
+      REQUIRE_FALSE(out.datasetBindings[0].enabled);
+    }
+
+    THEN("an empty patch writes no child and reads back empty")
+    {
+      vsr::core::DataTree tree;
+      toNode(ShotPatch{}, tree.root());
+      REQUIRE(tree.root().numChildren() == 0);
+      ShotPatch out;
+      out.fps = 1.f;
+      REQUIRE(fromNode(tree.root(), out));
+      REQUIRE_FALSE(out.fps);
+    }
+
+    THEN("a mistyped field is rejected and the output left alone")
+    {
+      vsr::core::DataTree tree;
+      writeChild(tree.root(), "fps", std::string("fast"));
+      ShotPatch out;
+      out.loop = true;
+      REQUIRE_FALSE(fromNode(tree.root(), out));
+      REQUIRE(out.loop == true);
+
+      vsr::core::DataTree badRender;
+      writeChild(badRender.root()["renderSettings"], "width", -1);
+      REQUIRE_FALSE(fromNode(badRender.root(), out));
+
+      vsr::core::DataTree badBinding;
+      writeChild(badBinding.root()["datasetBindings"]["0"], "enabled", true);
+      REQUIRE_FALSE(fromNode(badBinding.root(), out));
+    }
+  }
+}
+
+SCENARIO("SciVis Studio color map arrays are the model's to pair and find",
+    "[SciVisStudio]")
+{
+  vsr::app::Context appContext;
+  auto &scene = appContext.vsr.scene;
+  Project project;
+  std::string error;
+
+  GIVEN("records as a manifest loads them, with no arrays yet")
+  {
+    project.colorMaps.push_back({"cm_0001", "Heat"});
+    project.colorMaps.push_back({"cm_0002", "Cold"});
+    REQUIRE_FALSE(color_map::resolveColorMapArray(scene, "cm_0001"));
+
+    WHEN("the arrays are ensured twice")
+    {
+      const auto before = scene.numberOfObjects(ANARI_ARRAY1D);
+      color_map::ensureColorMapArrays(project, scene);
+      color_map::ensureColorMapArrays(project, scene);
+
+      THEN("each record has exactly one default array, named by its id")
+      {
+        REQUIRE(scene.numberOfObjects(ANARI_ARRAY1D) == before + 2);
+        auto heat = color_map::resolveColorMapArray(scene, "cm_0001");
+        REQUIRE(heat);
+        REQUIRE(heat->name() == "cm_0001_colormap");
+        REQUIRE(heat->elementType() == ANARI_FLOAT32_VEC4);
+        REQUIRE(heat->size() == 256);
+        REQUIRE(color_map::resolveColorMapArray(scene, "cm_0002"));
+        REQUIRE_FALSE(color_map::resolveColorMapArray(scene, "cm_0003"));
+      }
+    }
+  }
+
+  GIVEN("a record created together with its array")
+  {
+    auto &record = color_map::createColorMap(project, scene, "Heat");
+    REQUIRE(record.name == "Heat");
+    const auto id = record.id;
+    REQUIRE(color_map::resolveColorMapArray(scene, id));
+
+    THEN("the dirty flag is the caller's, not the pairing's")
+    {
+      REQUIRE_FALSE(project.dirty);
+    }
+
+    THEN("removing it takes the array; an unknown id is reported")
+    {
+      REQUIRE(color_map::removeColorMap(project, scene, id, &error));
+      REQUIRE(project.colorMaps.empty());
+      REQUIRE_FALSE(color_map::resolveColorMapArray(scene, id));
+      REQUIRE_FALSE(color_map::removeColorMap(project, scene, id, &error));
+      REQUIRE(error == "color map not found");
+    }
+  }
+}
+
+SCENARIO("SciVis Studio color maps pair a record with a scene array",
+    "[SciVisStudio]")
+{
+  vsr::app::Context appContext;
+  ProjectContext projectContext(&appContext);
+  projectContext.createUnsavedProject();
+  auto &project = projectContext.project();
+  auto &scene = appContext.vsr.scene;
+  std::string error;
+
+  WHEN("a color map is created")
+  {
+    const auto arrays = scene.numberOfObjects(ANARI_ARRAY1D);
+    auto *record = projectContext.createColorMap("Heat");
+    REQUIRE(record);
+    const auto id = record->id;
+
+    THEN("the record names an RGBA array that lives in the scene")
+    {
+      REQUIRE(record->name == "Heat");
+      REQUIRE(scene.numberOfObjects(ANARI_ARRAY1D) == arrays + 1);
+      auto array = projectContext.resolveColorMapArray(id);
+      REQUIRE(array);
+      REQUIRE(array->name() == id + "_colormap");
+      REQUIRE(array->elementType() == ANARI_FLOAT32_VEC4);
+      REQUIRE(array->size() == 256);
+      REQUIRE(project.dirty);
+    }
+
+    THEN("a second one with the same name is de-duplicated")
+    {
+      auto *other = projectContext.createColorMap("heat");
+      REQUIRE(other);
+      REQUIRE(other->name != "Heat");
+      REQUIRE(other->id != id);
+    }
+
+    THEN("rename validates format and collisions")
+    {
+      REQUIRE(projectContext.createColorMap("Cold"));
+      REQUIRE_FALSE(projectContext.renameColorMap(id, "cold", &error));
+      REQUIRE(error.find("already uses") != std::string::npos);
+      REQUIRE_FALSE(projectContext.renameColorMap(id, "", &error));
+      REQUIRE_FALSE(projectContext.renameColorMap("nope", "x", &error));
+      REQUIRE(error == "color map not found");
+      REQUIRE(projectContext.renameColorMap(id, "Warm", &error));
+      REQUIRE(project::findColorMap(project, id)->name == "Warm");
+      REQUIRE(projectContext.resolveColorMapArray(id));
+    }
+
+    THEN("remove takes the record and the array with it")
+    {
+      REQUIRE(projectContext.removeColorMap(id, &error));
+      REQUIRE(project.colorMaps.empty());
+      REQUIRE_FALSE(projectContext.resolveColorMapArray(id));
+      REQUIRE(scene.numberOfObjects(ANARI_ARRAY1D) == arrays);
+      REQUIRE_FALSE(projectContext.removeColorMap(id, &error));
+      REQUIRE(error == "color map not found");
+    }
+  }
+}
+
+SCENARIO(
+    "SciVis Studio project lookups, labels and sorted views", "[SciVisStudio]")
+{
+  GIVEN("a project with datasets, shots, rigs and color maps")
+  {
+    Project project;
+    Dataset d1;
+    d1.id = "dataset_0001";
+    d1.name = "pressure";
+    d1.status = DatasetStatus::Available;
+    d1.residency = DatasetResidency::Unloaded;
+    d1.sourceKind = DatasetSourceKind::FileAnimation;
+    Dataset d2;
+    d2.id = "dataset_0002";
+    d2.name = "Density";
+    d2.status = DatasetStatus::ImportFailed;
+    project.datasets = {d1, d2};
+
+    Shot s1;
+    s1.id = "shot_0001";
+    s1.name = "b shot";
+    s1.lightRigId = "lightrig_0001";
+    s1.cameraRigId = "camerarig_0001";
+    Shot s2;
+    s2.id = "shot_0002";
+    s2.name = "A shot";
+    s2.lightRigId = "lightrig_0001";
+    s2.cameraRigId = "camerarig_0002"; // not in the project
+    project.shots = {s1, s2};
+    project.activeShotId = "shot_0002";
+
+    LightRig rig;
+    rig.id = "lightrig_0001";
+    rig.name = "Default";
+    project.lightRigs = {rig};
+    CameraRig cam;
+    cam.id = "camerarig_0001";
+    cam.name = "Orbit";
+    project.cameraRigs = {cam};
+    ColorMapRecord map;
+    map.id = "colormap_0001";
+    map.name = "viridis";
+    project.colorMaps = {map};
+
+    THEN("lookups find entities by id and the active shot")
+    {
+      REQUIRE(project::findDataset(project, "dataset_0002")
+          == &project.datasets[1]);
+      REQUIRE(project::findDataset(project, "nope") == nullptr);
+      REQUIRE(project::findShot(project, "shot_0001") == &project.shots[0]);
+      REQUIRE(project::activeShot(project) == &project.shots[1]);
+      REQUIRE(light_rig::findLightRig(project, "lightrig_0001")
+          == &project.lightRigs[0]);
+      REQUIRE(camera_rig::findCameraRig(project, "camerarig_0001")
+          == &project.cameraRigs[0]);
+      REQUIRE(project::findColorMap(project, "colormap_0001")
+          == &project.colorMaps[0]);
+      REQUIRE(project::findColorMap(project, "colormap_0002") == nullptr);
+      REQUIRE(project::lightRigUseCount(project, "lightrig_0001") == 2);
+      REQUIRE(project::cameraRigUseCount(project, "camerarig_0001") == 1);
+      REQUIRE(project::cameraRigUseCount(project, "camerarig_0002") == 1);
+    }
+
+    THEN("display strings name entities and mark gaps")
+    {
+      REQUIRE(std::string(dataset::displayStatus(d1)) == "Unloaded");
+      REQUIRE(std::string(dataset::displayStatus(d2)) == "Import Failed");
+      REQUIRE(std::string(dataset::toString(d1.sourceKind))
+          == dataset::toString(DatasetSourceKind::FileAnimation));
+      REQUIRE(std::string(dataset::toString(d1.residency))
+          == dataset::toString(DatasetResidency::Unloaded));
+      REQUIRE(project::projectDirectoryText(project) == "{unsaved}");
+      project.projectDirectory = "/data/run7";
+      REQUIRE(project::projectDirectoryText(project) == "/data/run7");
+      REQUIRE(project::lightRigLabel(project, "lightrig_0001") == "Default");
+      REQUIRE(project::lightRigLabel(project, "") == "<none>");
+      REQUIRE(project::cameraRigLabel(project, "camerarig_0002")
+          == "<missing: camerarig_0002>");
+      REQUIRE(project::datasetLabel(project, "dataset_0001") == "pressure");
+      REQUIRE(project::shotLabel(project, "shot_0002") == "A shot");
+      REQUIRE(project::colorMapLabel(project, "colormap_0001") == "viridis");
+    }
+
+    THEN("sorted views order by name case-insensitively")
+    {
+      const auto datasets = project::sortedDatasets(project);
+      REQUIRE(datasets.size() == 2);
+      REQUIRE(datasets[0]->name == "Density");
+      REQUIRE(datasets[1]->name == "pressure");
+      const auto shots = project::sortedShots(project);
+      REQUIRE(shots[0]->id == "shot_0002");
+      REQUIRE(shots[1]->id == "shot_0001");
+      REQUIRE(project::sortedLightRigs(project).size() == 1);
+      REQUIRE(project::sortedCameraRigs(project).size() == 1);
+      REQUIRE(project::sortedColorMaps(project).size() == 1);
+      // The collections themselves are untouched.
+      REQUIRE(project.datasets[0].id == "dataset_0001");
+      REQUIRE(project.shots[0].id == "shot_0001");
+    }
+  }
+}
+
+SCENARIO("Object metadata marks its dataset dirty", "[SciVisStudio]")
+{
+  // A volume's opacityControlPoints is the durable half of its Transfer
+  // Function and is metadata, not a parameter. It only ever reached disk
+  // because the editor rewrote the color Array beside it in the same breath;
+  // once the two travel as separate wire messages that coincidence is gone,
+  // and a clean dataset is skipped entirely on save.
+  vsr::app::Context appContext;
+  ProjectContext projectContext(&appContext);
+  projectContext.createUnsavedProject();
+  auto &project = projectContext.project();
+  auto &scene = appContext.vsr.scene;
+  auto *studio = scene.layer("studio");
+  auto datasetsRoot = findDirectChild(studio->root(), "datasets");
+  auto datasetRoot = scene.insertChildNode(datasetsRoot, "dataset_0001");
+
+  auto volume = scene.createObject<vsr::scene::Volume>(
+      vsr::scene::tokens::volume::transferFunction1D);
+  scene.insertChildObjectNode(datasetRoot, volume, "volume");
+
+  Dataset dataset;
+  dataset.id = "dataset_0001";
+  dataset.name = "Example";
+  dataset.sourceKind = DatasetSourceKind::Static;
+  dataset.importerType = "VOLUME";
+  dataset.status = DatasetStatus::Available;
+  dataset.rootNode = projectContext.refFor("studio", datasetRoot);
+  project.datasets.push_back(std::move(dataset));
+
+  GIVEN("A clean dataset holding a volume")
+  {
+    project.datasets.front().dirty = false;
+
+    WHEN("A metadata array on the volume is rewritten alone")
+    {
+      const vsr::math::float2 points[3]{
+          vsr::math::float2(0.f),
+          vsr::math::float2(0.5f, 0.25f),
+          vsr::math::float2(1.f),
+      };
+      volume->setMetadataArray(
+          "opacityControlPoints", ANARI_FLOAT32_VEC2, points, 3);
+
+      THEN("The dataset is dirty")
+      {
+        REQUIRE(project.datasets.front().dirty);
+      }
+    }
+
+    WHEN("A scalar metadata value on the volume is written alone")
+    {
+      volume->setMetadataValue("manipulator.distance", 2.f);
+
+      THEN("The dataset is dirty")
+      {
+        REQUIRE(project.datasets.front().dirty);
+      }
+    }
+  }
 }

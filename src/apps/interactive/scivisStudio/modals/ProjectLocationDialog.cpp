@@ -2,114 +2,95 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "ProjectLocationDialog.h"
+// imgui
+#include <imgui.h>
+#include <misc/cpp/imgui_stdlib.h>
 
-#include "ProjectSerialization.h"
+namespace vsr::scivis_studio::modals {
 
-#include "vsr/ui/imgui/Application.h"
-
-#include "imgui.h"
-
-#include <cstring>
-
-namespace vsr::scivis_studio {
-
-namespace {
-
-template <size_t N>
-void copyToInputBuffer(std::array<char, N> &buffer, const std::string &value)
-{
-  buffer.fill('\0');
-  std::strncpy(buffer.data(), value.c_str(), buffer.size() - 1);
-}
-
-} // namespace
-
-ProjectLocationDialog::ProjectLocationDialog(vsr::ui::imgui::Application *app)
-    : Modal(app, "Project Location")
+ProjectLocationDialog::ProjectLocationDialog(vsr::ui::imgui::Application *app,
+    std::unique_ptr<BrowseProvider> browse,
+    std::unique_ptr<Action> action)
+    : Modal(app, "Project Location"),
+      m_browse(std::move(browse)),
+      m_action(std::move(action))
 {}
 
 ProjectLocationDialog::~ProjectLocationDialog() = default;
 
-void ProjectLocationDialog::configure(ProjectLocationMode mode,
-    std::function<void(const std::filesystem::path &)> onAccept)
+void ProjectLocationDialog::reset()
 {
-  m_mode = mode;
-  m_onAccept = std::move(onAccept);
   m_error.clear();
+  m_action->reset();
 }
 
-bool ProjectLocationDialog::validate(
-    const std::filesystem::path &path, std::string &error) const
+void ProjectLocationDialog::configure(ProjectLocationMode mode)
 {
-  if (path.empty()) {
-    error = "Enter a project directory.";
-    return false;
+  m_mode = mode;
+  reset();
+  auto initial = m_action->initialDirectory(mode);
+  if (!initial.empty())
+    m_directory = std::move(initial);
+}
+
+void ProjectLocationDialog::submit()
+{
+  if (m_directory.empty()) {
+    m_error = "Enter a project directory.";
+    return;
   }
 
-  const auto manifest =
-      resolveProjectFileForRead(path / PROJECT_MANIFEST_FILENAME);
-  if (m_mode == ProjectLocationMode::OpenProject) {
-    auto result = validateProjectRoot(path);
-    if (!result.ok)
-      error = result.error;
-    return result.ok;
-  }
+  Request request;
+  request.mode = m_mode;
+  request.directory = m_directory;
 
-  if (std::filesystem::exists(manifest)) {
-    error = "Target directory already contains " + manifest.filename().string()
-        + ".";
-    return false;
-  }
-
-  if (std::filesystem::exists(path) && !std::filesystem::is_directory(path)) {
-    error = "Target path is not a directory.";
-    return false;
-  }
-
-  return true;
+  m_error.clear();
+  m_action->submit(request, [this](bool ok, const std::string &error) {
+    if (!ok) {
+      m_error = error;
+      return;
+    }
+    hide();
+  });
 }
 
 void ProjectLocationDialog::buildUI()
 {
-  const char *title = "Open Project";
-  const char *button = "Open";
-  if (m_mode == ProjectLocationMode::SaveProjectAs) {
-    title = "Save Project As";
-    button = "Save";
-  }
+  const bool open = m_mode == ProjectLocationMode::OpenProject;
+  ImGui::TextUnformatted(open ? "Open Project" : "Save Project As");
 
-  ImGui::TextUnformatted(title);
-
-  if (!m_browsedDirectory.empty()) {
-    copyToInputBuffer(m_directory, m_browsedDirectory);
-    m_browsedDirectory.clear();
-  }
-
-  if (ImGui::Button("...##projectDirectory")) {
-    m_browsedDirectory.clear();
-    m_app->getFilenameFromDialog(
-        m_browsedDirectory, vsr::ui::imgui::FileDialogMode::OpenDirectory);
+  const bool busy = m_action->busy();
+  ImGui::BeginDisabled(busy);
+  if (ImGui::Button("Browse...")) {
+    BrowseRequest request;
+    request.mode = BrowseMode::OpenDirectory;
+    request.title = open ? "Choose the project directory to open"
+                         : "Choose the directory to save the project into";
+    request.startDirectory = m_directory;
+    request.onAccept = [this](const std::vector<std::filesystem::path> &paths) {
+      if (!paths.empty())
+        m_directory = paths.front().generic_string();
+    };
+    m_browse->browse(std::move(request));
   }
   ImGui::SameLine();
-  ImGui::InputText("Directory", m_directory.data(), m_directory.size());
-  if (!m_error.empty())
-    ImGui::TextColored(ImVec4(1.f, 0.35f, 0.25f, 1.f), "%s", m_error.c_str());
+  ImGui::SetNextItemWidth(520.f);
+  const bool entered = ImGui::InputText(
+      "Directory", &m_directory, ImGuiInputTextFlags_EnterReturnsTrue);
+  ImGui::EndDisabled();
 
-  ImGui::Spacing();
-  if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+  switch (modalFooter(
+      *m_browse, *m_action, m_error, open ? "Open" : "Save", entered)) {
+  case ModalChoice::Cancelled:
+    reset();
     hide();
-    return;
-  }
-
-  ImGui::SameLine();
-  if (ImGui::Button(button)) {
-    std::filesystem::path path(m_directory.data());
-    if (!validate(path, m_error))
-      return;
-    hide();
-    if (m_onAccept)
-      m_onAccept(path);
+    break;
+  case ModalChoice::Submitted:
+    submit();
+    break;
+  case ModalChoice::None:
+    break;
   }
 }
 
-} // namespace vsr::scivis_studio
+} // namespace vsr::scivis_studio::modals

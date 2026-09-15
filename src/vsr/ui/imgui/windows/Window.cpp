@@ -9,9 +9,7 @@
 
 namespace vsr::ui::imgui {
 
-Window::Window(Application *app, const char *name)
-    : m_app(app), m_name(name)
-{}
+Window::Window(Application *app, const char *name) : m_app(app), m_name(name) {}
 
 Window::~Window() = default;
 
@@ -77,6 +75,13 @@ int Window::pushStyle()
 vsr::app::Context *Window::appContext() const
 {
   return m_app ? m_app->appContext() : nullptr;
+}
+
+const vsr::ui::ObjectEditPolicy &Window::objectEditPolicy() const
+{
+  // A window with no application behind it has nothing to refuse.
+  static const vsr::ui::ObjectEditPolicy PERMISSIVE;
+  return m_app ? m_app->objectEditPolicy() : PERMISSIVE;
 }
 
 } // namespace vsr::ui::imgui

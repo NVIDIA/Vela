@@ -1,0 +1,1891 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+// catch
+#include "StudioFakeServer.h"
+#include "StudioRemoteTestHelpers.h"
+#include "catch.hpp"
+// vsr_scivis_studio_client_core
+#include "ArrayHydration.h"
+#include "ProjectOps.h"
+#include "ServerConnection.h"
+// vsr_scivis_studio_protocol
+#include "BrowseMessages.h"
+#include "FrameMessages.h"
+#include "PlaybackMessages.h"
+#include "ProjectOpReply.h"
+#include "ProjectRequests.h"
+#include "ProjectSnapshot.h"
+#include "SessionMessages.h"
+#include "ShotRigRequests.h"
+#include "StudioCodec.h"
+#include "StudioProtocol.h"
+#include "TaskMessages.h"
+#include "ViewportMessages.h"
+// vsr_scene
+#include "vsr/scene/Scene.hpp"
+// std
+#include <chrono>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <thread>
+#include <vector>
+
+using namespace vsr::scivis_studio;
+using namespace vsr::scivis_studio::protocol;
+using namespace vsr::scivis_studio::client;
+using vsr::network::Message;
+using namespace std::chrono_literals;
+
+namespace {
+
+// A request the fake server has received, with its id, ready for a scripted
+// reply.
+struct SeenRequest
+{
+  StudioMessageType type{};
+  uint64_t requestId{0};
+  Message raw;
+};
+
+// Reads the requestId every project request carries as its first field
+// without knowing the concrete payload type.
+std::optional<uint64_t> requestIdOf(const Message &msg)
+{
+  vsr::core::DataTree tree;
+  if (!msg.payload.empty() && !tree.read(msg.payload))
+    return {};
+  uint64_t id = 0;
+  if (!readChild(tree.root(), "requestId", id))
+    return {};
+  return id;
+}
+
+// A MirroredClient on a fake server that records every request it is sent
+// and every task ending the client reports.
+struct Fixture : MirroredClient
+{
+  Fixture(ConnectionTimings timings = fastTimings());
+  ~Fixture();
+
+  void connect();
+  // Polls until the server has seen `n` requests of any type.
+  bool waitForRequests(size_t n);
+  std::vector<SeenRequest> requests();
+  ProjectOps &ops();
+
+  vsr::scene::Scene source;
+  FakeStudioServer server;
+  int projectReplaced{0};
+  std::vector<TaskRecord> ended; // every onTaskEnded, in order
+  std::mutex mutex;
+  std::vector<SeenRequest> seen;
+};
+
+Fixture::Fixture(ConnectionTimings timings) : MirroredClient(timings)
+{
+  populateFakeScene(source);
+  server.bootstrap = makeFakeBootstrap(source);
+  server.onRequest = [this](const Message &msg) {
+    SeenRequest request;
+    request.type = StudioMessageType(msg.header.type);
+    request.requestId = requestIdOf(msg).value_or(0);
+    request.raw = msg;
+    std::lock_guard lock(mutex);
+    seen.push_back(std::move(request));
+  };
+  connection.onProjectReplaced = [this]() { projectReplaced++; };
+  connection.projectOps().onTaskEnded = [this](const TaskRecord &task) {
+    ended.push_back(task);
+  };
+}
+
+Fixture::~Fixture()
+{
+  // The server's IO thread appends to `seen` from onRequest (a Disconnect
+  // the test sent last still counts), so it is joined before the members
+  // it writes to go away.
+  server.channel->stop();
+}
+
+void Fixture::connect()
+{
+  MirroredClient::connect(server.port());
+}
+
+bool Fixture::waitForRequests(size_t n)
+{
+  return pollUntil(connection, [&] {
+    std::lock_guard lock(mutex);
+    return seen.size() >= n;
+  });
+}
+
+std::vector<SeenRequest> Fixture::requests()
+{
+  std::lock_guard lock(mutex);
+  return seen;
+}
+
+ProjectOps &Fixture::ops()
+{
+  return connection.projectOps();
+}
+
+// Collects the replies one callback receives and the thread it ran on.
+struct Recorded
+{
+  std::vector<ProjectOpReply> replies;
+  std::vector<std::thread::id> threads;
+
+  ReplyCallback recorder();
+  size_t count() const;
+};
+
+ReplyCallback Recorded::recorder()
+{
+  return [this](const ProjectOpReply &reply) {
+    replies.push_back(reply);
+    threads.push_back(std::this_thread::get_id());
+  };
+}
+
+size_t Recorded::count() const
+{
+  return replies.size();
+}
+
+} // namespace
+
+SCENARIO("ProjectOps matches replies to requests by id", "[StudioClient]")
+{
+  GIVEN("a connected client with two requests in flight")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+
+    Recorded first, second;
+    const auto h1 = f.ops().send(NewProject{}, first.recorder());
+    RenameDataset rename;
+    rename.datasetId = "dataset_0001";
+    rename.newName = "pressure";
+    const auto h2 = f.ops().send(rename, second.recorder());
+    REQUIRE(h1.valid());
+    REQUIRE(h2.valid());
+    REQUIRE(h1.requestId != h2.requestId);
+    REQUIRE(f.ops().pendingCount() == 2);
+    REQUIRE(f.ops().pending(h1));
+    REQUIRE(f.ops().pending(h2));
+
+    REQUIRE(f.waitForRequests(2));
+    const auto seen = f.requests();
+    REQUIRE(seen[0].type == StudioMessageType::NewProject);
+    REQUIRE(seen[0].requestId == h1.requestId);
+    REQUIRE(seen[1].type == StudioMessageType::RenameDataset);
+    REQUIRE(seen[1].requestId == h2.requestId);
+    const auto decodedRename = decode<RenameDataset>(seen[1].raw);
+    REQUIRE(decodedRename);
+    REQUIRE(decodedRename->newName == "pressure");
+
+    WHEN("the server answers the second request first, with an error")
+    {
+      f.server.send(encode(makeErrorReply(h2.requestId, "dataset not found")));
+
+      THEN("only the second callback runs, on the polling thread")
+      {
+        REQUIRE(pollUntil(f.connection, [&] { return second.count() == 1; }));
+        REQUIRE(first.count() == 0);
+        REQUIRE_FALSE(second.replies[0].ok);
+        REQUIRE(second.replies[0].error == "dataset not found");
+        REQUIRE(second.replies[0].requestId == h2.requestId);
+        REQUIRE(second.threads[0] == std::this_thread::get_id());
+        REQUIRE(f.ops().pendingCount() == 1);
+        REQUIRE(f.ops().pending(h1));
+        REQUIRE_FALSE(f.ops().pending(h2));
+
+        AND_THEN("the first callback runs once its reply arrives, once")
+        {
+          f.server.send(encode(makeOkReply(h1.requestId)));
+          REQUIRE(pollUntil(f.connection, [&] { return first.count() == 1; }));
+          REQUIRE(first.replies[0].ok);
+          REQUIRE(first.replies[0].requestId == h1.requestId);
+          REQUIRE(f.ops().pendingCount() == 0);
+
+          // A second reply to the same id is noise, not a second callback.
+          f.server.send(encode(makeOkReply(h1.requestId)));
+          pollFor(f.connection, 50ms);
+          REQUIRE(first.count() == 1);
+          REQUIRE(second.count() == 1);
+        }
+      }
+    }
+
+    WHEN("a reply sits in the inbound queue and the UI has not polled")
+    {
+      f.server.send(encode(makeOkReply(h1.requestId)));
+
+      THEN("the callback waits for poll()")
+      {
+        // Long enough for the IO thread to have queued the reply.
+        REQUIRE(staysFalse([&] { return first.count() != 0; }, 50ms));
+        REQUIRE(pollUntil(f.connection, [&] { return first.count() == 1; }));
+      }
+    }
+
+    WHEN("a callback is forgotten before its reply")
+    {
+      f.ops().forget(h1);
+      f.server.send(encode(makeOkReply(h1.requestId)));
+
+      THEN("the reply retires the request silently")
+      {
+        REQUIRE(pollUntil(f.connection, [&] { return !f.ops().pending(h1); }));
+        REQUIRE(first.count() == 0);
+      }
+    }
+  }
+}
+
+SCENARIO("ProjectOps retires a request a bare Error names", "[StudioClient]")
+{
+  GIVEN("a connected client with a shot and a dataset request in flight")
+  {
+    Fixture f;
+    std::vector<std::string> bannerErrors;
+    f.connection.onServerError = [&](const std::string &m) {
+      bannerErrors.push_back(m);
+    };
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+
+    Recorded shot, rename;
+    const auto hShot = f.ops().send(CreateShot{}, shot.recorder());
+    RenameDataset renameReq;
+    renameReq.datasetId = "dataset_0001";
+    renameReq.newName = "pressure";
+    const auto hRename = f.ops().send(renameReq, rename.recorder());
+    REQUIRE(f.waitForRequests(2));
+
+    WHEN("the server refuses one by type with a bare Error")
+    {
+      Error error;
+      error.message = "malformed RenameDataset payload";
+      f.server.send(encode(error));
+
+      THEN("only that request fails, once, with the server's text")
+      {
+        REQUIRE(pollUntil(f.connection, [&] { return rename.count() == 1; }));
+        REQUIRE_FALSE(rename.replies[0].ok);
+        REQUIRE(rename.replies[0].requestId == hRename.requestId);
+        REQUIRE(rename.replies[0].error == "malformed RenameDataset payload");
+        REQUIRE(shot.count() == 0);
+        REQUIRE(f.ops().pending(hShot));
+        REQUIRE_FALSE(f.ops().pending(hRename));
+        REQUIRE(bannerErrors.empty());
+
+        AND_THEN("a late reply to it is noise")
+        {
+          f.server.send(encode(makeOkReply(hRename.requestId)));
+          pollFor(f.connection, 50ms);
+          REQUIRE(rename.count() == 1);
+        }
+      }
+    }
+
+    WHEN("the Error names a type nothing pending has, or a longer name")
+    {
+      Error unrelated;
+      unrelated.message = "Pick is not implemented in this server";
+      f.server.send(encode(unrelated));
+      Error longer;
+      longer.message = "malformed CreateShotArchive payload";
+      f.server.send(encode(longer));
+
+      THEN("both requests stay pending and the banner hears the errors")
+      {
+        REQUIRE(
+            pollUntil(f.connection, [&] { return bannerErrors.size() == 2; }));
+        REQUIRE(bannerErrors[0] == unrelated.message);
+        REQUIRE(bannerErrors[1] == longer.message);
+        REQUIRE(shot.count() == 0);
+        REQUIRE(rename.count() == 0);
+        REQUIRE(f.ops().pendingCount() == 2);
+      }
+    }
+
+    WHEN("two requests of one type are pending and an Error names it")
+    {
+      Recorded secondShot;
+      const auto hShot2 = f.ops().send(CreateShot{}, secondShot.recorder());
+      REQUIRE(f.waitForRequests(3));
+      Error error;
+      error.message = "malformed CreateShot payload";
+      f.server.send(encode(error));
+
+      THEN("the oldest one is the one retired")
+      {
+        REQUIRE(pollUntil(f.connection, [&] { return shot.count() == 1; }));
+        REQUIRE(shot.replies[0].requestId == hShot.requestId);
+        REQUIRE(secondShot.count() == 0);
+        REQUIRE(f.ops().pending(hShot2));
+        REQUIRE(f.ops().pending(hRename));
+      }
+    }
+  }
+}
+
+SCENARIO("ProjectOps decodes typed results for the callback", "[StudioClient]")
+{
+  GIVEN("a connected client")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+
+    WHEN("createShot is answered with a ShotCreatedResult")
+    {
+      std::optional<ShotCreatedResult> result;
+      bool ok = false;
+      int calls = 0;
+      CreateShot create;
+      create.name = "Shot 2";
+      const auto handle = f.ops().sendForResult<ShotCreatedResult>(create,
+          [&](const ProjectOpReply &reply,
+              const std::optional<ShotCreatedResult> &r) {
+            calls++;
+            ok = reply.ok;
+            result = r;
+          });
+      REQUIRE(f.waitForRequests(1));
+      const auto seen = f.requests();
+      REQUIRE(seen[0].type == StudioMessageType::CreateShot);
+      const auto request = decode<CreateShot>(seen[0].raw);
+      REQUIRE(request);
+      REQUIRE(request->name == "Shot 2");
+
+      auto reply = makeOkReply(handle.requestId);
+      setResults(reply, ShotCreatedResult{"shot_0002"});
+      f.server.send(encode(reply));
+
+      THEN("the callback receives the decoded shot id")
+      {
+        REQUIRE(pollUntil(f.connection, [&] { return calls == 1; }));
+        REQUIRE(ok);
+        REQUIRE(result);
+        REQUIRE(result->shotId == "shot_0002");
+      }
+    }
+
+    WHEN("a sendForResult request fails")
+    {
+      std::optional<LightRigCreatedResult> result;
+      bool ok = true;
+      int calls = 0;
+      CloneLightRig clone;
+      clone.lightRigId = "lightrig_0009";
+      const auto handle = f.ops().sendForResult<LightRigCreatedResult>(clone,
+          [&](const ProjectOpReply &reply,
+              const std::optional<LightRigCreatedResult> &r) {
+            calls++;
+            ok = reply.ok;
+            result = r;
+          });
+      REQUIRE(f.waitForRequests(1));
+      f.server.send(
+          encode(makeErrorReply(handle.requestId, "light rig not found")));
+
+      THEN("the callback sees the failure and no result")
+      {
+        REQUIRE(pollUntil(f.connection, [&] { return calls == 1; }));
+        REQUIRE_FALSE(ok);
+        REQUIRE_FALSE(result);
+      }
+    }
+
+    WHEN("requests of several types go out through send and sendForResult")
+    {
+      auto &ops = f.ops();
+      const auto ignore = [](const ProjectOpReply &) {};
+      const auto ignoreR = [](const ProjectOpReply &, const auto &) {};
+
+      std::vector<StudioMessageType> expected;
+      const auto expect = [&](StudioMessageType t, RequestHandle h) {
+        REQUIRE(h.valid());
+        expected.push_back(t);
+      };
+      expect(StudioMessageType::NewProject, ops.send(NewProject{}, ignore));
+      ImportStaticDataset import;
+      import.name = "n";
+      import.sourcePath = "/d/f.obj";
+      import.importerType = vsr::io::ImporterType::OBJ;
+      expect(StudioMessageType::ImportStaticDataset,
+          ops.sendForResult<TaskStartedResult>(import, ignoreR));
+      RemoveDataset removeDataset;
+      removeDataset.datasetId = "dataset_0001";
+      removeDataset.keepAssetFile = true;
+      expect(StudioMessageType::RemoveDataset, ops.send(removeDataset, ignore));
+      RemoveLightFromRig removeLight;
+      removeLight.lightRigId = "lightrig_0001";
+      removeLight.lightNode.layerName = "studio";
+      removeLight.lightNode.nodeIndex = 7;
+      expect(
+          StudioMessageType::RemoveLightFromRig, ops.send(removeLight, ignore));
+      expect(StudioMessageType::ListRoots,
+          ops.sendForResult<ListRootsResult>(ListRoots{}, ignoreR));
+      RenderShot render;
+      render.shotId = "shot_0001";
+      expect(StudioMessageType::RenderShot,
+          ops.sendForResult<TaskStartedResult>(render, ignoreR));
+      CancelTask cancel;
+      cancel.taskId = 3;
+      expect(StudioMessageType::CancelTask, ops.send(cancel, ignore));
+
+      THEN("the server sees one request of each, in order, with ids and fields")
+      {
+        REQUIRE(f.waitForRequests(expected.size()));
+        const auto seen = f.requests();
+        REQUIRE(seen.size() == expected.size());
+        for (size_t i = 0; i < seen.size(); ++i) {
+          REQUIRE(seen[i].type == expected[i]);
+          REQUIRE(seen[i].requestId != 0);
+        }
+        // The fields travel as the caller set them.
+        const auto imp = decode<ImportStaticDataset>(seen[1].raw);
+        REQUIRE(imp);
+        REQUIRE(imp->importerType == vsr::io::ImporterType::OBJ);
+        REQUIRE(imp->sourcePath == "/d/f.obj");
+        const auto rm = decode<RemoveDataset>(seen[2].raw);
+        REQUIRE(rm);
+        REQUIRE(rm->keepAssetFile);
+        const auto light = decode<RemoveLightFromRig>(seen[3].raw);
+        REQUIRE(light);
+        REQUIRE(light->lightNode.layerName == "studio");
+        REQUIRE(light->lightNode.nodeIndex == 7);
+        const auto shot = decode<RenderShot>(seen[5].raw);
+        REQUIRE(shot);
+        REQUIRE(shot->shotId == "shot_0001");
+        const auto cancelled = decode<CancelTask>(seen.back().raw);
+        REQUIRE(cancelled);
+        REQUIRE(cancelled->taskId == 3);
+        REQUIRE(f.ops().pendingCount() == expected.size());
+      }
+    }
+  }
+}
+
+SCENARIO(
+    "taskLabel names the request that starts a Server Task", "[StudioClient]")
+{
+  GIVEN("the task-launching requests with their fields set")
+  {
+    THEN("each label quotes what the task works on")
+    {
+      OpenProject open;
+      open.directory = "/d/p";
+      REQUIRE(taskLabel(open) == "Open project '/d/p'");
+      SaveProject save;
+      REQUIRE(taskLabel(save) == "Save project");
+      save.directory = "/d/q";
+      REQUIRE(taskLabel(save) == "Save project as '/d/q'");
+      ImportStaticDataset import;
+      import.sourcePath = "/d/f.obj";
+      REQUIRE(taskLabel(import) == "Import '/d/f.obj'");
+      ImportFileAnimationDataset animation;
+      animation.name = "run";
+      animation.sourcePaths = {"/d/a.raw", "/d/b.raw"};
+      REQUIRE(taskLabel(animation) == "Import file animation 'run' (2 files)");
+      LoadDataset load;
+      load.datasetId = "dataset_0001";
+      REQUIRE(taskLabel(load) == "Load dataset dataset_0001");
+      IncorporateDatasetCandidate incorporate;
+      incorporate.proposedName = "proposed";
+      REQUIRE(taskLabel(incorporate) == "Incorporate dataset 'proposed'");
+      incorporate.name = "typed";
+      REQUIRE(taskLabel(incorporate) == "Incorporate dataset 'typed'");
+      RenderShot render;
+      render.shotId = "shot_0001";
+      REQUIRE(taskLabel(render) == "Render shot 'shot_0001'");
+    }
+
+    THEN("a request that starts no task has no label")
+    {
+      REQUIRE(taskLabel(NewProject{}).empty());
+      REQUIRE(taskLabel(CreateShot{}).empty());
+      REQUIRE(taskLabel(CancelTask{}).empty());
+    }
+  }
+}
+
+SCENARIO("InFlight sends one request at a time", "[StudioClient]")
+{
+  GIVEN("a connected client and an InFlight group")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+    InFlight group;
+    Recorded first;
+    REQUIRE_FALSE(group.busy(f.ops()));
+
+    WHEN("a request goes out through it")
+    {
+      REQUIRE(group.send(f.ops(), NewProject{}, first.recorder()));
+      REQUIRE(f.waitForRequests(1));
+
+      THEN("it is busy and refuses another until the reply comes")
+      {
+        REQUIRE(group.busy(f.ops()));
+        REQUIRE(group.handle.valid());
+        Recorded second;
+        REQUIRE_FALSE(group.send(f.ops(), NewProject{}, second.recorder()));
+        REQUIRE_FALSE(group.sendForResult<ListRootsResult>(
+            f.ops(), ListRoots{}, nullptr));
+        REQUIRE(f.ops().pendingCount() == 1);
+
+        f.server.send(encode(makeOkReply(group.handle.requestId)));
+        REQUIRE(pollUntil(f.connection, [&] { return first.count() == 1; }));
+        REQUIRE_FALSE(group.busy(f.ops()));
+        REQUIRE(group.send(f.ops(), NewProject{}, second.recorder()));
+        REQUIRE(group.busy(f.ops()));
+      }
+
+      THEN("clear() forgets the handle, though the request stays pending")
+      {
+        group.clear();
+        REQUIRE_FALSE(group.handle.valid());
+        REQUIRE_FALSE(group.busy(f.ops()));
+        REQUIRE(f.ops().pendingCount() == 1);
+      }
+    }
+  }
+}
+
+SCENARIO("ProjectOps fails every pending request when the connection goes",
+    "[StudioClient]")
+{
+  GIVEN("a connected client with two requests awaiting replies")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+    Recorded a, b;
+    const auto h1 = f.ops().send(NewProject{}, a.recorder());
+    const auto h2 = f.ops().send(ListRoots{}, b.recorder());
+    REQUIRE(f.waitForRequests(2));
+
+    WHEN("the server falls silent until loss is declared")
+    {
+      f.server.silent = true;
+      REQUIRE(pollUntil(f.connection,
+          [&] { return f.connection.state() == ConnectionState::Lost; }));
+
+      THEN("both callbacks ran exactly once with \"connection lost\"")
+      {
+        REQUIRE(a.count() == 1);
+        REQUIRE(b.count() == 1);
+        REQUIRE_FALSE(a.replies[0].ok);
+        REQUIRE(a.replies[0].error == "connection lost");
+        REQUIRE(a.replies[0].requestId == h1.requestId);
+        REQUIRE_FALSE(b.replies[0].ok);
+        REQUIRE(b.replies[0].error == "connection lost");
+        REQUIRE(b.replies[0].requestId == h2.requestId);
+        REQUIRE(f.ops().pendingCount() == 0);
+
+        AND_THEN("a late reply after reconnecting does not run them again")
+        {
+          f.server.silent = false;
+          REQUIRE(f.waitConnectedAndBootstrapped(2));
+          f.server.send(encode(makeOkReply(h1.requestId)));
+          f.server.send(encode(makeOkReply(h2.requestId)));
+          pollFor(f.connection, 50ms);
+          REQUIRE(a.count() == 1);
+          REQUIRE(b.count() == 1);
+        }
+      }
+    }
+
+    WHEN("the user disconnects")
+    {
+      f.connection.disconnect();
+
+      THEN("both callbacks ran once with \"connection lost\"")
+      {
+        REQUIRE(a.count() == 1);
+        REQUIRE(b.count() == 1);
+        REQUIRE(a.replies[0].error == "connection lost");
+        REQUIRE(b.replies[0].error == "connection lost");
+        REQUIRE(f.ops().pendingCount() == 0);
+      }
+    }
+  }
+
+  GIVEN("a client that is not connected")
+  {
+    Fixture f;
+    Recorded a;
+
+    WHEN("a request is sent anyway")
+    {
+      const auto handle = f.ops().send(NewProject{}, a.recorder());
+      REQUIRE(handle.valid());
+
+      THEN("the callback fails from the next poll(), not from send()")
+      {
+        REQUIRE(a.count() == 0);
+        f.connection.poll();
+        REQUIRE(a.count() == 1);
+        REQUIRE_FALSE(a.replies[0].ok);
+        REQUIRE(a.replies[0].error == "not connected");
+        REQUIRE(a.replies[0].requestId == handle.requestId);
+        REQUIRE(f.ops().pendingCount() == 0);
+      }
+    }
+  }
+}
+
+SCENARIO(
+    "ProjectOps tracks Server Tasks from start to finish", "[StudioClient]")
+{
+  GIVEN("a connected client that asked to open a project")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+    REQUIRE(f.ops().tasks().empty());
+    REQUIRE_FALSE(f.ops().tasksActive());
+
+    std::optional<TaskStartedResult> started;
+    OpenProject open;
+    open.directory = "/data/run7";
+    const auto handle = f.ops().sendForResult<TaskStartedResult>(open,
+        [&](const ProjectOpReply &, const std::optional<TaskStartedResult> &r) {
+          started = r;
+        });
+    REQUIRE(f.waitForRequests(1));
+
+    WHEN("the reply carries a TaskStartedResult")
+    {
+      auto reply = makeOkReply(handle.requestId);
+      setResults(reply, TaskStartedResult{42});
+      f.server.send(encode(reply));
+      REQUIRE(pollUntil(f.connection, [&] { return started.has_value(); }));
+
+      THEN("a Queued record labelled after the request appears")
+      {
+        REQUIRE(started->taskId == 42);
+        REQUIRE(f.ops().tasks().size() == 1);
+        const TaskRecord *task = f.ops().task(42);
+        REQUIRE(task);
+        REQUIRE(task->state == TaskState::Queued);
+        REQUIRE(task->label == "Open project '/data/run7'");
+        REQUIRE_FALSE(task->finished());
+        REQUIRE(f.ops().tasksActive());
+
+        AND_THEN("progress makes it Running and completion keeps it")
+        {
+          TaskProgress progress;
+          progress.taskId = 42;
+          progress.message = "staging";
+          f.server.send(encode(progress));
+          REQUIRE(pollUntil(f.connection,
+              [&] { return f.ops().task(42)->state == TaskState::Running; }));
+          REQUIRE(f.ops().task(42)->lastProgress.message == "staging");
+          REQUIRE(f.ops().task(42)->lastProgress.total == 0);
+
+          TaskCompleted completed;
+          completed.taskId = 42;
+          completed.message = "opened";
+          f.server.send(encode(completed));
+          REQUIRE(pollUntil(f.connection,
+              [&] { return f.ops().task(42)->state == TaskState::Completed; }));
+          REQUIRE(f.ops().task(42)->finished());
+          REQUIRE(f.ops().task(42)->lastProgress.message == "opened");
+          REQUIRE(f.ops().task(42)->error.empty());
+          REQUIRE_FALSE(f.ops().tasksActive());
+          REQUIRE(f.ops().tasks().size() == 1);
+
+          f.ops().clearFinishedTasks();
+          REQUIRE(f.ops().tasks().empty());
+          REQUIRE(f.ops().task(42) == nullptr);
+        }
+
+        AND_THEN("a failure records the error and stays until cleared")
+        {
+          TaskFailed failed;
+          failed.taskId = 42;
+          failed.error = "project.vsr does not exist";
+          f.server.send(encode(failed));
+          REQUIRE(pollUntil(f.connection,
+              [&] { return f.ops().task(42)->state == TaskState::Failed; }));
+          REQUIRE(f.ops().task(42)->error == "project.vsr does not exist");
+          REQUIRE(f.ops().task(42)->finished());
+
+          // Progress after the end can only be a new task under a reused
+          // id (a restarted server): the record starts over as its own.
+          TaskProgress late;
+          late.taskId = 42;
+          late.message = "late";
+          f.server.send(encode(late));
+          REQUIRE(pollUntil(f.connection, [&] {
+            return f.ops().task(42)->lastProgress.message == "late";
+          }));
+          REQUIRE(f.ops().task(42)->state == TaskState::Running);
+          REQUIRE(f.ops().task(42)->label == "late");
+          REQUIRE(f.ops().task(42)->error.empty());
+          REQUIRE(f.ops().tasksActive());
+        }
+
+        AND_THEN("a completion without a message records no outcome")
+        {
+          TaskProgress phase;
+          phase.taskId = 42;
+          phase.message = "writing";
+          f.server.send(encode(phase));
+          TaskCompleted completed;
+          completed.taskId = 42;
+          f.server.send(encode(completed));
+          REQUIRE(pollUntil(f.connection,
+              [&] { return f.ops().task(42)->state == TaskState::Completed; }));
+          REQUIRE(f.ops().task(42)->lastProgress.message == "writing");
+          REQUIRE(f.ops().task(42)->outcome.empty());
+        }
+
+        AND_THEN("a CancelTask for that id goes out")
+        {
+          Recorded cancel;
+          CancelTask cancelRequest;
+          cancelRequest.taskId = 42;
+          const auto ch = f.ops().send(cancelRequest, cancel.recorder());
+          REQUIRE(f.waitForRequests(2));
+          const auto seen = f.requests();
+          REQUIRE(seen[1].type == StudioMessageType::CancelTask);
+          const auto request = decode<CancelTask>(seen[1].raw);
+          REQUIRE(request);
+          REQUIRE(request->taskId == 42);
+          REQUIRE(request->requestId == ch.requestId);
+
+          f.server.send(encode(makeOkReply(ch.requestId)));
+          TaskFailed failed;
+          failed.taskId = 42;
+          failed.error = "cancelled";
+          f.server.send(encode(failed));
+          REQUIRE(pollUntil(f.connection, [&] {
+            return cancel.count() == 1
+                && f.ops().task(42)->state == TaskState::Failed;
+          }));
+          REQUIRE(f.ops().task(42)->error == "cancelled");
+        }
+      }
+    }
+
+    WHEN("task events name a task this client never launched")
+    {
+      TaskProgress progress;
+      progress.taskId = 99;
+      progress.current = 2;
+      progress.total = 10;
+      f.server.send(encode(progress));
+
+      THEN("a record is created for it with a generic label")
+      {
+        REQUIRE(pollUntil(
+            f.connection, [&] { return f.ops().task(99) != nullptr; }));
+        const TaskRecord *task = f.ops().task(99);
+        REQUIRE(task->state == TaskState::Running);
+        REQUIRE(task->label == "Task 99");
+        REQUIRE(task->lastProgress.current == 2);
+        REQUIRE(task->lastProgress.total == 10);
+      }
+    }
+
+    WHEN("the user disconnects with a task recorded")
+    {
+      auto reply = makeOkReply(handle.requestId);
+      setResults(reply, TaskStartedResult{42});
+      f.server.send(encode(reply));
+      REQUIRE(pollUntil(f.connection, [&] { return started.has_value(); }));
+      f.connection.disconnect();
+
+      THEN("the task records go with the session")
+      {
+        REQUIRE(f.ops().tasks().empty());
+      }
+    }
+  }
+}
+
+SCENARIO("ServerConnection applies snapshots outside the bootstrap",
+    "[StudioClient]")
+{
+  GIVEN("a connected, bootstrapped client")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+    REQUIRE(f.projectReplaced == 1); // the bootstrap's own snapshot
+    REQUIRE(f.connection.project()->name == "fake project");
+
+    WHEN("the server pushes a ProjectSnapshot")
+    {
+      ProjectSnapshot snapshot;
+      snapshot.project.name = "renamed project";
+      Shot shot;
+      shot.id = "shot_0002";
+      shot.name = "Shot 2";
+      snapshot.project.shots.push_back(shot);
+      snapshot.project.activeShotId = "shot_0002";
+      f.server.send(encode(snapshot));
+
+      THEN("the replica is replaced and onProjectReplaced fires once")
+      {
+        REQUIRE(
+            pollUntil(f.connection, [&] { return f.projectReplaced == 2; }));
+        const Project *project = f.connection.project();
+        REQUIRE(project);
+        REQUIRE(project->name == "renamed project");
+        REQUIRE(project::activeShot(*project));
+        REQUIRE(project::activeShot(*project)->id == "shot_0002");
+        REQUIRE_FALSE(f.connection.bootstrapping());
+        REQUIRE(f.bootstraps == 1);
+      }
+    }
+
+    WHEN("the server bootstraps again with a task record still open")
+    {
+      TaskProgress progress;
+      progress.taskId = 5;
+      progress.message = "importing";
+      f.server.send(encode(progress));
+      REQUIRE(
+          pollUntil(f.connection, [&] { return f.ops().tasks().size() == 1; }));
+      REQUIRE(f.ops().tasksActive());
+
+      f.server.sendBootstrap();
+
+      THEN(
+          "the record is failed with 'connection lost' by the client, silently")
+      {
+        REQUIRE(f.waitConnectedAndBootstrapped(2));
+        REQUIRE(f.ops().tasks().size() == 1);
+        REQUIRE_FALSE(f.ops().tasksActive());
+        const TaskRecord *task = f.ops().task(5);
+        REQUIRE(task);
+        REQUIRE(task->state == TaskState::Failed);
+        REQUIRE(task->error == "connection lost");
+        REQUIRE(task->failedByClient);
+        REQUIRE(task->label == "importing");
+        REQUIRE(f.ended.empty()); // the banner said it
+      }
+    }
+
+    WHEN("the server pushes a TimeAdvanceWarning")
+    {
+      REQUIRE_FALSE(f.connection.lastTimeAdvanceWarning());
+      TimeAdvanceWarning warning;
+      warning.shotId = "shot_0001";
+      warning.frame = 17;
+      warning.message = "frame 17 failed to load";
+      f.server.send(encode(warning));
+
+      THEN("the latest warning is kept until cleared")
+      {
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.connection.lastTimeAdvanceWarning().has_value(); }));
+        REQUIRE(f.connection.lastTimeAdvanceWarning()->frame == 17);
+        REQUIRE(f.connection.lastTimeAdvanceWarning()->shotId == "shot_0001");
+        f.connection.clearTimeAdvanceWarning();
+        REQUIRE_FALSE(f.connection.lastTimeAdvanceWarning());
+      }
+    }
+  }
+}
+
+SCENARIO("ProjectOps rebuilds task records from the bootstrap's replay",
+    "[StudioClient]")
+{
+  GIVEN("a connected client with a queued task of its own and a running one")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+
+    OpenProject open;
+    open.directory = "/d/p";
+    const auto handle = f.ops().sendForResult<TaskStartedResult>(open, nullptr);
+    REQUIRE(f.waitForRequests(1));
+    auto reply = makeOkReply(handle.requestId);
+    setResults(reply, TaskStartedResult{5});
+    f.server.send(encode(reply));
+    TaskProgress progress;
+    progress.taskId = 6;
+    progress.message = "importing";
+    f.server.send(encode(progress));
+    REQUIRE(
+        pollUntil(f.connection, [&] { return f.ops().tasks().size() == 2; }));
+    REQUIRE(f.ops().task(5)->state == TaskState::Queued);
+    REQUIRE(f.ops().task(6)->state == TaskState::Running);
+
+    WHEN("the next bootstrap replays one outcome and one running task")
+    {
+      TaskCompleted completed;
+      completed.taskId = 5;
+      completed.message = "/d/p/renders/shot_0001";
+      setResults(completed, RenderShotResult{3});
+      f.server.bootstrap.push_back(encode(completed));
+      TaskProgress running;
+      running.taskId = 9;
+      running.current = 2;
+      running.total = 10;
+      running.message = "render shot 'shot_0001'";
+      f.server.bootstrap.push_back(encode(running));
+      f.server.sendBootstrap();
+      REQUIRE(f.waitConnectedAndBootstrapped(2));
+
+      THEN("the replayed outcome revives the record under its own label")
+      {
+        const TaskRecord *task = f.ops().task(5);
+        REQUIRE(task);
+        REQUIRE(task->state == TaskState::Completed);
+        REQUIRE_FALSE(task->failedByClient);
+        REQUIRE(task->label == "Open project '/d/p'");
+        REQUIRE(task->lastProgress.message == "/d/p/renders/shot_0001");
+        REQUIRE(task->outcome == "/d/p/renders/shot_0001");
+        REQUIRE(task->framesCompleted == 3);
+        REQUIRE(task->error.empty());
+        // The one ending announced: the replayed outcome, not the client's
+        // own failures of 5 and 6 at BootstrapBegin.
+        REQUIRE(f.ended.size() == 1);
+        REQUIRE(f.ended[0].taskId == 5);
+        REQUIRE(f.ended[0].state == TaskState::Completed);
+        REQUIRE(f.ended[0].describeEnding()
+            == "Open project '/d/p' completed (3 frames): /d/p/renders/shot_0001");
+      }
+
+      THEN("the task the server never mentioned again stays failed")
+      {
+        const TaskRecord *task = f.ops().task(6);
+        REQUIRE(task);
+        REQUIRE(task->state == TaskState::Failed);
+        REQUIRE(task->error == "connection lost");
+        REQUIRE(task->failedByClient);
+      }
+
+      THEN("the running task is created, labelled with its description")
+      {
+        const TaskRecord *task = f.ops().task(9);
+        REQUIRE(task);
+        REQUIRE(task->state == TaskState::Running);
+        REQUIRE(task->label == "render shot 'shot_0001'");
+        REQUIRE(task->lastProgress.current == 2);
+        REQUIRE(task->lastProgress.total == 10);
+        REQUIRE(f.ops().tasksActive());
+
+        AND_THEN("its live progress keeps the label, its end finishes it")
+        {
+          TaskProgress frame;
+          frame.taskId = 9;
+          frame.current = 3;
+          frame.total = 10;
+          frame.message = "frame 3/10";
+          f.server.send(encode(frame));
+          REQUIRE(pollUntil(f.connection,
+              [&] { return f.ops().task(9)->lastProgress.current == 3; }));
+          REQUIRE(f.ops().task(9)->label == "render shot 'shot_0001'");
+          REQUIRE(f.ops().task(9)->lastProgress.message == "frame 3/10");
+
+          TaskCompleted done;
+          done.taskId = 9;
+          setResults(done, RenderShotResult{10});
+          f.server.send(encode(done));
+          REQUIRE(pollUntil(f.connection,
+              [&] { return f.ops().task(9)->state == TaskState::Completed; }));
+          REQUIRE(f.ops().task(9)->framesCompleted == 10);
+          REQUIRE_FALSE(f.ops().tasksActive());
+        }
+      }
+    }
+
+    WHEN("a render this client launched is still running across a reconnect")
+    {
+      RenderShot renderShot;
+      renderShot.shotId = "shot_0001";
+      const auto render =
+          f.ops().sendForResult<TaskStartedResult>(renderShot, nullptr);
+      REQUIRE(f.waitForRequests(1));
+      auto started = makeOkReply(render.requestId);
+      setResults(started, TaskStartedResult{7});
+      f.server.send(encode(started));
+      REQUIRE(pollUntil(f.connection, [&] { return f.ops().renderActive(); }));
+
+      TaskProgress running;
+      running.taskId = 7;
+      running.current = 4;
+      running.total = 12;
+      running.message = "frame 4 of 12";
+      f.server.bootstrap.push_back(encode(running));
+      f.server.sendBootstrap();
+      REQUIRE(f.waitConnectedAndBootstrapped(2));
+
+      THEN("the restarted record still counts as a render")
+      {
+        const TaskRecord *task = f.ops().task(7);
+        REQUIRE(task);
+        REQUIRE(task->state == TaskState::Running);
+        REQUIRE(task->render);
+        // The editors go on refusing edits while the server does.
+        REQUIRE(f.ops().renderActive());
+        // The label still starts over: the replay's description wins.
+        REQUIRE(task->label == "frame 4 of 12");
+
+        AND_THEN("its ending clears the render state")
+        {
+          TaskCompleted done;
+          done.taskId = 7;
+          setResults(done, RenderShotResult{12});
+          f.server.send(encode(done));
+          REQUIRE(pollUntil(f.connection,
+              [&] { return f.ops().task(7)->state == TaskState::Completed; }));
+          REQUIRE_FALSE(f.ops().renderActive());
+        }
+      }
+    }
+
+    WHEN("the next bootstrap replays progress for the task the client failed")
+    {
+      TaskProgress running;
+      running.taskId = 6;
+      running.current = 3;
+      running.total = 8;
+      running.message = "import '/d/f.obj'";
+      f.server.bootstrap.push_back(encode(running));
+      f.server.sendBootstrap();
+      REQUIRE(f.waitConnectedAndBootstrapped(2));
+
+      THEN("the record starts over under the replay's description")
+      {
+        const TaskRecord *task = f.ops().task(6);
+        REQUIRE(task);
+        REQUIRE(task->state == TaskState::Running);
+        REQUIRE_FALSE(task->failedByClient);
+        REQUIRE(task->label == "import '/d/f.obj'");
+        REQUIRE(task->error.empty());
+        REQUIRE(task->lastProgress.current == 3);
+        REQUIRE(task->lastProgress.total == 8);
+        REQUIRE(f.ops().tasksActive());
+      }
+    }
+
+    WHEN("a restarted server hands a new task the id of a finished record")
+    {
+      TaskCompleted done;
+      done.taskId = 5;
+      done.message = "/d/p";
+      f.server.send(encode(done));
+      REQUIRE(pollUntil(f.connection,
+          [&] { return f.ops().task(5)->state == TaskState::Completed; }));
+      REQUIRE(f.ended.size() == 1);
+
+      ImportStaticDataset import;
+      import.name = "n";
+      import.sourcePath = "/d/f.obj";
+      import.importerType = vsr::io::ImporterType::OBJ;
+      const auto again =
+          f.ops().sendForResult<TaskStartedResult>(import, nullptr);
+      REQUIRE(f.waitForRequests(2));
+      auto restarted = makeOkReply(again.requestId);
+      setResults(restarted, TaskStartedResult{5});
+      f.server.send(encode(restarted));
+
+      THEN("the launch reply starts the record over and it runs to its end")
+      {
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.ops().task(5)->state == TaskState::Queued; }));
+        const TaskRecord *task = f.ops().task(5);
+        REQUIRE(task->label == "Import '/d/f.obj'");
+        REQUIRE(task->outcome.empty());
+        REQUIRE(task->lastProgress.message.empty());
+        REQUIRE(f.ops().tasksActive());
+
+        TaskProgress progress2;
+        progress2.taskId = 5;
+        progress2.message = "importing";
+        f.server.send(encode(progress2));
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.ops().task(5)->state == TaskState::Running; }));
+        REQUIRE(f.ops().task(5)->lastProgress.message == "importing");
+
+        TaskCompleted done2;
+        done2.taskId = 5;
+        done2.message = "dataset_0001";
+        f.server.send(encode(done2));
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.ops().task(5)->outcome == "dataset_0001"; }));
+        REQUIRE(f.ops().task(5)->state == TaskState::Completed);
+        // The new task under the reused id ended too.
+        REQUIRE(f.ended.size() == 2);
+        REQUIRE(f.ended[1].label == "Import '/d/f.obj'");
+      }
+    }
+
+    WHEN("the next bootstrap replays an ending this client saw live")
+    {
+      TaskCompleted done;
+      done.taskId = 5;
+      done.message = "/d/p";
+      f.server.send(encode(done));
+      REQUIRE(pollUntil(f.connection, [&] { return f.ended.size() == 1; }));
+      REQUIRE(f.ended[0].taskId == 5);
+
+      // The server replays every ending it has not replayed before, whether
+      // or not the session that saw it live was this one.
+      f.server.bootstrap.push_back(encode(done));
+      f.server.sendBootstrap();
+      REQUIRE(f.waitConnectedAndBootstrapped(2));
+
+      THEN("the record stays completed and the ending is not announced again")
+      {
+        const TaskRecord *task = f.ops().task(5);
+        REQUIRE(task);
+        REQUIRE(task->state == TaskState::Completed);
+        REQUIRE(task->outcome == "/d/p");
+        REQUIRE_FALSE(task->failedByClient);
+        REQUIRE(f.ended.size() == 1);
+      }
+
+      THEN("the record the client failed meanwhile announced nothing")
+      {
+        REQUIRE(f.ops().task(6)->state == TaskState::Failed);
+        REQUIRE(f.ops().task(6)->failedByClient);
+        REQUIRE(f.ended.size() == 1);
+      }
+    }
+
+    WHEN("progress arrives for a finished record without a launch reply")
+    {
+      TaskCompleted done;
+      done.taskId = 6;
+      f.server.send(encode(done));
+      REQUIRE(pollUntil(f.connection,
+          [&] { return f.ops().task(6)->state == TaskState::Completed; }));
+      TaskProgress progress;
+      progress.taskId = 6;
+      progress.current = 1;
+      progress.total = 4;
+      progress.message = "render shot 'shot_0002'";
+      f.server.send(encode(progress));
+
+      THEN("another client's task under a reused id starts a fresh record")
+      {
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.ops().task(6)->state == TaskState::Running; }));
+        const TaskRecord *task = f.ops().task(6);
+        REQUIRE(task->label == "render shot 'shot_0002'");
+        REQUIRE(task->lastProgress.total == 4);
+        REQUIRE(f.ops().tasksActive());
+      }
+    }
+
+    WHEN(
+        "a restarted server hands a new task the id of a record the client failed")
+    {
+      f.server.sendBootstrap();
+      REQUIRE(f.waitConnectedAndBootstrapped(2));
+      REQUIRE(f.ops().task(5)->failedByClient);
+
+      ImportStaticDataset import;
+      import.name = "n";
+      import.sourcePath = "/d/f.obj";
+      import.importerType = vsr::io::ImporterType::OBJ;
+      const auto again =
+          f.ops().sendForResult<TaskStartedResult>(import, nullptr);
+      REQUIRE(f.waitForRequests(2));
+      auto restarted = makeOkReply(again.requestId);
+      setResults(restarted, TaskStartedResult{5});
+      f.server.send(encode(restarted));
+
+      THEN("the record starts over under the new request's label")
+      {
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.ops().task(5)->state == TaskState::Queued; }));
+        const TaskRecord *task = f.ops().task(5);
+        REQUIRE_FALSE(task->failedByClient);
+        REQUIRE(task->label == "Import '/d/f.obj'");
+        REQUIRE(task->error.empty());
+        REQUIRE(f.ops().tasksActive());
+
+        TaskProgress progress2;
+        progress2.taskId = 5;
+        progress2.current = 1;
+        progress2.total = 1;
+        f.server.send(encode(progress2));
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.ops().task(5)->state == TaskState::Running; }));
+      }
+    }
+  }
+}
+
+SCENARIO("TaskRecord describes its ending for the toast", "[StudioClient]")
+{
+  GIVEN("a completed task")
+  {
+    TaskRecord task;
+    task.label = "Render shot 'shot_0001'";
+    task.state = TaskState::Completed;
+
+    WHEN("it wrote frames and named an outcome")
+    {
+      task.framesCompleted = 24;
+      task.outcome = "/out/shot_0001";
+
+      THEN("the frames and the outcome follow the label")
+      {
+        REQUIRE(task.describeEnding()
+            == "Render shot 'shot_0001' completed (24 frames): /out/shot_0001");
+      }
+    }
+
+    WHEN("it reports neither")
+    {
+      THEN("the label completed, and nothing more")
+      {
+        REQUIRE(task.describeEnding() == "Render shot 'shot_0001' completed");
+      }
+    }
+  }
+
+  GIVEN("a failed task")
+  {
+    TaskRecord task;
+    task.label = "Render shot 'shot_0001'";
+    task.state = TaskState::Failed;
+    task.error = "cancelled";
+
+    WHEN("it wrote frames first")
+    {
+      task.framesCompleted = 12;
+
+      THEN("the count precedes the error")
+      {
+        REQUIRE(task.describeEnding()
+            == "Render shot 'shot_0001' failed after 12 frames: cancelled");
+      }
+    }
+
+    WHEN("it wrote none")
+    {
+      THEN("the error follows the label")
+      {
+        REQUIRE(task.describeEnding()
+            == "Render shot 'shot_0001' failed: cancelled");
+      }
+    }
+  }
+
+  GIVEN("a record with no label yet")
+  {
+    TaskRecord task;
+    task.state = TaskState::Failed;
+    task.error = "connection lost";
+
+    THEN("a placeholder stands in for the label")
+    {
+      REQUIRE(task.describeEnding() == "<task> failed: connection lost");
+    }
+  }
+
+  GIVEN("a task still running")
+  {
+    TaskRecord task;
+    task.label = "Import";
+    task.state = TaskState::Running;
+
+    THEN("there is no ending to describe")
+    {
+      REQUIRE(task.describeEnding().empty());
+    }
+  }
+}
+
+SCENARIO("ProjectOps flags the render it launched", "[StudioClient]")
+{
+  GIVEN("a connected client that asked for a render")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+    REQUIRE_FALSE(f.ops().renderActive());
+
+    bool answered = false;
+    RenderShot render;
+    render.shotId = "shot_0001";
+    const auto handle = f.ops().sendForResult<TaskStartedResult>(render,
+        [&](const ProjectOpReply &reply,
+            const std::optional<TaskStartedResult> &r) {
+          answered = reply.ok && r && r->taskId == 7;
+        });
+    REQUIRE(f.waitForRequests(1));
+    REQUIRE(f.requests()[0].type == StudioMessageType::RenderShot);
+
+    WHEN("the reply starts a task")
+    {
+      auto reply = makeOkReply(handle.requestId);
+      setResults(reply, TaskStartedResult{7});
+      f.server.send(encode(reply));
+      REQUIRE(pollUntil(f.connection, [&] { return answered; }));
+
+      THEN("the record is a render until it finishes")
+      {
+        const TaskRecord *task = f.ops().task(7);
+        REQUIRE(task);
+        REQUIRE(task->render);
+        REQUIRE(task->label == "Render shot 'shot_0001'");
+        REQUIRE(f.ops().renderActive());
+
+        TaskFailed failed;
+        failed.taskId = 7;
+        failed.error = "cancelled";
+        setResults(failed, RenderShotResult{12});
+        f.server.send(encode(failed));
+        REQUIRE(pollUntil(f.connection,
+            [&] { return f.ops().task(7)->state == TaskState::Failed; }));
+        REQUIRE(f.ops().task(7)->framesCompleted == 12);
+        REQUIRE_FALSE(f.ops().renderActive());
+      }
+    }
+
+    WHEN("the server refuses because a render is in progress")
+    {
+      f.server.send(
+          encode(makeErrorReply(handle.requestId, "render in progress")));
+      pollUntil(f.connection, [&] { return f.ops().pendingCount() == 0; });
+
+      THEN("no record is made")
+      {
+        REQUIRE(f.ops().tasks().empty());
+        REQUIRE_FALSE(f.ops().renderActive());
+      }
+    }
+  }
+}
+
+SCENARIO("ProjectOps decodes Remote Browse results", "[StudioClient]")
+{
+  GIVEN("a connected client")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+
+    WHEN("listRoots is answered")
+    {
+      std::optional<ListRootsResult> roots;
+      int calls = 0;
+      const auto handle = f.ops().sendForResult<ListRootsResult>(ListRoots{},
+          [&](const ProjectOpReply &, const std::optional<ListRootsResult> &r) {
+            calls++;
+            roots = r;
+          });
+      REQUIRE(f.waitForRequests(1));
+      ListRootsResult result;
+      result.roots = {"/data", "/scratch/runs"};
+      auto reply = makeOkReply(handle.requestId);
+      setResults(reply, result);
+      f.server.send(encode(reply));
+
+      THEN("the roots arrive typed and in order")
+      {
+        REQUIRE(pollUntil(f.connection, [&] { return calls == 1; }));
+        REQUIRE(roots);
+        REQUIRE(roots->roots.size() == 2);
+        REQUIRE(roots->roots[0] == "/data");
+        REQUIRE(roots->roots[1] == "/scratch/runs");
+      }
+    }
+
+    WHEN("listDirectory is answered")
+    {
+      std::optional<ListDirectoryResult> listing;
+      int calls = 0;
+      ListDirectory list;
+      list.directory = "/data";
+      const auto handle = f.ops().sendForResult<ListDirectoryResult>(list,
+          [&](const ProjectOpReply &,
+              const std::optional<ListDirectoryResult> &r) {
+            calls++;
+            listing = r;
+          });
+      REQUIRE(f.waitForRequests(1));
+      const auto seen = f.requests();
+      const auto request = decode<ListDirectory>(seen[0].raw);
+      REQUIRE(request);
+      REQUIRE(request->directory == "/data");
+
+      ListDirectoryResult result;
+      DirectoryEntry project;
+      project.name = "run7";
+      project.kind = EntryKind::ProjectDirectory;
+      project.mtimeSeconds = 1700000000;
+      DirectoryEntry dir;
+      dir.name = "raw";
+      dir.kind = EntryKind::Directory;
+      DirectoryEntry file;
+      file.name = "field.raw";
+      file.kind = EntryKind::File;
+      file.size = 4096;
+      result.entries = {project, dir, file};
+      auto reply = makeOkReply(handle.requestId);
+      setResults(reply, result);
+      f.server.send(encode(reply));
+
+      THEN("the entries arrive typed and in order")
+      {
+        REQUIRE(pollUntil(f.connection, [&] { return calls == 1; }));
+        REQUIRE(listing);
+        REQUIRE(listing->entries.size() == 3);
+        REQUIRE(listing->entries[0].name == "run7");
+        REQUIRE(listing->entries[0].kind == EntryKind::ProjectDirectory);
+        REQUIRE(listing->entries[0].mtimeSeconds == 1700000000);
+        REQUIRE(listing->entries[1].kind == EntryKind::Directory);
+        REQUIRE(listing->entries[2].kind == EntryKind::File);
+        REQUIRE(listing->entries[2].size == 4096);
+      }
+    }
+
+    WHEN("listDirectory is refused")
+    {
+      std::optional<ListDirectoryResult> listing;
+      std::string error;
+      int calls = 0;
+      ListDirectory list;
+      list.directory = "/etc";
+      const auto handle = f.ops().sendForResult<ListDirectoryResult>(list,
+          [&](const ProjectOpReply &reply,
+              const std::optional<ListDirectoryResult> &r) {
+            calls++;
+            error = reply.error;
+            listing = r;
+          });
+      REQUIRE(f.waitForRequests(1));
+      f.server.send(encode(makeErrorReply(
+          handle.requestId, "path is outside the server's Data Roots")));
+
+      THEN("the error reaches the callback without a listing")
+      {
+        REQUIRE(pollUntil(f.connection, [&] { return calls == 1; }));
+        REQUIRE_FALSE(listing);
+        REQUIRE(error == "path is outside the server's Data Roots");
+      }
+    }
+  }
+}
+
+SCENARIO(
+    "ProjectOps matches PickReply messages to picks by id", "[StudioClient]")
+{
+  GIVEN("a connected client with two picks in flight")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+
+    std::vector<std::optional<PickReply>> first, second;
+    const auto h1 =
+        f.ops().pick(10, 20, [&](const auto &r) { first.push_back(r); });
+    const auto h2 =
+        f.ops().pick(30, 40, [&](const auto &r) { second.push_back(r); });
+    REQUIRE(h1.valid());
+    REQUIRE(h2.valid());
+    REQUIRE(h1.requestId != h2.requestId);
+    REQUIRE(f.ops().pendingCount() == 2);
+    REQUIRE(f.ops().pending(h1));
+    REQUIRE(f.ops().pending(h2));
+
+    REQUIRE(f.waitForRequests(2));
+    const auto seen = f.requests();
+    REQUIRE(seen[0].type == StudioMessageType::Pick);
+    REQUIRE(seen[0].requestId == h1.requestId);
+    REQUIRE(seen[1].type == StudioMessageType::Pick);
+    const auto decodedPick = decode<Pick>(seen[1].raw);
+    REQUIRE(decodedPick);
+    REQUIRE(decodedPick->x == 30);
+    REQUIRE(decodedPick->y == 40);
+
+    WHEN("the server answers the second pick first, with a hit")
+    {
+      PickReply reply;
+      reply.requestId = h2.requestId;
+      reply.hit = true;
+      reply.worldPosition = {1.f, 2.f, 3.f};
+      reply.objectIdentity = SceneObjectRef{ANARI_VOLUME, 7};
+      f.server.send(encode(reply));
+
+      THEN("only the second callback runs, with the decoded reply")
+      {
+        REQUIRE(pollUntil(f.connection, [&] { return second.size() == 1; }));
+        REQUIRE(first.empty());
+        REQUIRE(second[0].has_value());
+        REQUIRE(second[0]->hit);
+        REQUIRE(second[0]->worldPosition.y == 2.f);
+        REQUIRE(second[0]->objectIdentity);
+        REQUIRE(second[0]->objectIdentity->type == ANARI_VOLUME);
+        REQUIRE(second[0]->objectIdentity->objectIndex == 7);
+        REQUIRE(f.ops().pending(h1));
+        REQUIRE_FALSE(f.ops().pending(h2));
+
+        AND_THEN("a background reply retires the first pick once")
+        {
+          PickReply miss;
+          miss.requestId = h1.requestId;
+          f.server.send(encode(miss));
+          REQUIRE(pollUntil(f.connection, [&] { return first.size() == 1; }));
+          REQUIRE(first[0].has_value());
+          REQUIRE_FALSE(first[0]->hit);
+          REQUIRE_FALSE(first[0]->objectIdentity);
+          REQUIRE(f.ops().pendingCount() == 0);
+
+          f.server.send(encode(miss));
+          pollFor(f.connection, 50ms);
+          REQUIRE(first.size() == 1);
+        }
+      }
+    }
+
+    WHEN("the first pick is forgotten")
+    {
+      f.ops().forget(h1);
+
+      THEN(
+          "it is retired outright: the server never answers a superseded"
+          " Pick")
+      {
+        REQUIRE_FALSE(f.ops().pending(h1));
+        REQUIRE(f.ops().pending(h2));
+        REQUIRE(f.ops().pendingCount() == 1);
+
+        AND_THEN("a late reply for it is ignored")
+        {
+          PickReply late;
+          late.requestId = h1.requestId;
+          late.hit = true;
+          f.server.send(encode(late));
+          pollFor(f.connection, 50ms);
+          REQUIRE(first.empty());
+          REQUIRE(f.ops().pendingCount() == 1);
+        }
+      }
+    }
+
+    WHEN("the server refuses a Pick with a bare Error")
+    {
+      Error error;
+      error.message = "Pick 12345 refused: no active shot to render";
+      f.server.send(encode(error));
+
+      THEN("the oldest pending pick fails once with an absent reply")
+      {
+        REQUIRE(pollUntil(f.connection, [&] { return first.size() == 1; }));
+        REQUIRE_FALSE(first[0].has_value());
+        REQUIRE(second.empty());
+        REQUIRE_FALSE(f.ops().pending(h1));
+        REQUIRE(f.ops().pending(h2));
+      }
+    }
+
+    WHEN("the user disconnects")
+    {
+      f.connection.disconnect();
+
+      THEN("both picks fail once with an absent reply")
+      {
+        REQUIRE(first.size() == 1);
+        REQUIRE(second.size() == 1);
+        REQUIRE_FALSE(first[0].has_value());
+        REQUIRE_FALSE(second[0].has_value());
+        REQUIRE(f.ops().pendingCount() == 0);
+      }
+    }
+  }
+
+  GIVEN("a client that is not connected")
+  {
+    Fixture f;
+    std::vector<std::optional<PickReply>> replies;
+
+    WHEN("a pick is sent anyway")
+    {
+      const auto handle =
+          f.ops().pick(1, 1, [&](const auto &r) { replies.push_back(r); });
+      REQUIRE(handle.valid());
+
+      THEN("the callback fails from the next poll(), not from pick()")
+      {
+        REQUIRE(replies.empty());
+        f.connection.poll();
+        REQUIRE(replies.size() == 1);
+        REQUIRE_FALSE(replies[0].has_value());
+        REQUIRE(f.ops().pendingCount() == 0);
+      }
+    }
+  }
+}
+
+SCENARIO(
+    "ServerConnection carries playback and viewport messages", "[StudioClient]")
+{
+  GIVEN("a connected client")
+  {
+    Fixture f;
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+
+    WHEN("setPlaying is answered ok")
+    {
+      Recorded recorded;
+      SetPlaying play;
+      play.shotId = "shot_0001";
+      play.playing = true;
+      const auto handle = f.ops().send(play, recorded.recorder());
+      REQUIRE(f.waitForRequests(1));
+      const auto seen = f.requests();
+      REQUIRE(seen[0].type == StudioMessageType::SetPlaying);
+      const auto request = decode<SetPlaying>(seen[0].raw);
+      REQUIRE(request);
+      REQUIRE(request->shotId == "shot_0001");
+      REQUIRE(request->playing);
+      REQUIRE(request->requestId == handle.requestId);
+
+      f.server.send(encode(makeOkReply(handle.requestId)));
+
+      THEN("the callback sees the reply")
+      {
+        REQUIRE(pollUntil(f.connection, [&] { return recorded.count() == 1; }));
+        REQUIRE(recorded.replies[0].ok);
+      }
+    }
+
+    WHEN("RequestArrayHistogram is answered with bins")
+    {
+      std::optional<ArrayHistogramResult> result;
+      int calls = 0;
+      RequestArrayHistogram ask;
+      ask.array = SceneObjectRef{ANARI_ARRAY1D, 3};
+      ask.binCount = 16;
+      const auto handle = f.ops().sendForResult<ArrayHistogramResult>(ask,
+          [&](const ProjectOpReply &reply,
+              const std::optional<ArrayHistogramResult> &r) {
+            calls++;
+            if (reply.ok)
+              result = r;
+          });
+      REQUIRE(f.waitForRequests(1));
+      const auto request = decode<RequestArrayHistogram>(f.requests()[0].raw);
+      REQUIRE(request);
+      REQUIRE(request->array.type == ANARI_ARRAY1D);
+      REQUIRE(request->array.objectIndex == 3);
+      REQUIRE(request->binCount == 16);
+
+      ArrayHistogramResult histogram;
+      histogram.bins = {1, 2, 3};
+      histogram.minValue = -1.f;
+      histogram.maxValue = 4.f;
+      auto reply = makeOkReply(handle.requestId);
+      setResults(reply, histogram);
+      f.server.send(encode(reply));
+
+      THEN("the callback receives the decoded histogram")
+      {
+        REQUIRE(pollUntil(f.connection, [&] { return calls == 1; }));
+        REQUIRE(result);
+        REQUIRE(result->bins == std::vector<uint64_t>{1, 2, 3});
+        REQUIRE(result->minValue == -1.f);
+        REQUIRE(result->maxValue == 4.f);
+      }
+    }
+
+    WHEN("the optimistic time and viewport messages are sent")
+    {
+      f.connection.setTime("shot_0001", 42);
+      f.connection.setOutline(SceneObjectRef{ANARI_SURFACE, 5});
+      f.connection.setOutline(std::nullopt);
+      ViewportSettings settings;
+      settings.visualizeAOV = vsr::rendering::AOVType::DEPTH;
+      settings.depthVisualMaximum = 12.f;
+      settings.showWorldBounds = true;
+      f.connection.setViewportSettings(settings);
+
+      THEN("the server receives each with its fields")
+      {
+        REQUIRE(f.waitForRequests(4));
+        const auto seen = f.requests();
+        REQUIRE(seen[0].type == StudioMessageType::SetTime);
+        const auto time = decode<SetTime>(seen[0].raw);
+        REQUIRE(time);
+        REQUIRE(time->shotId == "shot_0001");
+        REQUIRE(time->frame == 42);
+        REQUIRE(seen[1].type == StudioMessageType::SetOutline);
+        const auto outline = decode<SetOutline>(seen[1].raw);
+        REQUIRE(outline);
+        REQUIRE(outline->objectIdentity);
+        REQUIRE(outline->objectIdentity->objectIndex == 5);
+        const auto cleared = decode<SetOutline>(seen[2].raw);
+        REQUIRE(cleared);
+        REQUIRE_FALSE(cleared->objectIdentity);
+        REQUIRE(seen[3].type == StudioMessageType::ViewportSettings);
+        const auto received = decode<ViewportSettings>(seen[3].raw);
+        REQUIRE(received);
+        REQUIRE(received->visualizeAOV == vsr::rendering::AOVType::DEPTH);
+        REQUIRE(received->depthVisualMaximum == 12.f);
+        REQUIRE(received->showWorldBounds);
+        REQUIRE(received->highlightSelection); // default travelled too
+      }
+    }
+
+    WHEN("a TimeAdvanceWarning arrives")
+    {
+      std::vector<TimeAdvanceWarning> warnings;
+      f.connection.onTimeAdvanceWarning = [&](const TimeAdvanceWarning &w) {
+        warnings.push_back(w);
+      };
+      TimeAdvanceWarning warning;
+      warning.shotId = "shot_0001";
+      warning.frame = 12;
+      warning.message = "file missing";
+      f.server.send(encode(warning));
+
+      THEN("the callback fires and the newest warning is kept until cleared")
+      {
+        REQUIRE(pollUntil(f.connection, [&] { return warnings.size() == 1; }));
+        REQUIRE(warnings[0].frame == 12);
+        REQUIRE(warnings[0].message == "file missing");
+        REQUIRE(f.connection.lastTimeAdvanceWarning());
+        REQUIRE(f.connection.lastTimeAdvanceWarning()->frame == 12);
+        f.connection.clearTimeAdvanceWarning();
+        REQUIRE_FALSE(f.connection.lastTimeAdvanceWarning());
+      }
+    }
+
+    WHEN("a Frame is taken")
+    {
+      REQUIRE_FALSE(f.connection.lastFrameHeader());
+      FrameHeader header;
+      header.width = 2;
+      header.height = 1;
+      header.shotId = "shot_0001";
+      header.frame = 9;
+      const std::vector<std::byte> pixels(2 * 1 * 4, std::byte{0});
+      f.server.send(encodeFrame(header, pixels.data(), pixels.size()));
+
+      THEN("its header is the last frame header")
+      {
+        Message frame;
+        REQUIRE(pollUntil(
+            f.connection, [&] { return f.connection.takeLatestFrame(frame); }));
+        REQUIRE(f.connection.lastFrameHeader());
+        REQUIRE(f.connection.lastFrameHeader()->frame == 9);
+        REQUIRE(f.connection.lastFrameHeader()->shotId == "shot_0001");
+
+        f.connection.disconnect();
+        REQUIRE_FALSE(f.connection.lastFrameHeader());
+      }
+    }
+  }
+}
+
+SCENARIO("ArrayHydration fills a mirror proxy before letting it be edited",
+    "[StudioClient]")
+{
+  GIVEN("a connected client whose mirror holds a proxy array")
+  {
+    Fixture f;
+    auto sourceArray = f.source.createArray(ANARI_FLOAT32_VEC4, 4);
+    const std::vector<vsr::math::float4> served(4, vsr::math::float4(0.25f));
+    sourceArray->setData(served);
+    f.source.getObject<vsr::scene::Geometry>(0)->setParameterObject(
+        "color", *sourceArray);
+    f.server.bootstrap = makeFakeBootstrap(f.source);
+
+    f.connect();
+    REQUIRE(f.waitConnectedAndBootstrapped());
+
+    auto array = f.mirror.getObject<vsr::scene::Array>(sourceArray->index());
+    REQUIRE(array);
+    REQUIRE(array->isProxy());
+
+    ArrayHydration hydration(&f.connection);
+    REQUIRE_FALSE(hydration.hydrated(array->index()));
+
+    WHEN("hydration is requested and the server answers")
+    {
+      hydration.request(*array);
+
+      protocol::RequestArrayData seen;
+      REQUIRE(pollUntil(f.connection, [&] {
+        std::lock_guard lock(f.mutex);
+        for (const auto &request : f.seen) {
+          if (request.type != StudioMessageType::RequestArrayData)
+            continue;
+          const auto decoded = decode<protocol::RequestArrayData>(request.raw);
+          if (decoded)
+            seen = *decoded;
+          return decoded.has_value();
+        }
+        return false;
+      }));
+      REQUIRE(seen.array.objectIndex == sourceArray->index());
+
+      protocol::ArrayDataResult result;
+      result.elementType = ANARI_FLOAT32_VEC4;
+      result.elementCount = served.size();
+      const auto *bytes = reinterpret_cast<const std::byte *>(served.data());
+      result.data.assign(bytes, bytes + served.size() * sizeof(served[0]));
+
+      auto reply = makeOkReply(seen.requestId);
+      protocol::setResults(reply, result);
+      f.server.send(encode(reply));
+
+      THEN("the mirror array holds the samples and may now be edited")
+      {
+        REQUIRE(pollUntil(f.connection,
+            [&] { return hydration.hydrated(array->index()); }));
+        REQUIRE_FALSE(array->isProxy());
+        const auto *samples = array->dataAs<vsr::math::float4>();
+        REQUIRE(samples != nullptr);
+        REQUIRE(samples[0].x == 0.25f);
+
+        // The fill itself must not have echoed back as an edit: the array is
+        // declared editable only after its samples have landed.
+        std::lock_guard lock(f.mutex);
+        for (const auto &request : f.seen)
+          REQUIRE(request.type != StudioMessageType::SetArrayData);
+      }
+    }
+
+    WHEN("the reply says the array is gone")
+    {
+      hydration.request(*array);
+      uint64_t requestId = 0;
+      REQUIRE(pollUntil(f.connection, [&] {
+        std::lock_guard lock(f.mutex);
+        for (const auto &request : f.seen) {
+          if (request.type == StudioMessageType::RequestArrayData) {
+            requestId = request.requestId;
+            return true;
+          }
+        }
+        return false;
+      }));
+      f.server.send(encode(makeErrorReply(requestId, "is not an array")));
+
+      THEN("nothing is hydrated and the reason is kept")
+      {
+        REQUIRE(pollUntil(f.connection,
+            [&] { return !hydration.lastError().empty(); }));
+        REQUIRE_FALSE(hydration.hydrated(array->index()));
+        REQUIRE(array->isProxy());
+      }
+    }
+  }
+}

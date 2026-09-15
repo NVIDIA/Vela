@@ -9,6 +9,11 @@
 
 namespace vsr::rendering {
 
+// Whether `d` lists `extension` (an "ANARI_KHR_..." name) among its device
+// extensions; what a pass asks before enabling an optional frame channel.
+// False for a null device or extension.
+bool deviceSupportsExtension(anari::Device d, const char *extension);
+
 /*
  * ImagePass that drives a single ANARI Frame with a configurable camera,
  * renderer, and world; optionally captures auxiliary AOV buffers
@@ -39,7 +44,11 @@ struct AnariSceneRenderPass : public ImagePass
   void startFirstFrame(bool wait = false);
   void waitForCompletion();
 
-  // default' true', if 'false', then anari::wait() on each pass
+  // Default true: render() composites the frame the previous call started and
+  // starts the next, so the picture lags the scene by one call. False renders
+  // synchronously: render() renders, waits and composites in one call, so the
+  // buffers show the scene as it is at that call (a frame stamped with the
+  // time it was rendered at, a pick against the current camera).
   void setRunAsync(bool on);
 
   anari::Frame getFrame() const;

@@ -8,6 +8,8 @@
 #include "imgui.h"
 
 #include "vsr/app/Context.h"
+// vsr_ui_imgui
+#include "vsr/ui/imgui/vsr_ui_imgui.h"
 
 namespace vsr::ui::imgui {
 
@@ -30,6 +32,9 @@ struct Modal
   virtual void buildUI() = 0;
   virtual bool userClosable() const;
   vsr::app::Context *appContext() const;
+  // What the application lets the object editors offer; pass it to
+  // buildUI_object()/buildUI_parameter().
+  const vsr::ui::ObjectEditPolicy &objectEditPolicy() const;
 
   Application *m_app{nullptr};
 

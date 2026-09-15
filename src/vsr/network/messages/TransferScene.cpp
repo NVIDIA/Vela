@@ -17,10 +17,13 @@ TransferScene::TransferScene(vsr::scene::Scene *scene, bool includeArrayData)
     return;
   }
 
+  // Preserved numbering: the receiver's layers must name every node by the
+  // sender's index, since protocol node references carry those indices.
   if (!vsr::io::serialize_SceneArchive(*scene,
           m_tree.root(),
           includeArrayData ? vsr::io::ArrayDataPolicy::IncludeData
-                           : vsr::io::ArrayDataPolicy::ProxyOnly)) {
+                           : vsr::io::ArrayDataPolicy::ProxyOnly,
+          vsr::io::LayerNodeNumbering::Preserved)) {
     vsr::core::logError(
         "[message::TransferScene] Failed to serialize Scene Archive");
   }
@@ -33,18 +36,20 @@ TransferScene::TransferScene(const Message &msg, vsr::scene::Scene *scene)
       msg.header.payload_length);
 }
 
-void TransferScene::execute()
+bool TransferScene::execute()
 {
   if (!m_scene) {
     vsr::core::logError(
         "[message::TransferScene] No scene set to transfer data into");
-    return;
+    return false;
   }
 
   if (!vsr::io::deserialize_SceneArchive(*m_scene, m_tree.root())) {
     vsr::core::logError(
         "[message::TransferScene] Failed to deserialize Scene Archive");
+    return false;
   }
+  return true;
 }
 
 } // namespace vsr::network::messages

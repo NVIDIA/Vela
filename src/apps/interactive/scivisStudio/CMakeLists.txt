@@ -1,8 +1,10 @@
 ## SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 ## SPDX-License-Identifier: Apache-2.0
 
-add_library(vsr_scivis_studio_model STATIC
+add_library(vsr_scivis_studio_model OBJECT
   CameraRig.cpp
+  ColorMaps.cpp
+  DataNodeFields.cpp
   Dataset.cpp
   DatasetIO.cpp
   LightRig.cpp
@@ -16,6 +18,7 @@ add_library(vsr_scivis_studio_model STATIC
   RenderShot.cpp
   RenderShotCLI.cpp
   Shot.cpp
+  ShotOps.cpp
   StudioCLI.cpp
 )
 
@@ -31,6 +34,30 @@ PUBLIC
   vsr_io
   vsr_rendering
   vsr_scene
+)
+
+# The modals both Studios show: one implementation each, parameterised on
+# where paths come from (BrowseProvider) and what an accepted dialog does
+# (ModalAction). The monolith and the remote client supply their own halves
+# (LocalProjectActions here, RemoteProjectActions in the client).
+add_library(vsr_scivis_studio_modals OBJECT
+  modals/AddFileAnimationDatasetDialog.cpp
+  modals/AddStaticDatasetDialog.cpp
+  modals/BrowseProvider.cpp
+  modals/ModalAction.cpp
+  modals/ModalUI.cpp
+  modals/ProjectLocationDialog.cpp
+)
+
+target_include_directories(vsr_scivis_studio_modals
+PUBLIC
+  ${CMAKE_CURRENT_LIST_DIR}
+)
+
+target_link_libraries(vsr_scivis_studio_modals
+PUBLIC
+  vsr_io
+  vsr_ui_imgui
 )
 
 set(SCIVIS_STUDIO_DEFAULT_LAYOUT_FILE
@@ -50,9 +77,7 @@ configure_file(
 
 add_executable(scivisStudio
   Application.cpp
-  modals/AddFileAnimationDatasetDialog.cpp
-  modals/AddStaticDatasetDialog.cpp
-  modals/ProjectLocationDialog.cpp
+  modals/LocalProjectActions.cpp
   scivisStudio.cpp
   windows/CameraRigEditor.cpp
   windows/DatasetEditor.cpp
@@ -69,6 +94,7 @@ PRIVATE
 target_link_libraries(scivisStudio
 PRIVATE
   vsr_scivis_studio_model
+  vsr_scivis_studio_modals
   vsr_ui_imgui
 )
 

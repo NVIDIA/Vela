@@ -1,0 +1,266 @@
+# SciVis Studio Remote
+
+The wire vocabulary of the SciVis Studio client-server split: what crosses
+the network between the Studio server (which owns the project, scene, and
+rendering) and the thin UI client, and what each end holds. Design:
+[`docs/scivis-studio-client-server.md`](../../../../docs/scivis-studio-client-server.md).
+Project and dataset language is owned by
+[SciVis Studio](../scivisStudio/CONTEXT.md) and is never redefined here.
+
+## Language
+
+### Protocol
+
+**Studio Message Set**:
+The client-server protocol owned by this context: its own message-type enum
+and version, reusing the VSR network transport but sharing nothing with the
+remote-viewer demo protocol. A message outside the set is rejected, never
+ignored.
+
+**Project Op**:
+A synchronous request/reply mutation of project state, one-to-one with a
+`ProjectContext` operation, carrying a client-minted request id. The client
+applies nothing optimistically; the reply and the following Project Snapshot
+are the truth.
+_Avoid_: RPC call, command
+
+**Shot Patch**:
+The fields of one Shot an edit changes and nothing else (`ShotPatch`, a
+model type: every field optional, bindings as the datasets to set), what
+`UpdateShot{shotId, patch}` carries. The server applies it to its stored Shot
+and validates the result as a whole; a client control commits a patch of
+the one field it edits, so no client holds a draft Shot and two windows
+editing the same shot never overwrite each other's fields.
+_Avoid_: shot delta, whole-Shot update, draft
+
+**Project Snapshot**:
+The whole serialized Project, pushed after every confirmed mutation from any
+source. It replaces the client's Project Replica wholesale and is the commit
+marker: scene messages for the same mutation precede it, and its arrival
+means the mutation is fully visible. It carries the Project's Full form
+(`ProjectForm::Full`): the manifest's fields plus, inline under each entity,
+the runtime fields the client cannot rebuild; the same serializer writes the
+manifest form `project.vsr` stores. One snapshot per change of the
+`ProjectContext` revision, decided by the server loop, never by a handler.
+_Avoid_: project delta, project patch, runtime sidecar
+
+**Server Task**:
+A long-running server operation identified by a server-allocated task id,
+reporting optional progress and exactly one completion or failure, with
+cooperative cancel. Single-lane: one task runs, others queue in order. Task
+state survives client disconnects.
+_Avoid_: background job, async request
+
+**Bootstrap**:
+The bracketed message sequence a server sends on every accepted connection —
+structural scene, layer snapshots, frame config, Task-Status Replay, then a
+Project Snapshot — leaving the client fully populated.
+Connecting and reconnecting are the same act; the server's authoritative
+state is the session.
+_Avoid_: session restore, resync
+
+**Task-Status Replay**:
+The part of the Bootstrap that tells a client how every Server Task ended
+since the previous Bootstrap (each `TaskCompleted`/`TaskFailed` verbatim) and
+which one is running now (one `TaskProgress` naming it). It is what lets a
+task outlive the session that launched it: the client fails its open task
+records at `BootstrapBegin` and the replay overwrites the ones the server
+still speaks of (an ending in place; progress starts the record over).
+Idempotent — an ending heard live may be replayed once more.
+_Avoid_: task history sync, task resume
+
+**Exclusive Server Task**:
+A Server Task that owns the Project and the Scene while it is queued or
+running — in v1 the shot render. Its **pause-and-refuse** rule: interactive
+frames pause because the task holds the render loop, and any request that
+would mutate the Project or Scene or launch another task is refused with
+"render in progress" when it reaches dispatch, rather than held back to run
+afterwards; browse, histogram and cancel still go through. An exclusive task
+also outlives its session when it is merely queued.
+_Avoid_: blocking task, render lock
+
+**Client Layout**:
+The `{windows, layout}` tree the client keeps for itself -- each window's
+settings and the ImGui dock layout -- written to its own file beside the
+user's application settings at exit and restored at startup. It never
+travels on the wire and never belongs to a Project, so which project is open
+moves no panel. A UI-state node an opened project's manifest carries (the
+monolith writes one) is held by the server only to be written back on save.
+_Avoid_: layout sync, project layout, window settings message
+
+**Object Metadata**:
+Free-form keyed values a scene object carries beside its parameters -- a
+camera's `manipulator.*`, a volume's `opacityControlPoints`. Unlike a
+parameter it never reaches ANARI and carries no description, range or usage
+hint, but it crosses the wire on the same optimistic, one-way path
+(`SetObjectMetadata`) and rides the enclosing parameter batch. A key holding
+array data travels there too; bulk array *objects* do not, having their own
+message. Unrelated to
+`__vsr_metadata`, the Data Tree file envelope, which shares only the word.
+_Avoid_: user data, object properties, custom attributes
+
+### Client-held state
+
+**Structural Mirror**:
+The client's copy of the scene's objects, parameters, and layers without bulk
+array contents. Arrays arrive as descriptors (type, shape, element count,
+value range) and hold no samples unless a panel has made one a Hydrated
+Array; its size is a function of project structure, not data size. Objects
+and layer nodes keep the server's indices, so a wire identity
+(SceneObjectRef, SceneNodeRef) names the same thing on both sides.
+_Avoid_: scene copy, full mirror
+
+**Hydrated Array**:
+A Structural Mirror array a panel has filled with the server's samples so it
+can be read and edited locally — the exception to descriptors-only, and the
+only way a client edits array contents at all. Hydration is per array and
+owned by the panel that asked for it, which drops it when the mirror is
+replaced; nothing hydrates at bootstrap and nothing hydrates on demand from
+the renderer. What keeps the mirror's size structural is that only what a
+user has opened an editor on is ever hydrated.
+_Avoid_: cached array, loaded array, array fetch
+
+**Project Replica**:
+The client's read-only copy of the real Project value structs, including
+runtime-only display fields, replaced wholesale by each Project Snapshot.
+Every field may be read and none written; all mutation goes through Project
+Ops.
+_Avoid_: client project, local project
+
+**Opaque Dataset**:
+A dataset as the Structural Mirror holds it: its full object and layer
+structure with every parameter, but arrays as descriptors only (type, shape,
+element count) — bulk contents stay on the server. Opacity is a property of
+array *contents*, never of structure. A client can name and edit every
+object a dataset creates, and asks the server about contents it cannot read
+(Array Histogram) or wants to edit (Hydrated Array).
+_Avoid_: partial dataset, dataset stub, subtree expansion
+
+**Edit Policy**:
+Which parameter edits a client's object editors offer at all
+(`vsr::ui::ObjectEditPolicy`, set once on the UI Application). A refused
+edit is drawn disabled with the reason on hover, never hidden. The client
+refuses exactly the five that no client-to-server message expresses --
+object creation, usage hints, string lists and attribute bindings,
+array-valued bindings, and clearing a value -- so the widget never changes
+the Structural Mirror in a way the next commit would silently undo.
+_Avoid_: read-only mode, locked parameter
+
+**Connection State**:
+The client's explicit state toward its server: `NeverConnected`, `Connected`,
+`Lost`, or `Disconnected`. **Lost** is involuntary (view frozen under a
+banner, auto-retrying); **Disconnected** is a completed user intention (clean
+home state, no retry). The frozen-with-banner treatment is exclusively for
+Lost.
+
+**Session Phase**:
+Where the client's session with its server stands, from the socket up to a
+bootstrapped mirror (`SessionPhase`): `Idle` (no socket: never connected,
+Lost between retries, or Disconnected), `AwaitingHello`, `AwaitingBootstrap`
+(Connected, but the mirror and replica are still a previous session's frozen
+view or empty), `Bootstrapping`, `Ready` (BootstrapEnd seen on this
+connection), `Closing` (a Shutdown went out and only the server's own close
+is awaited). `Ready` with a replica is the one condition under which the UI
+may send an edit (`ServerConnection::canSend`). Named after the server's
+`SessionState` where both sides wait for the same thing: `AwaitingHello`
+(each awaits the peer's Hello), `Bootstrapping` (the same bracket); `Ready`
+is the client's side of the server's `Established`.
+
+**Mirror Replacement**:
+One of the two moments the whole Structural Mirror is swapped, announced
+before the objects go so the UI can drop what points into them
+(`MirrorReplace`). A **Bootstrap** replacement empties the mirror and refills
+it over the messages that follow -- there is no scene to browse until
+BootstrapEnd, and none at all if a loss cuts the bracket short. A
+**MidSession** replacement is the TransferScene every scene-changing commit
+pushes: one message, a whole scene the moment it applies. Only the first
+leaves the client without a scene, so only the first may grey the panels that
+browse one.
+_Avoid_: mirror reset, scene reload
+
+### Files
+
+**Data Root**:
+A server-launch-configured directory under which all browsing and every
+path-taking operation must fall. A guardrail against accidents on a trusted
+network, not a security boundary.
+
+**Remote Browse**:
+The client's stateless walk of the server's filesystem (`ListRoots`,
+`ListDirectory`), replacing native file dialogs. The server lists, the client
+filters, and server-side operation validation is the sole authority on what a
+path may be used for.
+
+**Browse Provider**:
+Where a shared modal gets a path: the monolith's native SDL dialogs, or the
+client's Remote Browse. One of the two seams the three modals both Studios
+show are parameterised on (`scivisStudio/modals/BrowseProvider.h`).
+
+**Modal Action**:
+The other seam: what an accepted shared modal does, and how it answers --
+once, on the submitting frame (the monolith, in process) or a later one (the
+client, when the Project Op's reply lands). While it has not answered, the
+modal is greyed -- which only a host that waits ever is, so the greying is
+the client's; an unaccepted request's error shows in the dialog, which stays
+open (`scivisStudio/modals/ModalAction.h`).
+
+### Time and rendering
+
+**Time at Rest**:
+The committed playback position: the replica's `currentFrame` and `playing`,
+updated by one Project Snapshot when motion stops.
+
+**In-Motion Time**:
+The frame currently shown during playback or scrubbing, carried exclusively
+by the per-frame image header (`shotId`, `frame`) and never by the replica.
+
+**Control-State Latch**:
+The server pattern marshalling interactive inputs (time, camera, pick,
+viewport settings, frame config) from the network IO thread to the render
+loop: the handler latches the newest value, the loop applies it once per
+iteration. The latch is simultaneously the latest-wins coalescer and the
+thread-safety seam. Inputs that must not coalesce — scene edits, and Project
+Ops when they arrive — do not go through the latch: they ride an **edit drain
+queue** alongside it, kept in arrival order and drained by the same loop
+iteration, so nothing is lost and nothing runs off the IO thread. Session
+events (a connection accepted, its Hello, its loss, a close the server asked
+for) ride a third lane the same way, each tagged with its connection's
+serial, because the loop must replay what happened to the connections in
+the order it happened.
+_Avoid_: message queue for the latch itself (it holds one value, not a
+history); latch for the drain queue (it keeps every edit, in order)
+
+**Origin-Based Echo Suppression**:
+The rule that an edit never returns to the end it came from: each end
+disables its own outbound delegate while applying what the other end sent
+(the server while applying client edits, the client while applying pushes
+and the Bootstrap). Suppression is decided by where a mutation originated,
+never by comparing values.
+_Avoid_: change filtering, loop detection
+
+**Latest-Frame-Wins**:
+The frame pacing rule: at most one Frame is in flight, and while it is the
+server skips rendering rather than queueing pictures, so the client always
+shows the newest state and a slow link never builds a backlog.
+_Avoid_: frame queue, frame buffer depth
+
+**Frame Cost**:
+What one Frame took the server to make, carried in its header: `pipelineMs`,
+the wall time of the whole server-side pass chain, and `renderMs`, the ANARI
+device's own frame duration inside it. It is per frame and never averaged on
+the wire; the client shows it beside the rate frames arrive at, which is a
+property of the link, not of the render.
+_Avoid_: server fps, frame rate (a cost is a time, not a rate)
+
+**World Bounds**:
+The bounds of the server's world, read once per render and carried by every
+frame header alongside the pixels it belongs to. The thin client owns no
+world of its own, so this is the only scene extent it knows; framing a view
+on it (Reset View) is the client's, not a request to the server.
+_Avoid_: scene bounds message, bounds push
+
+**Pick**:
+A request naming a viewport pixel, answered by the server against its current
+camera and scene with `{hit, worldPosition, objectIdentity?}`. What the
+answer means — focus the camera, select the object — is client UI intent, not
+protocol state.

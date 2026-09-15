@@ -1,0 +1,1650 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+// catch
+#include "StudioRemoteTestHelpers.h"
+#include "StudioServerTestHelpers.h"
+#include "TestDirectories.h"
+#include "catch.hpp"
+// vsr_scivis_studio_server_core
+#include "DataRoots.h"
+#include "ServerOptions.h"
+#include "ServerTaskRunner.h"
+#include "StudioServer.h"
+// vsr_scivis_studio_protocol
+#include "BrowseMessages.h"
+#include "FrameMessages.h"
+#include "PlaybackMessages.h"
+#include "ProjectOpReply.h"
+#include "ProjectRequests.h"
+#include "ProjectSnapshot.h"
+#include "SessionMessages.h"
+#include "ShotRigRequests.h"
+#include "StudioCodec.h"
+#include "StudioProtocol.h"
+#include "TaskMessages.h"
+#include "ViewportMessages.h"
+// vsr_scivis_studio_model
+#include "ProjectSerialization.h"
+// vsr_network
+#include "vsr/network/messages/TransferScene.hpp"
+// vsr_scene
+#include "vsr/scene/Scene.hpp"
+// vsr_core
+#include "vsr/core/DataTree.hpp"
+// std
+#include <algorithm>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <optional>
+#include <string>
+#include <system_error>
+#include <utility>
+#include <vector>
+
+using namespace vsr::scivis_studio;
+using namespace vsr::scivis_studio::server;
+using namespace vsr::scivis_studio::protocol;
+using vsr::network::Message;
+using namespace std::chrono_literals;
+
+namespace {
+
+// A Data Root with the files the scenarios browse and import: a triangle
+// mesh, a larger grid mesh for tasks that must stay queued long enough to be
+// cancelled, a plain directory and a directory marked as a project.
+struct DataRootFixture
+{
+  DataRootFixture();
+
+  ScopedFixtureDirectory scratch{"vsr_studio_server_project_ops_"};
+  const std::filesystem::path &root{scratch.path};
+  std::filesystem::path mesh;
+  std::filesystem::path grid;
+  std::filesystem::path plainDir;
+  std::filesystem::path projectDir;
+};
+
+void writeGridObj(const std::filesystem::path &file, int n)
+{
+  std::ofstream out(file);
+  for (int j = 0; j <= n; ++j)
+    for (int i = 0; i <= n; ++i)
+      out << "v " << i << ' ' << j << " 0\n";
+  const auto index = [n](int i, int j) { return j * (n + 1) + i + 1; };
+  for (int j = 0; j < n; ++j) {
+    for (int i = 0; i < n; ++i) {
+      out << "f " << index(i, j) << ' ' << index(i + 1, j) << ' '
+          << index(i + 1, j + 1) << '\n';
+      out << "f " << index(i, j) << ' ' << index(i + 1, j + 1) << ' '
+          << index(i, j + 1) << '\n';
+    }
+  }
+}
+
+DataRootFixture::DataRootFixture()
+{
+  mesh = root / "mesh.obj";
+  writeTriangleObj(mesh);
+  grid = root / "grid.obj";
+  writeGridObj(grid, 60);
+  plainDir = root / "plain";
+  std::filesystem::create_directories(plainDir);
+  projectDir = root / "proj";
+  std::filesystem::create_directories(projectDir);
+  std::ofstream(projectDir / PROJECT_MANIFEST_FILENAME) << "";
+}
+
+// A started server on the Data Root with one bootstrapped client and a
+// clean message log.
+struct Session : ServerSession
+{
+  explicit Session(const std::filesystem::path &dataRoot);
+
+  // The shot the newest Frame was rendered for.
+  std::optional<ShotID> latestFrameShot();
+  bool waitForFrameOf(const ShotID &shotId);
+};
+
+Session::Session(const std::filesystem::path &dataRoot)
+    : ServerSession(testServerOptions({dataRoot}))
+{
+  client.clear();
+}
+
+std::optional<ShotID> Session::latestFrameShot()
+{
+  const auto msg = client.last(StudioMessageType::Frame);
+  if (msg.header.type != uint8_t(StudioMessageType::Frame))
+    return {};
+  const auto frame = decodeFrame(msg);
+  if (!frame)
+    return {};
+  return frame->header.shotId;
+}
+
+bool Session::waitForFrameOf(const ShotID &shotId)
+{
+  return waitFor([&] { return latestFrameShot() == shotId; });
+}
+
+const DirectoryEntry *findEntry(
+    const ListDirectoryResult &listing, const std::string &name)
+{
+  auto itr = std::find_if(listing.entries.begin(),
+      listing.entries.end(),
+      [&](const DirectoryEntry &e) { return e.name == name; });
+  return itr == listing.entries.end() ? nullptr : &*itr;
+}
+
+const Dataset *findDatasetNamed(const Project &project, const std::string &name)
+{
+  auto itr = std::find_if(project.datasets.begin(),
+      project.datasets.end(),
+      [&](const Dataset &d) { return d.name == name; });
+  return itr == project.datasets.end() ? nullptr : &*itr;
+}
+
+} // namespace
+
+SCENARIO("DataRoots admit only canonical paths inside a root", "[StudioServer]")
+{
+  ScopedFixtureDirectory scratch("vsr_studio_data_roots_");
+  const auto &base = scratch.path;
+  std::filesystem::create_directories(base / "data" / "sub");
+  std::filesystem::create_directories(base / "data2");
+  std::filesystem::create_directories(base / "elsewhere" / "proj");
+
+  GIVEN("one root and a project directory outside it")
+  {
+    DataRoots roots({base / "data"}, base / "elsewhere" / "proj");
+
+    THEN("both are roots, canonicalized")
+    {
+      REQUIRE(roots.roots().size() == 2);
+      REQUIRE(roots.roots()[0] == canonicalizePath(base / "data"));
+      REQUIRE(
+          roots.roots()[1] == canonicalizePath(base / "elsewhere" / "proj"));
+    }
+
+    THEN("paths inside a root resolve, even when their tail does not exist")
+    {
+      std::string error;
+      REQUIRE(roots.resolve(base / "data" / "sub" / "new.vsr", &error));
+      REQUIRE(roots.resolve(base / "data", &error));
+      REQUIRE(roots.resolve(base / "data" / "sub" / ".." / "x", &error));
+      REQUIRE(roots.isInside(base / "elsewhere" / "proj" / "datasets"));
+    }
+
+    THEN("a sibling sharing the root's prefix is outside")
+    {
+      std::string error;
+      REQUIRE_FALSE(roots.resolve(base / "data2" / "a.obj", &error));
+      REQUIRE(error.find("Data Roots") != std::string::npos);
+      REQUIRE(error.find("data2") != std::string::npos);
+      REQUIRE_FALSE(roots.isInside(base / "elsewhere"));
+      REQUIRE_FALSE(roots.isInside(base / "data" / ".." / "data2"));
+    }
+
+    THEN("relative and empty paths are refused")
+    {
+      std::string error;
+      REQUIRE_FALSE(roots.resolve("relative/file.obj", &error));
+      REQUIRE(error.find("absolute") != std::string::npos);
+      REQUIRE_FALSE(roots.resolve({}, &error));
+    }
+  }
+
+  GIVEN("a project directory already inside a root")
+  {
+    DataRoots roots({base / "data"}, base / "data" / "sub");
+
+    THEN("no second root is added")
+    {
+      REQUIRE(roots.roots().size() == 1);
+    }
+  }
+}
+
+SCENARIO("ServerTaskRunner runs queued tasks one at a time", "[StudioServer]")
+{
+  std::vector<Message> sent;
+  ServerTaskRunner runner([&](Message &&msg) { sent.push_back(msg); });
+  // What the loop does: run one, then send its ending.
+  const auto run = [&] {
+    const auto ran = runner.runOne();
+    if (ran)
+      runner.sendEnding(*ran);
+    return ran;
+  };
+
+  GIVEN("three queued tasks")
+  {
+    std::string cancelRunningError;
+    uint64_t first = 0;
+    first = runner.enqueue("first", [&](const TaskControl &progress) {
+      progress("half way");
+      // The running task cannot cancel itself (or be cancelled).
+      REQUIRE_FALSE(runner.cancel(first, &cancelRunningError));
+      REQUIRE(runner.running());
+      TaskResult result;
+      result.message = "dataset_0001";
+      return result;
+    });
+    const auto second = runner.enqueue(
+        "second", [&](const TaskControl &) { return taskFailure("boom"); });
+    const auto third = runner.enqueue(
+        "third", [&](const TaskControl &) { return TaskResult{}; });
+
+    THEN("ids increase and nothing is sent until a task runs")
+    {
+      REQUIRE(first < second);
+      REQUIRE(second < third);
+      REQUIRE(runner.queued() == 3);
+      REQUIRE_FALSE(runner.running());
+      REQUIRE(sent.empty());
+    }
+
+    WHEN("the third is cancelled while queued")
+    {
+      std::string error;
+      REQUIRE(runner.cancel(third, &error));
+
+      THEN("it is dropped with TaskFailed{cancelled} and unknown ids fail")
+      {
+        REQUIRE(runner.queued() == 2);
+        REQUIRE(sent.size() == 1);
+        const auto failed = decode<TaskFailed>(sent.back());
+        REQUIRE(failed);
+        REQUIRE(failed->taskId == third);
+        REQUIRE(failed->error == "cancelled");
+        REQUIRE_FALSE(runner.cancel(third, &error));
+        REQUIRE(error == "task already finished");
+        REQUIRE_FALSE(runner.cancel(9999, &error));
+        REQUIRE(error.find("unknown task") != std::string::npos);
+      }
+
+      AND_WHEN("the queue is run down")
+      {
+        sent.clear();
+        const auto ranFirst = run();
+        const auto ranSecond = run();
+        const auto ranNothing = run();
+
+        THEN("each task reports progress and exactly one ending, in order")
+        {
+          REQUIRE(ranFirst);
+          REQUIRE(ranFirst->taskId == first);
+          REQUIRE(ranFirst->result.outcome == TaskOutcome::Completed);
+          REQUIRE(cancelRunningError == "task already running");
+          REQUIRE(ranSecond);
+          REQUIRE(ranSecond->taskId == second);
+          REQUIRE(ranSecond->result.outcome == TaskOutcome::Failed);
+          REQUIRE_FALSE(ranNothing);
+          REQUIRE_FALSE(runner.running());
+          REQUIRE(runner.queued() == 0);
+
+          REQUIRE(sent.size() == 3);
+          const auto progress = decode<TaskProgress>(sent[0]);
+          REQUIRE(progress);
+          REQUIRE(progress->taskId == first);
+          REQUIRE(progress->total == 0);
+          REQUIRE(progress->message == "half way");
+          const auto completed = decode<TaskCompleted>(sent[1]);
+          REQUIRE(completed);
+          REQUIRE(completed->taskId == first);
+          REQUIRE(completed->message == "dataset_0001");
+          const auto failed = decode<TaskFailed>(sent[2]);
+          REQUIRE(failed);
+          REQUIRE(failed->taskId == second);
+          REQUIRE(failed->error == "boom");
+        }
+      }
+    }
+
+    WHEN("the session ends")
+    {
+      runner.dropQueued();
+
+      THEN("the queue is forgotten silently")
+      {
+        REQUIRE(runner.queued() == 0);
+        REQUIRE(sent.empty());
+        REQUIRE_FALSE(run());
+      }
+    }
+
+    WHEN("an exclusive task is queued behind them and the session ends")
+    {
+      bool ranExclusive = false;
+      const auto render = runner.enqueue(
+          "render",
+          [&](const TaskControl &) {
+            ranExclusive = runner.runningTask()->exclusive;
+            return TaskResult{};
+          },
+          true);
+      runner.dropQueued();
+
+      THEN("only the exclusive task survives")
+      {
+        REQUIRE(runner.queued() == 1);
+        REQUIRE(runner.exclusivePending());
+        REQUIRE(sent.empty());
+        const auto ran = run();
+        REQUIRE(ran);
+        REQUIRE(ran->taskId == render);
+        REQUIRE(ranExclusive);
+      }
+    }
+  }
+
+  GIVEN("an exclusive task that polls its cancel flag")
+  {
+    uint64_t frames = 0;
+    uint64_t render = 0;
+    render = runner.enqueue(
+        "render shot 'shot_0001'",
+        [&](const TaskControl &task) {
+          REQUIRE(runner.exclusivePending());
+          REQUIRE(runner.runningTask()->exclusive);
+          REQUIRE(task.taskId() == render);
+          TaskResult result;
+          for (uint64_t frame = 1; frame <= 200; ++frame) {
+            if (task.cancelRequested())
+              break;
+            task(frame, 200, "frame");
+            ++frames;
+            // What the IO thread does when a CancelTask names the running id.
+            if (frame == 3)
+              REQUIRE(runner.requestCancelRunning(render));
+          }
+          result.outcome =
+              frames == 200 ? TaskOutcome::Completed : TaskOutcome::Cancelled;
+          setResults(result, RenderShotResult{frames});
+          return result;
+        },
+        true);
+    const auto after = runner.enqueue("after", [&](const TaskControl &task) {
+      // The render's cancel request does not carry over to the next body.
+      REQUIRE_FALSE(task.cancelRequested());
+      return TaskResult{};
+    });
+
+    THEN(
+        "it is pending, and the flag is refused for a task that is not running")
+    {
+      REQUIRE(runner.exclusivePending());
+      REQUIRE_FALSE(runner.requestCancelRunning(render));
+      REQUIRE_FALSE(runner.requestCancelRunning(after));
+    }
+
+    WHEN("it runs")
+    {
+      const auto ran = run();
+
+      THEN("it stopped at the next frame boundary and reports how far it got")
+      {
+        REQUIRE(ran);
+        REQUIRE(ran->result.outcome == TaskOutcome::Cancelled);
+        REQUIRE(frames == 3);
+        REQUIRE_FALSE(runner.exclusivePending());
+        REQUIRE(sent.size() == 4);
+        const auto second = decode<TaskProgress>(sent[1]);
+        REQUIRE(second);
+        REQUIRE(second->current == 2);
+        REQUIRE(second->total == 200);
+        REQUIRE(second->message == "frame");
+        const auto failed = decode<TaskFailed>(sent.back());
+        REQUIRE(failed);
+        REQUIRE(failed->taskId == render);
+        REQUIRE(failed->error == "cancelled");
+      }
+
+      THEN("the CancelTask dispatched after the body is acknowledged")
+      {
+        std::string error;
+        REQUIRE(runner.cancel(render, &error));
+        REQUIRE(runner.cancel(render, &error)); // idempotent
+        REQUIRE(runner.finished().size() == 1);
+        REQUIRE(
+            runner.finished().front().result.outcome == TaskOutcome::Cancelled);
+      }
+
+      AND_WHEN("the next bootstrap replays the history")
+      {
+        run(); // 'after' completes
+        sent.clear();
+        std::vector<Message> replayed;
+        runner.replayTo([&](Message &&msg) { replayed.push_back(msg); });
+
+        THEN("both endings go out verbatim, once")
+        {
+          REQUIRE(replayed.size() == 2);
+          const auto failed = decode<TaskFailed>(replayed[0]);
+          REQUIRE(failed);
+          REQUIRE(failed->taskId == render);
+          REQUIRE(failed->error == "cancelled");
+          const auto completed = decode<TaskCompleted>(replayed[1]);
+          REQUIRE(completed);
+          REQUIRE(completed->taskId == after);
+          REQUIRE(sent.empty());
+
+          replayed.clear();
+          runner.replayTo([&](Message &&msg) { replayed.push_back(msg); });
+          REQUIRE(replayed.empty());
+        }
+
+        THEN("the endings stay known: a cancel is told they finished")
+        {
+          REQUIRE(runner.finished().size() == 2);
+          std::string error;
+          REQUIRE(runner.cancel(render, &error)); // still acknowledged
+          REQUIRE_FALSE(runner.cancel(after, &error));
+          REQUIRE(error == "task already finished");
+        }
+      }
+    }
+  }
+
+  GIVEN("an exclusive task and a task behind it, with the server going down")
+  {
+    bool renderSawStop = false;
+    bool afterSawStop = false;
+    runner.enqueue(
+        "render",
+        [&](const TaskControl &task) {
+          // What the shot render does at its next frame.
+          renderSawStop = task.cancelRequested();
+          TaskResult result;
+          if (renderSawStop)
+            result.outcome = TaskOutcome::Cancelled;
+          return result;
+        },
+        true);
+    runner.enqueue("after", [&](const TaskControl &task) {
+      afterSawStop = task.cancelRequested();
+      return TaskResult{};
+    });
+
+    WHEN("stopAll() is called before they run")
+    {
+      runner.stopAll();
+      const auto render = run();
+      const auto after = run();
+
+      THEN(
+          "every body reads a cancel request, and the exclusive flag rides "
+          "the ending")
+      {
+        REQUIRE(render);
+        REQUIRE(render->exclusive);
+        REQUIRE(renderSawStop);
+        REQUIRE(render->result.outcome == TaskOutcome::Cancelled);
+        const auto failed = decode<TaskFailed>(sent.front());
+        REQUIRE(failed);
+        REQUIRE(failed->error == "cancelled");
+        REQUIRE(after);
+        REQUIRE_FALSE(after->exclusive);
+        REQUIRE(afterSawStop);
+      }
+    }
+  }
+
+  GIVEN("a task whose ending is not sent until the loop says so")
+  {
+    const auto id = runner.enqueue("import", [&](const TaskControl &) {
+      TaskResult result;
+      result.message = "dataset_0001";
+      return result;
+    });
+
+    WHEN("it runs")
+    {
+      const auto ran = runner.runOne();
+
+      THEN("runOne() records the ending and hands it back unsent")
+      {
+        REQUIRE(ran);
+        REQUIRE(ran->taskId == id);
+        REQUIRE(sent.empty());
+        REQUIRE(runner.finished().size() == 1);
+        std::string error;
+        REQUIRE_FALSE(runner.cancel(id, &error));
+        REQUIRE(error == "task already finished");
+
+        runner.sendEnding(*ran);
+        REQUIRE(sent.size() == 1);
+        const auto completed = decode<TaskCompleted>(sent.back());
+        REQUIRE(completed);
+        REQUIRE(completed->taskId == id);
+        REQUIRE(completed->message == "dataset_0001");
+      }
+    }
+  }
+
+  GIVEN("a task that never polls its cancel flag")
+  {
+    uint64_t import = 0;
+    import = runner.enqueue("import", [&](const TaskControl &task) {
+      // The IO thread raises the flag while the body runs; the body neither
+      // looks at it nor stops.
+      REQUIRE(runner.requestCancelRunning(import));
+      REQUIRE(task.cancelRequested());
+      TaskResult result;
+      result.message = "dataset_0001";
+      return result;
+    });
+
+    WHEN("it completes despite the flag")
+    {
+      const auto ran = run();
+      REQUIRE(ran);
+      REQUIRE(ran->result.outcome == TaskOutcome::Completed);
+
+      THEN("the CancelTask dispatched after it is refused, not acknowledged")
+      {
+        std::string error;
+        REQUIRE_FALSE(runner.cancel(import, &error));
+        REQUIRE(error == "task already finished");
+        REQUIRE(
+            runner.finished().front().result.outcome == TaskOutcome::Completed);
+        REQUIRE(sent.size() == 1);
+        REQUIRE(decode<TaskCompleted>(sent.back()));
+      }
+    }
+  }
+
+  GIVEN("a task that fails on its own after a cancel was requested")
+  {
+    uint64_t import = 0;
+    import = runner.enqueue("import", [&](const TaskControl &task) {
+      REQUIRE(runner.requestCancelRunning(import));
+      REQUIRE(task.cancelRequested());
+      // The body saw the flag but stopped for a reason of its own; it does
+      // not report Cancelled.
+      return taskFailure("boom");
+    });
+
+    WHEN("it runs")
+    {
+      const auto ran = run();
+      REQUIRE(ran);
+      REQUIRE(ran->result.outcome == TaskOutcome::Failed);
+
+      THEN("its failure stands: the cancel is not acknowledged")
+      {
+        REQUIRE(runner.finished().back().result.outcome == TaskOutcome::Failed);
+        std::string error;
+        REQUIRE_FALSE(runner.cancel(import, &error));
+        REQUIRE(error == "task already finished");
+        const auto failed = decode<TaskFailed>(sent.back());
+        REQUIRE(failed);
+        REQUIRE(failed->error == "boom");
+      }
+    }
+  }
+
+  GIVEN("more endings than the history keeps")
+  {
+    for (size_t i = 0; i < ServerTaskRunner::HISTORY_CAP + 3; ++i) {
+      runner.enqueue("n", [&](const TaskControl &) { return TaskResult{}; });
+      run();
+    }
+
+    THEN("the oldest are forgotten first")
+    {
+      REQUIRE(runner.finished().size() == ServerTaskRunner::HISTORY_CAP);
+      REQUIRE(runner.finished().front().taskId == 4);
+    }
+  }
+
+  GIVEN("a task completed with a determinate result")
+  {
+    const auto id = runner.enqueue("render", [&](const TaskControl &task) {
+      task(4, 4, "frame");
+      TaskResult result;
+      result.message = "/renders/shot_0001";
+      setResults(result, RenderShotResult{4});
+      return result;
+    });
+    run();
+
+    THEN("TaskCompleted carries the frame count and the replay repeats it")
+    {
+      const auto completed = decode<TaskCompleted>(sent.back());
+      REQUIRE(completed);
+      REQUIRE(results<RenderShotResult>(*completed)->framesCompleted == 4);
+      REQUIRE(completed->message == "/renders/shot_0001");
+      std::string error;
+      REQUIRE_FALSE(runner.cancel(id, &error));
+      REQUIRE(error == "task already finished");
+      std::vector<Message> replayed;
+      runner.replayTo([&](Message &&msg) { replayed.push_back(msg); });
+      REQUIRE(replayed.size() == 1);
+      const auto again = decode<TaskCompleted>(replayed[0]);
+      REQUIRE(again);
+      REQUIRE(results<RenderShotResult>(*again)->framesCompleted == 4);
+    }
+  }
+
+  GIVEN("a task whose body throws")
+  {
+    const auto thrower = runner.enqueue("thrower", [&](const TaskControl &) {
+      throw std::filesystem::filesystem_error("stat failed",
+          std::filesystem::path("/locked/dir"),
+          std::make_error_code(std::errc::permission_denied));
+      return TaskResult{};
+    });
+    const auto after = runner.enqueue(
+        "after", [&](const TaskControl &) { return TaskResult{}; });
+
+    WHEN("the queue is run")
+    {
+      const auto ranThrower = run();
+      const auto ranAfter = run();
+
+      THEN("the exception becomes that task's TaskFailed and the next runs")
+      {
+        REQUIRE(ranThrower);
+        REQUIRE(ranThrower->taskId == thrower);
+        REQUIRE(ranThrower->result.outcome == TaskOutcome::Failed);
+        REQUIRE(
+            ranThrower->result.error.find("stat failed") != std::string::npos);
+        REQUIRE_FALSE(runner.running());
+        REQUIRE(ranAfter);
+        REQUIRE(ranAfter->taskId == after);
+        REQUIRE(ranAfter->result.outcome == TaskOutcome::Completed);
+
+        REQUIRE(sent.size() == 2);
+        const auto failed = decode<TaskFailed>(sent[0]);
+        REQUIRE(failed);
+        REQUIRE(failed->taskId == thrower);
+        REQUIRE(failed->error.find("task aborted") != std::string::npos);
+        REQUIRE(decode<TaskCompleted>(sent[1]));
+      }
+    }
+  }
+}
+
+SCENARIO("StudioServer serves project, shot, rig and color map ops",
+    "[StudioServer]")
+{
+  if (!helideAvailable()) {
+    WARN("helide ANARI library unavailable, skipping the project ops test");
+    return;
+  }
+
+  DataRootFixture data;
+  Session session(data.root);
+  auto &client = session.client;
+  size_t snapshots = 0;
+
+  GIVEN("a bootstrapped client on a fresh project")
+  {
+    WHEN("it asks for a new project")
+    {
+      const auto reply = session.request(NewProject{});
+
+      THEN("the reply is ok and the scene resend precedes the snapshot")
+      {
+        REQUIRE(reply.ok);
+        REQUIRE(session.waitForSnapshots(++snapshots));
+        const auto scene = client.indexOf(StudioMessageType::TransferScene);
+        const auto answer = client.indexOf(StudioMessageType::ProjectOpReply);
+        const auto snapshot =
+            client.indexOf(StudioMessageType::ProjectSnapshot);
+        REQUIRE(scene < answer);
+        REQUIRE(answer < snapshot);
+        const auto project = session.latestSnapshot().project;
+        REQUIRE(project.shots.size() == 1);
+        REQUIRE(project.datasets.empty());
+        REQUIRE(project.activeShotId == project.shots.front().id);
+        // Binding the server's renderer completes the shot's defaults; it is
+        // not an edit, so a fresh project starts clean.
+        REQUIRE_FALSE(project.dirty);
+        REQUIRE(project.shots.front().renderSettings.rendererObjectIndex
+            != VSR_INVALID_INDEX);
+
+        AND_THEN("frames render the new project's shot")
+        {
+          client.send(StartRendering{});
+          REQUIRE(client.waitForCount(StudioMessageType::Frame, 1));
+          REQUIRE(session.waitForFrameOf(project.activeShotId));
+        }
+      }
+    }
+
+    WHEN("shots are created, switched, edited and removed")
+    {
+      const auto firstShot =
+          session.server->projectContext().project().activeShotId;
+      client.send(StartRendering{});
+      REQUIRE(session.waitForFrameOf(firstShot));
+
+      auto reply = session.request(CreateShot{0, "Two"});
+      REQUIRE(reply.ok);
+      const auto created = results<ShotCreatedResult>(reply);
+      REQUIRE(created);
+      REQUIRE(created->shotId != firstShot);
+      REQUIRE(session.waitForSnapshots(++snapshots));
+
+      THEN("the new shot is active and frames follow it")
+      {
+        const auto project = session.latestSnapshot().project;
+        REQUIRE(project.shots.size() == 2);
+        REQUIRE(project.activeShotId == created->shotId);
+        REQUIRE(session.waitForFrameOf(created->shotId));
+      }
+
+      THEN("an unknown shot cannot be activated and nothing changes")
+      {
+        reply = session.request(SetActiveShot{0, "shot_9999"});
+        REQUIRE_FALSE(reply.ok);
+        REQUIRE(reply.error == "shot not found");
+        REQUIRE(client.count(StudioMessageType::ProjectSnapshot) == snapshots);
+      }
+
+      THEN("activating the first shot changes the frame header")
+      {
+        reply = session.request(SetActiveShot{0, firstShot});
+        REQUIRE(reply.ok);
+        REQUIRE(session.waitForSnapshots(++snapshots));
+        REQUIRE(session.latestSnapshot().project.activeShotId == firstShot);
+        REQUIRE(session.waitForFrameOf(firstShot));
+      }
+
+      THEN("UpdateShot normalizes fields and rejects unknown rigs")
+      {
+        auto project = session.latestSnapshot().project;
+        const auto before = *project::findShot(project, created->shotId);
+        UpdateShot update;
+        update.shotId = created->shotId;
+        update.patch.name = "Renamed";
+        update.patch.frameCount = 0;
+        update.patch.currentFrame = 7;
+        reply = session.request(update);
+        REQUIRE(reply.ok);
+        REQUIRE(session.waitForSnapshots(++snapshots));
+        project = session.latestSnapshot().project;
+        const auto *shot = project::findShot(project, created->shotId);
+        REQUIRE(shot);
+        REQUIRE(shot->name == "Renamed");
+        REQUIRE(shot->frameCount == 1);
+        REQUIRE(shot->currentFrame == 0);
+        REQUIRE_FALSE(shot->playing);
+        // The fields the patch did not carry stand.
+        REQUIRE(shot->fps == before.fps);
+        REQUIRE(shot->loop == before.loop);
+        REQUIRE(shot->renderSettings.width == before.renderSettings.width);
+
+        update = UpdateShot{};
+        update.shotId = created->shotId;
+        update.patch.lightRigId = "lightRig_9999";
+        reply = session.request(update);
+        REQUIRE_FALSE(reply.ok);
+        REQUIRE(reply.error == "light rig not found");
+        REQUIRE(client.count(StudioMessageType::ProjectSnapshot) == snapshots);
+
+        update.shotId = "shot_9999";
+        update.patch = ShotPatch{};
+        update.patch.name = "x";
+        reply = session.request(update);
+        REQUIRE_FALSE(reply.ok);
+        REQUIRE(reply.error == "shot not found");
+        REQUIRE(client.count(StudioMessageType::ProjectSnapshot) == snapshots);
+      }
+
+      THEN("removing the active shot switches to the other; the last stays")
+      {
+        reply = session.request(RemoveShot{0, created->shotId});
+        REQUIRE(reply.ok);
+        REQUIRE(session.waitForSnapshots(++snapshots));
+        auto project = session.latestSnapshot().project;
+        REQUIRE(project.shots.size() == 1);
+        REQUIRE(project.activeShotId == firstShot);
+        REQUIRE(session.waitForFrameOf(firstShot));
+
+        reply = session.request(RemoveShot{0, firstShot});
+        REQUIRE_FALSE(reply.ok);
+        REQUIRE(reply.error.find("last shot") != std::string::npos);
+        REQUIRE(client.count(StudioMessageType::ProjectSnapshot) == snapshots);
+      }
+    }
+
+    WHEN("light rigs are built up and torn down")
+    {
+      auto reply = session.request(CreateLightRig{0, "Rig"});
+      REQUIRE(reply.ok);
+      const auto rig = results<LightRigCreatedResult>(reply);
+      REQUIRE(rig);
+      REQUIRE(session.waitForSnapshots(++snapshots));
+      REQUIRE(session.latestSnapshot().project.lightRigs.size() == 2);
+
+      THEN("lights are added as scene objects and removed again")
+      {
+        const auto scenes = client.count(StudioMessageType::TransferScene);
+        reply = session.request(AddLightToRig{0, rig->lightRigId, "point"});
+        REQUIRE(reply.ok);
+        const auto light = results<LightAddedResult>(reply);
+        REQUIRE(light);
+        REQUIRE(light->lightNode.layerName == "studio");
+        REQUIRE(light->lightNode.nodeIndex != VSR_INVALID_INDEX);
+        REQUIRE(session.waitForSnapshots(++snapshots));
+        REQUIRE(client.count(StudioMessageType::TransferScene) == scenes + 1);
+
+        reply = session.request(AddLightToRig{0, rig->lightRigId, "laser"});
+        REQUIRE_FALSE(reply.ok);
+        REQUIRE(reply.error.find("laser") != std::string::npos);
+
+        const auto afterAdd = client.count(StudioMessageType::TransferScene);
+        reply = session.request(
+            RemoveLightFromRig{0, rig->lightRigId, light->lightNode});
+        REQUIRE(reply.ok);
+        REQUIRE(session.waitForSnapshots(++snapshots));
+        REQUIRE(client.count(StudioMessageType::TransferScene) == afterAdd + 1);
+
+        reply = session.request(
+            RemoveLightFromRig{0, rig->lightRigId, light->lightNode});
+        REQUIRE_FALSE(reply.ok);
+      }
+
+      THEN("clone, rename and remove keep names unique")
+      {
+        reply = session.request(CloneLightRig{0, rig->lightRigId});
+        REQUIRE(reply.ok);
+        const auto clone = results<LightRigCreatedResult>(reply);
+        REQUIRE(clone);
+        REQUIRE(clone->lightRigId != rig->lightRigId);
+        REQUIRE(session.waitForSnapshots(++snapshots));
+        REQUIRE(session.latestSnapshot().project.lightRigs.size() == 3);
+
+        reply =
+            session.request(RenameLightRig{0, clone->lightRigId, "Default"});
+        REQUIRE_FALSE(reply.ok);
+        REQUIRE(reply.error.find("already uses") != std::string::npos);
+
+        reply = session.request(RenameLightRig{0, clone->lightRigId, "Clone"});
+        REQUIRE(reply.ok);
+        REQUIRE(session.waitForSnapshots(++snapshots));
+        const auto project = session.latestSnapshot().project;
+        REQUIRE(light_rig::findLightRig(project, clone->lightRigId)->name
+            == "Clone");
+
+        reply = session.request(RemoveLightRig{0, clone->lightRigId});
+        REQUIRE(reply.ok);
+        REQUIRE(session.waitForSnapshots(++snapshots));
+        REQUIRE(session.latestSnapshot().project.lightRigs.size() == 2);
+        reply = session.request(RemoveLightRig{0, clone->lightRigId});
+        REQUIRE_FALSE(reply.ok);
+        REQUIRE(reply.error == "light rig not found");
+      }
+    }
+
+    WHEN("camera rigs are created, renamed and removed")
+    {
+      auto reply = session.request(CreateCameraRig{0, "Cam"});
+      REQUIRE(reply.ok);
+      const auto rig = results<CameraRigCreatedResult>(reply);
+      REQUIRE(rig);
+      REQUIRE(session.waitForSnapshots(++snapshots));
+      REQUIRE(session.latestSnapshot().project.cameraRigs.size() == 2);
+
+      THEN("renames are validated and removal is final")
+      {
+        reply =
+            session.request(RenameCameraRig{0, rig->cameraRigId, "Default"});
+        REQUIRE_FALSE(reply.ok);
+        reply =
+            session.request(RenameCameraRig{0, rig->cameraRigId, "Bad/Name"});
+        REQUIRE_FALSE(reply.ok);
+        reply = session.request(RenameCameraRig{0, rig->cameraRigId, "Cam 2"});
+        REQUIRE(reply.ok);
+        REQUIRE(session.waitForSnapshots(++snapshots));
+        const auto project = session.latestSnapshot().project;
+        REQUIRE(camera_rig::findCameraRig(project, rig->cameraRigId)->name
+            == "Cam 2");
+
+        reply = session.request(RemoveCameraRig{0, rig->cameraRigId});
+        REQUIRE(reply.ok);
+        REQUIRE(session.waitForSnapshots(++snapshots));
+        REQUIRE(session.latestSnapshot().project.cameraRigs.size() == 1);
+        reply = session.request(RemoveCameraRig{0, rig->cameraRigId});
+        REQUIRE_FALSE(reply.ok);
+        REQUIRE(reply.error == "camera rig not found");
+      }
+    }
+
+    WHEN("color maps are created, renamed and removed")
+    {
+      const auto scenes = client.count(StudioMessageType::TransferScene);
+      auto reply = session.request(CreateColorMap{0, "Heat"});
+      REQUIRE(reply.ok);
+      const auto created = results<ColorMapCreatedResult>(reply);
+      REQUIRE(created);
+      REQUIRE(session.waitForSnapshots(++snapshots));
+
+      THEN("the record and its array object both appear")
+      {
+        REQUIRE(created->object.type == ANARI_ARRAY1D);
+        REQUIRE(created->object.objectIndex != VSR_INVALID_INDEX);
+        REQUIRE(client.count(StudioMessageType::TransferScene) == scenes + 1);
+        const auto project = session.latestSnapshot().project;
+        REQUIRE(project.colorMaps.size() == 1);
+        REQUIRE(project.colorMaps.front().id == created->colorMapId);
+        REQUIRE(project.colorMaps.front().name == "Heat");
+      }
+
+      THEN("rename collisions are refused, remove takes the object too")
+      {
+        reply = session.request(CreateColorMap{0, "Cold"});
+        REQUIRE(reply.ok);
+        REQUIRE(session.waitForSnapshots(++snapshots));
+        reply = session.request(RenameColorMap{0, created->colorMapId, "cold"});
+        REQUIRE_FALSE(reply.ok);
+        REQUIRE(reply.error.find("already uses") != std::string::npos);
+        reply = session.request(RenameColorMap{0, created->colorMapId, "Warm"});
+        REQUIRE(reply.ok);
+        REQUIRE(session.waitForSnapshots(++snapshots));
+        REQUIRE(project::findColorMap(
+                    session.latestSnapshot().project, created->colorMapId)
+                    ->name
+            == "Warm");
+
+        const auto before = client.count(StudioMessageType::TransferScene);
+        reply = session.request(RemoveColorMap{0, created->colorMapId});
+        REQUIRE(reply.ok);
+        REQUIRE(session.waitForSnapshots(++snapshots));
+        REQUIRE(client.count(StudioMessageType::TransferScene) == before + 1);
+        REQUIRE(session.latestSnapshot().project.colorMaps.size() == 1);
+        reply = session.request(RemoveColorMap{0, created->colorMapId});
+        REQUIRE_FALSE(reply.ok);
+        REQUIRE(reply.error == "color map not found");
+      }
+    }
+  }
+}
+
+SCENARIO("StudioServer refuses unserviceable requests with a matching reply",
+    "[StudioServer]")
+{
+  if (!helideAvailable()) {
+    WARN("helide ANARI library unavailable, skipping the refusal test");
+    return;
+  }
+
+  DataRootFixture data;
+  Session session(data.root);
+  auto &client = session.client;
+
+  GIVEN("a bootstrapped client")
+  {
+    WHEN("a project request carries its id but no other field")
+    {
+      vsr::core::DataTree tree;
+      writeChild(tree.root(), "requestId", uint64_t(501));
+      Message msg;
+      msg.header.type = uint8_t(StudioMessageType::CreateShot);
+      tree.write(msg.payload);
+      msg.header.payload_length = uint32_t(msg.payload.size());
+      client.channel->send(std::move(msg));
+
+      THEN("the refusal is a ProjectOpReply the client can retire")
+      {
+        const auto reply = client.waitForReply(501);
+        REQUIRE(reply);
+        REQUIRE_FALSE(reply->ok);
+        REQUIRE(reply->error.find("malformed CreateShot") != std::string::npos);
+        REQUIRE(client.count(StudioMessageType::Error) == 0);
+        REQUIRE(client.count(StudioMessageType::ProjectSnapshot) == 0);
+      }
+    }
+
+    WHEN("a RenderShot names the active shot of an unsaved project")
+    {
+      RenderShot render;
+      render.requestId = 502;
+      render.shotId = session.server->projectContext().project().activeShotId;
+      client.send(render);
+
+      THEN("the refusal is a ProjectOpReply naming the precondition")
+      {
+        const auto reply = client.waitForReply(502);
+        REQUIRE(reply);
+        REQUIRE_FALSE(reply->ok);
+        REQUIRE(reply->error.find("not saved") != std::string::npos);
+        REQUIRE(client.count(StudioMessageType::Error) == 0);
+      }
+    }
+
+    WHEN("a project request has no readable id")
+    {
+      Message msg;
+      msg.header.type = uint8_t(StudioMessageType::CreateShot);
+      msg.payload = {std::byte{0xff}, std::byte{0x00}, std::byte{0x13}};
+      msg.header.payload_length = uint32_t(msg.payload.size());
+      client.channel->send(std::move(msg));
+
+      THEN("a bare Error is all the server can send")
+      {
+        REQUIRE(client.waitForCount(StudioMessageType::Error, 1));
+        const auto error = client.lastDecoded<Error>();
+        REQUIRE(error);
+        REQUIRE(
+            error->message.find("malformed CreateShot") != std::string::npos);
+        REQUIRE(client.count(StudioMessageType::ProjectOpReply) == 0);
+      }
+    }
+  }
+}
+
+SCENARIO("StudioServer answers Remote Browse inside its Data Roots",
+    "[StudioServer]")
+{
+  if (!helideAvailable()) {
+    WARN("helide ANARI library unavailable, skipping the browse test");
+    return;
+  }
+
+  DataRootFixture data;
+  Session session(data.root);
+
+  GIVEN("one data root with files, a plain directory and a project")
+  {
+    THEN("ListRoots names the canonical root")
+    {
+      const auto reply = session.request(ListRoots{});
+      REQUIRE(reply.ok);
+      const auto roots = results<ListRootsResult>(reply);
+      REQUIRE(roots);
+      REQUIRE(roots->roots
+          == std::vector<std::filesystem::path>{canonicalizePath(data.root)});
+    }
+
+    THEN("ListDirectory kinds, sizes and order are right")
+    {
+      const auto reply = session.request(ListDirectory{0, data.root});
+      REQUIRE(reply.ok);
+      const auto listing = results<ListDirectoryResult>(reply);
+      REQUIRE(listing);
+      REQUIRE(listing->entries.size() == 4);
+      REQUIRE(listing->entries[0].name == "plain");
+      REQUIRE(listing->entries[0].kind == EntryKind::Directory);
+      REQUIRE(listing->entries[1].name == "proj");
+      REQUIRE(listing->entries[1].kind == EntryKind::ProjectDirectory);
+      REQUIRE(listing->entries[2].name == "grid.obj");
+      REQUIRE(listing->entries[3].name == "mesh.obj");
+      const auto *mesh = findEntry(*listing, "mesh.obj");
+      REQUIRE(mesh->kind == EntryKind::File);
+      REQUIRE(mesh->size == std::filesystem::file_size(data.mesh));
+      REQUIRE(mesh->mtimeSeconds > 0);
+
+      const auto empty = session.request(ListDirectory{0, data.plainDir});
+      REQUIRE(empty.ok);
+      REQUIRE(results<ListDirectoryResult>(empty)->entries.empty());
+    }
+
+    THEN("paths outside the roots, relative paths and files are refused")
+    {
+      auto reply = session.request(
+          ListDirectory{0, std::filesystem::temp_directory_path()});
+      REQUIRE_FALSE(reply.ok);
+      REQUIRE(reply.error.find("Data Roots") != std::string::npos);
+
+      reply = session.request(ListDirectory{0, "relative/dir"});
+      REQUIRE_FALSE(reply.ok);
+      REQUIRE(reply.error.find("absolute") != std::string::npos);
+
+      reply = session.request(ListDirectory{0, data.mesh});
+      REQUIRE_FALSE(reply.ok);
+      REQUIRE(reply.error.find("not a directory") != std::string::npos);
+      REQUIRE(session.client.count(StudioMessageType::ProjectSnapshot) == 0);
+    }
+  }
+}
+
+SCENARIO("StudioServer commits scene changes as one snapshot", "[StudioServer]")
+{
+  if (!helideAvailable()) {
+    WARN("helide ANARI library unavailable, skipping the scene commit test");
+    return;
+  }
+
+  DataRootFixture data;
+  Session session(data.root);
+  auto &client = session.client;
+  size_t snapshots = 0;
+
+  GIVEN("a bootstrapped client and a mesh under the data root")
+  {
+    WHEN("a dataset is imported")
+    {
+      ImportStaticDataset import;
+      import.name = "Tri";
+      import.sourcePath = data.mesh;
+      import.importerType = vsr::io::ImporterType::OBJ;
+      const auto taskId = startedTaskId(session.request(import));
+      const auto end = client.waitForTaskEnd(taskId);
+      REQUIRE(end);
+      REQUIRE(end->completed);
+      REQUIRE(session.waitForSnapshots(++snapshots));
+
+      THEN("nothing streamed during it and one TransferScene commits it")
+      {
+        REQUIRE(client.count(StudioMessageType::ObjectAdded) == 0);
+        REQUIRE(client.count(StudioMessageType::ObjectRemoved) == 0);
+        REQUIRE(client.count(StudioMessageType::TransferLayer) == 0);
+        REQUIRE(client.count(StudioMessageType::TransferScene) == 1);
+        // The Project Snapshot is the commit marker: the scene message for
+        // the same mutation precedes it.
+        REQUIRE(client.indexOf(StudioMessageType::TransferScene)
+            < client.indexOf(StudioMessageType::ProjectSnapshot));
+      }
+
+      THEN("the mirror it builds carries the imported parameters")
+      {
+        vsr::scene::Scene mirror;
+        vsr::network::messages::TransferScene(
+            client.last(StudioMessageType::TransferScene), &mirror)
+            .execute();
+
+        size_t geometries = 0;
+        size_t withVertexPositions = 0;
+        vsr::core::foreach_item_const(
+            mirror.objectDB().geometry, [&](const vsr::scene::Geometry *g) {
+              if (!g)
+                return;
+              ++geometries;
+              if (g->parameter("vertex.position"))
+                ++withVertexPositions;
+            });
+        REQUIRE(geometries > 0);
+        REQUIRE(withVertexPositions == geometries);
+      }
+
+      AND_WHEN("an op that does not touch the scene follows")
+      {
+        auto reply = session.request(CreateCameraRig{0, "Cam"});
+        REQUIRE(reply.ok);
+        const auto rig = results<CameraRigCreatedResult>(reply);
+        REQUIRE(rig);
+        REQUIRE(session.waitForSnapshots(++snapshots));
+        const auto scenes = client.count(StudioMessageType::TransferScene);
+
+        reply = session.request(RenameCameraRig{0, rig->cameraRigId, "Cam 2"});
+        REQUIRE(reply.ok);
+        REQUIRE(session.waitForSnapshots(++snapshots));
+
+        THEN("it commits with its reply alone, sending no scene message")
+        {
+          REQUIRE(client.count(StudioMessageType::TransferScene) == scenes);
+        }
+      }
+    }
+  }
+}
+
+SCENARIO("StudioServer runs project tasks on its loop", "[StudioServer]")
+{
+  if (!helideAvailable()) {
+    WARN("helide ANARI library unavailable, skipping the task test");
+    return;
+  }
+
+  DataRootFixture data;
+  Session session(data.root);
+  auto &client = session.client;
+  auto &scene = session.server->appContext().vsr.scene;
+  size_t snapshots = 0;
+
+  GIVEN("a fresh project and a mesh under the data root")
+  {
+    ImportStaticDataset import;
+    import.name = "Tri";
+    import.sourcePath = data.mesh;
+    import.importerType = vsr::io::ImporterType::OBJ;
+    const auto taskId = startedTaskId(session.request(import));
+    const auto end = client.waitForTaskEnd(taskId);
+    REQUIRE(end);
+
+    THEN("the import completes, names its dataset and snapshots after")
+    {
+      REQUIRE(end->completed);
+      REQUIRE(client.count(StudioMessageType::TaskProgress) >= 1);
+      REQUIRE(session.waitForSnapshots(++snapshots));
+      REQUIRE(client.indexOf(StudioMessageType::TaskCompleted)
+          < client.indexOf(StudioMessageType::ProjectSnapshot));
+      const auto project = session.latestSnapshot().project;
+      REQUIRE(project.datasets.size() == 1);
+      REQUIRE(project.datasets.front().id == end->text);
+      REQUIRE(project.datasets.front().name == "Tri");
+      REQUIRE(project.datasets.front().status == DatasetStatus::Available);
+    }
+
+    WHEN("a missing file is imported")
+    {
+      REQUIRE(session.waitForSnapshots(++snapshots));
+      import.name = "Missing";
+      import.sourcePath = data.root / "missing.obj";
+      const auto failedId = startedTaskId(session.request(import));
+      const auto failedEnd = client.waitForTaskEnd(failedId);
+
+      THEN("the task fails and a snapshot still carries the failed record")
+      {
+        REQUIRE(failedEnd);
+        REQUIRE_FALSE(failedEnd->completed);
+        REQUIRE(session.waitForSnapshots(++snapshots));
+        const auto project = session.latestSnapshot().project;
+        REQUIRE(project.datasets.size() == 2);
+        const auto *missing = findDatasetNamed(project, "Missing");
+        REQUIRE(missing);
+        REQUIRE(missing->status == DatasetStatus::ImportFailed);
+
+        AND_THEN("removing it is a sync op with a snapshot")
+        {
+          const auto reply = session.request(RemoveDataset{0, missing->id});
+          REQUIRE(reply.ok);
+          REQUIRE(session.waitForSnapshots(++snapshots));
+          REQUIRE(session.latestSnapshot().project.datasets.size() == 1);
+        }
+      }
+    }
+
+    WHEN("its Dataset Archive is loaded back under a name of the request's")
+    {
+      REQUIRE(session.waitForSnapshots(++snapshots));
+      SaveDatasetArchive save;
+      save.datasetId = end->text;
+      save.file = data.root / "tri.vsr";
+      const auto saveEnd =
+          client.waitForTaskEnd(startedTaskId(session.request(save)));
+      REQUIRE(saveEnd);
+      REQUIRE(saveEnd->completed);
+
+      LoadDatasetArchive load;
+      load.file = save.file;
+      load.name = "Wing";
+      const auto loadEnd =
+          client.waitForTaskEnd(startedTaskId(session.request(load)));
+      REQUIRE(loadEnd);
+
+      THEN("the loaded dataset carries that name, not the archive's")
+      {
+        REQUIRE(loadEnd->completed);
+        REQUIRE(session.waitForSnapshots(++snapshots));
+        const auto project = session.latestSnapshot().project;
+        REQUIRE(project.datasets.size() == 2);
+        const auto *wing = findDatasetNamed(project, "Wing");
+        REQUIRE(wing);
+        REQUIRE(wing->id == loadEnd->text);
+        REQUIRE(wing->status == DatasetStatus::Available);
+        REQUIRE(findDatasetNamed(project, "Tri"));
+      }
+
+      AND_WHEN("a name the project already uses is asked for")
+      {
+        REQUIRE(session.waitForSnapshots(++snapshots)); // the Wing load's
+        load.name = "Tri";
+        const auto takenEnd =
+            client.waitForTaskEnd(startedTaskId(session.request(load)));
+
+        THEN("the task fails and the project gains no dataset")
+        {
+          REQUIRE(takenEnd);
+          REQUIRE_FALSE(takenEnd->completed);
+          REQUIRE(takenEnd->text.find("already uses") != std::string::npos);
+          REQUIRE(
+              client.count(StudioMessageType::ProjectSnapshot) == snapshots);
+          REQUIRE(session.latestSnapshot().project.datasets.size() == 2);
+        }
+      }
+    }
+
+    WHEN("the project is saved, its dataset unloaded and the asset removed")
+    {
+      REQUIRE(session.waitForSnapshots(++snapshots));
+      const auto saved = data.root / "avail";
+      SaveProject save;
+      save.directory = saved;
+      const auto saveEnd =
+          client.waitForTaskEnd(startedTaskId(session.request(save)));
+      REQUIRE(saveEnd);
+      REQUIRE(saveEnd->completed);
+      REQUIRE(session.waitForSnapshots(++snapshots));
+
+      REQUIRE(session.request(UnloadDataset{0, end->text}).ok);
+      REQUIRE(session.waitForSnapshots(++snapshots));
+      const auto unloaded = session.latestSnapshot().project.datasets.front();
+      REQUIRE(unloaded.residency == DatasetResidency::Unloaded);
+      REQUIRE(unloaded.status == DatasetStatus::Available);
+      const auto asset = saved / "datasets" / (unloaded.persistedName + ".vsr");
+      REQUIRE(std::filesystem::remove(asset));
+      const auto replies = client.count(StudioMessageType::ProjectOpReply);
+
+      THEN("a snapshot marks it Unavailable with nothing asked")
+      {
+        REQUIRE(session.waitForSnapshots(++snapshots));
+        const auto project = session.latestSnapshot().project;
+        REQUIRE(project.datasets.size() == 1);
+        REQUIRE(project.datasets.front().status == DatasetStatus::Unavailable);
+        REQUIRE(client.count(StudioMessageType::ProjectOpReply) == replies);
+      }
+    }
+
+    WHEN("a path outside the roots is named")
+    {
+      REQUIRE(session.waitForSnapshots(++snapshots));
+      const auto endings = client.count(StudioMessageType::TaskFailed)
+          + client.count(StudioMessageType::TaskCompleted);
+      import.sourcePath = std::filesystem::temp_directory_path() / "x.obj";
+      const auto reply = session.request(import);
+
+      THEN("the reply is an error and no task starts")
+      {
+        REQUIRE_FALSE(reply.ok);
+        REQUIRE(reply.error.find("Data Roots") != std::string::npos);
+        REQUIRE_FALSE(results<TaskStartedResult>(reply));
+        REQUIRE(client.count(StudioMessageType::TaskFailed)
+                + client.count(StudioMessageType::TaskCompleted)
+            == endings);
+        REQUIRE(client.count(StudioMessageType::ProjectSnapshot) == snapshots);
+      }
+    }
+
+    WHEN("the project is saved and reopened")
+    {
+      REQUIRE(session.waitForSnapshots(++snapshots));
+      const auto geometries = scene.numberOfObjects(ANARI_GEOMETRY);
+      const auto shots = session.latestSnapshot().project.shots.size();
+
+      // Whether the project has a directory is read when the task runs.
+      const auto unsavedId = startedTaskId(session.request(SaveProject{}));
+      const auto unsavedEnd = client.waitForTaskEnd(unsavedId);
+      REQUIRE(unsavedEnd);
+      REQUIRE_FALSE(unsavedEnd->completed);
+      REQUIRE(unsavedEnd->text.find("never been saved") != std::string::npos);
+
+      SaveProject save;
+      save.directory = std::filesystem::temp_directory_path() / "elsewhere";
+      auto reply = session.request(save);
+      REQUIRE_FALSE(reply.ok);
+      REQUIRE(reply.error.find("Data Roots") != std::string::npos);
+
+      const auto saved = data.root / "saved";
+      save.directory = saved;
+      const auto saveId = startedTaskId(session.request(save));
+      const auto saveEnd = client.waitForTaskEnd(saveId);
+      REQUIRE(saveEnd);
+
+      THEN("the save completes and the snapshot is clean")
+      {
+        REQUIRE(saveEnd->completed);
+        REQUIRE(session.waitForSnapshots(++snapshots));
+        const auto project = session.latestSnapshot().project;
+        REQUIRE_FALSE(project.dirty);
+        REQUIRE(project.projectDirectory == canonicalizePath(saved));
+        REQUIRE(std::filesystem::exists(saved / PROJECT_MANIFEST_FILENAME));
+
+        AND_THEN("a fresh project then OpenProject restores the datasets")
+        {
+          reply = session.request(NewProject{});
+          REQUIRE(reply.ok);
+          REQUIRE(session.waitForSnapshots(++snapshots));
+          REQUIRE(session.latestSnapshot().project.datasets.empty());
+
+          client.clear();
+          snapshots = 0;
+          const auto openId =
+              startedTaskId(session.request(OpenProject{0, saved}));
+          const auto openEnd = client.waitForTaskEnd(openId);
+          REQUIRE(openEnd);
+          REQUIRE(openEnd->completed);
+          REQUIRE(session.waitForSnapshots(++snapshots));
+          REQUIRE(client.indexOf(StudioMessageType::TransferScene)
+              < client.indexOf(StudioMessageType::TaskCompleted));
+          REQUIRE(client.indexOf(StudioMessageType::TaskCompleted)
+              < client.indexOf(StudioMessageType::ProjectSnapshot));
+          const auto reopened = session.latestSnapshot().project;
+          REQUIRE(reopened.datasets.size() == 1);
+          REQUIRE(reopened.datasets.front().name == "Tri");
+          REQUIRE(reopened.shots.size() == shots);
+          REQUIRE(reopened.projectDirectory == canonicalizePath(saved));
+          REQUIRE(scene.numberOfObjects(ANARI_GEOMETRY) == geometries);
+
+          AND_THEN("frames render after the reopen")
+          {
+            client.send(StartRendering{});
+            REQUIRE(session.waitForFrameOf(reopened.activeShotId));
+          }
+        }
+
+        AND_THEN("opening a directory without a project fails cleanly")
+        {
+          const auto before = client.count(StudioMessageType::ProjectSnapshot);
+          const auto badId =
+              startedTaskId(session.request(OpenProject{0, data.plainDir}));
+          const auto badEnd = client.waitForTaskEnd(badId);
+          REQUIRE(badEnd);
+          REQUIRE_FALSE(badEnd->completed);
+          REQUIRE(client.count(StudioMessageType::ProjectSnapshot) == before);
+        }
+      }
+    }
+
+    WHEN("a project whose manifest lists no shots is opened")
+    {
+      REQUIRE(session.waitForSnapshots(++snapshots));
+      const auto noShots = data.root / "noshots";
+      SaveProject save;
+      save.directory = noShots;
+      const auto saveEnd =
+          client.waitForTaskEnd(startedTaskId(session.request(save)));
+      REQUIRE(saveEnd);
+      REQUIRE(saveEnd->completed);
+      REQUIRE(session.waitForSnapshots(++snapshots));
+      {
+        // openStagedProject creates no shot when the manifest has none.
+        const auto manifest = (noShots / PROJECT_MANIFEST_FILENAME).string();
+        vsr::core::DataTree tree;
+        REQUIRE(tree.load(manifest.c_str()));
+        auto *project = tree.root().child("scivisStudio");
+        REQUIRE(project);
+        REQUIRE(project->child("shots"));
+        project->remove("shots");
+        project->remove("activeShot");
+        REQUIRE(tree.save(manifest.c_str()));
+      }
+
+      const auto openId =
+          startedTaskId(session.request(OpenProject{0, noShots}));
+      const auto openEnd = client.waitForTaskEnd(openId);
+      REQUIRE(openEnd);
+      REQUIRE(openEnd->completed);
+      REQUIRE(session.waitForSnapshots(++snapshots));
+      REQUIRE(session.latestSnapshot().project.shots.empty());
+
+      THEN("rendering pauses instead of using the old scene's handles")
+      {
+        client.send(StartRendering{});
+        REQUIRE(waitFor([&] { return session.server->streaming(); }));
+        // Long enough for several frames at any rate the loop renders at.
+        REQUIRE(staysFalse(
+            [&] {
+              return client.count(StudioMessageType::Frame) != 0
+                  || !session.server->streaming();
+            },
+            200ms));
+
+        AND_THEN("a Pick is refused with an Error instead of a miss")
+        {
+          Pick pick;
+          pick.requestId = 777;
+          pick.x = 1;
+          pick.y = 1;
+          client.send(pick);
+          REQUIRE(client.waitForCount(StudioMessageType::Error, 1));
+          const auto error = client.lastDecoded<Error>();
+          REQUIRE(error);
+          REQUIRE(error->message.find("Pick 777") != std::string::npos);
+          REQUIRE(error->message.find("no active shot") != std::string::npos);
+          REQUIRE(client.count(StudioMessageType::PickReply) == 0);
+          REQUIRE(client.count(StudioMessageType::Frame) == 0);
+        }
+
+        AND_THEN("creating a shot binds the pipeline and frames resume")
+        {
+          const auto reply = session.request(CreateShot{0, "First"});
+          REQUIRE(reply.ok);
+          const auto created = results<ShotCreatedResult>(reply);
+          REQUIRE(created);
+          REQUIRE(session.waitForFrameOf(created->shotId));
+        }
+      }
+    }
+
+    WHEN("a save naming no directory follows an open back to back")
+    {
+      REQUIRE(session.waitForSnapshots(++snapshots));
+      const auto saved = data.root / "saved_then_reopened";
+      SaveProject save;
+      save.directory = saved;
+      const auto saveEnd =
+          client.waitForTaskEnd(startedTaskId(session.request(save)));
+      REQUIRE(saveEnd);
+      REQUIRE(saveEnd->completed);
+      REQUIRE(session.request(NewProject{}).ok);
+      REQUIRE(session.waitForSnapshots(snapshots += 2));
+      REQUIRE(session.latestSnapshot().project.projectDirectory.empty());
+
+      // "Open that project, then save it" without waiting in between: the
+      // save must resolve the directory against the project the open puts in
+      // place, not the unsaved one it was dispatched against.
+      OpenProject open;
+      open.requestId = session.nextRequestId++;
+      open.directory = saved;
+      SaveProject saveOwn;
+      saveOwn.requestId = session.nextRequestId++;
+      client.send(open);
+      client.send(saveOwn);
+
+      THEN("the save runs after the open and writes the reopened project")
+      {
+        const auto openReply = client.waitForReply(open.requestId);
+        const auto saveReply = client.waitForReply(saveOwn.requestId);
+        REQUIRE(openReply);
+        REQUIRE(saveReply);
+        const auto openId = startedTaskId(*openReply);
+        const auto saveId = startedTaskId(*saveReply);
+        const auto openEnd = client.waitForTaskEnd(openId);
+        const auto saveOwnEnd = client.waitForTaskEnd(saveId);
+        REQUIRE(openEnd);
+        REQUIRE(openEnd->completed);
+        REQUIRE(saveOwnEnd);
+        REQUIRE(saveOwnEnd->completed);
+        REQUIRE(session.waitForSnapshots(snapshots += 2));
+        const auto project = session.latestSnapshot().project;
+        REQUIRE(project.projectDirectory == canonicalizePath(saved));
+        REQUIRE_FALSE(project.dirty);
+      }
+    }
+
+    WHEN("a sync op follows two imports and then the second is cancelled")
+    {
+      REQUIRE(session.waitForSnapshots(++snapshots));
+      ImportStaticDataset first;
+      first.requestId = session.nextRequestId++;
+      first.name = "GridA";
+      first.sourcePath = data.grid;
+      first.importerType = vsr::io::ImporterType::OBJ;
+      auto second = first;
+      second.requestId = session.nextRequestId++;
+      second.name = "GridB";
+      CreateShot shot;
+      shot.requestId = session.nextRequestId++;
+      shot.name = "after the imports";
+      CancelTask cancel;
+      cancel.requestId = session.nextRequestId++;
+      cancel.taskId = taskId + 2;
+      client.send(first);
+      client.send(second);
+      client.send(shot);
+      client.send(cancel);
+
+      THEN("the cancel is served past the waiting sync op, which then runs")
+      {
+        const auto cancelReply = client.waitForReply(cancel.requestId);
+        REQUIRE(cancelReply);
+        REQUIRE(cancelReply->ok);
+        const auto secondEnd = client.waitForTaskEnd(taskId + 2);
+        REQUIRE(secondEnd);
+        REQUIRE_FALSE(secondEnd->completed);
+        REQUIRE(secondEnd->text == "cancelled");
+
+        const auto shotReply = client.waitForReply(shot.requestId);
+        REQUIRE(shotReply);
+        REQUIRE(shotReply->ok);
+        const auto firstEnd = client.waitForTaskEnd(taskId + 1);
+        REQUIRE(firstEnd);
+        REQUIRE(firstEnd->completed);
+        // The shot was created after the surviving import, as sent.
+        REQUIRE(client.indexOf(StudioMessageType::TaskCompleted)
+            < client.indexOfReply(shot.requestId));
+        REQUIRE(session.waitForSnapshots(snapshots += 2));
+        const auto project = session.latestSnapshot().project;
+        REQUIRE(project.datasets.size() == 2);
+        REQUIRE(project.shots.back().name == "after the imports");
+      }
+    }
+
+    WHEN("two imports are queued and the second is cancelled at once")
+    {
+      REQUIRE(session.waitForSnapshots(++snapshots));
+      // Task ids are allocated in order, so the second import's id is known
+      // before its reply arrives; all three requests go out back to back.
+      ImportStaticDataset first;
+      first.requestId = session.nextRequestId++;
+      first.name = "GridA";
+      first.sourcePath = data.grid;
+      first.importerType = vsr::io::ImporterType::OBJ;
+      auto second = first;
+      second.requestId = session.nextRequestId++;
+      second.name = "GridB";
+      CancelTask cancel;
+      cancel.requestId = session.nextRequestId++;
+      cancel.taskId = taskId + 2;
+      client.send(first);
+      client.send(second);
+      client.send(cancel);
+
+      THEN("the first runs, the second fails as cancelled")
+      {
+        const auto firstReply = client.waitForReply(first.requestId);
+        const auto secondReply = client.waitForReply(second.requestId);
+        const auto cancelReply = client.waitForReply(cancel.requestId);
+        REQUIRE(firstReply);
+        REQUIRE(secondReply);
+        REQUIRE(cancelReply);
+        REQUIRE(startedTaskId(*firstReply) == taskId + 1);
+        REQUIRE(startedTaskId(*secondReply) == taskId + 2);
+        REQUIRE(cancelReply->ok);
+
+        const auto firstEnd = client.waitForTaskEnd(taskId + 1);
+        const auto secondEnd = client.waitForTaskEnd(taskId + 2);
+        REQUIRE(firstEnd);
+        REQUIRE(firstEnd->completed);
+        REQUIRE(secondEnd);
+        REQUIRE_FALSE(secondEnd->completed);
+        REQUIRE(secondEnd->text == "cancelled");
+        REQUIRE(session.waitForSnapshots(++snapshots));
+        REQUIRE(session.latestSnapshot().project.datasets.size() == 2);
+
+        const auto late = session.request(CancelTask{0, taskId + 1});
+        REQUIRE_FALSE(late.ok);
+        REQUIRE(late.error == "task already finished");
+      }
+    }
+  }
+}

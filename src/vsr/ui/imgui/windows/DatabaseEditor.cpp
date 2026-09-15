@@ -36,7 +36,8 @@ void DatabaseEditor::buildUI()
         if (doDelete)
           appContext()->vsr.scene.removeObject(o);
         else
-          vsr::ui::buildUI_object(*o, appContext()->vsr.scene, true);
+          vsr::ui::buildUI_object(
+              *o, appContext()->vsr.scene, true, 0, objectEditPolicy());
         ImGui::PopID();
       });
     }

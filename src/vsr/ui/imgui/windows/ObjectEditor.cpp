@@ -28,7 +28,8 @@ void ObjectEditor::buildUI()
   auto &node = *selectedNode;
 
   if (auto *selectedObject = node->getObject(); selectedObject) {
-    vsr::ui::buildUI_object(*selectedObject, appContext()->vsr.scene, true);
+    vsr::ui::buildUI_object(
+        *selectedObject, appContext()->vsr.scene, true, 0, objectEditPolicy());
   } else if (node->isTransform()) {
     // Setup transform values //
 

@@ -1,0 +1,222 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+#pragma once
+
+#include "PayloadCommon.h"
+#include "StudioProtocol.h"
+// vsr_scivis_studio_model
+#include "Dataset.h"
+// vsr_rendering
+#include "vsr/rendering/pipeline/passes/VisualizeAOVPass.h"
+// vsr_core
+#include "vsr/core/DataTree.hpp"
+#include "vsr/core/VSRMath.hpp"
+// std
+#include <cstdint>
+#include <optional>
+#include <string_view>
+#include <vector>
+
+namespace vsr::scivis_studio::protocol {
+
+/*
+ * Picking, selection outline, viewport passes and the array histogram. The
+ * server picks against its current camera and scene and answers with one
+ * flat PickReply; the client owns selection and tells the server only what
+ * rendering needs (SetOutline). ViewportSettings is the flat, optimistic
+ * mirror of the monolith Viewport's id-driven pass toggles, which composite
+ * server-side before encoding in v1.
+ *
+ * Example:
+ *   Pick pick;
+ *   pick.requestId = nextId();
+ *   pick.x = mouse.x;
+ *   pick.y = mouse.y;
+ *   channel.send(encode(pick));
+ */
+
+// x and y are frame pixels in the header's width x height: x grows to the
+// right, y downwards from the top-left corner (the client's image origin;
+// the server converts to ANARI's bottom-up buffer). Coordinates outside the
+// frame are clamped to its edge. The server services one Pick at a time,
+// latest-wins: a Pick arriving before an earlier one was serviced replaces
+// it, and only the survivor is answered.
+struct Pick
+{
+  static constexpr StudioMessageType MESSAGE_TYPE = StudioMessageType::Pick;
+  uint64_t requestId{0};
+  int x{0};
+  int y{0};
+};
+
+// objectIdentity is the server-minted (type, pool index) of what was hit;
+// absent when the pick landed on background.
+struct PickReply
+{
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::PickReply;
+  uint64_t requestId{0};
+  bool hit{false};
+  vsr::math::float3 worldPosition{0.f, 0.f, 0.f};
+  std::optional<SceneObjectRef> objectIdentity;
+};
+
+// An absent objectIdentity clears the outline.
+struct SetOutline
+{
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::SetOutline;
+  std::optional<SceneObjectRef> objectIdentity;
+};
+
+// Field names and defaults mirror vsr::ui::Viewport's saved settings so the
+// two stay one vocabulary: highlightSelection drives OutlineRenderPass,
+// outlinePrimitives PrimitiveOutlineRenderPass, showWorldBounds (+ color,
+// width) BoxOutlineRenderPass, and visualizeAOV (+ depth range, edgeInvert)
+// VisualizeAOVPass.
+struct ViewportSettings
+{
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::ViewportSettings;
+  bool highlightSelection{true};
+  bool outlinePrimitives{false};
+  bool showWorldBounds{false};
+  vsr::math::float4 worldBoundsColor{0.8f, 0.8f, 0.8f, 1.f};
+  int worldBoundsWidth{1};
+  vsr::rendering::AOVType visualizeAOV{vsr::rendering::AOVType::NONE};
+  float depthVisualMinimum{0.f};
+  float depthVisualMaximum{1.f};
+  bool edgeInvert{false};
+};
+
+// The server clamps binCount into this range before binning; both ends of
+// the wire agree on it.
+constexpr uint32_t MIN_HISTOGRAM_BINS = 1;
+constexpr uint32_t MAX_HISTOGRAM_BINS = 4096;
+
+struct RequestArrayHistogram
+{
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::RequestArrayHistogram;
+  uint64_t requestId{0};
+  SceneObjectRef array;
+  uint32_t binCount{0};
+};
+
+// Result carried in a ProjectOpReply's `results` subtree. Elements that are
+// NaN or infinite take no part in the range or the bins; nonFinite counts
+// them so the bins still account for every element.
+struct ArrayHistogramResult
+{
+  std::vector<uint64_t> bins;
+  float minValue{0.f};
+  float maxValue{0.f};
+  uint64_t nonFinite{0};
+};
+
+// The Structural Mirror holds arrays as proxies with no samples, so a client
+// that wants to edit one -- a volume's Transfer Function is the only case in
+// v12 -- asks for its contents first and hydrates its own copy (ADR 0037's
+// companion: the edit itself goes back as SetArrayData). The array is named
+// the way RequestArrayHistogram names it, by its server-minted index.
+struct RequestArrayData
+{
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::RequestArrayData;
+  uint64_t requestId{0};
+  SceneObjectRef array;
+};
+
+// Result carried in a ProjectOpReply's `results` subtree: one array's whole
+// contents, element type and count included so the receiver can check them
+// against the descriptor it already holds before filling anything.
+struct ArrayDataResult
+{
+  anari::DataType elementType{ANARI_UNKNOWN};
+  uint64_t elementCount{0};
+  std::vector<std::byte> data;
+};
+
+// Enumerator names ("NONE", "DEPTH", ..., "INSTANCE_ID"), "Unknown" otherwise.
+const char *toString(vsr::rendering::AOVType type);
+std::optional<vsr::rendering::AOVType> aovTypeFromString(std::string_view name);
+
+// All but the histogram result are fields() descriptions (PayloadCommon.h):
+//  - Pick: requestId, x and y are required.
+//  - PickReply: requestId and hit are required; worldPosition defaults to
+//    the origin; a present but malformed objectIdentity is rejected.
+//  - SetOutline: an absent objectIdentity reads as "clear"; a present but
+//    malformed one is rejected.
+//  - ViewportSettings: every field is optional and keeps its default when
+//    absent, so a newer client can add toggles without breaking an older
+//    server; a present but mistyped field is rejected.
+//  - RequestArrayHistogram: requestId, array and binCount are required.
+//  - RequestArrayData: requestId and array are required.
+
+// bins travel as one UINT64 array leaf (absent when empty); minValue and
+// maxValue are required, nonFinite defaults to 0 when absent.
+void toNode(const ArrayHistogramResult &, vsr::core::DataNode &);
+bool fromNode(const vsr::core::DataNode &, ArrayHistogramResult &);
+
+// data travels as one typed array leaf carrying its own element type;
+// elementCount is read back from that leaf rather than sent beside it, so the
+// two can never disagree. An empty array writes no leaf.
+void toNode(const ArrayDataResult &, vsr::core::DataNode &);
+bool fromNode(const vsr::core::DataNode &, ArrayDataResult &);
+
+// Inlined definitions ////////////////////////////////////////////////////////
+
+template <typename V>
+void fields(V &v, Pick &p)
+{
+  v.required("requestId", p.requestId);
+  v.required("x", p.x);
+  v.required("y", p.y);
+}
+
+template <typename V>
+void fields(V &v, PickReply &r)
+{
+  v.required("requestId", r.requestId);
+  v.required("hit", r.hit);
+  v.optional("worldPosition", r.worldPosition);
+  v.optionalChild("objectIdentity", r.objectIdentity);
+}
+
+template <typename V>
+void fields(V &v, SetOutline &o)
+{
+  v.optionalChild("objectIdentity", o.objectIdentity);
+}
+
+template <typename V>
+void fields(V &v, ViewportSettings &s)
+{
+  v.optional("highlightSelection", s.highlightSelection);
+  v.optional("outlinePrimitives", s.outlinePrimitives);
+  v.optional("showWorldBounds", s.showWorldBounds);
+  v.optional("worldBoundsColor", s.worldBoundsColor);
+  v.optional("worldBoundsWidth", s.worldBoundsWidth);
+  v.optionalEnum("visualizeAOV", s.visualizeAOV, toString, aovTypeFromString);
+  v.optional("depthVisualMinimum", s.depthVisualMinimum);
+  v.optional("depthVisualMaximum", s.depthVisualMaximum);
+  v.optional("edgeInvert", s.edgeInvert);
+}
+
+template <typename V>
+void fields(V &v, RequestArrayHistogram &r)
+{
+  v.required("requestId", r.requestId);
+  v.child("array", r.array);
+  v.required("binCount", r.binCount);
+}
+
+template <typename V>
+void fields(V &v, RequestArrayData &r)
+{
+  v.required("requestId", r.requestId);
+  v.child("array", r.array);
+}
+
+} // namespace vsr::scivis_studio::protocol

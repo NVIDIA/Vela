@@ -7,6 +7,8 @@
 #include "RenderShot.h"
 #include "modals/AddFileAnimationDatasetDialog.h"
 #include "modals/AddStaticDatasetDialog.h"
+#include "modals/BrowseProvider.h"
+#include "modals/LocalProjectActions.h"
 #include "modals/ProjectLocationDialog.h"
 #include "windows/CameraRigEditor.h"
 #include "windows/DatasetEditor.h"
@@ -31,7 +33,6 @@
 #include <system_error>
 
 namespace vsr::scivis_studio {
-
 
 using VSRApplication = vsr::ui::imgui::Application;
 namespace vsr_ui = vsr::ui::imgui;
@@ -174,11 +175,25 @@ vsr::ui::imgui::WindowArray Application::setupWindows()
   m_layerTree->hide();
   m_transferFunctionEditor->hide();
 
-  m_projectLocationDialog = std::make_unique<ProjectLocationDialog>(this);
+  m_projectLocationDialog =
+      std::make_unique<modals::ProjectLocationDialog>(this,
+          std::make_unique<modals::NativeBrowseProvider>(this),
+          std::make_unique<LocalProjectLocationAction>(
+              [this](modals::ProjectLocationMode mode,
+                  const std::filesystem::path &directory) {
+                if (mode == modals::ProjectLocationMode::OpenProject)
+                  openProject(directory);
+                else
+                  saveProjectAs(directory);
+              }));
   m_addStaticDatasetDialog =
-      std::make_unique<AddStaticDatasetDialog>(this, &m_projectContext);
+      std::make_unique<modals::AddStaticDatasetDialog>(this,
+          std::make_unique<modals::NativeBrowseProvider>(this),
+          std::make_unique<LocalStaticDatasetAction>(this, &m_projectContext));
   m_addFileAnimationDatasetDialog =
-      std::make_unique<AddFileAnimationDatasetDialog>(this, &m_projectContext);
+      std::make_unique<modals::AddFileAnimationDatasetDialog>(this,
+          std::make_unique<modals::NativeBrowseProvider>(this),
+          std::make_unique<LocalFileAnimationAction>(this, &m_projectContext));
 
   if (!m_initialProjectDirectory.empty()) {
     ProjectOpenOptions options;
@@ -204,30 +219,6 @@ void Application::teardown()
   VSRApplication::teardown();
 }
 
-void Application::saveWindowSettings(vsr::core::DataNode &node)
-{
-  node.reset();
-  for (auto *w : m_windows)
-    w->saveSettings(node[w->name()]);
-}
-
-void Application::loadWindowSettings(vsr::core::DataNode &node)
-{
-  for (auto *w : m_windows)
-    w->loadSettings(node[w->name()]);
-}
-
-std::string Application::saveLayout() const
-{
-  return ImGui::SaveIniSettingsToMemory();
-}
-
-void Application::loadLayout(const std::string &layout)
-{
-  if (!layout.empty())
-    ImGui::LoadIniSettingsFromMemory(layout.c_str());
-}
-
 bool Application::saveProject()
 {
   auto &project = m_projectContext.project();
@@ -242,16 +233,11 @@ bool Application::saveProject()
 bool Application::saveProjectAs(const std::filesystem::path &directory)
 {
   vsr::core::DataTree scratch;
-  auto &root = scratch.root();
-  saveWindowSettings(root["windows"]);
-  saveApplicationSettings(root);
+  saveUIStateTree(scratch.root());
 
   std::string error;
-  const bool ok = m_projectContext.saveProject(directory,
-      root.child("windows"),
-      saveLayout(),
-      root.child("settings"),
-      &error);
+  const bool ok =
+      m_projectContext.saveProject(directory, &scratch.root(), &error);
   if (!ok)
     vsr::core::logError("[SciVisStudio] Save failed: %s", error.c_str());
   else
@@ -266,14 +252,9 @@ bool Application::openProject(
     m_viewport->releaseSceneReferences();
 
   vsr::core::DataTree scratch;
-  std::string layout;
   std::string error;
-  const bool ok = m_projectContext.openProject(directory,
-      &scratch.root()["windows"],
-      &layout,
-      &scratch.root()["settings"],
-      &error,
-      options);
+  const bool ok =
+      m_projectContext.openProject(directory, &scratch.root(), &error, options);
   if (!ok) {
     vsr::core::logError("[SciVisStudio] Open failed: %s", error.c_str());
     if (m_viewport)
@@ -281,9 +262,7 @@ bool Application::openProject(
     return false;
   }
 
-  loadWindowSettings(scratch.root()["windows"]);
-  loadLayout(layout);
-  loadApplicationSettings(scratch.root());
+  applyUIStateTree(scratch.root());
   addRecentProject(directory);
   return true;
 }
@@ -490,18 +469,14 @@ void Application::showAddFileAnimationDatasetDialog()
 
 void Application::showProjectLocationDialogForOpen()
 {
-  m_projectLocationDialog->configure(ProjectLocationMode::OpenProject,
-      [this](
-          const std::filesystem::path &directory) { openProject(directory); });
+  m_projectLocationDialog->configure(modals::ProjectLocationMode::OpenProject);
   m_projectLocationDialog->show();
 }
 
 void Application::showProjectLocationDialogForSaveAs()
 {
-  m_projectLocationDialog->configure(ProjectLocationMode::SaveProjectAs,
-      [this](const std::filesystem::path &directory) {
-        saveProjectAs(directory);
-      });
+  m_projectLocationDialog->configure(
+      modals::ProjectLocationMode::SaveProjectAs);
   m_projectLocationDialog->show();
 }
 
@@ -566,8 +541,6 @@ void Application::uiFrameStart()
   const ImGuiIO &io = ImGui::GetIO();
   auto &animMgr = appContext()->vsr.animationMgr;
   animMgr.tick(io.DeltaTime);
-  if (auto *shot = project::activeShot(m_projectContext.project()))
-    shot->playing = animMgr.isPlaying();
 
   if (ImGui::BeginMainMenuBar()) {
     uiMainMenuBar();
@@ -606,10 +579,8 @@ void Application::uiFrameStart()
   }
 
   if (!io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Space)) {
-    if (auto *shot = project::activeShot(m_projectContext.project())) {
-      animMgr.togglePlay();
-      shot->playing = animMgr.isPlaying();
-    }
+    if (auto *shot = project::activeShot(m_projectContext.project()))
+      m_projectContext.setPlaying(shot->id, !animMgr.isPlaying());
   }
 
   // Saving while a background task mutates the project (dataset load,

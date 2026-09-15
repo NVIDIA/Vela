@@ -11,6 +11,8 @@
 #include "vsr/scene/UpdateDelegate.hpp"
 #include "vsr/scene/objects/Array.hpp"
 // std
+#include <cmath>
+#include <string>
 #include <vector>
 
 using vsr::animation::AnimationManager;
@@ -47,7 +49,154 @@ struct BatchRecordingDelegate : public vsr::scene::EmptyUpdateDelegate
   int unmapsOutsideBatch{0};
 };
 
+// A file binding whose frames past `lastGoodFrame` refuse to load.
+struct FailingFileBinding : public vsr::animation::FileBinding
+{
+  FailingFileBinding(Scene *scene, int frames, int lastGoodFrame)
+      : FileBinding(scene), frames(frames), lastGoodFrame(lastGoodFrame)
+  {}
+
+  std::string kind() const override
+  {
+    return "failing";
+  }
+
+  void toDataNode(vsr::core::DataNode &) const override {}
+
+  void update(float t) override
+  {
+    const int frame = int(std::lround(t * float(frames - 1)));
+    if (frame > lastGoodFrame)
+      reportLoadFailure(frame, "frame " + std::to_string(frame) + " is bad");
+    else
+      loaded = frame;
+  }
+
+  int frames{0};
+  int lastGoodFrame{0};
+  int loaded{0};
+
+ private:
+  void addCallbackToAnimation(vsr::animation::Animation &anim) override
+  {
+    anim.addCallbackBinding([this](float t) { update(t); });
+  }
+};
+
+// What a load-failure callback saw, in order.
+struct LoadFailureRecord
+{
+  int frame{0};
+  std::string message;
+};
+
 } // namespace
+
+SCENARIO(
+    "A file binding reports the frames it cannot load", "[AnimationManager]")
+{
+  GIVEN("A manager owning a binding whose last two frames are bad")
+  {
+    Scene scene;
+    AnimationManager mgr(&scene);
+    mgr.setAnimationTotalFrames(5);
+    auto &anim = mgr.addAnimation("files");
+    auto &binding = anim.emplaceFileBinding<FailingFileBinding>(&scene, 5, 2);
+    std::vector<LoadFailureRecord> seen;
+    mgr.setLoadFailureCallback([&seen](int frame, std::string message) {
+      seen.push_back({frame, std::move(message)});
+    });
+
+    WHEN("Time lands on a good frame")
+    {
+      mgr.setAnimationFrame(2);
+
+      THEN("Nothing is reported and the frame loaded")
+      {
+        REQUIRE(binding.loaded == 2);
+        REQUIRE(seen.empty());
+      }
+    }
+
+    WHEN("Time lands on bad frames")
+    {
+      mgr.setAnimationFrame(3);
+      mgr.setAnimationFrame(4);
+
+      THEN("The callback saw each failure once, as it happened")
+      {
+        REQUIRE(seen.size() == 2);
+        REQUIRE(seen[0].frame == 3);
+        REQUIRE(seen[0].message == "frame 3 is bad");
+        REQUIRE(seen[1].frame == 4);
+      }
+    }
+
+    WHEN("Playback runs across a bad frame")
+    {
+      mgr.setAnimationFPS(1.f);
+      mgr.setAnimationFrame(2);
+      mgr.play();
+      mgr.tick(1.f);
+
+      THEN("The failure is reported and playback goes on")
+      {
+        REQUIRE(mgr.getAnimationFrame() == 3);
+        REQUIRE(mgr.isPlaying());
+        REQUIRE(seen.size() == 1);
+      }
+    }
+
+    WHEN("Nobody listens")
+    {
+      mgr.setLoadFailureCallback({});
+      mgr.setAnimationFrame(3);
+
+      THEN("The report is dropped and time still moved")
+      {
+        REQUIRE(seen.empty());
+        REQUIRE(mgr.getAnimationFrame() == 3);
+      }
+    }
+  }
+
+  GIVEN("A clock longer than a binding that has only five files")
+  {
+    Scene scene;
+    AnimationManager mgr(&scene);
+    mgr.setAnimationTotalFrames(10);
+    auto &anim = mgr.addAnimation("files");
+    // Its own indices 0..4 span the clock; index 3 and 4 are bad.
+    anim.emplaceFileBinding<FailingFileBinding>(&scene, 5, 2);
+    std::vector<LoadFailureRecord> seen;
+    mgr.setLoadFailureCallback([&seen](int frame, std::string message) {
+      seen.push_back({frame, std::move(message)});
+    });
+
+    WHEN("Time lands on a clock frame the binding maps to a bad file")
+    {
+      mgr.setAnimationFrame(9); // file index 4
+
+      THEN("The failure carries the clock frame, not the file index")
+      {
+        REQUIRE(seen.size() == 1);
+        REQUIRE(seen[0].frame == 9);
+        REQUIRE(seen[0].message == "frame 4 is bad");
+      }
+    }
+
+    WHEN("A failure is reported outside any time application")
+    {
+      mgr.reportLoadFailure(4, "late");
+
+      THEN("The binding's index passes through")
+      {
+        REQUIRE(seen.size() == 1);
+        REQUIRE(seen[0].frame == 4);
+      }
+    }
+  }
+}
 
 SCENARIO("A time change is one update batch", "[AnimationManager]")
 {
@@ -56,8 +205,7 @@ SCENARIO("A time change is one update batch", "[AnimationManager]")
     Scene scene;
     AnimationManager mgr(&scene);
 
-    auto *recorder =
-        scene.updateDelegate().emplace<BatchRecordingDelegate>();
+    auto *recorder = scene.updateDelegate().emplace<BatchRecordingDelegate>();
 
     std::vector<vsr::scene::ArrayRef> arrays;
     for (int i = 0; i < 3; ++i) {
@@ -111,11 +259,33 @@ SCENARIO("vsr::animation::AnimationManager playback", "[AnimationManager]")
     WHEN("A slow frame accumulates enough time for multiple animation steps")
     {
       mgr.play();
-      mgr.tick(1.25f);
+      const bool advanced = mgr.tick(1.25f);
 
-      THEN("Playback catches up by advancing multiple frames")
+      THEN("Playback advances one frame only: fps is a ceiling, never a skip")
       {
+        REQUIRE(advanced);
+        REQUIRE(mgr.getAnimationFrame() == 1);
+      }
+
+      THEN("The carried-over time is capped at one frame's worth")
+      {
+        // 0.75 s were left over; only 0.5 s (one frame) carry, so the next
+        // tick advances once, and the one after that needs fresh time.
+        REQUIRE(mgr.tick(0.001f));
         REQUIRE(mgr.getAnimationFrame() == 2);
+        REQUIRE_FALSE(mgr.tick(0.001f));
+        REQUIRE(mgr.getAnimationFrame() == 2);
+      }
+    }
+
+    WHEN("Too little time has passed for a frame")
+    {
+      mgr.play();
+
+      THEN("tick() reports that nothing advanced")
+      {
+        REQUIRE_FALSE(mgr.tick(0.1f));
+        REQUIRE(mgr.getAnimationFrame() == 0);
       }
     }
 
@@ -133,15 +303,50 @@ SCENARIO("vsr::animation::AnimationManager playback", "[AnimationManager]")
 
     WHEN("Non-looping playback reaches the last frame")
     {
+      int stopped = 0;
+      bool playingWhenStopped = true;
+      mgr.setPlaybackStoppedCallback([&] {
+        stopped++;
+        playingWhenStopped = mgr.isPlaying();
+      });
       mgr.setLoop(false);
       mgr.setAnimationFrame(3);
       mgr.play();
-      mgr.tick(1.0f);
+      const bool advanced = mgr.tick(1.0f);
 
-      THEN("Playback stops on the last frame")
+      THEN("Playback stops on the last frame and says so once")
       {
+        REQUIRE(advanced);
         REQUIRE(mgr.getAnimationFrame() == 4);
         REQUIRE_FALSE(mgr.isPlaying());
+        REQUIRE(stopped == 1);
+        REQUIRE_FALSE(playingWhenStopped);
+      }
+
+      THEN("Further ticks and an explicit stop() do not fire the callback")
+      {
+        REQUIRE_FALSE(mgr.tick(1.0f));
+        mgr.play();
+        mgr.stop();
+        REQUIRE(stopped == 1);
+      }
+    }
+
+    WHEN("Non-looping playback starts on the last frame")
+    {
+      int stopped = 0;
+      mgr.setPlaybackStoppedCallback([&] { stopped++; });
+      mgr.setLoop(false);
+      mgr.setAnimationFrame(4);
+      mgr.play();
+      const bool advanced = mgr.tick(1.0f);
+
+      THEN("The first tick stops playback without advancing")
+      {
+        REQUIRE_FALSE(advanced);
+        REQUIRE(mgr.getAnimationFrame() == 4);
+        REQUIRE_FALSE(mgr.isPlaying());
+        REQUIRE(stopped == 1);
       }
     }
 

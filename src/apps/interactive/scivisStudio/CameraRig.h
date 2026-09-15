@@ -9,6 +9,7 @@
 #include "vsr/rendering/view/Manipulator.hpp"
 
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -56,9 +57,12 @@ CameraRigID nextCameraRigId(const Project &project);
 CameraRig *findCameraRig(Project &project, const CameraRigID &id);
 const CameraRig *findCameraRig(const Project &project, const CameraRigID &id);
 
-// Interpolation enum <-> persisted string.
+// Interpolation enum <-> persisted string. The parser is strict: the mode
+// whose toString() spelling is `s`, empty for anything else, so a corrupt rig
+// is reported rather than read as Linear.
 const char *toString(CameraInterpolation interpolation);
-CameraInterpolation interpolationFromString(const std::string &s);
+std::optional<CameraInterpolation> interpolationFromString(
+    const std::string &s);
 
 // Manipulator <-> stored camera pose.
 ManipulatorState manipulatorStateFromManipulator(
@@ -81,10 +85,14 @@ bool loadCameraRigArchiveFile(const std::filesystem::path &file,
     CameraRig &rigOut,
     std::string *error = nullptr);
 
-// DataTree node <-> camera rig value data (current pose + keyframes). Exposed
-// so the legacy (pre-v4) inline-manifest read path can reuse it.
+// DataTree node <-> camera rig value data (current pose + keyframes); the
+// Camera Rig Archive, the legacy (pre-v4) inline manifest and the Project
+// Snapshot's Full form all carry it. Reading assigns rig.current and
+// rig.keyframes only on success: an absent child keeps the rig as is, a
+// mistyped pose or keyframe field or an unknown interpolation spelling is
+// rejected.
 void cameraRigToNode(const CameraRig &rig, vsr::core::DataNode &node);
-void nodeToCameraRig(vsr::core::DataNode &node, CameraRig &rig);
+bool nodeToCameraRig(const vsr::core::DataNode &node, CameraRig &rig);
 
 } // namespace camera_rig
 

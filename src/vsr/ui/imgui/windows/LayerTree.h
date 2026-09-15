@@ -13,17 +13,48 @@ struct ImportFileDialog;
 
 struct LayerTree : public Window
 {
+  // How much the widget may change. Full is the default. NoLayerAddRemove
+  // keeps the layer "new"/"delete" buttons disabled for an application that
+  // owns its layers. ReadOnly keeps selection, expand/collapse and hover but
+  // hides or disables every affordance that mutates the scene or the layer
+  // structure; the remote client uses it, where layer structure is
+  // server-push-only (see the SciVis Studio client-server spec).
+  enum class EditMode
+  {
+    Full,
+    NoLayerAddRemove,
+    ReadOnly
+  };
+
   LayerTree(Application *app, const char *name = "Layers");
   void buildUI() override;
 
-  void setEnableAddRemoveLayers(bool enable);
+  void setEditMode(EditMode mode);
+
+  // Drop everything the widget remembers about the current scene: the
+  // selection anchor, the hovered and context-menu nodes and the chosen
+  // layer. Applications that replace the whole scene under a live widget
+  // (the SciVis Studio client, whenever a Project Snapshot replaces the
+  // Structural Mirror) must call this before the old layers are destroyed:
+  // a LayerNodeRef has no generation counter, so a retained one still
+  // reports valid() while dangling. Harmless to call at any other time.
+  void dropSceneReferences();
 
  private:
+  bool canEdit() const; // not ReadOnly
+  bool canAddRemoveLayers() const; // Full
+
   void buildUI_layerHeader();
   void buildUI_tree();
   void buildUI_activateObjectSceneMenu();
   void buildUI_handleSelection();
+  void buildUI_clipboardShortcuts();
   void buildUI_objectSceneMenu();
+  // The context-menu items that mutate the scene or layer structure; not
+  // emitted in ReadOnly. Returns true when an item added a node, so the
+  // caller clears the selection once the popup has ended.
+  bool buildUI_mutatingMenuItems(
+      vsr::scene::Layer &layer, vsr::scene::LayerNodeRef menuNode);
   void buildUI_newLayerSceneMenu();
   void buildUI_setActiveLayersSceneMenus();
 
@@ -34,20 +65,17 @@ struct LayerTree : public Window
 
   std::vector<vsr::scene::LayerNodeRef> copyNodesTo(
       vsr::scene::LayerNodeRef targetParent,
-      const std::vector<vsr::scene::LayerNodeRef>& sourceNodes,
-      bool cutOperation
-  );
+      const std::vector<vsr::scene::LayerNodeRef> &sourceNodes,
+      bool cutOperation);
 
-  bool isValidDropTarget(
-      vsr::scene::Layer& layer,
+  bool isValidDropTarget(vsr::scene::Layer &layer,
       vsr::scene::LayerNodeRef targetParent,
-      const vsr::scene::LayerNodeRef* sourceNodes,
-      size_t count
-  ) const;
+      const vsr::scene::LayerNodeRef *sourceNodes,
+      size_t count) const;
 
   // Data //
 
-  bool m_enableAddRemove{true};
+  EditMode m_editMode{EditMode::Full};
   size_t m_hoveredNode{VSR_INVALID_INDEX};
   size_t m_menuNode{VSR_INVALID_INDEX};
   bool m_activeLayerMenuTriggered{false};

@@ -407,6 +407,7 @@ size_t mappedLayerNodeIndex(const SceneArchiveMappings &mappings,
 bool serializeSceneArchive(const scene::Scene &scene,
     core::DataNode &archive,
     ArrayDataPolicy arrayData,
+    LayerNodeNumbering numbering,
     SceneArchiveMappings &mappings)
 {
   archive.reset();
@@ -424,12 +425,15 @@ bool serializeSceneArchive(const scene::Scene &scene,
     const auto layerName = layerEntry.first.str();
     auto &layerNode = layers[layerName.c_str()];
     const auto &layer = *layerEntry.second.ptr;
-    serialize_Layer(layer, layerNode);
+    serialize_Layer(layer, layerNode, numbering);
     layerNode["isActive"] = layerEntry.second.active;
 
     size_t archiveIndex = 0;
     layer.traverse_const(layer.root(), [&](const scene::LayerNode &node, int) {
-      mappings.layerNodes.push_back({layerName, node.index(), archiveIndex++});
+      const size_t reloadIndex = numbering == LayerNodeNumbering::Preserved
+          ? node.index()
+          : archiveIndex++;
+      mappings.layerNodes.push_back({layerName, node.index(), reloadIndex});
       return true;
     });
   }
@@ -459,7 +463,9 @@ bool serializeSceneArchive(const scene::Scene &scene,
   return true;
 }
 
-void reconstructSceneArchive(scene::Scene &scene, core::DataNode &sceneArchive)
+// False when a layer could not be rebuilt as recorded (a Preserved slot
+// collision); the objects and the layers before it are already in place.
+bool reconstructSceneArchive(scene::Scene &scene, core::DataNode &sceneArchive)
 {
   scene.removeAllObjects();
 
@@ -472,11 +478,16 @@ void reconstructSceneArchive(scene::Scene &scene, core::DataNode &sceneArchive)
     }
   }
 
+  bool layersRebuilt = true;
   if (auto *layers = payload.child("layers")) {
     layers->foreach_child([&](core::DataNode &layerNode) {
       const core::Token layerName(layerNode.name());
       auto &layer = *scene.addLayer(layerName);
-      deserialize_Layer(layerNode, layer, scene);
+      if (!deserialize_Layer(layerNode, layer, scene)) {
+        core::logError("[deserialize_SceneArchive] layer '%s' refused",
+            layerNode.name().c_str());
+        layersRebuilt = false;
+      }
       const bool active = layerNode.child("isActive")
           ? layerNode["isActive"].getValueOr(true)
           : true;
@@ -485,16 +496,18 @@ void reconstructSceneArchive(scene::Scene &scene, core::DataNode &sceneArchive)
     });
   }
   scene.signalActiveLayersChanged();
+  return layersRebuilt;
 }
 
 } // namespace
 
 bool serialize_SceneArchive(const scene::Scene &scene,
     core::DataNode &archive,
-    ArrayDataPolicy arrayData)
+    ArrayDataPolicy arrayData,
+    LayerNodeNumbering numbering)
 {
   SceneArchiveMappings mappings;
-  return serializeSceneArchive(scene, archive, arrayData, mappings);
+  return serializeSceneArchive(scene, archive, arrayData, numbering, mappings);
 }
 
 bool serialize_SceneAndAnimationManagerArchives(const scene::Scene &scene,
@@ -513,7 +526,8 @@ bool serialize_SceneAndAnimationManagerArchives(const scene::Scene &scene,
   }
 
   SceneArchiveMappings mappings;
-  if (!serializeSceneArchive(scene, sceneArchive, arrayData, mappings)
+  if (!serializeSceneArchive(
+          scene, sceneArchive, arrayData, LayerNodeNumbering::Archive, mappings)
       || !serialize_AnimationManagerArchive(
           animationManager, animationManagerArchive)) {
     sceneArchive.reset();
@@ -566,8 +580,7 @@ bool deserialize_SceneArchive(scene::Scene &scene,
   if (!archiveValidation.accepted())
     return false;
 
-  reconstructSceneArchive(scene, archive);
-  return true;
+  return reconstructSceneArchive(scene, archive);
 }
 
 bool save_SceneArchive(

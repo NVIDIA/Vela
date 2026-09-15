@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# The server's rejection paths: every message it does not handle is answered
+# with an Error, never dropped. `send-raw` skips the codec and puts an
+# arbitrary type byte on the wire; `expect-error` waits for the reply.
+
+connect
+
+# Type bytes outside the Studio Message Set.
+send-raw 0
+expect-error "unknown message type 0"
+send-raw 255
+expect-error "unknown message type 255"
+
+# A type byte in the range the server-to-client messages use, but unassigned.
+send-raw 200
+expect-error "unknown message type 200"
+
+# A RenderShot (60) whose payload cannot be decoded is refused loudly.
+send-raw 60
+expect-error "malformed RenderShot payload"
+assert lastError contains RenderShot
+
+assert errors.received == 4
+
+# The session survived every rejection.
+ping
+expect-pong
+assert state == Connected
+disconnect

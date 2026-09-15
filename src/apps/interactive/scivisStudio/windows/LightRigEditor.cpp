@@ -8,7 +8,6 @@
 #include "vsr/ui/imgui/Application.h"
 
 #include <algorithm>
-#include <array>
 #include <cfloat>
 #include <cstring>
 #include <filesystem>
@@ -27,19 +26,6 @@ std::string withVsrExtension(const std::string &path)
     p.replace_extension(".vsr");
   return p.string();
 }
-
-struct LightTypeOption
-{
-  const char *label;
-  const char *subtype;
-};
-
-constexpr std::array<LightTypeOption, 5> LIGHT_TYPES = {
-    {{"Directional", "directional"},
-        {"Point", "point"},
-        {"Quad", "quad"},
-        {"Spot", "spot"},
-        {"Ring", "ring"}}};
 
 std::vector<vsr::scene::LayerNodeRef> lightNodes(vsr::scene::LayerNodeRef root)
 {
@@ -180,7 +166,7 @@ void LightRigEditor::buildUI_addLight(LightRig &rig)
     ImGui::OpenPopup("Add Light");
 
   if (ImGui::BeginPopup("Add Light")) {
-    for (const auto &type : LIGHT_TYPES) {
+    for (const auto &type : light_rig::LIGHT_SUBTYPES) {
       if (ImGui::MenuItem(type.label)) {
         auto node = m_projectContext->addLightToRig(rig, type.subtype);
         if (node)
@@ -390,9 +376,9 @@ void LightRigEditor::buildUI()
   const bool activeShotUsesRig = shot && shot->lightRigId == rig.id;
   ImGui::BeginDisabled(!shot || activeShotUsesRig);
   if (ImGui::Button("Use for Active Shot") && shot) {
-    shot->lightRigId = rig.id;
-    project.markDirty();
-    m_projectContext->applyActiveShot();
+    Shot edit = *shot;
+    edit.lightRigId = rig.id;
+    m_projectContext->updateShot(edit);
   }
   ImGui::EndDisabled();
 
@@ -407,7 +393,7 @@ void LightRigEditor::buildUI()
 
   ImGui::SameLine();
   if (ImGui::Button("Remove Rig")) {
-    if (m_projectContext->shotUseCount(rig.id) > 0) {
+    if (project::lightRigUseCount(project, rig.id) > 0) {
       m_pendingDeleteRig = rig.id;
       ImGui::OpenPopup("Delete Light Rig?");
     } else {
@@ -420,8 +406,9 @@ void LightRigEditor::buildUI()
   if (ImGui::BeginPopupModal(
           "Delete Light Rig?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
     auto *pending = light_rig::findLightRig(project, m_pendingDeleteRig);
-    const int useCount = m_projectContext->shotUseCount(m_pendingDeleteRig);
-    ImGui::Text("Delete '%s' and clear %d shot reference%s?",
+    const size_t useCount =
+        project::lightRigUseCount(project, m_pendingDeleteRig);
+    ImGui::Text("Delete '%s' and clear %zu shot reference%s?",
         pending ? pending->name.c_str() : m_pendingDeleteRig.c_str(),
         useCount,
         useCount == 1 ? "" : "s");

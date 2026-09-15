@@ -7,6 +7,8 @@
 
 // std
 #include <functional>
+#include <string>
+#include <vector>
 
 namespace vsr::scene {
 struct Scene;
@@ -34,6 +36,25 @@ struct AnimationManager
 
   using TimeChangedCallback = std::function<void(float)>;
   void setTimeChangedCallback(TimeChangedCallback cb);
+
+  // Fired by tick() right after playback stops on its own at the end of a
+  // non-looping clock (m_playing is already false); stop() does not fire it.
+  // One slot, last setter wins, like the time-changed callback.
+  using PlaybackStoppedCallback = std::function<void()>;
+  void setPlaybackStoppedCallback(PlaybackStoppedCallback cb);
+
+  // Fired when a FileBinding reports a frame it could not load
+  // (FileBinding::reportLoadFailure()). `clockFrame` is the clock frame that
+  // was being applied when the binding reported (the frame a timeline
+  // shows), so the conversion from a binding's own file index happens here,
+  // once, at the manager boundary; a report made outside a time application
+  // passes the binding's index through. `message` is the reason. Whoever
+  // drives time listens; with no listener the report is dropped (the binding
+  // logs it regardless). One slot, last setter wins.
+  using LoadFailureCallback =
+      std::function<void(int clockFrame, std::string message)>;
+  void setLoadFailureCallback(LoadFailureCallback cb);
+  void reportLoadFailure(int frame, std::string message);
 
   scene::Scene *scene() const;
 
@@ -69,8 +90,13 @@ struct AnimationManager
   // so the caller can say so.
   bool widenClock(int frames, float fps);
 
-  // Playing state — call tick(elapsedSeconds) once per UI frame
-  void tick(float elapsedSeconds);
+  // Playing state — call tick(elapsedSeconds) once per UI frame. A tick
+  // advances at most one frame, however much wall-clock time has passed: fps
+  // is a ceiling, not a promise, so a slow iteration (a file binding loading
+  // an 800 ms frame) is never made up for by skipping frames -- every frame is
+  // the point. The elapsed time carried over to the next call is capped at
+  // one frame's worth. Returns true when the frame changed.
+  bool tick(float elapsedSeconds);
   void play();
   void stop();
   void togglePlay();
@@ -83,9 +109,13 @@ struct AnimationManager
  private:
   void setAnimationTimeInternal(float time, bool resetPlaybackAccumulator);
   void setAnimationFrameInternal(int frame, bool resetPlaybackAccumulator);
+  // Playback ran off the end of a non-looping clock.
+  void stopAtEnd();
 
   scene::Scene *m_scene{nullptr};
   TimeChangedCallback m_timeChangedCallback;
+  PlaybackStoppedCallback m_playbackStoppedCallback;
+  LoadFailureCallback m_loadFailureCallback;
   float m_incrementSize{0.01f};
   float m_animationFPS{30.f};
   float m_time{0.f};

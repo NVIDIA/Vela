@@ -48,9 +48,13 @@ void applyTransferFunction(
     colormap.push_back({color.x, color.y, color.z, opacity});
   }
 
-  auto colorArray = scene.createArray(ANARI_FLOAT32_VEC4, colormap.size());
-  colorArray->setData(colormap);
-  volume->setParameterObject("color", *colorArray);
+  // The volume already owns a color Array (Volume::ensureColorArray, ADR
+  // 0037); overwrite its samples rather than binding a second one, which
+  // would leave the first unreferenced.
+  volume->ensureColorArray();
+  auto *colorArray = volume->parameterValueAsObject<vsr::scene::Array>("color");
+  if (colorArray != nullptr && colorArray->size() == colormap.size())
+    colorArray->setData(colormap);
 
   if (tf.range.lower < tf.range.upper)
     volume->setParameter("valueRange", ANARI_FLOAT32_BOX1, &tf.range);
@@ -142,6 +146,7 @@ VolumeRef import_volume(
   volume->setName(file.c_str());
   volume->setParameterObject("value", *field);
   volume->setParameter("valueRange", ANARI_FLOAT32_BOX1, &valueRange);
+  volume->ensureColorArray();
 
   return volume;
 }

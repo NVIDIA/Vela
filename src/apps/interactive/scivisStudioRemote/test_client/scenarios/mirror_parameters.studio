@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# What an import leaves in the Structural Mirror: not just the objects, but
+# every parameter they carry. Scene signals fire during a mutation -- an
+# object is announced by Scene::createObject, before the importer has set a
+# thing on it -- so the server records them and sends one TransferScene at
+# the commit point instead. Reading a parameter that is not there is a FAIL,
+# so each assert below is itself the check that the value crossed.
+#
+# `copy-fixture` puts fixtures/triangle.obj into the data root, which
+# `list-roots` reveals as $dataRoot.
+
+copy-fixture fixtures/triangle.obj
+connect
+list-roots
+assert project.datasets == 0
+
+import-static-dataset $dataRoot/triangle.obj Tri OBJ
+await-task
+await-snapshot
+assert project.datasets == 1
+
+# The import's objects, with their parameter counts.
+dump-scene
+
+# The surface names its geometry and its material.
+find-object surface
+assert param.surface.$lastObjectIndex.geometry contains geometry:
+assert param.surface.$lastObjectIndex.material contains material:
+
+# The geometry names the vertex array whose contents stay on the server: the
+# mirror has the binding and the array's descriptor, not the bytes. This is
+# the parameter the old streaming push could never carry -- the geometry was
+# announced before the importer bound anything to it.
+find-object geometry
+assert param.geometry.$lastObjectIndex.vertex.position contains array1d:
+
+disconnect

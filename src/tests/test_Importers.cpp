@@ -447,3 +447,76 @@ SCENARIO("TIFF textures decode into float texel arrays", "[Importers]")
   }
 #endif
 }
+
+SCENARIO("Transfer-function volumes always carry a color Array", "[Importers]")
+{
+  vsr::scene::Scene scene;
+
+  GIVEN("A freshly created transferFunction1D volume")
+  {
+    auto volume = scene.createObject<vsr::scene::Volume>(
+        vsr::scene::tokens::volume::transferFunction1D);
+
+    WHEN("Its color Array is ensured")
+    {
+      volume->ensureColorArray();
+
+      THEN("Color holds a 256-sample RGBA Array")
+      {
+        auto *colorArray =
+            volume->parameterValueAsObject<vsr::scene::Array>("color");
+        REQUIRE(colorArray != nullptr);
+        REQUIRE(colorArray->elementType() == ANARI_FLOAT32_VEC4);
+        REQUIRE(colorArray->size() == 256);
+      }
+
+      THEN("Ensuring again binds the same Array")
+      {
+        auto *first =
+            volume->parameterValueAsObject<vsr::scene::Array>("color");
+        volume->ensureColorArray();
+        REQUIRE(
+            volume->parameterValueAsObject<vsr::scene::Array>("color") == first);
+      }
+    }
+  }
+
+  GIVEN("A volume of another subtype")
+  {
+    auto volume = scene.createObject<vsr::scene::Volume>(
+        vsr::scene::tokens::volume::structuredRegular);
+
+    WHEN("Its color Array is ensured")
+    {
+      volume->ensureColorArray();
+
+      THEN("Nothing is bound")
+      {
+        REQUIRE(volume->parameterValueAsObject<vsr::scene::Array>("color")
+            == nullptr);
+      }
+    }
+  }
+
+  GIVEN("A volume with a transfer function applied")
+  {
+    auto volume = scene.createObject<vsr::scene::Volume>(
+        vsr::scene::tokens::volume::transferFunction1D);
+    volume->ensureColorArray();
+    auto *before = volume->parameterValueAsObject<vsr::scene::Array>("color");
+
+    vsr::core::TransferFunction transferFunction =
+        vsr::core::makeDefaultTransferFunction();
+
+    WHEN("The transfer function is applied")
+    {
+      vsr::io::applyTransferFunction(scene, volume, transferFunction);
+
+      THEN("The samples land in the Array the volume already owned")
+      {
+        REQUIRE(volume->parameterValueAsObject<vsr::scene::Array>("color")
+            == before);
+      }
+    }
+  }
+}

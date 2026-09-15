@@ -7,6 +7,24 @@
 
 namespace vsr::rendering {
 
+CameraPose defaultViewForBounds(const vsr::math::box3 &bounds)
+{
+  auto box = bounds;
+  if (!(box.lower.x <= box.upper.x && box.lower.y <= box.upper.y
+          && box.lower.z <= box.upper.z))
+    box = vsr::math::box3(vsr::math::float3(-1.f), vsr::math::float3(1.f));
+
+  const auto center = 0.5f * (box.lower + box.upper);
+  const auto diag = box.upper - box.lower;
+
+  CameraPose pose;
+  pose.fixedDist = 1.25f * vsr::math::length(diag);
+  pose.lookat = center;
+  pose.azeldist = {0.f, 20.f, pose.fixedDist};
+  pose.upAxis = static_cast<int>(UpAxis::POS_Y);
+  return pose;
+}
+
 void Manipulator::setConfig(const CameraPose &p)
 {
   m_mode = static_cast<ManipulatorMode>(p.mode);
@@ -24,6 +42,69 @@ void Manipulator::setConfig(
   if (m_fixedDistance == vsr::math::inf)
     m_fixedDistance = dist;
   update();
+}
+
+void Manipulator::setPose(anari::math::float3 eye,
+    anari::math::float3 direction,
+    anari::math::float3 up)
+{
+  auto dir = direction;
+  if (!adoptOrientation(dir, up))
+    return;
+
+  const float distance =
+      std::abs(m_distance) > 0.f ? std::abs(m_distance) : 1.f;
+  m_distance = distance;
+  m_speed = distance;
+  m_eye = eye;
+  m_at = eye + dir * distance;
+  update();
+}
+
+void Manipulator::setFixedDistancePose(anari::math::float3 eye,
+    anari::math::float3 direction,
+    anari::math::float3 up,
+    float distance)
+{
+  auto dir = direction;
+  if (!adoptOrientation(dir, up))
+    return;
+
+  m_distance = distance > 0.f ? distance : 1.f;
+  m_speed = m_distance;
+  if (!(m_fixedDistance < vsr::math::inf) || !(m_fixedDistance > 0.f))
+    m_fixedDistance = m_distance;
+  m_at = eye + dir * m_fixedDistance;
+  m_eye = m_at - dir * m_distance;
+  update();
+}
+
+bool Manipulator::adoptOrientation(
+    anari::math::float3 &direction, const anari::math::float3 &up)
+{
+  const float length = linalg::length(direction);
+  if (!(length > 0.f))
+    return false;
+  direction = direction / length;
+
+  if (linalg::length2(up) > 0.f) {
+    // The axis the up vector leans along most.
+    const anari::math::float3 candidates[] = {{1.f, 0.f, 0.f},
+        {0.f, 1.f, 0.f},
+        {0.f, 0.f, 1.f},
+        {-1.f, 0.f, 0.f},
+        {0.f, -1.f, 0.f},
+        {0.f, 0.f, -1.f}};
+    int best = 0;
+    for (int i = 1; i < 6; ++i) {
+      if (linalg::dot(up, candidates[i]) > linalg::dot(up, candidates[best]))
+        best = i;
+    }
+    m_axis = static_cast<UpAxis>(best);
+  }
+
+  m_azel = directionToAzel(-direction, m_axis);
+  return true;
 }
 
 void Manipulator::setCenter(anari::math::float3 center)

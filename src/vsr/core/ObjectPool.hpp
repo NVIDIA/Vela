@@ -54,6 +54,11 @@ struct ObjectPool
   ObjectPoolRef<T> insert(T &&v);
   template <typename... Args>
   ObjectPoolRef<T> emplace(Args &&...args);
+  // Place a value in slot i, growing the pool with empty slots as needed;
+  // returns an invalid ref (and stores nothing) when slot i is occupied.
+  ObjectPoolRef<T> insert_at(size_t i, T &&v);
+  template <typename... Args>
+  ObjectPoolRef<T> emplace_at(size_t i, Args &&...args);
   bool erase(size_t i);
 
   void clear();
@@ -234,6 +239,39 @@ template <typename... Args>
 ObjectPoolRef<T> ObjectPool<T>::emplace(Args &&...args)
 {
   return insert(std::move(T(std::forward<Args>(args)...)));
+}
+
+template <typename T>
+inline ObjectPoolRef<T> ObjectPool<T>::insert_at(size_t i, T &&v)
+{
+  if (i == INVALID_INDEX)
+    return {};
+
+  if (i < capacity()) {
+    if (!slot_empty(i))
+      return {};
+    m_freeIndices.erase(
+        std::find(m_freeIndices.begin(), m_freeIndices.end(), i));
+  } else {
+    for (size_t gap = capacity(); gap < i; ++gap) {
+      m_values.emplace_back();
+      m_slots.push_back(false);
+      m_freeIndices.push_back(gap);
+    }
+    m_values.emplace_back();
+    m_slots.push_back(false);
+  }
+
+  m_values[i] = std::move(v);
+  m_slots[i] = true;
+  return at(i);
+}
+
+template <typename T>
+template <typename... Args>
+ObjectPoolRef<T> ObjectPool<T>::emplace_at(size_t i, Args &&...args)
+{
+  return insert_at(i, std::move(T(std::forward<Args>(args)...)));
 }
 
 template <typename T>

@@ -46,6 +46,14 @@ struct CameraPose
   int mode{static_cast<int>(ManipulatorMode::Orbit)};
 };
 
+// The view that frames `bounds`: centered on the box, an orbit distance of
+// 1.25x its diagonal (also the fixed distance), az/el (0, 20) and the +y up
+// axis. This is what every "reset view" in the project starts from, wherever
+// the bounds came from -- an ANARI world queried in process, or a server's
+// world reported over the wire. An empty box (a world with nothing in it)
+// frames the unit box instead, so the result is always a usable view.
+CameraPose defaultViewForBounds(const vsr::math::box3 &bounds);
+
 /*
  * Orbit-style camera controller that tracks az/el/distance to a center point
  * and exposes rotate/zoom/pan operations for interactive or scripted
@@ -67,6 +75,23 @@ class Manipulator
   void setConfig(anari::math::float3 center,
       float dist,
       anari::math::float2 azel = anari::math::float2(0.f));
+  // Adopts a camera pose given as eye, viewing direction and up vector: the
+  // center moves to the current distance along the direction and the up axis
+  // becomes the one the up vector points along. For following a camera whose
+  // position/direction/up were edited without manipulator metadata.
+  void setPose(anari::math::float3 eye,
+      anari::math::float3 direction,
+      anari::math::float3 up);
+  // Adopts a pose whose eye sits at the fixed distance from the center, as an
+  // orthographic camera's does (updateCameraObject writes eye_FixedDistance()
+  // as its position and derives its image height from the orbit distance):
+  // the orbit distance becomes `distance`, the fixed distance is kept (or
+  // initialized to it), and the center is placed so eye_FixedDistance() is
+  // `eye`. The up axis follows the up vector as in setPose.
+  void setFixedDistancePose(anari::math::float3 eye,
+      anari::math::float3 direction,
+      anari::math::float3 up,
+      float distance);
   void setCenter(anari::math::float3 center);
   void setDistance(float dist);
   void setFixedDistance(float dist);
@@ -102,6 +127,10 @@ class Manipulator
 
  protected:
   void update();
+  // The up axis the up vector leans along most, and the az/el of `direction`
+  // against it; shared by the pose setters. False for a zero direction.
+  bool adoptOrientation(
+      anari::math::float3 &direction, const anari::math::float3 &up);
 
   UpAxis negateAxis(UpAxis current) const;
   anari::math::float3 azelToDirection(float az, float el, UpAxis axis) const;

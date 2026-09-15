@@ -11,6 +11,8 @@
 // vsr_io
 #include "vsr/io/archives/AnimationManagerArchive.hpp"
 #include "vsr/io/archives/SceneArchive.hpp"
+// std
+#include <utility>
 
 namespace vsr::app {
 
@@ -69,14 +71,23 @@ void serialize_CameraPose(
   node["mode"] = pose.mode;
 }
 
-void deserialize_CameraPose(core::DataNode &node, rendering::CameraPose &pose)
+bool deserialize_CameraPose(
+    const core::DataNode &node, rendering::CameraPose &pose)
 {
-  node["name"].getValue(ANARI_STRING, &pose.name);
-  node["lookat"].getValue(ANARI_FLOAT32_VEC3, &pose.lookat);
-  node["azeldist"].getValue(ANARI_FLOAT32_VEC3, &pose.azeldist);
-  node["fixedDist"].getValue(ANARI_FLOAT32, &pose.fixedDist);
-  node["upAxis"].getValue(ANARI_INT32, &pose.upAxis);
-  node["mode"].getValue(ANARI_INT32, &pose.mode);
+  rendering::CameraPose out = pose;
+  auto read = [&](const char *name, anari::DataType type, void *field) {
+    const auto *child = node.child(name);
+    return !child || child->getValue(type, field);
+  };
+  if (!read("name", ANARI_STRING, &out.name)
+      || !read("lookat", ANARI_FLOAT32_VEC3, &out.lookat)
+      || !read("azeldist", ANARI_FLOAT32_VEC3, &out.azeldist)
+      || !read("fixedDist", ANARI_FLOAT32, &out.fixedDist)
+      || !read("upAxis", ANARI_INT32, &out.upAxis)
+      || !read("mode", ANARI_INT32, &out.mode))
+    return false;
+  pose = std::move(out);
+  return true;
 }
 
 bool serialize_ApplicationDump(const Context &context, core::DataNode &root)
