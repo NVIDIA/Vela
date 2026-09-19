@@ -21,18 +21,21 @@ it. An inspect-only dump was rejected because a format nobody can load back
 is a debugging aid, not a representation, and would leave the binary form as
 the only thing an editor could not touch.
 
-The Text Encoding is deliberately *strictly richer* than the Binary Encoding
-rather than equivalent to it. Binary writes one record per leaf and so drops
-the value of any interior node (ADR 0026, ADR 0027); a nested syntax preserves
-those values for free, and crippling it to match would be a cost with no
-buyer. The consequence is that `binary -> text -> binary` round-trips
-byte-identically while `text -> binary -> text` may not, and the reference
-document says so. Anonymous Nodes appear as marked unnamed entries rather
-than by their synthesized `<n>` names, and names of that shape are rejected
-by the text reader so that a file cannot describe a node the binary reader
-would re-interpret. Array data is always inline text; dataset-scale trees are
-legal but not the target, and a sidecar or opaque-bulk extension can be added
-under the header's version without breaking any reader written today.
+The Text Encoding carries exactly what a Data Tree can hold, no more and no
+less than the Binary Encoding does; the alternative of letting the nested
+syntax express things the in-memory model cannot, such as an interior node
+that also holds a value, was tried and rejected. A `DataNode` is either a
+value or a container, and a reader that could build a node no other code
+path can would be a second data model hiding in a parser. Such an entry is
+accepted and its value dropped with a warning. The one asymmetry between the
+encodings is deliberate: Anonymous Nodes appear as marked unnamed entries
+rather than by their synthesized `<n>` names, names of that shape are rejected
+by the text reader, and the reader mints fresh names on load. So
+`binary -> text -> binary` is structurally but not byte identical, while
+`text -> binary -> text` is byte identical. Array data is always inline text;
+dataset-scale trees are legal but not the target, and a sidecar or
+opaque-bulk extension can be added under the header's version without
+breaking any reader written today.
 
 A required first line carries the encoding name and a version. The
 repository has paid once already for a format-adjacent change without one

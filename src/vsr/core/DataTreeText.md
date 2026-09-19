@@ -108,8 +108,10 @@ a newer file.
 
 A named entry is a name, optionally `=` and a value, optionally a block of
 children. An entry with a block and no value is an interior node; an entry
-with a value and no block is a leaf; an entry with both is an interior node
-that also holds a value (see [Fidelity](#fidelity)).
+with a value and no block is a leaf. An entry with both a value and a
+non-empty block is accepted, but the value is dropped with a warning that
+names the line and column: a Data Node holds a value or children, never both
+(see [Fidelity](#fidelity)). A writer never emits that shape.
 
 An Anonymous Node is written as an entry beginning with the `-` marker in
 place of the name. The reader mints a fresh anonymous name for it exactly as
@@ -262,24 +264,22 @@ Subtree Replacement Signal fires, and a warning names the line and column.
 
 ## Fidelity
 
-The Text Encoding is strictly richer than the Binary Encoding. The binary
-form writes one record per leaf and so drops the value of any interior node
-(ADR 0026, ADR 0027); the nested text syntax preserves it, spelled as an
-entry with both a value and a block. A value-less leaf is preserved by both.
+The Text Encoding carries exactly what the in-memory Data Tree can hold, and
+so does the Binary Encoding; neither is richer than the other. A `DataNode`
+is either a value or a container (`append()` clears a value, `setValue()`
+removes children), so a text entry with both a value and children is not a
+richer tree but a malformed one, and the reader drops the value with a
+warning. A value-less leaf is preserved by both encodings.
 
-The consequence is an asymmetry:
+The one asymmetry is the spelling of Anonymous Nodes. The binary record
+stores a node's synthesized `<n>` name literally, while text writes the `-`
+marker and the reader mints a fresh name. The consequences:
 
-- **binary -> text -> binary** loses nothing that the binary form carried.
-  The one thing that is not byte-identical is the spelling of Anonymous
-  Nodes: the binary record stores a node's synthesized `<n>` name literally,
-  while text writes the `-` marker and the reader mints a fresh name, so two
-  binary files that differ only in those synthesized names describe the same
-  tree.
-- **text -> binary -> text** may not be identical, because an interior node's
-  value does not survive the binary step.
-
-Note that `DataNode`'s public mutators keep a node either a value or a
-container: `append()` clears the value and `setValue()` removes the children.
-An interior node with a value can therefore only enter a tree from a text
-file; once there it behaves as an interior node everywhere, and its value is
-retained by the text writer and dropped by the binary writer.
+- **binary -> text -> binary** produces a binary that is *structurally*
+  identical to the original (same shape, names, anonymity, types and values,
+  with anonymous nodes matched by ordinal) but not necessarily
+  *byte*-identical, because the synthesized names may differ.
+- **text -> binary -> text** is byte-identical, since text never spells the
+  synthesized names.
+- **text -> text** (load then save) is byte-identical for a file in the
+  writer's canonical form.

@@ -878,9 +878,10 @@ struct DataTreeTextCodec::Parser
   int errorColumn() const;
 
  private:
-  // A value decoded ahead of the node it lands in: children are appended
-  // first, because DataNode::append() clears a value, and the value is then
-  // put in place directly so that an interior node keeps it.
+  // A value decoded ahead of the node it lands in. It is applied only once
+  // the entry's block, if any, has been read: a DataNode is either a value or
+  // a container, so a value that turns out to sit on an interior node is
+  // dropped with a warning rather than placed.
   struct PendingValue
   {
     bool present{false};
@@ -1096,6 +1097,22 @@ bool DataTreeTextCodec::Parser::parseEntry(DataNode &parent)
       return false;
     if (!parseEntries(*node, &openBrace))
       return false;
+  }
+
+  // The in-memory model keeps a node either a value or a container:
+  // append() clears a value and setValue() removes children. The Text
+  // Encoding is exactly as expressive and no more, so a value on an entry
+  // that also has children is dropped here, loudly, instead of building a
+  // node no other code path can (ADR 0039).
+  if (value.present && !node->isLeaf()) {
+    logWarning(
+        "[DataNode] Text Encoding line %d, column %d: '%s' has both a value "
+        "and children; a Data Node holds one or the other, so the value is "
+        "dropped",
+        nameToken.line,
+        nameToken.column,
+        anonymous ? "-" : name.c_str());
+    value.present = false;
   }
 
   apply(value, *node);
@@ -1408,9 +1425,9 @@ void DataTreeTextCodec::Parser::apply(PendingValue &value, DataNode &node)
   if (!value.present)
     return;
 
-  // Placed directly rather than through the setters: the setters clear the
-  // children just appended, and the Text Encoding preserves an interior
-  // node's value. Signals are collapsed by the caller either way.
+  // The node is a leaf by the time a value is applied (see parseEntry), so
+  // this is what the public setters would do minus their Signal, which the
+  // caller collapses into one Subtree Replacement anyway.
   if (value.isArray) {
     node.m_data.arrayType = value.type;
     node.m_data.arrayBytes = std::move(value.bytes);

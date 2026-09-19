@@ -1387,9 +1387,7 @@ keyed {
 }
 sequence {
   - = float32 0
-  - = float32 1 {
-    label = "first keyframe"
-  }
+  - = float32 1
   - {
     label = "no value"
   }
@@ -1402,7 +1400,7 @@ sequence {
   "a+b" = int32 4
   "spaced out" = int32 5
 }
-interior = int32 7 {
+interior {
   child = int32 8
 }
 valueless {}
@@ -1493,7 +1491,7 @@ keyed {
 }
 sequence {
   - = float32 0
-  - = float32 1 { label = "first keyframe" }
+  - = float32 1
   - { label = "no value" }
   - {}
 }
@@ -1504,7 +1502,7 @@ sequence {
   "a+b" = int32 4
   "spaced out" = int32 5
 }
-interior = int32 7 { child = int32 8 }
+interior { child = int32 8 }
 valueless {}
 # A trailing comment.
 )";
@@ -1776,17 +1774,18 @@ SCENARIO(
       REQUIRE(sequence.child(0)->path().str() == "/sequence/[0]");
       REQUIRE(sequence.child(0)->getValueAs<float>() == 0.f);
       REQUIRE(sequence.child(1)->getValueAs<float>() == 1.f);
-      REQUIRE((*sequence.child(1))["label"].getValueAs<std::string>()
-          == "first keyframe");
+      REQUIRE(sequence.child(1)->isLeaf());
       REQUIRE(sequence.child(2)->empty());
       REQUIRE(sequence.child(2)->numChildren() == 1);
+      REQUIRE((*sequence.child(2))["label"].getValueAs<std::string>()
+          == "no value");
       REQUIRE(sequence.child(3)->empty());
       REQUIRE(sequence.child(3)->isLeaf());
     }
 
-    THEN("An interior node keeps its value and a value-less leaf is empty")
+    THEN("An interior node is empty and a value-less leaf is empty")
     {
-      REQUIRE(root["interior"].getValueAs<int>() == 7);
+      REQUIRE(root["interior"].empty());
       REQUIRE(root["interior"]["child"].getValueAs<int>() == 8);
       REQUIRE(root["valueless"].empty());
       REQUIRE(root["valueless"].isLeaf());
@@ -1805,31 +1804,35 @@ SCENARIO(
   }
 }
 
-SCENARIO("The Text Encoding is strictly richer than binary", "[DataTree]")
+SCENARIO("The Text Encoding is exactly as expressive as the tree", "[DataTree]")
 {
-  GIVEN("An interior node with a value, which only text can describe")
+  GIVEN("An entry with both a value and children, which no tree can hold")
   {
     const std::string text =
         "vsr-text 1\ninterior = int32 7 {\n  child = int32 8\n}\n";
     vsr::core::DataTree tree;
     REQUIRE(tree.fromText(text));
 
-    THEN("Text preserves it")
+    THEN("The read succeeds, the value is dropped, and the child is kept")
     {
-      REQUIRE(tree.root()["interior"].getValueAs<int>() == 7);
+      REQUIRE(tree.root()["interior"].empty());
+      REQUIRE_FALSE(tree.root()["interior"].isLeaf());
       REQUIRE(tree.root()["interior"]["child"].getValueAs<int>() == 8);
-      REQUIRE(tree.toText() == text);
     }
 
-    THEN("Binary drops the interior value and keeps the child")
+    THEN("Re-saving spells it as a plain interior node")
+    {
+      REQUIRE(
+          tree.toText() == "vsr-text 1\ninterior {\n  child = int32 8\n}\n");
+    }
+
+    THEN("Text, binary, and text again agree")
     {
       std::vector<std::byte> binary;
       REQUIRE(tree.write(binary));
       vsr::core::DataTree viaBinary;
       REQUIRE(viaBinary.read(binary));
-      REQUIRE(viaBinary.root()["interior"].empty());
-      REQUIRE(viaBinary.root()["interior"]["child"].getValueAs<int>() == 8);
-      REQUIRE(viaBinary.toText() != text);
+      REQUIRE(viaBinary.toText() == tree.toText());
     }
   }
 
