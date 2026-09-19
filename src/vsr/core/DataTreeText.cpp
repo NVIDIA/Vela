@@ -6,6 +6,7 @@
 #include "vsr/core/Logging.hpp"
 // std
 #include <cerrno>
+#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -230,9 +231,11 @@ uint16_t floatToHalf(float f)
 // Literal formatting /////////////////////////////////////////////////////////
 
 // Floats use the shortest decimal that parses back to the same value, so 0.1
-// stays 0.1 and no precision is lost.
+// stays 0.1 and no precision is lost. std::to_chars picks between plain and
+// scientific spelling by length, so 60 is "60" and 1e30 is "1e+30"; a
+// precision search over %g would spell 60 as "6e+01".
 template <typename T>
-std::string formatFloating(T value, int maxPrecision, T (*parse)(const char *))
+std::string formatFloating(T value)
 {
   if (std::isnan(value))
     return "nan";
@@ -240,32 +243,18 @@ std::string formatFloating(T value, int maxPrecision, T (*parse)(const char *))
     return value < T(0) ? "-inf" : "inf";
 
   char buffer[64];
-  for (int precision = 1; precision <= maxPrecision; ++precision) {
-    std::snprintf(buffer, sizeof(buffer), "%.*g", precision, double(value));
-    if (parse(buffer) == value)
-      break;
-  }
-  return buffer;
-}
-
-float parseFloatFully(const char *text)
-{
-  return std::strtof(text, nullptr);
-}
-
-double parseDoubleFully(const char *text)
-{
-  return std::strtod(text, nullptr);
+  const auto result = std::to_chars(buffer, buffer + sizeof(buffer), value);
+  return std::string(buffer, result.ptr);
 }
 
 std::string formatFloat(float value)
 {
-  return formatFloating<float>(value, 9, parseFloatFully);
+  return formatFloating<float>(value);
 }
 
 std::string formatDouble(double value)
 {
-  return formatFloating<double>(value, 17, parseDoubleFully);
+  return formatFloating<double>(value);
 }
 
 template <typename T>

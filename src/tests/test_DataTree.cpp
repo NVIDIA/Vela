@@ -1318,6 +1318,7 @@ floats {
   half = float16 0.5
   single = float32 0.1
   negative = float32 -3.25
+  whole = float32 60
   huge = float32 1e+30
   tiny = float64 1e-300
   precise = float64 0.1
@@ -1431,6 +1432,7 @@ floats {
   half = float16 0.5
   single = float32 0.1
   negative = float32 -3.25
+  whole = float32 6e1            # plain spelling wins on re-save
   huge = float32 1E30            # any exponent spelling parses
   tiny = float64 1e-300
   precise = float64 0.10000000000000001

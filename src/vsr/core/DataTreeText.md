@@ -170,7 +170,9 @@ underlying integer storage, not the normalized real they represent:
 `ufixed8_vec4 255 128 0 255`.
 
 **Floats** (`float32`, `float64`) use the shortest decimal that parses back
-to the same value, so `0.1` stays `0.1` and no precision is lost. Not-a-number
+to the same value, so `0.1` stays `0.1` and no precision is lost; between a
+plain and an exponent spelling the shorter wins, so `60` is `60` and ten to
+the thirtieth is `1e+30`. Not-a-number
 and the infinities are the words `nan`, `inf`, and `-inf`. A reader accepts
 any decimal or exponent spelling the C library parses (`1e-3`, `2.5E+7`).
 
