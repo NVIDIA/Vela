@@ -9,6 +9,10 @@ project(vsrPrint)
 project_add_executable(vsrPrint.cpp)
 project_link_libraries(vsr_core)
 
+project(vsrConvert)
+project_add_executable(vsrConvert.cpp)
+project_link_libraries(vsr_core)
+
 project(vsrRender)
 project_add_executable(vsrRender.cpp)
 project_link_libraries(
