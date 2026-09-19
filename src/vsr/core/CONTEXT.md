@@ -38,6 +38,24 @@ its contents at any time, so a Data Tree cannot vouch for an External Array's
 value the way it can for the values it stores.
 _Avoid_: Borrowed array, unowned array, array view
 
+### Encodings
+
+**Binary Encoding**:
+The compact byte form of a Data Tree: one record per leaf, carrying the leaf's
+name, its Parent Path, and its value. It is the form every `.vsr` file and
+every embedded Archive has carried to date and the only form that travels on
+the wire. An interior node's own value is not part of it.
+_Avoid_: Binary format, raw buffer, blob
+
+**Text Encoding**:
+The human-readable and human-editable form of a Data Tree, a full peer of the
+Binary Encoding: either can stand in for the other as the carrier of a `.vsr`
+file. It is strictly richer, preserving an interior node's value and showing
+Anonymous Nodes as an unnamed sequence rather than by synthesized name. It
+may contain comments, which a writer never emits and a reader discards. See
+[ADR 0039](../../../docs/adr/0039-give-the-data-tree-a-text-encoding.md).
+_Avoid_: ASCII format, text dump, pretty print, JSON
+
 ### Addressing
 
 **Data Path**:
