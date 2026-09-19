@@ -61,6 +61,7 @@ boundary between its in-memory and serialized forms.
 | [0025](0025-address-anonymous-data-nodes-by-ordinal.md) | Address anonymous Data Nodes by ordinal, not by name | |
 | [0026](0026-keep-the-data-tree-file-format-unchanged.md) | Keep the Data Tree file format unchanged when introducing Data Paths | |
 | [0027](0027-serialize-a-data-node-as-the-tree-it-roots.md) | Serialize a Data Node as the tree it roots | Extends [0026](0026-keep-the-data-tree-file-format-unchanged.md) |
+| [0039](0039-give-the-data-tree-a-text-encoding.md) | Give the Data Tree a Text Encoding as a peer of the binary one | Extends [0026](0026-keep-the-data-tree-file-format-unchanged.md), [0027](0027-serialize-a-data-node-as-the-tree-it-roots.md) |
 
 See [`src/vsr/core/CONTEXT.md`](../../src/vsr/core/CONTEXT.md) for the
 resulting vocabulary.

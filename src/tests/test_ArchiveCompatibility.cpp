@@ -8,6 +8,7 @@
 #include "vsr/animation/AnimationManager.hpp"
 #include "vsr/core/DataTree.hpp"
 #include "vsr/core/DataTreeMetadata.hpp"
+#include "vsr/core/DataTreeText.hpp"
 #include "vsr/io/archives.hpp"
 #include "vsr/io/archives/detail/ArchivePlan.hpp"
 #include "vsr/io/serialization/serialization_internal.hpp"
@@ -15,6 +16,7 @@
 #include "vsr/scene/objects/Geometry.hpp"
 // std
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -56,6 +58,88 @@ vsr::io::SubtreeArchiveResult loadSubtreeArchiveContent(
     return {};
   return vsr::io::deserialize_SubtreeArchiveContent(
       scene, tree.root(), destination, desc, displayName, options);
+}
+
+// True when two trees describe the same Data Tree: same names, values,
+// arrays, and children in order. Anonymous Nodes are matched positionally,
+// by their anonymity rather than by the '<n>' names some process minted.
+bool sameTree(const vsr::core::DataNode &a, const vsr::core::DataNode &b)
+{
+  const bool aAnonymous = vsr::core::isDelimitedNumber(a.name(),
+      vsr::core::ANONYMOUS_NAME_OPEN,
+      vsr::core::ANONYMOUS_NAME_CLOSE);
+  const bool bAnonymous = vsr::core::isDelimitedNumber(b.name(),
+      vsr::core::ANONYMOUS_NAME_OPEN,
+      vsr::core::ANONYMOUS_NAME_CLOSE);
+  if (aAnonymous != bAnonymous || (!aAnonymous && a.name() != b.name()))
+    return false;
+
+  if (a.holdsArray() != b.holdsArray())
+    return false;
+  if (a.holdsArray()) {
+    anari::DataType aType = ANARI_UNKNOWN;
+    anari::DataType bType = ANARI_UNKNOWN;
+    const void *aData = nullptr;
+    const void *bData = nullptr;
+    size_t aSize = 0;
+    size_t bSize = 0;
+    a.getValueAsArray(&aType, &aData, &aSize);
+    b.getValueAsArray(&bType, &bData, &bSize);
+    if (aType != bType || aSize != bSize)
+      return false;
+    if (aSize != 0
+        && std::memcmp(aData, bData, aSize * anari::sizeOf(aType)) != 0)
+      return false;
+  } else if (a.getValue().valid() != b.getValue().valid()
+      || (a.getValue().valid() && a.getValue() != b.getValue())) {
+    return false;
+  }
+
+  if (a.numChildren() != b.numChildren())
+    return false;
+  for (size_t i = 0; i < a.numChildren(); ++i) {
+    if (!sameTree(*a.child(i), *b.child(i)))
+      return false;
+  }
+  return true;
+}
+
+// Every archive kind must survive binary -> text -> binary with nothing lost.
+// The two binary buffers are not compared byte for byte: the binary record
+// stores each Anonymous Node's synthesized '<n>' name literally, and the text
+// reader mints fresh ones, so the bytes differ in exactly those names and
+// nothing else. The trees they decode to, and their Text Encodings, must be
+// identical.
+void requireTextEncodingCarries(const vsr::core::DataTree &tree)
+{
+  std::vector<std::byte> binary;
+  REQUIRE(tree.write(binary));
+
+  const std::string text = tree.toText();
+  REQUIRE(vsr::core::isDataTreeText(text));
+
+  vsr::core::DataTree viaText;
+  REQUIRE(viaText.fromText(text));
+
+  std::vector<std::byte> binaryAgain;
+  REQUIRE(viaText.write(binaryAgain));
+  REQUIRE_FALSE(vsr::core::isDataTreeText(std::string_view(
+      reinterpret_cast<const char *>(binaryAgain.data()), binaryAgain.size())));
+
+  vsr::core::DataTree original;
+  REQUIRE(original.read(binary));
+  vsr::core::DataTree roundTripped;
+  REQUIRE(roundTripped.read(binaryAgain));
+
+  REQUIRE(sameTree(original.root(), roundTripped.root()));
+  REQUIRE(roundTripped.toText() == text);
+}
+
+void requireTextEncodingCarriesFile(const std::string &filename)
+{
+  vsr::core::DataTree tree;
+  REQUIRE(tree.load(filename.c_str()));
+  requireTextEncodingCarries(tree);
 }
 
 vsr::scene::ArrayRef makeFloatArray(vsr::scene::Scene &scene,
@@ -130,6 +214,11 @@ SCENARIO("vsr::io camera and renderer subset serialization",
     WHEN("only cameras and renderers are saved")
     {
       vsr::io::detail::serializeLegacyCameraRendererPayload(source, root);
+
+      THEN("the Text Encoding carries it")
+      {
+        requireTextEncodingCarries(tree);
+      }
 
       THEN("the output is tagged as a camera and renderer subset")
       {
@@ -245,6 +334,11 @@ SCENARIO("vsr::io scene payload metadata validation", "[ArchiveCompatibility]")
     {
       vsr::core::DataTree tree;
       REQUIRE(vsr::io::serialize_SceneArchive(source, tree.root()));
+
+      THEN("the Text Encoding carries it")
+      {
+        requireTextEncodingCarries(tree);
+      }
 
       THEN("the output is tagged as a full scene")
       {
@@ -385,6 +479,11 @@ SCENARIO("vsr::io surface object serialization", "[ArchiveCompatibility]")
       vsr::core::DataTree savedTree;
       REQUIRE(savedTree.load(filename.c_str()));
 
+      THEN("the Text Encoding carries it")
+      {
+        requireTextEncodingCarries(savedTree);
+      }
+
       THEN("the payload is tagged as a surface object with local root index 0")
       {
         auto metadata = vsr::core::readDataTreeMetadata(savedTree.root());
@@ -522,6 +621,7 @@ SCENARIO("vsr::io volume object serialization", "[ArchiveCompatibility]")
       vsr::core::DataTree savedTree;
       REQUIRE(savedTree.load(filename.c_str()));
       REQUIRE(vsr::io::validate_ObjectArchive(savedTree.root()).accepted());
+      requireTextEncodingCarries(savedTree);
 
       vsr::scene::Scene target;
       target.createObject<vsr::scene::SpatialField>(
@@ -781,6 +881,11 @@ SCENARIO("vsr::io layer subtree serialization", "[ArchiveCompatibility]")
       vsr::core::DataTree savedTree;
       REQUIRE(savedTree.load(filename.c_str()));
 
+      THEN("the Text Encoding carries it")
+      {
+        requireTextEncodingCarries(savedTree);
+      }
+
       THEN(
           "the payload is tagged as a layer subtree with an objectDB and subtree")
       {
@@ -954,6 +1059,7 @@ SCENARIO(
   vsr::core::DataTree saved;
   REQUIRE(saved.load(filename.c_str()));
   auto *serializedAnimation = saved.root()["animations"].child(0);
+  requireTextEncodingCarries(saved);
   REQUIRE(serializedAnimation);
   auto *serializedMaterialBinding =
       (*serializedAnimation)["objectBindings"].child(1);
@@ -1137,10 +1243,16 @@ SCENARIO("vsr::io accepts USD file bindings written before continuous time",
     binding["timeBase"].append() = 0.f;
     binding["timeBase"].append() = 1.f;
 
+    THEN("The Text Encoding carries it")
+    {
+      requireTextEncodingCarries(tree);
+    }
+
     THEN("It still validates against the scene")
     {
       std::string message;
-      REQUIRE(vsr::io::validate_AnimationArchive(animations, archive, &message));
+      REQUIRE(
+          vsr::io::validate_AnimationArchive(animations, archive, &message));
     }
 
     THEN("It deserializes, dropping the fields rather than failing on them")
@@ -1178,10 +1290,16 @@ SCENARIO("vsr::io accepts USD file bindings written before continuous time",
     binding["primPath"] = std::string("/Swarm");
     binding["prototypeIndex"] = uint64_t(0);
 
+    THEN("The Text Encoding carries it")
+    {
+      requireTextEncodingCarries(tree);
+    }
+
     THEN("The kind is a recognized part of the format")
     {
       std::string message;
-      REQUIRE(vsr::io::validate_AnimationArchive(animations, archive, &message));
+      REQUIRE(
+          vsr::io::validate_AnimationArchive(animations, archive, &message));
     }
   }
 }
@@ -1221,6 +1339,7 @@ SCENARIO("vsr::io scene exclusion rejects mixed animation ownership",
   REQUIRE(sawFirst);
   REQUIRE(sawSecond);
   REQUIRE(tree.root()["animations"]["objects"].numChildren() == 1);
+  requireTextEncodingCarries(tree);
 }
 
 SCENARIO("subtree Archive deserialization exposes exact rollback ownership",
@@ -1338,6 +1457,7 @@ SCENARIO("vsr::io validates layer subtree animation targets",
   vsr::core::DataTree tree;
   REQUIRE(tree.load(filename.c_str()));
   auto *animation = tree.root()["animations"].child(0);
+  requireTextEncodingCarries(tree);
   REQUIRE(animation);
   auto *binding = (*animation)["objectBindings"].child(0);
   REQUIRE(binding);
@@ -1392,6 +1512,7 @@ SCENARIO("legacy project payloads exclude light-rig subtrees",
         auto *objectDB = tree.root().child("objectDB");
         REQUIRE(objectDB);
         REQUIRE(objectDB->child("light") == nullptr);
+        requireTextEncodingCarries(tree);
 
         auto *rigsNode =
             tree.root()["layers"].child("studio")->child("children");
@@ -1546,6 +1667,7 @@ SCENARIO("legacy project payloads remap animations across exclusion",
       {
         REQUIRE(target.numberOfObjects(ANARI_LIGHT) == 0);
         REQUIRE(target.numberOfObjects(ANARI_ARRAY) == 1); // lightOnly dropped
+        requireTextEncodingCarries(tree);
         REQUIRE(targetMgr.animations().size() == 1);
 
         auto &loaded = targetMgr.animations().front();
@@ -1622,6 +1744,7 @@ SCENARIO("vsr::io scene exclusion preserves retained animation dependencies",
   vsr::animation::AnimationManager targetAnimations(&target);
   vsr::io::detail::tryDeserializeLegacyScenePayload(
       target, tree.root(), nullptr, &targetAnimations);
+  requireTextEncodingCarries(tree);
 
   REQUIRE(target.numberOfObjects(ANARI_SURFACE) == 1);
   REQUIRE(target.numberOfObjects(ANARI_MATERIAL) == 3);
