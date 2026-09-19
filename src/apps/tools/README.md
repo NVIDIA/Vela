@@ -8,7 +8,7 @@ headless rendering, and scripting.
 | Tool | Purpose | Usage |
 | --- | --- | --- |
 | `obj2header` | Convert a Wavefront OBJ mesh into a generated C/C++ header with packed vertex arrays. | `./obj2header <file.obj> <outfile.h>` |
-| `vsrPrint` | Load a serialized `.vsr` file and print its `DataTree` contents. | `./vsrPrint <file.vsr>` |
+| `vsrPrint` | Print a `.vsr` file as the Data Tree Text Encoding, or convert it between the Binary and Text Encodings. | `./vsrPrint <file.vsr> [output.vsr]` |
 | `vsrRender` | Offline render from a saved `.vsr` state file (including render settings and camera/animation data). | `./vsrRender <state_file.vsr>` |
 | `vsrOffline` | Headless renderer with direct CLI control over imports, camera, lights, renderer, and output. | `./vsrOffline [options]` |
 | `vsrVolumeToNanoVDB` | Convert supported structured volume files to NanoVDB (`.vdb`) with optional quantization settings. | `./vsrVolumeToNanoVDB [options] <input_volume> <output.vdb>` |
@@ -32,12 +32,18 @@ Usage:
 
 ## `vsrPrint`
 
-Loads a `.vsr` file into `vsr::core::DataTree` and prints the tree structure.
+Loads a `.vsr` file into `vsr::core::DataTree`, in whichever encoding it is
+in, and prints it as the Text Encoding (see
+[`src/vsr/core/DataTreeText.md`](../../vsr/core/DataTreeText.md)). With an
+output path it becomes a two-way converter: a binary input is saved as text,
+a text input is saved as binary. Both encodings use the `.vsr` extension.
 
 Usage:
 
 ```bash
-./vsrPrint scene.vsr
+./vsrPrint scene.vsr                    # print as text
+./vsrPrint cameras.vsr cameras_text.vsr # binary -> text, ready to edit
+./vsrPrint cameras_text.vsr cameras.vsr # text -> binary
 ```
 
 ## `vsrRender`

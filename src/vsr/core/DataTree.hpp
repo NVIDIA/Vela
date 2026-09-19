@@ -351,9 +351,9 @@ struct DataTree
   std::string toText() const;
   bool fromText(std::string_view text);
 
-  // Visual inspection //
+  // Visual inspection: the Text Encoding, written to stdout //
 
-  void print();
+  void print() const;
 
   VSR_NOT_MOVEABLE(DataTree)
   VSR_NOT_COPYABLE(DataTree)
@@ -1487,55 +1487,12 @@ inline bool DataTree::fromText(std::string_view text)
   return root().fromText(text);
 }
 
-inline void DataTree::print()
+inline void DataTree::print() const
 {
-  traverse([](vsr::core::DataNode &node, int level) {
-    if (level == 0)
-      return true;
-
-    for (int i = 1; i < level; i++)
-      printf("    ");
-
-    if (!node.isLeaf())
-      printf("%s:\n", node.name().c_str());
-    else {
-      printf("%s: ", node.name().c_str());
-
-      if (node.holdsObjectIdx()) {
-        anari::DataType type = ANARI_UNKNOWN;
-        size_t index = 0;
-        node.getValueAsObjectIdx(&type, &index);
-        printf("%s @%zu", anari::toString(type), index);
-      } else if (node.holdsArray()) {
-        anari::DataType type = ANARI_UNKNOWN;
-        const void *data = nullptr;
-        size_t size = 0;
-        node.getValueAsArray(&type, &data, &size);
-        printf("%s[%zu]", anari::toString(type), size);
-      } else {
-        auto &value = node.getValue();
-        printf("%s", anari::toString(value.type()));
-        if (value.is(ANARI_STRING))
-          printf(" | \"%s\"", value.getCStr());
-        else if (value.is<bool>())
-          printf(" | %s", value.get<bool>() ? "true" : "false");
-        else if (value.is<int>())
-          printf(" | %d", value.get<int>());
-        else if (value.is<uint32_t>())
-          printf(" | %d", value.get<uint32_t>());
-        else if (value.is<float>())
-          printf(" | %f", value.get<float>());
-        else if (value.is<double>())
-          printf(" | %f", value.get<double>());
-      }
-
-      printf("\n");
-    }
-
-    return true;
-  });
-
-  printf("\n");
+  // One human-facing representation, not two: the debug print is the Text
+  // Encoding itself, so what is printed is what could be saved and loaded.
+  const std::string text = toText();
+  std::fwrite(text.data(), sizeof(char), text.size(), stdout);
 }
 
 // DataTreeUpdateBatch //
