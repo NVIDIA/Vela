@@ -12,7 +12,11 @@ components.
 - `DataTree` and `DataNode` provide hierarchical typed data serialization to
   file or memory buffers. Any node serializes as the tree it roots, so a
   subtree saves and loads exactly as a whole tree does; `DataTree`'s own
-  `save`/`load`/`write`/`read` forward to its root node.
+  `save`/`load`/`write`/`read` forward to its root node. A tree has two peer
+  encodings: the compact Binary Encoding, which writers use by default, and
+  the human-editable Text Encoding (`Encoding::Text`, `toText()`,
+  `fromText()`), which readers detect automatically. The text grammar and
+  every literal rule are specified in [DataTreeText.md](DataTreeText.md).
 - `DataPath` addresses a `DataNode` within its tree, naming named children and
   numbering anonymous ones; `DataTreeObserver` receives a signal per semantic
   edit made to a tree, including one `signalSubtreeReplaced()` per subtree
