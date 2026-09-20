@@ -248,7 +248,7 @@ bool saveCameraRigArchiveFile(
   root["name"] = rig.name;
   cameraRigToNode(rig, root["rig"]);
 
-  if (!tree.save(file.string().c_str())) {
+  if (!tree.save(file.string().c_str(), PROJECT_FILE_ENCODING)) {
     if (error)
       *error = "failed to write Camera Rig Archive";
     return false;

@@ -109,7 +109,7 @@ bool copyDatasetArchiveFile(const std::filesystem::path &source,
   archive.root()["dataset"]["name"] = targetName;
   archive.root()["displayName"] = targetName;
   archive.root()["subtree"]["name"] = targetName;
-  if (!archive.save(target.string().c_str()))
+  if (!archive.save(target.string().c_str(), DATASET_ARCHIVE_ENCODING))
     return fail("failed to rename copied Dataset Archive", error);
   return true;
 }
@@ -136,7 +136,8 @@ vsr::scene::LayerNodeRef resolveProjectAssetRoot(const vsr::scene::Scene &scene,
   return resolveNode(scene, fallback);
 }
 
-using PoolArchiveSaver = bool (*)(const vsr::scene::Scene &, const char *);
+using PoolArchiveSaver = bool (*)(
+    const vsr::scene::Scene &, const char *, vsr::core::Encoding);
 using PoolArchiveValidator = vsr::io::ArchiveValidationResult (*)(
     vsr::core::DataNode &);
 
@@ -156,7 +157,7 @@ ProjectAssetWrite makePoolArchiveWrite(const vsr::scene::Scene &scene,
   write.writer = [&scene, saveArchive, description](
                      const std::filesystem::path &file,
                      std::string *writeError) {
-    if (saveArchive(scene, file.string().c_str()))
+    if (saveArchive(scene, file.string().c_str(), PROJECT_FILE_ENCODING))
       return true;
     return fail(std::string("failed to save ") + description, writeError);
   };
@@ -588,7 +589,7 @@ bool buildProjectSavePlan(const ProjectSaveRequest &request,
     plan.manifest.ownedTarget = PROJECT_MANIFEST_FILENAME;
   plan.manifest.writer = [manifestTree](const std::filesystem::path &file,
                              std::string *writeError) {
-    if (manifestTree->save(file.string().c_str()))
+    if (manifestTree->save(file.string().c_str(), PROJECT_FILE_ENCODING))
       return true;
     return fail("failed to serialize project manifest", writeError);
   };

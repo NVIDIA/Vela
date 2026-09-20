@@ -5,6 +5,8 @@
 
 // vsr_io
 #include "vsr/io/archives/ArchiveValidation.hpp"
+// vsr_core
+#include "vsr/core/DataTree.hpp"
 
 namespace vsr::core {
 struct DataNode;
@@ -22,7 +24,9 @@ ArchiveValidationResult validate_CameraArchive(core::DataNode &archive);
 bool deserialize_CameraArchive(scene::Scene &scene,
     core::DataNode &archive,
     ArchiveValidationResult *validation = nullptr);
-bool save_CameraArchive(const scene::Scene &scene, const char *filename);
+bool save_CameraArchive(const scene::Scene &scene,
+    const char *filename,
+    core::Encoding encoding = core::Encoding::Binary);
 bool load_CameraArchive(scene::Scene &scene,
     const char *filename,
     ArchiveValidationResult *validation = nullptr);

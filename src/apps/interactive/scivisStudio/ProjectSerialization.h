@@ -27,6 +27,16 @@ constexpr int DECOMPOSED_SCENE_SCHEMA_VERSION = 6;
 constexpr int SCHEMA_VERSION = 8;
 constexpr const char *PROJECT_MANIFEST_FILENAME = "project.vsr";
 
+// Every project-owned file a person might want to read or hand-edit -- the
+// manifest, the scene pool Archives, and Camera and Light Rig Archives -- is
+// written in the Data Tree Text Encoding (ADR 0039). Dataset Archives are the
+// exception: they carry bulk geometry and volume arrays, so they stay in the
+// Binary Encoding. Readers detect either, so a project directory may hold a
+// mix and legacy binary files keep opening.
+constexpr vsr::core::Encoding PROJECT_FILE_ENCODING = vsr::core::Encoding::Text;
+constexpr vsr::core::Encoding DATASET_ARCHIVE_ENCODING =
+    vsr::core::Encoding::Binary;
+
 // Projects written before the TSD -> VSR rename spell every Archive with a
 // ".tsd" extension and a "project.tsd" manifest. Reads accept either spelling
 // so an untouched legacy project directory still opens; saving always emits
