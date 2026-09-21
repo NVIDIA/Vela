@@ -8,9 +8,12 @@
 #include "vsr/core/DataTree.hpp"
 #include "vsr/core/DataTreeMetadata.hpp"
 #include "vsr/core/DataTreeObserver.hpp"
+#include "vsr/core/DataTreeText.hpp"
 #include "vsr/core/Logging.hpp"
 // std
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -1246,6 +1249,870 @@ SCENARIO(
     THEN("the remaining count is unknown rather than a sentinel")
     {
       REQUIRE_FALSE(reader.bytesRemaining().has_value());
+    }
+  }
+}
+
+// Text Encoding ///////////////////////////////////////////////////////////////
+
+namespace {
+
+std::string_view asText(const std::vector<std::byte> &buffer)
+{
+  return std::string_view(
+      reinterpret_cast<const char *>(buffer.data()), buffer.size());
+}
+
+// Warnings the Text Encoding reader logs while the recorder is alive.
+struct WarningRecorder
+{
+  WarningRecorder()
+  {
+    vsr::core::setLoggingCallback(
+        [this](vsr::core::LogLevel level, std::string message) {
+          if (level == vsr::core::WARNING)
+            warnings.push_back(std::move(message));
+        });
+  }
+  ~WarningRecorder()
+  {
+    vsr::core::setNoLogging();
+  }
+
+  bool namesLineAndColumn() const
+  {
+    return warnings.size() == 1
+        && warnings[0].find("line ") != std::string::npos
+        && warnings[0].find("column ") != std::string::npos;
+  }
+
+  std::vector<std::string> warnings;
+};
+
+// The hand-written sample: every type category and grammar corner, in the
+// writer's canonical form, so that loading and re-saving it is byte-identical.
+constexpr const char *TEXT_SAMPLE = R"(vsr-text 1
+flags {
+  enabled = true
+  hidden = false
+}
+integers {
+  i8 = int8 -128
+  u8 = uint8 255
+  i16 = int16 -32768
+  u16 = uint16 65535
+  i32 = int32 -2147483648
+  u32 = uint32 4294967295
+  i64 = int64 -9223372036854775808
+  u64 = uint64 18446744073709551615
+  kind = data_type 1068
+}
+fixed {
+  f8 = fixed8 -127
+  uf8 = ufixed8 200
+  rgba = ufixed8_rgba_srgb 255 128 64 255
+  f16 = fixed16_vec2 -32000 32000
+  uf32 = ufixed32 4000000000
+}
+floats {
+  half = float16 0.5
+  single = float32 0.1
+  negative = float32 -3.25
+  whole = float32 60
+  huge = float32 1e+30
+  tiny = float64 1e-300
+  precise = float64 0.1
+  notANumber = float32 nan
+  infinite = float64 inf
+  negInfinite = float32 -inf
+}
+vectors {
+  position = float32_vec3 0 1.5 -4
+  color = float32_vec4 1 0.5 0.25 1
+  size = int32_vec2 1920 1080
+  bounds = float32_box3 -1 -1 -1 1 1 1
+  region = uint64_region2 0 0 10 10
+  rotation = float32_quat_ijkw 0 0 0 1
+}
+matrices {
+  transform = float32_mat4 1 0 0 0 0 1 0 0 0 0 1 0 5 6 7 1
+  small = float32_mat2x3 1 2 3 4 5 6
+}
+strings {
+  plain = "hello"
+  escaped = "quote \" backslash \\ newline \n tab \t bell \x07"
+  utf8 = "grüße"
+  empty = ""
+}
+references {
+  geometry = geometry@12
+  material = material@0
+  array = array1d@3
+}
+arrays {
+  bools = bool[] [
+    true false true
+  ]
+  bytes = uint8[] [
+    0 1 2 3 4 5 6 7
+    8 9
+  ]
+  halves = float16[] [
+    0.5 1 1.5
+  ]
+  floats = float32[] [
+    0.25 0.5 0.75
+  ]
+  doubles = float64[] [
+    0.1 0.2
+  ]
+  bigInts = int64[] [
+    -1 9223372036854775807
+  ]
+  positions = float32_vec3[] [
+    0 0 0
+    1 0 0
+    0 1 0
+  ]
+  transforms = float32_mat4[] [
+    1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1
+  ]
+  references = geometry[] [
+    geometry@1 geometry@2
+  ]
+  empty = float32[] []
+}
+keyed {
+  1 = int32 1
+  2 = int32 2
+}
+sequence {
+  - = float32 0
+  - = float32 1
+  - {
+    label = "no value"
+  }
+  - {}
+}
+"needs quoting" {
+  "tab\tname" = int32 1
+  "quote\"name" = int32 2
+  "-" = int32 3
+  "a+b" = int32 4
+  "spaced out" = int32 5
+}
+interior {
+  child = int32 8
+}
+valueless {}
+)";
+
+// The same tree spelled the way a person might: comments everywhere they are
+// legal, free whitespace, and the explicit forms of the two omissible types.
+constexpr const char *TEXT_SAMPLE_COMMENTED = R"(vsr-text 1   # header comment
+# A leading comment line.
+
+flags {   # trailing comment on a block
+  enabled = bool true   # explicit bool type
+  hidden = false
+}
+integers { i8 = int8 -128 u8 = uint8 255 i16 = int16 -32768
+  u16 = uint16 65535 i32 = int32 -2147483648 u32 = uint32 4294967295
+  i64 = int64 -9223372036854775808 u64 = uint64 18446744073709551615
+  kind = data_type 1068 }
+fixed {
+  f8 = fixed8 -127
+  uf8 = ufixed8 200
+  rgba = ufixed8_rgba_srgb 255 128 64 255
+  f16 = fixed16_vec2 -32000
+                     32000       # components may span lines
+  uf32 = ufixed32 4000000000
+}
+floats {
+  half = float16 0.5
+  single = float32 0.1
+  negative = float32 -3.25
+  whole = float32 6e1            # plain spelling wins on re-save
+  huge = float32 1E30            # any exponent spelling parses
+  tiny = float64 1e-300
+  precise = float64 0.10000000000000001
+  notANumber = float32 nan
+  infinite = float64 inf
+  negInfinite = float32 -inf
+}
+vectors {
+  position = float32_vec3 0 1.5 -4
+  color = float32_vec4 1 0.5 0.25 1
+  size = int32_vec2 1920 1080
+  bounds = float32_box3 -1 -1 -1 1 1 1
+  region = uint64_region2 0 0 10 10
+  rotation = float32_quat_ijkw 0 0 0 1
+}
+matrices {
+  transform = float32_mat4
+    1 0 0 0
+    0 1 0 0
+    0 0 1 0
+    5 6 7 1
+  small = float32_mat2x3 1 2 3 4 5 6
+}
+strings {
+  plain = string "hello"        # explicit string type
+  escaped = "quote \" backslash \\ newline \n tab \t bell \x07"
+  utf8 = "grüße"
+  empty = ""
+}
+references {
+  geometry = geometry @ 12      # whitespace around '@' is insignificant
+  material = material@0
+  array = array1d@3
+}
+arrays {
+  bools = bool[] [ true false true ]
+  bytes = uint8[] [ 0 1 2 3 4 5 6 7 8 9 ]
+  halves = float16[] [ 0.5 1 1.5 ]
+  floats = float32 [] [ 0.25 0.5 0.75 ]
+  doubles = float64[] [ 0.1 0.2 ]
+  bigInts = int64[] [ -1 9223372036854775807 ]
+  positions = float32_vec3[] [
+    0 0 0   # origin
+    1 0 0   # x
+    0 1 0   # y
+  ]
+  transforms = float32_mat4[] [ 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 ]
+  references = geometry[] [
+    geometry@1
+    geometry@2
+  ]
+  empty = float32[] [
+  ]
+}
+keyed {
+  1 = int32 1
+  2 = int32 2
+}
+sequence {
+  - = float32 0
+  - = float32 1
+  - { label = "no value" }
+  - {}
+}
+"needs quoting" {
+  "tab\tname" = int32 1
+  "quote\"name" = int32 2
+  "-" = int32 3
+  "a+b" = int32 4
+  "spaced out" = int32 5
+}
+interior { child = int32 8 }
+valueless {}
+# A trailing comment.
+)";
+
+} // namespace
+
+SCENARIO("DataTree values round trip through the Text Encoding", "[DataTree]")
+{
+  vsr::core::DataTree source;
+  source.root()["settings"]["sampleCount"] = 16;
+  const float weights[] = {0.25f, 0.5f, 0.75f};
+  source.root()["weights"].setValueAsArray(weights, 3);
+
+  WHEN("The tree is written as text")
+  {
+    std::vector<std::byte> buffer;
+    REQUIRE(source.write(buffer, vsr::core::Encoding::Text));
+
+    THEN("The buffer begins with the header and is the string form")
+    {
+      REQUIRE(vsr::core::isDataTreeText(asText(buffer)));
+      REQUIRE(asText(buffer) == source.toText());
+      REQUIRE(source.toText().rfind("vsr-text 1\n", 0) == 0);
+      REQUIRE(source.toText().back() == '\n');
+    }
+
+    THEN("Reading it back needs no encoding argument")
+    {
+      vsr::core::DataTree destination;
+      REQUIRE(destination.read(buffer));
+      REQUIRE(destination.root()["settings"]["sampleCount"].getValueAs<int>()
+          == 16);
+
+      const float *roundTripWeights = nullptr;
+      size_t numWeights = 0;
+      const auto *weightsNode = destination.root().child("weights");
+      REQUIRE(weightsNode != nullptr);
+      weightsNode->getValueAsArray(&roundTripWeights, &numWeights);
+      REQUIRE(numWeights == 3);
+      REQUIRE(std::equal(weights, weights + numWeights, roundTripWeights));
+    }
+
+    THEN("The default encoding is still binary")
+    {
+      std::vector<std::byte> binary;
+      REQUIRE(source.write(binary));
+      REQUIRE_FALSE(vsr::core::isDataTreeText(asText(binary)));
+      REQUIRE(binary != buffer);
+    }
+  }
+
+  WHEN("The string conveniences are used")
+  {
+    vsr::core::DataTree destination;
+    REQUIRE(destination.fromText(source.toText()));
+
+    THEN("The trees agree, and re-saving is byte-identical")
+    {
+      REQUIRE(destination.root()["settings"]["sampleCount"].getValueAs<int>()
+          == 16);
+      REQUIRE(destination.toText() == source.toText());
+    }
+  }
+}
+
+SCENARIO("Reading text into a DataNode replaces what it held", "[DataTree]")
+{
+  GIVEN("A text subtree and a node that already has contents")
+  {
+    vsr::core::DataTree source;
+    source.root()["fromFile"] = 1;
+    const std::string text = source.toText();
+
+    vsr::core::DataTree destination;
+    destination.root()["target"]["keep"] = 2;
+    destination.root()["target"]["alsoKeep"] = 3;
+
+    WHEN("The text is read into that node")
+    {
+      REQUIRE(destination.root()["target"].fromText(text));
+
+      THEN("What the node held is gone, not merged with")
+      {
+        REQUIRE(destination.root()["target"].child("keep") == nullptr);
+        REQUIRE(destination.root()["target"].child("alsoKeep") == nullptr);
+        REQUIRE(
+            destination.root()["target"]["fromFile"].getValueAs<int>() == 1);
+        REQUIRE(destination.root()["target"].numChildren() == 1);
+      }
+    }
+  }
+
+  GIVEN("A node holding a value rather than children")
+  {
+    vsr::core::DataTree source;
+    source.root()["fromFile"] = 1;
+
+    vsr::core::DataTree destination;
+    destination.root()["target"] = 99;
+
+    WHEN("Text is read into it")
+    {
+      REQUIRE(destination.root()["target"].fromText(source.toText()));
+
+      THEN("Its value is gone too: the node holds exactly what was read")
+      {
+        REQUIRE(destination.root()["target"].empty());
+        REQUIRE(
+            destination.root()["target"]["fromFile"].getValueAs<int>() == 1);
+      }
+    }
+  }
+}
+
+SCENARIO("A failed text read leaves the node empty", "[DataTree]")
+{
+  GIVEN("Malformed text and a populated node")
+  {
+    const std::string text = "vsr-text 1\nvalues {\n  a = int32 1\n";
+
+    vsr::core::DataTree destination;
+    destination.root()["target"]["keep"] = 1;
+
+    WHEN("The text is read into the node")
+    {
+      WarningRecorder recorder;
+      const bool ok = destination.root()["target"].fromText(text);
+
+      THEN("The read reports failure, naming the line and column")
+      {
+        REQUIRE_FALSE(ok);
+        REQUIRE(recorder.namesLineAndColumn());
+      }
+
+      THEN("No half-built subtree is left behind")
+      {
+        REQUIRE(destination.root()["target"].numChildren() == 0);
+        REQUIRE(destination.root()["target"].empty());
+      }
+    }
+
+    WHEN("An observed node fails to read")
+    {
+      RecordingObserver observer;
+      destination.setObserver(&observer);
+
+      REQUIRE_FALSE(destination.root()["target"].fromText(text));
+
+      THEN("One subtree-replaced signal still arrives: the node did change")
+      {
+        REQUIRE(observer.signals.size() == 1);
+        REQUIRE(observer.signals[0].kind == RecordedSignal::SubtreeReplaced);
+        REQUIRE(observer.signals[0].path == "/target");
+      }
+    }
+  }
+}
+
+SCENARIO(
+    "vsr::core::DataTree collapses a text read to one signal", "[DataTree]")
+{
+  GIVEN("The text of a tree of many nodes")
+  {
+    vsr::core::DataTree source;
+    for (int i = 0; i < 32; i++)
+      source.root()["values"][std::to_string(i)] = i;
+
+    std::vector<std::byte> buffer;
+    REQUIRE(source.write(buffer, vsr::core::Encoding::Text));
+
+    WHEN("It is read into an observed tree")
+    {
+      vsr::core::DataTree destination;
+      RecordingObserver observer;
+      destination.setObserver(&observer);
+
+      REQUIRE(destination.read(buffer));
+
+      THEN("Only the subtree-replaced signal arrives, naming the root")
+      {
+        REQUIRE(observer.signals.size() == 1);
+        REQUIRE(observer.signals[0].kind == RecordedSignal::SubtreeReplaced);
+        REQUIRE(vsr::core::DataPath(observer.signals[0].path).isRoot());
+      }
+
+      THEN("The tree really was populated")
+      {
+        REQUIRE(destination.root()["values"].numChildren() == 32);
+        REQUIRE(destination.root()["values"]["7"].getValueAs<int>() == 7);
+      }
+    }
+  }
+}
+
+SCENARIO(
+    "The Text Encoding sample is an executable specification", "[DataTree]")
+{
+  GIVEN("The hand-written sample in canonical form")
+  {
+    vsr::core::DataTree tree;
+    REQUIRE(tree.fromText(TEXT_SAMPLE));
+    auto &root = tree.root();
+
+    THEN("Re-saving it is byte-identical")
+    {
+      REQUIRE(tree.toText() == TEXT_SAMPLE);
+    }
+
+    THEN("Every literal decoded to the value it spells")
+    {
+      REQUIRE(root["flags"]["enabled"].getValueAs<bool>() == true);
+      REQUIRE(root["flags"]["hidden"].getValueAs<bool>() == false);
+      REQUIRE(root["integers"]["i8"].getValueAs<int8_t>() == -128);
+      REQUIRE(root["integers"]["u8"].getValueAs<uint8_t>() == 255);
+      REQUIRE(root["integers"]["i64"].getValueAs<int64_t>() == INT64_MIN);
+      REQUIRE(root["integers"]["u64"].getValueAs<uint64_t>() == UINT64_MAX);
+      REQUIRE(root["integers"]["kind"].getValue().type() == ANARI_DATA_TYPE);
+      REQUIRE(
+          root["fixed"]["rgba"].getValue().type() == ANARI_UFIXED8_RGBA_SRGB);
+      REQUIRE(root["floats"]["single"].getValueAs<float>() == 0.1f);
+      REQUIRE(root["floats"]["precise"].getValueAs<double>() == 0.1);
+      REQUIRE(std::isnan(root["floats"]["notANumber"].getValueAs<float>()));
+      REQUIRE(std::isinf(root["floats"]["infinite"].getValueAs<double>()));
+      REQUIRE(root["floats"]["negInfinite"].getValueAs<float>() < 0.f);
+      REQUIRE(root["floats"]["half"].getValue().type() == ANARI_FLOAT16);
+      REQUIRE(
+          root["vectors"]["position"].getValue().type() == ANARI_FLOAT32_VEC3);
+      REQUIRE(root["matrices"]["transform"].getValue().type()
+          == ANARI_FLOAT32_MAT4);
+      REQUIRE(root["strings"]["escaped"].getValueAs<std::string>()
+          == "quote \" backslash \\ newline \n tab \t bell \x07");
+      REQUIRE(root["strings"]["utf8"].getValueAs<std::string>() == "grüße");
+      REQUIRE(root["strings"]["empty"].getValueAs<std::string>().empty());
+
+      anari::DataType type = ANARI_UNKNOWN;
+      size_t idx = 0;
+      root["references"]["geometry"].getValueAsObjectIdx(&type, &idx);
+      REQUIRE(type == ANARI_GEOMETRY);
+      REQUIRE(idx == 12);
+
+      const float *positions = nullptr;
+      size_t numPositions = 0;
+      REQUIRE(root["arrays"]["positions"].arrayType() == ANARI_FLOAT32_VEC3);
+      const void *data = nullptr;
+      root["arrays"]["positions"].getValueAsArray(&type, &data, &numPositions);
+      positions = static_cast<const float *>(data);
+      REQUIRE(numPositions == 3);
+      REQUIRE(positions[3] == 1.f);
+
+      root["arrays"]["references"].getValueAsArray(&type, &data, &idx);
+      REQUIRE(type == ANARI_GEOMETRY);
+      REQUIRE(idx == 2);
+      REQUIRE(static_cast<const size_t *>(data)[1] == 2);
+
+      REQUIRE(root["arrays"]["empty"].holdsArray());
+      root["arrays"]["empty"].getValueAsArray(&type, &data, &idx);
+      REQUIRE(type == ANARI_FLOAT32);
+      REQUIRE(idx == 0);
+
+      REQUIRE(root["keyed"]["2"].getValueAs<int>() == 2);
+      REQUIRE(root["needs quoting"]["tab\tname"].getValueAs<int>() == 1);
+      REQUIRE(root["needs quoting"]["-"].getValueAs<int>() == 3);
+    }
+
+    THEN("Marked entries are Anonymous Nodes, addressed by ordinal")
+    {
+      auto &sequence = root["sequence"];
+      REQUIRE(sequence.numChildren() == 4);
+      REQUIRE(sequence.child(0)->path().str() == "/sequence/[0]");
+      REQUIRE(sequence.child(0)->getValueAs<float>() == 0.f);
+      REQUIRE(sequence.child(1)->getValueAs<float>() == 1.f);
+      REQUIRE(sequence.child(1)->isLeaf());
+      REQUIRE(sequence.child(2)->empty());
+      REQUIRE(sequence.child(2)->numChildren() == 1);
+      REQUIRE((*sequence.child(2))["label"].getValueAs<std::string>()
+          == "no value");
+      REQUIRE(sequence.child(3)->empty());
+      REQUIRE(sequence.child(3)->isLeaf());
+    }
+
+    THEN("An interior node is empty and a value-less leaf is empty")
+    {
+      REQUIRE(root["interior"].empty());
+      REQUIRE(root["interior"]["child"].getValueAs<int>() == 8);
+      REQUIRE(root["valueless"].empty());
+      REQUIRE(root["valueless"].isLeaf());
+    }
+  }
+
+  GIVEN("The same sample with comments, free whitespace, and explicit types")
+  {
+    vsr::core::DataTree tree;
+    REQUIRE(tree.fromText(TEXT_SAMPLE_COMMENTED));
+
+    THEN("It saves as the canonical form, comments discarded")
+    {
+      REQUIRE(tree.toText() == TEXT_SAMPLE);
+    }
+  }
+}
+
+SCENARIO("The Text Encoding is exactly as expressive as the tree", "[DataTree]")
+{
+  GIVEN("An entry with both a value and children, which no tree can hold")
+  {
+    const std::string text =
+        "vsr-text 1\ninterior = int32 7 {\n  child = int32 8\n}\n";
+    vsr::core::DataTree tree;
+    REQUIRE(tree.fromText(text));
+
+    THEN("The read succeeds, the value is dropped, and the child is kept")
+    {
+      REQUIRE(tree.root()["interior"].empty());
+      REQUIRE_FALSE(tree.root()["interior"].isLeaf());
+      REQUIRE(tree.root()["interior"]["child"].getValueAs<int>() == 8);
+    }
+
+    THEN("Re-saving spells it as a plain interior node")
+    {
+      REQUIRE(
+          tree.toText() == "vsr-text 1\ninterior {\n  child = int32 8\n}\n");
+    }
+
+    THEN("Text, binary, and text again agree")
+    {
+      std::vector<std::byte> binary;
+      REQUIRE(tree.write(binary));
+      vsr::core::DataTree viaBinary;
+      REQUIRE(viaBinary.read(binary));
+      REQUIRE(viaBinary.toText() == tree.toText());
+    }
+  }
+
+  GIVEN("A leaf, which roots an empty tree")
+  {
+    vsr::core::DataTree source;
+    source.root()["count"] = 16;
+
+    THEN("Its text is the header alone, and reads back as an empty tree")
+    {
+      const std::string text = source.root()["count"].toText();
+      REQUIRE(text == "vsr-text 1\n");
+
+      vsr::core::DataTree destination;
+      destination.root()["stale"] = 1;
+      REQUIRE(destination.fromText(text));
+      REQUIRE(destination.root().numChildren() == 0);
+    }
+  }
+
+  GIVEN("A node holding an External Array")
+  {
+    float values[] = {1.f, 2.f, 3.f};
+    vsr::core::DataTree external;
+    external.root()["data"].setValueAsExternalArray(ANARI_FLOAT32, values, 3);
+    vsr::core::DataTree owned;
+    owned.root()["data"].setValueAsArray(values, 3);
+
+    THEN("It is written by value and reads back owned")
+    {
+      REQUIRE(external.toText() == owned.toText());
+      REQUIRE(external.toText().find("float32[] [\n  1 2 3\n]")
+          != std::string::npos);
+
+      vsr::core::DataTree destination;
+      REQUIRE(destination.fromText(external.toText()));
+      REQUIRE(destination.root()["data"].holdsArray());
+      REQUIRE_FALSE(destination.root()["data"].holdsExternalArray());
+    }
+  }
+
+  GIVEN("A pointer-typed value")
+  {
+    vsr::core::DataTree tree;
+    int target = 0;
+    tree.root()["pointer"] =
+        vsr::core::Any(ANARI_VOID_POINTER, static_cast<const void *>(&target));
+    tree.root()["after"] = 1;
+
+    THEN("It is written as a value-less node, with a warning")
+    {
+      WarningRecorder recorder;
+      const std::string text = tree.toText();
+      REQUIRE(recorder.warnings.size() == 1);
+      REQUIRE(text == "vsr-text 1\npointer {}\nafter = int32 1\n");
+    }
+  }
+}
+
+SCENARIO("The encoding of a file is detected, not declared", "[DataTree]")
+{
+  GIVEN("A tree saved twice, once in each encoding, both as .vsr")
+  {
+    vsr::core::DataTree source;
+    source.root()["camera"]["fovy"] = 0.75f;
+    source.root()["name"] = "shot";
+
+    const auto directory = std::filesystem::temp_directory_path();
+    const auto binaryPath = (directory / "vsr_test_detect_binary.vsr").string();
+    const auto textPath = (directory / "vsr_test_detect_text.vsr").string();
+    REQUIRE(source.save(binaryPath.c_str()));
+    REQUIRE(source.save(textPath.c_str(), vsr::core::Encoding::Text));
+
+    THEN("The text file is text regardless of its extension")
+    {
+      REQUIRE(vsr::core::isDataTreeTextFile(textPath.c_str()));
+      REQUIRE_FALSE(vsr::core::isDataTreeTextFile(binaryPath.c_str()));
+
+      std::vector<std::byte> bytes(source.toText().size());
+      std::FILE *file = std::fopen(textPath.c_str(), "rb");
+      REQUIRE(file != nullptr);
+      REQUIRE(std::fread(bytes.data(), 1, bytes.size(), file) == bytes.size());
+      std::fclose(file);
+      REQUIRE(asText(bytes) == source.toText());
+    }
+
+    THEN("load() takes no argument and accepts both")
+    {
+      vsr::core::DataTree fromBinary;
+      REQUIRE(fromBinary.load(binaryPath.c_str()));
+      REQUIRE(fromBinary.root()["camera"]["fovy"].getValueAs<float>() == 0.75f);
+
+      vsr::core::DataTree fromText;
+      REQUIRE(fromText.load(textPath.c_str()));
+      REQUIRE(fromText.root()["camera"]["fovy"].getValueAs<float>() == 0.75f);
+      REQUIRE(fromText.root()["name"].getValueAs<std::string>() == "shot");
+
+      REQUIRE(fromBinary.toText() == fromText.toText());
+    }
+
+    std::filesystem::remove(binaryPath);
+    std::filesystem::remove(textPath);
+  }
+
+  GIVEN("A detached DataNode")
+  {
+    vsr::core::DataNode detached;
+
+    THEN("It writes the empty tree it roots and refuses to read text")
+    {
+      REQUIRE(detached.toText() == "vsr-text 1\n");
+      REQUIRE_FALSE(detached.fromText("vsr-text 1\na = int32 1\n"));
+    }
+  }
+}
+
+SCENARIO("Every malformed Text Encoding input is a hard error", "[DataTree]")
+{
+  struct Malformed
+  {
+    const char *description;
+    const char *text;
+    const char *messageFragment;
+  };
+
+  // clang-format off
+  const Malformed cases[] = {
+      {"missing header", "a = int32 1\n", "missing header"},
+      {"bad header", "vsr-text one\n", "malformed header"},
+      {"header not alone on its line", "vsr-text 1 a = int32 1\n",
+          "after the header"},
+      {"unsupported header version", "vsr-text 2\n", "unsupported"},
+      {"duplicate name in a scope",
+          "vsr-text 1\ng {\n  a = int32 1\n  a = int32 2\n}\n", "duplicate"},
+      {"unknown type", "vsr-text 1\na = float 1\n", "unknown type"},
+      {"reserved anonymous-shaped bare name", "vsr-text 1\n<3> = int32 1\n",
+          "synthesized anonymous"},
+      {"reserved anonymous-shaped quoted name",
+          "vsr-text 1\n\"<3>\" = int32 1\n", "synthesized anonymous"},
+      {"empty quoted name", "vsr-text 1\n\"\" = int32 1\n", "empty"},
+      {"integer out of range", "vsr-text 1\na = int8 200\n", "out of range"},
+      {"negative unsigned integer", "vsr-text 1\na = uint32 -1\n",
+          "out of range"},
+      {"fractional integer", "vsr-text 1\na = int32 1.5\n", "out of range"},
+      {"too few components", "vsr-text 1\na = float32_vec3 1 2\nb = int32 1\n",
+          "component"},
+      {"too many components", "vsr-text 1\na = float32 1 2\nb = int32 1\n",
+          "component"},
+      {"array count not a multiple of arity",
+          "vsr-text 1\na = float32_vec2[] [ 1 2 3 ]\n", "multiple"},
+      {"unterminated block", "vsr-text 1\na {\n  b = int32 1\n",
+          "unterminated block"},
+      {"unterminated string", "vsr-text 1\na = \"abc\n",
+          "unterminated string"},
+      {"unterminated array", "vsr-text 1\na = float32[] [ 1 2\n",
+          "unterminated array"},
+      {"marker outside a block", "vsr-text 1\na = -\n", "marker"},
+      {"token after the final closing brace", "vsr-text 1\na {}\n}\n",
+          "unexpected '}'"},
+      {"stray bracket after the final closing brace", "vsr-text 1\na {}\n]\n",
+          "expected a node name"},
+      {"numeric literal without a type", "vsr-text 1\na = 1\n",
+          "needs a type"},
+      {"entry with neither value nor block",
+          "vsr-text 1\na\nb = int32 1\n", "expected '=' or '{'"},
+      {"pointer type in a value", "vsr-text 1\na = void_pointer 0\n",
+          "no Text Encoding literal"},
+      {"unknown escape", "vsr-text 1\na = \"\\q\"\n", "escape"},
+      {"character outside the grammar", "vsr-text 1\na = int32 $1\n",
+          "unexpected character"},
+      {"bool spelled as a number", "vsr-text 1\na = bool 1\n",
+          "'true' or 'false'"},
+      {"object reference without an index", "vsr-text 1\na = geometry\n",
+          "index"},
+      {"object array element of another type",
+          "vsr-text 1\na = geometry[] [ material@1 ]\n", "geometry@"},
+  };
+  // clang-format on
+
+  for (const auto &c : cases) {
+    INFO(c.description);
+
+    vsr::core::DataTree destination;
+    destination.root()["target"]["keep"] = 1;
+    RecordingObserver observer;
+    destination.setObserver(&observer);
+
+    WarningRecorder recorder;
+    const bool ok = destination.root()["target"].fromText(c.text);
+    REQUIRE_FALSE(ok);
+
+    REQUIRE(destination.root()["target"].numChildren() == 0);
+    REQUIRE(destination.root()["target"].empty());
+
+    REQUIRE(observer.signals.size() == 1);
+    REQUIRE(observer.signals[0].kind == RecordedSignal::SubtreeReplaced);
+    REQUIRE(observer.signals[0].path == "/target");
+
+    REQUIRE(recorder.namesLineAndColumn());
+    INFO(recorder.warnings[0]);
+    REQUIRE(recorder.warnings[0].find(c.messageFragment) != std::string::npos);
+  }
+}
+
+SCENARIO("Text Anonymous Nodes are minted like appended ones", "[DataTree]")
+{
+  GIVEN("Text with marked entries, at top level and in a block")
+  {
+    const std::string text =
+        "vsr-text 1\n- = int32 10\n- = int32 11\nitems {\n  - = int32 20\n"
+        "  - {\n    x = int32 21\n  }\n}\n";
+
+    WHEN("It is read into a subtree")
+    {
+      vsr::core::DataTree tree;
+      auto &subtree = tree.root()["subtree"];
+      REQUIRE(subtree.fromText(text));
+
+      THEN("The marked entries are anonymous and addressable by ordinal")
+      {
+        REQUIRE(subtree.numChildren() == 3);
+        REQUIRE(subtree.child(0)->path().str() == "/subtree/[0]");
+        REQUIRE(subtree.child(1)->path().str() == "/subtree/[1]");
+        REQUIRE(subtree.child(1)->getValueAs<int>() == 11);
+        REQUIRE(subtree.child(2)->path().str() == "/subtree/items");
+
+        auto &items = subtree["items"];
+        REQUIRE(items.numChildren() == 2);
+        REQUIRE(items.child(1)->path().str() == "/subtree/items/[1]");
+        REQUIRE((*items.child(1))["x"].getValueAs<int>() == 21);
+        REQUIRE(tree.node(vsr::core::DataPath("/subtree/items/[0]"))
+                    ->getValueAs<int>()
+            == 20);
+      }
+
+      THEN("Their minted names are claimed against the process counter")
+      {
+        auto &items = subtree["items"];
+        constexpr size_t NUM_APPENDS = 8;
+        for (size_t i = 0; i < NUM_APPENDS; i++)
+          items.append();
+        REQUIRE(items.numChildren() == 2 + NUM_APPENDS);
+      }
+
+      THEN("The names never reach the text, only the markers do")
+      {
+        const std::string written = subtree.toText();
+        REQUIRE(written == text);
+        REQUIRE(written.find('<') == std::string::npos);
+      }
+    }
+  }
+
+  GIVEN("Anonymous nodes that came from binary")
+  {
+    vsr::core::DataTree source;
+    auto &items = source.root()["items"];
+    items.append() = 1;
+    items.append()["nested"] = 2;
+
+    std::vector<std::byte> binary;
+    REQUIRE(source.write(binary));
+
+    WHEN("The binary is converted to text and back")
+    {
+      vsr::core::DataTree viaBinary;
+      REQUIRE(viaBinary.read(binary));
+      vsr::core::DataTree viaText;
+      REQUIRE(viaText.fromText(viaBinary.toText()));
+
+      THEN("The sequence survives with its anonymity intact")
+      {
+        REQUIRE(viaText.root()["items"].numChildren() == 2);
+        REQUIRE(viaText.root()["items"].child(0)->path().str() == "/items/[0]");
+        REQUIRE((*viaText.root()["items"].child(1))["nested"].getValueAs<int>()
+            == 2);
+        REQUIRE(viaText.toText() == source.toText());
+      }
     }
   }
 }

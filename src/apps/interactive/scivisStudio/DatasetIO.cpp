@@ -298,8 +298,7 @@ bool writeSourceListFile(const std::filesystem::path &file,
   std::ofstream out(file, std::ios::binary | std::ios::trunc);
   if (!out) {
     return fail(
-        "failed to open Source List File for writing: " + file.string(),
-        error);
+        "failed to open Source List File for writing: " + file.string(), error);
   }
   for (const auto &source : sourceList)
     out << source.path << '\n';
@@ -376,8 +375,7 @@ bool writeDatasetSourceListEdit(const std::filesystem::path &datasetFile,
   const auto expectedName = validation.dataset.name;
 
   // The Source List File carries the edit and installs last.
-  plan.manifest.description =
-      "dataset '" + expectedName + "' Source List File";
+  plan.manifest.description = "dataset '" + expectedName + "' Source List File";
   plan.manifest.target = sourceListFilePath(datasetFile).filename();
   plan.manifest.ownedTarget = plan.manifest.target;
   plan.manifest.writer = [sourceList](const std::filesystem::path &file,
@@ -429,8 +427,7 @@ DatasetAssetValidationResult validateDatasetAsset(
     const std::filesystem::path &file)
 {
   auto result = validateDatasetArchiveFile(file);
-  if (result.ok
-      && result.dataset.sourceKind == DatasetSourceKind::FileAnimation
+  if (result.ok && result.dataset.sourceKind == DatasetSourceKind::FileAnimation
       && !result.dataset.pendingSourceListMigration) {
     result.ok = readSourceListFile(
         sourceListFilePath(file), result.dataset.sourceFiles, &result.error);
@@ -563,7 +560,7 @@ bool saveDatasetArchiveFile(const Dataset &dataset,
 
   datasetMetadataToNode(dataset, tree.root()["dataset"]);
   tree.root()["subtree"]["name"] = dataset.name;
-  if (!tree.save(file.string().c_str()))
+  if (!tree.save(file.string().c_str(), DATASET_ARCHIVE_ENCODING))
     return fail("failed to write dataset metadata", error);
 
   // Only the dataset file is validated here: the sibling Source List File is
@@ -574,8 +571,9 @@ bool saveDatasetArchiveFile(const Dataset &dataset,
   return true;
 }
 
-bool saveDeclaredDatasetArchiveFile(
-    const Dataset &dataset, const std::filesystem::path &file, std::string *error)
+bool saveDeclaredDatasetArchiveFile(const Dataset &dataset,
+    const std::filesystem::path &file,
+    std::string *error)
 {
   if (dataset.sourceKind != DatasetSourceKind::FileAnimation) {
     return fail("only file-animation datasets can be declared", error);
@@ -599,7 +597,7 @@ bool saveDeclaredDatasetArchiveFile(
 
   datasetMetadataToNode(dataset, tree.root()["dataset"]);
   tree.root()["subtree"]["name"] = dataset.name;
-  if (!tree.save(file.string().c_str()))
+  if (!tree.save(file.string().c_str(), DATASET_ARCHIVE_ENCODING))
     return fail("failed to write dataset metadata", error);
 
   auto validation = validateDatasetArchiveFile(file);

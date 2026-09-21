@@ -22,6 +22,7 @@
 #include "vsr/core/DataPath.hpp"
 #include "vsr/core/DataTree.hpp"
 #include "vsr/core/DataTreeMetadata.hpp"
+#include "vsr/core/DataTreeText.hpp"
 #include "vsr/io/animation/SpatialFieldFileBinding.hpp"
 #include "vsr/io/archives/CameraArchive.hpp"
 #include "vsr/io/archives/RendererArchive.hpp"
@@ -212,6 +213,8 @@ SCENARIO("SciVis Studio static Dataset Archives are self-contained",
   dataset.source.sourcePath = "../source/example.obj";
   dataset.source.importerSettings.set("flatten", "false");
   REQUIRE(saveDatasetArchiveFile(dataset, root, sourceAnimations, file));
+  // Dataset Archives carry bulk arrays and stay in the Binary Encoding.
+  REQUIRE_FALSE(vsr::core::isDataTreeTextFile(file.string().c_str()));
 
   auto validation = validateDatasetAsset(file);
   REQUIRE(validation.ok);
@@ -995,6 +998,7 @@ SCENARIO("SciVis Studio Camera Rig Archives round-trip keyframe data",
   std::filesystem::remove(file);
 
   REQUIRE(camera_rig::saveCameraRigArchiveFile(rig, file));
+  REQUIRE(vsr::core::isDataTreeTextFile(file.string().c_str()));
 
   CameraRig loaded;
   REQUIRE(camera_rig::loadCameraRigArchiveFile(file, loaded));
@@ -1682,6 +1686,59 @@ SCENARIO("SciVis Studio projects store scene pools in required Archives",
     REQUIRE(renderer->parameter("pixelSamples")->value().getAs<int>() == 7);
     auto &secondShot = projectContext.project().shots.back();
     REQUIRE(projectContext.resolveShotCamera(secondShot));
+  }
+
+  std::filesystem::remove_all(root);
+}
+
+SCENARIO("SciVis Studio writes project files as text except Dataset Archives",
+    "[SciVisStudio]")
+{
+  const auto root = std::filesystem::temp_directory_path()
+      / "vsr_scivis_studio_text_project_files";
+  std::filesystem::remove_all(root);
+
+  {
+    vsr::app::Context appContext;
+    ProjectContext projectContext(&appContext);
+    projectContext.createUnsavedProject();
+    REQUIRE(projectContext.createCameraRig("Hero Camera"));
+    REQUIRE(projectContext.createLightRig("Studio Lights"));
+    REQUIRE(projectContext.saveProject(root));
+  }
+
+  auto onlyArchiveIn = [&](const char *directory) {
+    std::filesystem::path found;
+    size_t count = 0;
+    for (auto &entry : std::filesystem::directory_iterator(root / directory)) {
+      if (entry.path().extension() == PROJECT_FILE_EXTENSION) {
+        found = entry.path();
+        ++count;
+      }
+    }
+    REQUIRE(count >= 1);
+    return found;
+  };
+
+  THEN("The manifest, scene pools, and rig Archives are the Text Encoding")
+  {
+    using vsr::core::isDataTreeTextFile;
+    REQUIRE(isDataTreeTextFile(
+        (root / PROJECT_MANIFEST_FILENAME).string().c_str()));
+    REQUIRE(isDataTreeTextFile((root / "scene/cameras.vsr").string().c_str()));
+    REQUIRE(
+        isDataTreeTextFile((root / "scene/renderers.vsr").string().c_str()));
+    REQUIRE(isDataTreeTextFile(onlyArchiveIn("cameras").string().c_str()));
+    REQUIRE(isDataTreeTextFile(onlyArchiveIn("lights").string().c_str()));
+  }
+
+  THEN("The project opens again from those files")
+  {
+    vsr::app::Context appContext;
+    ProjectContext projectContext(&appContext);
+    REQUIRE(projectContext.openProject(root));
+    REQUIRE(projectContext.project().cameraRigs.size() >= 1);
+    REQUIRE(projectContext.project().lightRigs.size() >= 1);
   }
 
   std::filesystem::remove_all(root);

@@ -12,6 +12,7 @@ endif()
 set(VSR_CORE_CXX_SOURCES
   ColorMapUtil.cpp
   DataStream.cpp
+  DataTreeText.cpp
   Logging.cpp
   Token.cpp
 )

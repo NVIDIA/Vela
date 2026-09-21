@@ -7,6 +7,7 @@
 #include "vsr/core/DataPath.hpp"
 #include "vsr/core/DataStream.hpp"
 #include "vsr/core/DataTreeObserver.hpp"
+#include "vsr/core/DataTreeText.hpp"
 #include "vsr/core/Forest.hpp"
 #include "vsr/core/Logging.hpp"
 #include "vsr/core/TypeMacros.hpp"
@@ -26,6 +27,18 @@
 namespace vsr::core {
 
 struct DataTree;
+
+/*
+ * The two serialized forms of a Data Tree, peers of one another: either can
+ * be the carrier of a .vsr file (ADR 0039). Writers take the choice
+ * explicitly and default to binary; readers detect it from the leading bytes
+ * and take no argument.
+ */
+enum class Encoding
+{
+  Binary,
+  Text
+};
 
 /*
  * Named node in a hierarchical tree that holds an Any value and an ordered
@@ -164,11 +177,23 @@ struct DataNode
   // changed, so either way one signalSubtreeReplaced() is delivered.
   //
   // A node with no tree behind it writes an empty tree and refuses to read.
-  bool write(std::vector<std::byte> &buffer) const;
+  //
+  // Writing takes the Encoding explicitly and defaults to the Binary
+  // Encoding, so no producer changes its output by accident. Reading detects
+  // the Encoding from the leading bytes -- the Text Encoding header, or not
+  // -- and never consults a file extension.
+  bool write(std::vector<std::byte> &buffer,
+      Encoding encoding = Encoding::Binary) const;
   bool read(const std::vector<std::byte> &buffer);
 
-  bool save(const char *filename) const;
+  bool save(const char *filename, Encoding encoding = Encoding::Binary) const;
   bool load(const char *filename);
+
+  // The Text Encoding as a string, and read from one. The same ADR 0027
+  // semantics and the same reader contract as the buffer methods apply. The
+  // grammar is documented in DataTreeText.md.
+  std::string toText() const;
+  bool fromText(std::string_view text);
 
 #ifndef VSR_DATA_TREE_TEST_MODE // allow access to self() in unit tests only (!)
  private:
@@ -178,6 +203,8 @@ struct DataNode
 
  private:
   friend struct DataTree;
+  friend struct DataTreeTextCodec; // the Text Encoding reaches the same
+                                   // silent mutation the binary loader uses
 
   DataNode(const std::string &name); // only Data[Node|Tree] can construct nodes
 
@@ -310,23 +337,30 @@ struct DataTree
   // root() and add nothing of their own. See DataNode's serialization block
   // for what they mean.
 
-  bool write(std::vector<std::byte> &buffer) const;
+  bool write(std::vector<std::byte> &buffer,
+      Encoding encoding = Encoding::Binary) const;
   bool read(const std::vector<std::byte> &buffer);
 
   // File I/O //
 
-  bool save(const char *filename) const;
+  bool save(const char *filename, Encoding encoding = Encoding::Binary) const;
   bool load(const char *filename);
 
-  // Visual inspection //
+  // String I/O //
 
-  void print();
+  std::string toText() const;
+  bool fromText(std::string_view text);
+
+  // Visual inspection: the Text Encoding, written to stdout //
+
+  void print() const;
 
   VSR_NOT_MOVEABLE(DataTree)
   VSR_NOT_COPYABLE(DataTree)
 
  private:
   friend struct DataNode;
+  friend struct DataTreeTextCodec;
 
   // The Observer to signal right now, or nullptr when there is none or when
   // signals are being collapsed into one signalSubtreeReplaced().
@@ -983,16 +1017,30 @@ inline void DataNode::signalSubtreeReplaced() const
 
 // DataNode serialization //
 
-inline bool DataNode::save(const char *filename) const
+inline bool DataNode::save(const char *filename, Encoding encoding) const
 {
   FileWriter writer(filename);
   if (!writer)
     return false;
+
+  if (encoding == Encoding::Text) {
+    const std::string text = toText();
+    return writer.write(text.data(), sizeof(char), text.size()) == text.size();
+  }
+
   return saveImpl(writer);
 }
 
-inline bool DataNode::write(std::vector<std::byte> &buffer) const
+inline bool DataNode::write(
+    std::vector<std::byte> &buffer, Encoding encoding) const
 {
+  if (encoding == Encoding::Text) {
+    const std::string text = toText();
+    const auto *begin = reinterpret_cast<const std::byte *>(text.data());
+    buffer.assign(begin, begin + text.size());
+    return true;
+  }
+
   BufferWriter writer;
   bool res = saveImpl(writer);
   buffer = writer.take();
@@ -1001,6 +1049,9 @@ inline bool DataNode::write(std::vector<std::byte> &buffer) const
 
 inline bool DataNode::load(const char *filename)
 {
+  if (isDataTreeTextFile(filename))
+    return DataTreeTextCodec::load(*this, filename);
+
   FileReader reader(filename);
   if (!reader)
     return false;
@@ -1009,8 +1060,25 @@ inline bool DataNode::load(const char *filename)
 
 inline bool DataNode::read(const std::vector<std::byte> &buffer)
 {
+  const std::string_view leadingBytes(
+      reinterpret_cast<const char *>(buffer.data()), buffer.size());
+  if (isDataTreeText(leadingBytes))
+    return fromText(leadingBytes);
+
   BufferReader reader(buffer);
   return loadImpl(reader);
+}
+
+inline std::string DataNode::toText() const
+{
+  std::string text;
+  DataTreeTextCodec::write(*this, text);
+  return text;
+}
+
+inline bool DataNode::fromText(std::string_view text)
+{
+  return DataTreeTextCodec::read(*this, text);
 }
 
 inline bool DataNode::saveImpl(DataWriter &writer) const
@@ -1388,14 +1456,15 @@ inline void DataTree::traverse(DataNode::Ref start,
   // clang-format on
 }
 
-inline bool DataTree::save(const char *filename) const
+inline bool DataTree::save(const char *filename, Encoding encoding) const
 {
-  return root().save(filename);
+  return root().save(filename, encoding);
 }
 
-inline bool DataTree::write(std::vector<std::byte> &buffer) const
+inline bool DataTree::write(
+    std::vector<std::byte> &buffer, Encoding encoding) const
 {
-  return root().write(buffer);
+  return root().write(buffer, encoding);
 }
 
 inline bool DataTree::load(const char *filename)
@@ -1408,55 +1477,22 @@ inline bool DataTree::read(const std::vector<std::byte> &buffer)
   return root().read(buffer);
 }
 
-inline void DataTree::print()
+inline std::string DataTree::toText() const
 {
-  traverse([](vsr::core::DataNode &node, int level) {
-    if (level == 0)
-      return true;
+  return root().toText();
+}
 
-    for (int i = 1; i < level; i++)
-      printf("    ");
+inline bool DataTree::fromText(std::string_view text)
+{
+  return root().fromText(text);
+}
 
-    if (!node.isLeaf())
-      printf("%s:\n", node.name().c_str());
-    else {
-      printf("%s: ", node.name().c_str());
-
-      if (node.holdsObjectIdx()) {
-        anari::DataType type = ANARI_UNKNOWN;
-        size_t index = 0;
-        node.getValueAsObjectIdx(&type, &index);
-        printf("%s @%zu", anari::toString(type), index);
-      } else if (node.holdsArray()) {
-        anari::DataType type = ANARI_UNKNOWN;
-        const void *data = nullptr;
-        size_t size = 0;
-        node.getValueAsArray(&type, &data, &size);
-        printf("%s[%zu]", anari::toString(type), size);
-      } else {
-        auto &value = node.getValue();
-        printf("%s", anari::toString(value.type()));
-        if (value.is(ANARI_STRING))
-          printf(" | \"%s\"", value.getCStr());
-        else if (value.is<bool>())
-          printf(" | %s", value.get<bool>() ? "true" : "false");
-        else if (value.is<int>())
-          printf(" | %d", value.get<int>());
-        else if (value.is<uint32_t>())
-          printf(" | %d", value.get<uint32_t>());
-        else if (value.is<float>())
-          printf(" | %f", value.get<float>());
-        else if (value.is<double>())
-          printf(" | %f", value.get<double>());
-      }
-
-      printf("\n");
-    }
-
-    return true;
-  });
-
-  printf("\n");
+inline void DataTree::print() const
+{
+  // One human-facing representation, not two: the debug print is the Text
+  // Encoding itself, so what is printed is what could be saved and loaded.
+  const std::string text = toText();
+  std::fwrite(text.data(), sizeof(char), text.size(), stdout);
 }
 
 // DataTreeUpdateBatch //

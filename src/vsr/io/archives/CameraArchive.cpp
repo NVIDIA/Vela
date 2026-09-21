@@ -43,12 +43,14 @@ bool deserialize_CameraArchive(scene::Scene &scene,
       validation);
 }
 
-bool save_CameraArchive(const scene::Scene &scene, const char *filename)
+bool save_CameraArchive(
+    const scene::Scene &scene, const char *filename, core::Encoding encoding)
 {
   if (!filename)
     return false;
   core::DataTree tree;
-  return serialize_CameraArchive(scene, tree.root()) && tree.save(filename);
+  return serialize_CameraArchive(scene, tree.root())
+      && tree.save(filename, encoding);
 }
 
 bool load_CameraArchive(scene::Scene &scene,

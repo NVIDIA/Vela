@@ -34,7 +34,7 @@ bool saveLightRigArchiveFile(vsr::scene::LayerNodeRef root,
   vsr::core::DataTree tree;
   return vsr::io::serialize_SubtreeArchiveContent(
              root, tree.root(), LIGHT_RIG_ARCHIVE_DESC, displayName)
-      && tree.save(file.string().c_str());
+      && tree.save(file.string().c_str(), PROJECT_FILE_ENCODING);
 }
 
 vsr::scene::LayerNodeRef deserializeLightRigArchive(vsr::scene::Scene &scene,

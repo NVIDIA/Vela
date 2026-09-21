@@ -37,12 +37,14 @@ bool deserialize_RendererArchive(scene::Scene &scene,
       validation);
 }
 
-bool save_RendererArchive(const scene::Scene &scene, const char *filename)
+bool save_RendererArchive(
+    const scene::Scene &scene, const char *filename, core::Encoding encoding)
 {
   if (!filename)
     return false;
   core::DataTree tree;
-  return serialize_RendererArchive(scene, tree.root()) && tree.save(filename);
+  return serialize_RendererArchive(scene, tree.root())
+      && tree.save(filename, encoding);
 }
 
 bool load_RendererArchive(scene::Scene &scene,
