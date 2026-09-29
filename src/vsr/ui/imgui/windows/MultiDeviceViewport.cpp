@@ -280,22 +280,20 @@ void MultiDeviceViewport::setupImagePipeline(
   m_pipeline.clear();
 
   m_anariPass =
-      m_pipeline.emplace_back<vsr::rendering::MultiDeviceSceneRenderPass>(
-          devices);
+      m_pipeline.setSource<vsr::rendering::MultiDeviceSceneRenderPass>(devices);
 
   {
     auto &adm = appContext()->anari;
     auto d = adm.loadDevice("helide");
     auto e = adm.loadDeviceExtensions("helide");
 
-    m_axesPass =
-        m_pipeline.emplace_back<vsr::rendering::AnariAxesRenderPass>(d, *e);
+    m_axesPass = m_pipeline.addPass<vsr::rendering::AnariAxesRenderPass>(d, *e);
     m_axesPass->setEnabled(m_showAxes);
 
     anari::release(d, d);
   }
 
-  m_outputPass = m_pipeline.emplace_back<vsr::rendering::CopyToSDLTexturePass>(
+  m_outputPass = m_pipeline.addSink<vsr::rendering::CopyToSDLTexturePass>(
       m_app->sdlRenderer());
 
   reshape(m_viewportSize);

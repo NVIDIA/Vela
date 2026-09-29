@@ -77,8 +77,7 @@ struct RemoteViewport : public BaseViewport
   bool m_hasPendingFrame{false};
   vsr::network::RenderSession::Frame::Config m_frameConfig;
 
-  vsr::rendering::ClearBuffersPass *m_clearPass{nullptr};
-  vsr::rendering::CopyToColorBufferPass *m_incomingFramePass{nullptr};
+  vsr::rendering::ExternalFrameSource *m_incomingFrameSource{nullptr};
   vsr::rendering::CopyToSDLTexturePass *m_outputPass{nullptr};
 };
 

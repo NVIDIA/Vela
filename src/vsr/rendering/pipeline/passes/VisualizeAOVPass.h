@@ -24,7 +24,7 @@ enum class AOVType
  * edge detection, or ID buffers) into the RGBA color buffer for debugging.
  *
  * Example:
- *   auto *pass = pipeline.emplace_back<VisualizeAOVPass>();
+ *   auto *pass = pipeline.addPass<VisualizeAOVPass>();
  *   pass->setAOVType(AOVType::DEPTH);
  *   pass->setDepthRange(0.1f, 100.f);
  */
@@ -39,7 +39,7 @@ struct VisualizeAOVPass : public ImagePass
   void setEdgeInvert(bool invert);
 
  private:
-  void render(ImageBuffers &b, int stageId) override;
+  void render(ImageBuffers &b) override;
 
   AOVType m_aovType{AOVType::NONE};
   float m_minDepth{0.f};

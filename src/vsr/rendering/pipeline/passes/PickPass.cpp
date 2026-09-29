@@ -14,7 +14,7 @@ void PickPass::setPickOperation(PickOpFunc &&f)
   m_op = std::move(f);
 }
 
-void PickPass::render(ImageBuffers &b, int /*stageId*/)
+void PickPass::render(ImageBuffers &b)
 {
   if (m_op)
     m_op(b);

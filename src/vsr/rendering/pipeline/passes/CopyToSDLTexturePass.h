@@ -14,7 +14,7 @@
 
 namespace vsr::rendering {
 
-struct CopyToSDLTexturePass : public ImagePass
+struct CopyToSDLTexturePass : public ImageSink
 {
   CopyToSDLTexturePass(SDL_Renderer *renderer);
   ~CopyToSDLTexturePass() override;
@@ -24,7 +24,7 @@ struct CopyToSDLTexturePass : public ImagePass
 
  private:
   void checkGLInterop() const;
-  void render(ImageBuffers &b, int stageId) override;
+  void render(const ImageBuffers &b) override;
   void updateSize() override;
 
   struct CopyToSDLTexturePassImpl;

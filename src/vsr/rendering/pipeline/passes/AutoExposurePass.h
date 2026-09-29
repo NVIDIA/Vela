@@ -19,7 +19,7 @@ struct AutoExposurePass : public ImagePass
   float currentExposure() const;
 
  private:
-  void render(ImageBuffers &b, int stageId) override;
+  void render(ImageBuffers &b) override;
 
   // Opaque persistent device scratch for the CUDA luminance reduction
   // (created lazily on first use; empty when built without CUDA).

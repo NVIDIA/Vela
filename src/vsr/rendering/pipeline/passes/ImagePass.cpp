@@ -17,36 +17,51 @@
 
 namespace vsr::rendering {
 
-ImagePass::ImagePass() = default;
-
-ImagePass::~ImagePass() = default;
-
-void ImagePass::setEnabled(bool enabled)
+const char *toString(ImageStageRole role)
 {
-  m_enabled = enabled;
+  switch (role) {
+  case ImageStageRole::SOURCE:
+    return "source";
+  case ImageStageRole::PASS:
+    return "pass";
+  case ImageStageRole::SINK:
+    return "sink";
+  }
+  return "unknown";
 }
 
-bool ImagePass::isEnabled() const
+// ImageStage definitions /////////////////////////////////////////////////////
+
+ImageStage::ImageStage() = default;
+
+ImageStage::~ImageStage() = default;
+
+bool ImageStage::isEnabled() const
 {
   return m_enabled;
 }
 
-const char *ImagePass::name() const
-{
-  return "ImagePass";
-}
-
-void ImagePass::updateSize()
-{
-  // no-up
-}
-
-vsr::math::uint2 ImagePass::getDimensions() const
+vsr::math::uint2 ImageStage::dimensions() const
 {
   return m_size;
 }
 
-void ImagePass::setDimensions(uint32_t width, uint32_t height)
+const char *ImageStage::name() const
+{
+  return "ImageStage";
+}
+
+void ImageStage::setEnabled(bool enabled)
+{
+  m_enabled = enabled;
+}
+
+void ImageStage::updateSize()
+{
+  // no-op
+}
+
+void ImageStage::setDimensions(uint32_t width, uint32_t height)
 {
   if (m_size.x == width && m_size.y == height)
     return;
@@ -55,6 +70,23 @@ void ImagePass::setDimensions(uint32_t width, uint32_t height)
   m_size.y = height;
 
   updateSize();
+}
+
+// Role definitions ///////////////////////////////////////////////////////////
+
+ImageStageRole ImageSource::role() const
+{
+  return ImageStageRole::SOURCE;
+}
+
+ImageStageRole ImagePass::role() const
+{
+  return ImageStageRole::PASS;
+}
+
+ImageStageRole ImageSink::role() const
+{
+  return ImageStageRole::SINK;
 }
 
 // Utility functions //////////////////////////////////////////////////////////

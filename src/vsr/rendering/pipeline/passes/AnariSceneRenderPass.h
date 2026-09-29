@@ -15,15 +15,15 @@ namespace vsr::rendering {
 bool deviceSupportsExtension(anari::Device d, const char *extension);
 
 /*
- * ImagePass that drives a single ANARI Frame with a configurable camera,
+ * Image Source that drives a single ANARI Frame with a configurable camera,
  * renderer, and world; optionally captures auxiliary AOV buffers
  * (depth, normals, albedo, object/primitive/instance IDs).
  *
  * Example:
- *   auto *pass = pipeline.emplace_back<AnariSceneRenderPass>(device);
+ *   auto *pass = pipeline.setSource<AnariSceneRenderPass>(device);
  *   pass->setCamera(cam); pass->setRenderer(rend); pass->setWorld(world);
  */
-struct AnariSceneRenderPass : public ImagePass
+struct AnariSceneRenderPass : public ImageSource
 {
   AnariSceneRenderPass(anari::Device d);
   ~AnariSceneRenderPass() override;
@@ -57,9 +57,9 @@ struct AnariSceneRenderPass : public ImagePass
   void updateSize() override;
   void updateCameraAspect();
   void restartFrame();
-  void render(ImageBuffers &b, int stageId) override;
+  void render(ImageBuffers &b) override;
   void copyFrameData();
-  void composite(ImageBuffers &b, int stageId);
+  void publish(ImageBuffers &b);
   void cleanup();
 
   ImageBuffers m_buffers;

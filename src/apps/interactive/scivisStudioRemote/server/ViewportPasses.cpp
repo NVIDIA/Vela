@@ -112,10 +112,10 @@ void ViewportPasses::setup(vsr::rendering::ImagePipeline &pipeline,
         " and the PRIMITIVE_ID AOV stay off");
   }
 
-  m_pickPass = pipeline.emplace_back<vsr::rendering::PickPass>();
+  m_pickPass = pipeline.addPass<vsr::rendering::PickPass>();
   m_pickPass->setEnabled(false);
   m_pickPass->setPickOperation([this](vsr::rendering::ImageBuffers &b) {
-    const auto size = m_pickPass->getDimensions();
+    const auto size = m_pickPass->dimensions();
     if (size.x == 0 || size.y == 0)
       return;
     const auto x = std::clamp(m_pickPixel.x, 0, int(size.x) - 1);
@@ -128,14 +128,14 @@ void ViewportPasses::setup(vsr::rendering::ImagePipeline &pipeline,
     m_pickSample = sample;
   });
 
-  m_aovPass = pipeline.emplace_back<vsr::rendering::VisualizeAOVPass>();
+  m_aovPass = pipeline.addPass<vsr::rendering::VisualizeAOVPass>();
   m_aovPass->setAOVType(AOVType::NONE);
   m_primitiveOutlinePass =
-      pipeline.emplace_back<vsr::rendering::PrimitiveOutlineRenderPass>();
+      pipeline.addPass<vsr::rendering::PrimitiveOutlineRenderPass>();
   m_primitiveOutlinePass->setEnabled(false);
-  m_outlinePass = pipeline.emplace_back<vsr::rendering::OutlineRenderPass>();
+  m_outlinePass = pipeline.addPass<vsr::rendering::OutlineRenderPass>();
   m_outlinePass->setOutlineId(~0u);
-  m_boundsPass = pipeline.emplace_back<vsr::rendering::BoxOutlineRenderPass>();
+  m_boundsPass = pipeline.addPass<vsr::rendering::BoxOutlineRenderPass>();
   m_boundsPass->setEnabled(false);
 
   m_settings = protocol::ViewportSettings{};

@@ -778,9 +778,8 @@ static void setupImagePipeline()
 
   anari::commitParameters(g_device, r);
 
-  auto *arp =
-      g_renderPipeline->emplace_back<vsr::rendering::AnariSceneRenderPass>(
-          g_device);
+  auto *arp = g_renderPipeline->setSource<vsr::rendering::AnariSceneRenderPass>(
+      g_device);
   arp->setWorld(g_renderIndex->world());
   arp->setRenderer(r);
   arp->setCamera(g_camera);

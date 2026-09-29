@@ -70,7 +70,7 @@ vsr_core  ->  vsr_scene  ->  vsr_io  ->  vsr_rendering  ->  vsr_app
 
 **RenderIndex** (`src/vsr/rendering/index/`): Translates VSR scene state to live ANARI handles. `RenderIndexAllLayers` and `RenderIndexFlatRegistry` are the two strategies. Populated via `populate()`, updated incrementally via delegate callbacks.
 
-**ImagePipeline** (`src/vsr/rendering/pipeline/`): Chain of `ImagePass` objects. The standard chain is `AnariSceneRenderPass` -> `MultiDeviceSceneRenderPass` -> `PickPass` -> `VisualizeAOVPass`.
+**ImagePipeline** (`src/vsr/rendering/pipeline/`): one `ImageSource` (e.g. `AnariSceneRenderPass`, `MultiDeviceSceneRenderPass`, `ExternalFrameSource`), then ordered `ImagePass`es (tone map, outlines, AOV visualization, overlays), then `ImageSink`s (SDL texture, network copy-out). See ADR 0028.
 
 **anari_vsr device modes**:
 

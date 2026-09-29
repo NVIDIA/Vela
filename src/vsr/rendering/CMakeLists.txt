@@ -14,10 +14,9 @@ PRIVATE
   pipeline/passes/AnariSceneRenderPass.cpp
   pipeline/passes/AutoExposurePass.cpp
   pipeline/passes/BoxOutlineRenderPass.cpp
-  pipeline/passes/ClearBuffersPass.cpp
   pipeline/passes/CopyFromColorBufferPass.cpp
-  pipeline/passes/CopyToColorBufferPass.cpp
   pipeline/passes/CopyToSDLTexturePass.cpp
+  pipeline/passes/ExternalFrameSource.cpp
   pipeline/passes/MultiDeviceSceneRenderPass.cpp
   pipeline/passes/OutlineRenderPass.cpp
   pipeline/passes/PrimitiveOutlineRenderPass.cpp
@@ -53,7 +52,6 @@ if (VSR_USE_CUDA)
     pipeline/passes/AnariSceneRenderPass.cpp
     pipeline/passes/AutoExposurePass.cpp
     pipeline/passes/BoxOutlineRenderPass.cpp
-    pipeline/passes/ClearBuffersPass.cpp
     pipeline/passes/ImagePass.cpp
     pipeline/passes/OutlineRenderPass.cpp
     pipeline/passes/PrimitiveOutlineRenderPass.cpp

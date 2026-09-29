@@ -21,12 +21,12 @@ void OutlineRenderPass::setOutlineId(uint32_t id)
   m_outlineId = id;
 }
 
-void OutlineRenderPass::render(ImageBuffers &b, int stageId)
+void OutlineRenderPass::render(ImageBuffers &b)
 {
-  if (!b.objectId || stageId == 0 || m_outlineId == ~0u)
+  if (!b.objectId || m_outlineId == ~0u)
     return;
 
-  const auto size = getDimensions();
+  const auto size = dimensions();
 
 #ifdef VSR_ALGORITHMS_HAS_CUDA
   if (b.stream) {

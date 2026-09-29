@@ -197,9 +197,8 @@ static void setupImagePipeline()
   ro.updateAllANARIParameters(g_device, r);
   anari::commitParameters(g_device, r);
 
-  auto *arp =
-      g_renderPipeline->emplace_back<vsr::rendering::AnariSceneRenderPass>(
-          g_device);
+  auto *arp = g_renderPipeline->setSource<vsr::rendering::AnariSceneRenderPass>(
+      g_device);
   arp->setWorld(g_renderIndex->world());
   arp->setRenderer(r);
   arp->setCamera(g_camera);
@@ -208,7 +207,7 @@ static void setupImagePipeline()
   // Add AOV visualization pass if enabled
   if (g_ctx->offline.aov.aovType != vsr::rendering::AOVType::NONE) {
     auto *aovPass =
-        g_renderPipeline->emplace_back<vsr::rendering::VisualizeAOVPass>();
+        g_renderPipeline->addPass<vsr::rendering::VisualizeAOVPass>();
     aovPass->setAOVType(g_ctx->offline.aov.aovType);
     aovPass->setDepthRange(
         g_ctx->offline.aov.depthMin, g_ctx->offline.aov.depthMax);

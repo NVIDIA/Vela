@@ -14,7 +14,7 @@ namespace vsr::rendering {
  * ImageBuffers to perform picking or hit-testing using the ID AOV channels.
  *
  * Example:
- *   auto *pass = pipeline.emplace_back<PickPass>();
+ *   auto *pass = pipeline.addPass<PickPass>();
  *   pass->setPickOperation([&](ImageBuffers &b) {
  *     uint32_t id = b.objectId[clickY * width + clickX];
  *   });
@@ -30,7 +30,7 @@ struct PickPass : public ImagePass
   void setPickOperation(PickOpFunc &&f);
 
  private:
-  void render(ImageBuffers &b, int stageId) override;
+  void render(ImageBuffers &b) override;
 
   PickOpFunc m_op;
 };

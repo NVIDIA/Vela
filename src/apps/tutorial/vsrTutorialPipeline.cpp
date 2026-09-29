@@ -109,7 +109,7 @@ int main()
 
   vsr::rendering::ImagePipeline rpipe(imageSize.x, imageSize.y);
 
-  auto *arp = rpipe.emplace_back<vsr::rendering::AnariSceneRenderPass>(device);
+  auto *arp = rpipe.setSource<vsr::rendering::AnariSceneRenderPass>(device);
   arp->setWorld(rIdx.world());
   arp->setRenderer(renderer);
   arp->setCamera(camera);
@@ -119,7 +119,7 @@ int main()
   anari::release(device, camera);
   anari::release(device, renderer);
 
-  auto *hrp = rpipe.emplace_back<vsr::rendering::OutlineRenderPass>();
+  auto *hrp = rpipe.addPass<vsr::rendering::OutlineRenderPass>();
   hrp->setOutlineId(0);
 
   printf("done!\n");

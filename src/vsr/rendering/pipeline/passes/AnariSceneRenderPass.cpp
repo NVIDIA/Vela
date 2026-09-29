@@ -8,10 +8,6 @@
 #ifdef VSR_ALGORITHMS_HAS_CUDA
 #include "vsr/algorithms/cuda/clearBuffers.hpp"
 #endif
-#include "vsr/algorithms/cpu/depthCompositeFrame.hpp"
-#ifdef VSR_ALGORITHMS_HAS_CUDA
-#include "vsr/algorithms/cuda/depthCompositeFrame.hpp"
-#endif
 // std
 #include <algorithm>
 #include <cstring>
@@ -147,16 +143,6 @@ void AnariSceneRenderPass::setEnableDepth(bool on)
   } else {
     vsr::core::logInfo("[ImagePipeline] disabling depth frame channel");
     anari::unsetParameter(m_device, m_frame, "channel.depth");
-
-    // Composite() reads the staging buffer even when disabled (stageId > 0
-    // chains); make it read as "background" so compositing degrades to
-    // color-only.
-    if (m_buffers.depth) {
-      auto size = getDimensions();
-      std::fill(m_buffers.depth,
-          m_buffers.depth + size_t(size.x) * size_t(size.y),
-          vsr::math::inf);
-    }
   }
 
   anari::commitParameters(m_device, m_frame);
@@ -178,7 +164,7 @@ void AnariSceneRenderPass::setEnableIDs(bool on)
   } else {
     vsr::core::logInfo("[ImagePipeline] disabling objectId frame channel");
     anari::unsetParameter(m_device, m_frame, "channel.objectId");
-    auto size = getDimensions();
+    auto size = dimensions();
     const size_t totalSize = size_t(size.x) * size_t(size.y);
     std::fill(m_buffers.objectId, m_buffers.objectId + totalSize, ~0u);
   }
@@ -203,7 +189,7 @@ void AnariSceneRenderPass::setEnablePrimitiveId(bool on)
     vsr::core::logInfo("[ImagePipeline] disabling primitiveId frame channel");
     anari::unsetParameter(m_device, m_frame, "channel.primitiveId");
 
-    auto size = getDimensions();
+    auto size = dimensions();
     const size_t totalSize = size_t(size.x) * size_t(size.y);
     std::fill(m_buffers.primitiveId, m_buffers.primitiveId + totalSize, ~0u);
   }
@@ -228,7 +214,7 @@ void AnariSceneRenderPass::setEnableInstanceId(bool on)
     vsr::core::logInfo("[ImagePipeline] disabling instanceId frame channel");
     anari::unsetParameter(m_device, m_frame, "channel.instanceId");
 
-    auto size = getDimensions();
+    auto size = dimensions();
     const size_t totalSize = size_t(size.x) * size_t(size.y);
     std::fill(m_buffers.instanceId, m_buffers.instanceId + totalSize, ~0u);
   }
@@ -290,7 +276,7 @@ void AnariSceneRenderPass::startFirstFrame(bool wait)
 {
   if (!m_firstFrame)
     return;
-  auto dims = getDimensions();
+  auto dims = dimensions();
   anari::render(m_device, m_frame);
   if (wait)
     waitForCompletion();
@@ -317,7 +303,7 @@ anari::Frame AnariSceneRenderPass::getFrame() const
 void AnariSceneRenderPass::updateSize()
 {
   cleanup();
-  auto size = getDimensions();
+  auto size = dimensions();
   anari::setParameter(m_device, m_frame, "size", size);
   anari::commitParameters(m_device, m_frame);
 
@@ -342,7 +328,7 @@ void AnariSceneRenderPass::updateSize()
 
 void AnariSceneRenderPass::updateCameraAspect()
 {
-  auto size = getDimensions();
+  auto size = dimensions();
   if (!m_camera || size.y == 0)
     return;
 
@@ -368,7 +354,7 @@ void AnariSceneRenderPass::restartFrame()
   waitForCompletion();
 }
 
-void AnariSceneRenderPass::render(ImageBuffers &b, int stageId)
+void AnariSceneRenderPass::render(ImageBuffers &b)
 {
   m_buffers.stream = b.stream;
 
@@ -402,16 +388,16 @@ void AnariSceneRenderPass::render(ImageBuffers &b, int stageId)
   }
 
   if (!nothingToShow)
-    composite(b, stageId);
+    publish(b);
   else {
-    const auto size = getDimensions();
+    const auto size = dimensions();
     const uint32_t totalPixels = uint32_t(size.x) * uint32_t(size.y);
 #ifdef VSR_ALGORITHMS_HAS_CUDA
     if (b.stream)
       vsr::algorithms::cuda::fill(b.stream, b.color, totalPixels, 0);
-#else
-    vsr::algorithms::cpu::fill(b.color, totalPixels, 0);
+    else
 #endif
+      vsr::algorithms::cpu::fill(b.color, totalPixels, 0);
   }
 }
 
@@ -439,7 +425,7 @@ void AnariSceneRenderPass::copyFrameData()
   if (m_enableDepth)
     depth = anari::map<float>(m_device, m_frame, depthChannel);
 
-  const vsr::math::uint2 size(getDimensions());
+  const vsr::math::uint2 size(dimensions());
   const size_t totalSize = size.x * size.y;
 
   // All channels this frame requested must have mapped successfully. Note
@@ -515,67 +501,40 @@ void AnariSceneRenderPass::copyFrameData()
     anari::unmap(m_device, m_frame, normalChannel);
 }
 
-void AnariSceneRenderPass::composite(ImageBuffers &b, int stageId)
+void AnariSceneRenderPass::publish(ImageBuffers &b)
 {
-  const bool firstPass = stageId == 0;
-  const vsr::math::uint2 size(getDimensions());
+  const vsr::math::uint2 size(dimensions());
   const size_t totalSize = size.x * size.y;
-  const float inf = vsr::math::inf;
 
-  if (firstPass) {
-    detail::copy(b.color, m_buffers.color, totalSize);
-    if (m_format == ANARI_FLOAT32_VEC4)
-      detail::copy(b.hdrColor, m_buffers.hdrColor, totalSize * 4);
-    if (m_enableDepth) {
-      detail::copy(b.depth, m_buffers.depth, totalSize);
-      m_depthIsInf = false;
-    } else if (!m_depthIsInf) {
-      // No depth produced this frame: make the shared buffer read as
-      // "background" so depth-testing passes (box outline, stageId > 0
-      // compositing) fall back instead of using stale/garbage values.
-      const uint32_t totalPixels = uint32_t(totalSize);
+  detail::copy(b.color, m_buffers.color, totalSize);
+  if (m_format == ANARI_FLOAT32_VEC4)
+    detail::copy(b.hdrColor, m_buffers.hdrColor, totalSize * 4);
+  if (m_enableDepth) {
+    detail::copy(b.depth, m_buffers.depth, totalSize);
+    m_depthIsInf = false;
+  } else if (!m_depthIsInf) {
+    // No depth produced this frame: make the shared buffer read as
+    // "background" so depth-testing passes (box outline) fall back instead of
+    // using stale values.
+    const uint32_t totalPixels = uint32_t(totalSize);
 #ifdef VSR_ALGORITHMS_HAS_CUDA
-      if (b.stream)
-        vsr::algorithms::cuda::fill(b.stream, b.depth, totalPixels, inf);
-      else
+    if (b.stream)
+      vsr::algorithms::cuda::fill(
+          b.stream, b.depth, totalPixels, vsr::math::inf);
+    else
 #endif
-        vsr::algorithms::cpu::fill(b.depth, totalPixels, inf);
-      m_depthIsInf = true;
-    }
-    detail::copy(b.objectId, m_buffers.objectId, totalSize);
-    if (m_enablePrimitiveId)
-      detail::copy(b.primitiveId, m_buffers.primitiveId, totalSize);
-    if (m_enableInstanceId)
-      detail::copy(b.instanceId, m_buffers.instanceId, totalSize);
-    if (m_enableAlbedo)
-      detail::copy(b.albedo, m_buffers.albedo, totalSize);
-    if (m_enableNormals)
-      detail::copy(b.normal, m_buffers.normal, totalSize);
-  } else {
-    const uint32_t totalPixels = uint32_t(size.x) * uint32_t(size.y);
-#ifdef VSR_ALGORITHMS_HAS_CUDA
-    if (b.stream) {
-      vsr::algorithms::cuda::depthCompositeFrame(b.stream,
-          b.color,
-          b.depth,
-          b.objectId,
-          m_buffers.color,
-          m_buffers.depth,
-          m_buffers.objectId,
-          totalPixels,
-          firstPass);
-      return;
-    }
-#endif
-    vsr::algorithms::cpu::depthCompositeFrame(b.color,
-        b.depth,
-        b.objectId,
-        m_buffers.color,
-        m_buffers.depth,
-        m_buffers.objectId,
-        totalPixels,
-        firstPass);
+      vsr::algorithms::cpu::fill(b.depth, totalPixels, vsr::math::inf);
+    m_depthIsInf = true;
   }
+  detail::copy(b.objectId, m_buffers.objectId, totalSize);
+  if (m_enablePrimitiveId)
+    detail::copy(b.primitiveId, m_buffers.primitiveId, totalSize);
+  if (m_enableInstanceId)
+    detail::copy(b.instanceId, m_buffers.instanceId, totalSize);
+  if (m_enableAlbedo)
+    detail::copy(b.albedo, m_buffers.albedo, totalSize);
+  if (m_enableNormals)
+    detail::copy(b.normal, m_buffers.normal, totalSize);
 }
 
 void AnariSceneRenderPass::cleanup()

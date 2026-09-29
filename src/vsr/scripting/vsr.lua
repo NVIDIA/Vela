@@ -750,9 +750,6 @@ function ImagePipeline:setDimensions(width, height) end
 
 function ImagePipeline:render() end
 
----@return integer
-function ImagePipeline:size() end
-
 ---@return boolean
 function ImagePipeline:empty() end
 

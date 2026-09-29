@@ -286,9 +286,8 @@ void DistributedRenderServer::setup_ImagePipeline()
   auto sz = m_distState->controlState.read()->frameSize;
   m_renderPipeline.setDimensions(sz.x, sz.y);
 
-  auto *arp =
-      m_renderPipeline.emplace_back<vsr::rendering::AnariSceneRenderPass>(
-          m_device);
+  auto *arp = m_renderPipeline.setSource<vsr::rendering::AnariSceneRenderPass>(
+      m_device);
   arp->setWorld(m_renderIndex->world());
   arp->setRenderer(m_renderIndex->renderer(m_renderers[0]->index()));
   arp->setCamera(m_renderIndex->camera(m_camera->index()));
@@ -297,8 +296,8 @@ void DistributedRenderServer::setup_ImagePipeline()
 
   // Only rank 0 needs to read back the color buffer for network transmission
   if (isMain()) {
-    auto *ccbp = m_renderPipeline
-                     .emplace_back<vsr::rendering::CopyFromColorBufferPass>();
+    auto *ccbp =
+        m_renderPipeline.addSink<vsr::rendering::CopyFromColorBufferPass>();
     ccbp->setExternalBuffer(m_session.frame.buffers.color);
   }
 }

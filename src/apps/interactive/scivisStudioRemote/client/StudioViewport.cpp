@@ -27,7 +27,6 @@ using namespace std::chrono_literals;
 
 namespace {
 
-constexpr vsr::math::float4 CLEAR_WITH_FRAME{0.f, 0.f, 0.f, 1.f};
 constexpr vsr::math::float4 CLEAR_WITHOUT_FRAME{0.12f, 0.12f, 0.12f, 1.f};
 
 const char *hintFor(ConnectionState state)
@@ -93,9 +92,7 @@ void StudioViewport::buildUI()
   if (connected)
     updateCamera();
 
-  m_framePass->setEnabled(m_hasFrame);
-  m_clearPass->setClearColor(
-      m_hasFrame ? CLEAR_WITH_FRAME : CLEAR_WITHOUT_FRAME);
+  m_frameSource->setFrame(m_hasFrame ? &m_pixels : nullptr);
   BaseViewport::imagePipeline_render();
 
   ui_menubar(connected);
@@ -553,13 +550,10 @@ void StudioViewport::updateCamera()
 
 void StudioViewport::imagePipeline_populate(vsr::rendering::ImagePipeline &p)
 {
-  m_clearPass = p.emplace_back<vsr::rendering::ClearBuffersPass>();
-  m_clearPass->setClearColor(CLEAR_WITHOUT_FRAME);
-  m_framePass = p.emplace_back<vsr::rendering::CopyToColorBufferPass>();
-  m_framePass->setExternalBuffer(m_pixels);
-  m_framePass->setEnabled(false);
-  m_outputPass = p.emplace_back<vsr::rendering::CopyToSDLTexturePass>(
-      m_app->sdlRenderer());
+  m_frameSource = p.setSource<vsr::rendering::ExternalFrameSource>();
+  m_frameSource->setFallbackColor(CLEAR_WITHOUT_FRAME);
+  m_outputPass =
+      p.addSink<vsr::rendering::CopyToSDLTexturePass>(m_app->sdlRenderer());
 }
 
 void StudioViewport::viewport_reshape(vsr::math::int2 newWindowSize)

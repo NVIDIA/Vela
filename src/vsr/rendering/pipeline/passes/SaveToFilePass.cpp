@@ -27,7 +27,7 @@ void SaveToFilePass::setSingleShotMode(bool enabled)
   m_singleShot = enabled;
 }
 
-void SaveToFilePass::render(ImageBuffers &b, int /*stageId*/)
+void SaveToFilePass::render(const ImageBuffers &b)
 {
   if (m_filename.empty()) {
     vsr::core::logWarning("[SaveToFilePass] No filename set, skipping save");
@@ -39,7 +39,7 @@ void SaveToFilePass::render(ImageBuffers &b, int /*stageId*/)
     return;
   }
 
-  const auto size = getDimensions();
+  const auto size = dimensions();
   const size_t totalPixels = size.x * size.y;
 
   if (totalPixels == 0) {

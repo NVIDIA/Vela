@@ -469,7 +469,7 @@ void CameraPoses::renderInterpolatedPath()
             config.frame.width, config.frame.height);
 
         auto *anariPass =
-            pipeline->emplace_back<vsr::rendering::AnariSceneRenderPass>(d);
+            pipeline->setSource<vsr::rendering::AnariSceneRenderPass>(d);
         anariPass->setRunAsync(false);
         anariPass->setWorld(renderIndex->world());
         anariPass->setRenderer(r);
@@ -477,8 +477,7 @@ void CameraPoses::renderInterpolatedPath()
 
         // Add AOV visualization pass if enabled
         if (config.aov.aovType != vsr::rendering::AOVType::NONE) {
-          auto *aovPass =
-              pipeline->emplace_back<vsr::rendering::VisualizeAOVPass>();
+          auto *aovPass = pipeline->addPass<vsr::rendering::VisualizeAOVPass>();
           aovPass->setAOVType(config.aov.aovType);
           aovPass->setDepthRange(config.aov.depthMin, config.aov.depthMax);
           aovPass->setEdgeInvert(config.aov.edgeInvert);
@@ -500,8 +499,7 @@ void CameraPoses::renderInterpolatedPath()
           }
         }
 
-        auto *savePass =
-            pipeline->emplace_back<vsr::rendering::SaveToFilePass>();
+        auto *savePass = pipeline->addSink<vsr::rendering::SaveToFilePass>();
         savePass->setSingleShotMode(false);
 
         // Render interpolated frames

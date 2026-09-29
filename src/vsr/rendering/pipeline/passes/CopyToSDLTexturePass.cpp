@@ -90,7 +90,7 @@ void CopyToSDLTexturePass::checkGLInterop() const
   m_impl->glInteropAvailable = false;
 }
 
-void CopyToSDLTexturePass::render(ImageBuffers &b, int /*stageId*/)
+void CopyToSDLTexturePass::render(const ImageBuffers &b)
 {
   if (!m_impl->glInteropAvailable) {
     checkGLInterop();
@@ -98,7 +98,7 @@ void CopyToSDLTexturePass::render(ImageBuffers &b, int /*stageId*/)
       updateSize();
   }
 
-  const auto size = getDimensions();
+  const auto size = dimensions();
 
 #ifdef ENABLE_CUDA
   if (m_impl->graphicsResource) {
@@ -117,10 +117,8 @@ void CopyToSDLTexturePass::render(ImageBuffers &b, int /*stageId*/)
     cudaGraphicsUnmapResources(1, &m_impl->graphicsResource);
   } else {
 #endif
-    SDL_UpdateTexture(m_impl->texture,
-        nullptr,
-        b.color,
-        getDimensions().x * sizeof(b.color[0]));
+    SDL_UpdateTexture(
+        m_impl->texture, nullptr, b.color, dimensions().x * sizeof(b.color[0]));
 #ifdef ENABLE_CUDA
   }
 #endif
@@ -137,7 +135,7 @@ void CopyToSDLTexturePass::updateSize()
 
   if (m_impl->texture)
     SDL_DestroyTexture(m_impl->texture);
-  auto newSize = getDimensions();
+  auto newSize = dimensions();
   m_impl->texture = SDL_CreateTexture(m_impl->renderer,
       SDL_PIXELFORMAT_RGBA32,
       SDL_TEXTUREACCESS_STREAMING,

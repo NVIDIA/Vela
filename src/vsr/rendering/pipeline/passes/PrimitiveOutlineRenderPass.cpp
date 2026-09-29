@@ -27,12 +27,12 @@ void PrimitiveOutlineRenderPass::setThickness(uint32_t thickness)
   m_thickness = thickness;
 }
 
-void PrimitiveOutlineRenderPass::render(ImageBuffers &b, int stageId)
+void PrimitiveOutlineRenderPass::render(ImageBuffers &b)
 {
-  if (!b.objectId || !b.primitiveId || stageId == 0)
+  if (!b.objectId || !b.primitiveId)
     return;
 
-  const auto size = getDimensions();
+  const auto size = dimensions();
   const auto outlineColor = helium::cvt_color_to_uint32(m_outlineColor);
 
 #ifdef VSR_ALGORITHMS_HAS_CUDA

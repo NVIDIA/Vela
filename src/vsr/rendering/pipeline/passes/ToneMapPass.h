@@ -22,7 +22,7 @@ struct ToneMapPass : public ImagePass
   void setHDREnabled(bool enabled);
 
  protected:
-  void render(ImageBuffers &b, int stageId) override;
+  void render(ImageBuffers &b) override;
 
  private:
   ToneMapOperator m_operator{ToneMapOperator::ACES};

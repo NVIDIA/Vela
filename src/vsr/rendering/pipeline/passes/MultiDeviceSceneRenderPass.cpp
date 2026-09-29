@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "MultiDeviceSceneRenderPass.h"
-// vsr_core
-#include <vsr/core/Logging.hpp>
 // std
 #include <algorithm>
 #include <cstring>
@@ -92,7 +90,7 @@ void MultiDeviceSceneRenderPass::foreach_frame(
 void MultiDeviceSceneRenderPass::updateSize()
 {
   cleanup();
-  auto size = getDimensions();
+  auto size = dimensions();
   foreach_frame([&](anari::Device d, anari::Frame f) {
     anari::setParameter(d, f, "size", size);
     anari::commitParameters(d, f);
@@ -107,13 +105,13 @@ void MultiDeviceSceneRenderPass::updateSize()
       std::numeric_limits<float>::infinity());
 }
 
-void MultiDeviceSceneRenderPass::render(ImageBuffers &b, int stageId)
+void MultiDeviceSceneRenderPass::render(ImageBuffers &b)
 {
   m_buffers.stream = b.stream;
   foreach_frame([](anari::Device d, anari::Frame f) { anari::render(d, f); });
   foreach_frame([](anari::Device d, anari::Frame f) { anari::wait(d, f); });
   copyFrameData();
-  composite(b, stageId);
+  publish(b);
 }
 
 void MultiDeviceSceneRenderPass::copyFrameData()
@@ -123,7 +121,7 @@ void MultiDeviceSceneRenderPass::copyFrameData()
   auto color = anari::map<void>(d, f, "channel.color");
   auto depth = anari::map<float>(d, f, "channel.depth");
 
-  const vsr::math::uint2 size(getDimensions());
+  const vsr::math::uint2 size(dimensions());
   const size_t totalSize = size.x * size.y;
   if (totalSize > 0 && size.x == color.width && size.y == color.height) {
     if (color.pixelType == ANARI_FLOAT32_VEC4) {
@@ -142,16 +140,9 @@ void MultiDeviceSceneRenderPass::copyFrameData()
   anari::unmap(d, f, "channel.depth");
 }
 
-void MultiDeviceSceneRenderPass::composite(ImageBuffers &b, int stageId)
+void MultiDeviceSceneRenderPass::publish(ImageBuffers &b)
 {
-  if (stageId != 0) {
-    vsr::core::logWarning(
-        "[MultiDeviceSceneRenderPass] "
-        "pass is NOT first in the pipeline -- "
-        "overriding existing frame contents");
-  }
-
-  const vsr::math::uint2 size(getDimensions());
+  const vsr::math::uint2 size(dimensions());
   const size_t totalSize = size.x * size.y;
 
   detail::copy(b.color, m_buffers.color, totalSize);

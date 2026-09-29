@@ -13,6 +13,7 @@ using vsr::rendering::AutoExposurePass;
 using vsr::rendering::ImageBuffers;
 using vsr::rendering::ImagePipeline;
 using vsr::rendering::ImagePass;
+using vsr::rendering::ImageSource;
 
 namespace {
 
@@ -21,14 +22,12 @@ constexpr uint32_t HEIGHT = 32;
 constexpr float MID_GRAY = 0.18f;
 constexpr float RESPONSE = 0.15f; // AutoExposurePass::m_response default
 
-// Writes a uniform grey of the requested luminance into the pipeline's HDR
-// buffer. Running first also keeps AutoExposurePass off stage 0, which it
-// skips by contract.
-struct FillPass : ImagePass
+// Produces uniform grey HDR pixels at the requested luminance.
+struct FillSource : ImageSource
 {
   float luminance{MID_GRAY};
 
-  void render(ImageBuffers &b, int) override
+  void render(ImageBuffers &b) override
   {
     if (!b.hdrColor)
       return;
@@ -52,13 +51,13 @@ float targetExposureFor(float luminance)
 struct Fixture
 {
   ImagePipeline pipeline;
-  FillPass *fill{nullptr};
+  FillSource *fill{nullptr};
   AutoExposurePass *pass{nullptr};
 
   Fixture()
   {
-    fill = pipeline.emplace_back<FillPass>();
-    pass = pipeline.emplace_back<AutoExposurePass>();
+    fill = pipeline.setSource<FillSource>();
+    pass = pipeline.addPass<AutoExposurePass>();
     pipeline.setDimensions(WIDTH, HEIGHT);
     pass->setHDREnabled(true);
   }
@@ -139,9 +138,9 @@ SCENARIO("AutoExposurePass publishes its exposure to the shared buffers",
         struct ProbePass : ImagePass
         {
           float seen{-999.f};
-          void render(ImageBuffers &b, int) override { seen = b.exposure; }
+          void render(ImageBuffers &b) override { seen = b.exposure; }
         };
-        auto *probe = f.pipeline.emplace_back<ProbePass>();
+        auto *probe = f.pipeline.addPass<ProbePass>();
         f.pipeline.render();
         REQUIRE(probe->seen == Approx(f.pass->currentExposure()));
       }

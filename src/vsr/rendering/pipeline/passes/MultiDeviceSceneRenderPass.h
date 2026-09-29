@@ -13,15 +13,15 @@
 namespace vsr::rendering {
 
 /*
- * ImagePass that drives one ANARI Frame per device in parallel and composites
- * their results into a single color buffer; mirrors AnariSceneRenderPass but
- * spans multiple ANARI devices.
+ * Image Source that drives one ANARI Frame per device in parallel and
+ * composites their results into a single color buffer; mirrors
+ * AnariSceneRenderPass but spans multiple ANARI devices.
  *
  * Example:
- *   auto *pass = pipeline.emplace_back<MultiDeviceSceneRenderPass>(devices);
+ *   auto *pass = pipeline.setSource<MultiDeviceSceneRenderPass>(devices);
  *   pass->setCamera(0, cam); pass->setWorld(0, world);
  */
-struct MultiDeviceSceneRenderPass : public ImagePass
+struct MultiDeviceSceneRenderPass : public ImageSource
 {
   MultiDeviceSceneRenderPass(const std::vector<anari::Device> &devices);
   ~MultiDeviceSceneRenderPass() override;
@@ -43,9 +43,9 @@ struct MultiDeviceSceneRenderPass : public ImagePass
       const std::function<void(anari::Device, anari::Frame)> &func) const;
 
   void updateSize() override;
-  void render(ImageBuffers &b, int stageId) override;
+  void render(ImageBuffers &b) override;
   void copyFrameData();
-  void composite(ImageBuffers &b, int stageId);
+  void publish(ImageBuffers &b);
   void cleanup();
 
   ImageBuffers m_buffers;

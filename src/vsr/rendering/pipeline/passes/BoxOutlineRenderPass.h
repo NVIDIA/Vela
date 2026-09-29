@@ -39,7 +39,7 @@ struct BoxOutlineRenderPass : public ImagePass
   void setDepthTestEnabled(bool enabled);
 
  private:
-  void render(ImageBuffers &b, int stageId) override;
+  void render(ImageBuffers &b) override;
 
   enum class ViewKind
   {

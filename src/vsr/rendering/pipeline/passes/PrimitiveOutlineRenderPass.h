@@ -19,7 +19,7 @@ struct PrimitiveOutlineRenderPass : public ImagePass
   void setThickness(uint32_t thickness);
 
  private:
-  void render(ImageBuffers &b, int stageId) override;
+  void render(ImageBuffers &b) override;
 
   vsr::math::float4 m_outlineColor{0.8f, 0.8f, 0.8f, 1.f};
   uint32_t m_thickness{1};

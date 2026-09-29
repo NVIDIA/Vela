@@ -16,7 +16,7 @@ void CopyFromColorBufferPass::setExternalBuffer(std::vector<uint8_t> &buffer)
   m_externalBuffer = &buffer;
 }
 
-void CopyFromColorBufferPass::render(ImageBuffers &b, int /*stageId*/)
+void CopyFromColorBufferPass::render(const ImageBuffers &b)
 {
   if (!b.color) {
     vsr::core::logError("[CopyFromColorBufferPass] No color buffer available");
@@ -28,7 +28,7 @@ void CopyFromColorBufferPass::render(ImageBuffers &b, int /*stageId*/)
     return;
   }
 
-  const auto size = getDimensions();
+  const auto size = dimensions();
   const size_t totalPixels = size.x * size.y;
 
   if (totalPixels == 0) {

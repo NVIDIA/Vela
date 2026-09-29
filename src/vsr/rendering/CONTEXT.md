@@ -6,11 +6,31 @@ pipeline of composable passes produces the final per-pixel output.
 ## Language
 
 **Image Pipeline**:
-An ordered sequence of Image Passes that all read and write a shared set of
-per-pixel buffers, executed in insertion order each frame.
+One Image Source, followed by ordered Image Passes, followed by Image Sinks,
+all sharing one set of per-pixel buffers for the frame being displayed.
+
+**Image Source**:
+The single stage of an Image Pipeline that produces the frame's pixels, such as
+an ANARI scene render. Everything after it refines or consumes those pixels.
+_Avoid_: first pass, stage 0
 
 **Image Pass**:
-A single, independently enable-able stage of an Image Pipeline.
+An independently enable-able stage that reads and modifies the pixels produced
+by the Image Source (tone mapping, outlines, overlays).
+_Avoid_: post pass (as a separate term)
+
+**Image Sink**:
+A terminal stage that hands the finished pixels to a consumer outside the
+pipeline, such as a display texture or a network stream.
+
+**Pick Request**:
+A one-off query for what lies under a pixel (depth, object, instance). It is
+not part of an Image Pipeline and never alters the displayed image.
+_Avoid_: pick pass
+
+**World Bounds Overlay**:
+A viewport feature that draws the Box Outline of the rendered world's bounds.
+_Avoid_: bounding box pass, scene bounding box rendering
 
 **Outline**:
 An image-space silhouette border around an object or primitive, derived from

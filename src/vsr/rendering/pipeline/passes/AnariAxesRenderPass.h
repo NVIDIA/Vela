@@ -15,7 +15,7 @@ namespace vsr::rendering {
  * changes.
  *
  * Example:
- *   auto *pass = pipeline.emplace_back<AnariAxesRenderPass>(device,
+ *   auto *pass = pipeline.addPass<AnariAxesRenderPass>(device,
  * extensions); pass->setView(manipulator.dir(), manipulator.up());
  */
 struct AnariAxesRenderPass : public ImagePass
@@ -31,7 +31,7 @@ struct AnariAxesRenderPass : public ImagePass
   bool isValid() const;
   void setupWorld();
   void updateSize() override;
-  void render(ImageBuffers &b, int stageId) override;
+  void render(ImageBuffers &b) override;
 
   bool m_deviceUsable{true};
   bool m_firstFrame{true};

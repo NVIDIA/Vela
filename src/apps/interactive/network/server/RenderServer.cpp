@@ -167,9 +167,8 @@ void RenderServer::setup_ImagePipeline()
   m_renderPipeline.setDimensions(
       m_session.frame.config.size.x, m_session.frame.config.size.y);
 
-  auto *arp =
-      m_renderPipeline.emplace_back<vsr::rendering::AnariSceneRenderPass>(
-          m_device);
+  auto *arp = m_renderPipeline.setSource<vsr::rendering::AnariSceneRenderPass>(
+      m_device);
   arp->setWorld(m_renderIndex->world());
   arp->setRenderer(m_renderIndex->renderer(m_currentRenderer->index()));
   arp->setCamera(m_renderIndex->camera(m_camera->index()));
@@ -177,7 +176,7 @@ void RenderServer::setup_ImagePipeline()
   m_sceneImagePass = arp;
 
   auto *ccbp =
-      m_renderPipeline.emplace_back<vsr::rendering::CopyFromColorBufferPass>();
+      m_renderPipeline.addSink<vsr::rendering::CopyFromColorBufferPass>();
   ccbp->setExternalBuffer(m_session.frame.buffers.color);
 }
 
