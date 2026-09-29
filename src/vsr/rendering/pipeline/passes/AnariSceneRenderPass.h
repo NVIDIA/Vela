@@ -28,17 +28,13 @@ struct AnariSceneRenderPass : public ImageSource
   AnariSceneRenderPass(anari::Device d);
   ~AnariSceneRenderPass() override;
   const char *name() const override;
+  ImageChannels supportedChannels() const override;
 
   void setCamera(anari::Camera c);
   void setRenderer(anari::Renderer r);
   void setWorld(anari::World w);
+  // FLOAT32_VEC4 additionally makes HDR_COLOR available to passes.
   void setColorFormat(anari::DataType t);
-  void setEnableDepth(bool on);
-  void setEnableIDs(bool on);
-  void setEnablePrimitiveId(bool on);
-  void setEnableInstanceId(bool on);
-  void setEnableAlbedo(bool on);
-  void setEnableNormals(bool on);
   void setUseImplicitAspectRatio(bool on);
 
   void startFirstFrame(bool wait = false);
@@ -55,27 +51,24 @@ struct AnariSceneRenderPass : public ImageSource
 
  private:
   void updateSize() override;
+  void updateChannels() override;
+  void resizeStaging();
   void updateCameraAspect();
   void restartFrame();
   void render(ImageBuffers &b) override;
   void copyFrameData();
   void publish(ImageBuffers &b);
-  void cleanup();
 
-  ImageBuffers m_buffers;
-  bool m_depthIsInf{false}; // 'b.depth' has been inf-filled (no depth produced)
+  ImageBuffers m_buffers; // staging: the latest completed ANARI frame
+  ImageChannels m_stagingChannels{ImageChannels::NONE};
+  ImageChannels m_frameChannels{ImageChannels::NONE}; // set on m_frame
+  ImageChannels m_deviceChannels{ImageChannels::NONE};
 
   bool m_firstFrame{true};
   // Channels were toggled since the last render: restart the frame once at
   // the next render() instead of once per toggle.
   bool m_pendingRestart{false};
   bool m_deviceSupportsCUDAFrames{false};
-  bool m_enableDepth{true};
-  bool m_enableIDs{false};
-  bool m_enablePrimitiveId{false};
-  bool m_enableInstanceId{false};
-  bool m_enableAlbedo{false};
-  bool m_enableNormals{false};
   bool m_runAsync{true};
   bool m_useImplicitAspectRatio{false};
 

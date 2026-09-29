@@ -14,12 +14,13 @@ struct OutputTransformPass : public ImagePass
   OutputTransformPass();
   ~OutputTransformPass() override;
   const char *name() const override;
+  ImageChannels requiredChannels() const override;
 
   void setColorFormat(anari::DataType format);
   void setGamma(float gamma);
 
  protected:
-  void render(ImageBuffers &b) override;
+  void render(ImageBuffers &b, FrameState &frame) override;
 
  private:
   anari::DataType m_colorFormat{ANARI_UFIXED8_RGBA_SRGB};

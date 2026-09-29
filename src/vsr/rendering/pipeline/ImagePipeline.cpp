@@ -57,20 +57,11 @@ void ImagePipeline::setDimensions(uint32_t width, uint32_t height)
   m_size.x = width;
   m_size.y = height;
 
+  // Reallocated lazily, with the channels in demand, by the next render().
   cleanup();
 
-  const size_t totalSize = size_t(width) * size_t(height);
-  if (totalSize == 0)
+  if (width == 0 || height == 0)
     return;
-
-  m_buffers.color = detail::allocate<uint32_t>(totalSize);
-  m_buffers.hdrColor = detail::allocate<float>(totalSize * 4);
-  m_buffers.depth = detail::allocate<float>(totalSize);
-  m_buffers.instanceId = detail::allocate<uint32_t>(totalSize);
-  m_buffers.objectId = detail::allocate<uint32_t>(totalSize);
-  m_buffers.primitiveId = detail::allocate<uint32_t>(totalSize);
-  m_buffers.albedo = detail::allocate<vsr::math::float3>(totalSize);
-  m_buffers.normal = detail::allocate<vsr::math::float3>(totalSize);
 
   if (m_source)
     m_source->setDimensions(width, height);
@@ -83,8 +74,10 @@ void ImagePipeline::setDimensions(uint32_t width, uint32_t height)
 void ImagePipeline::render()
 {
   m_passTimings.clear();
-  if (!m_source || !m_source->isEnabled() || !m_buffers.color)
+  if (!m_source || !m_source->isEnabled() || m_size.x == 0 || m_size.y == 0)
     return;
+
+  updateChannels();
 
   using clock = std::chrono::steady_clock;
   auto elapsed = [](clock::time_point start) {
@@ -92,7 +85,7 @@ void ImagePipeline::render()
         .count();
   };
 
-  m_buffers.exposure = 0.f;
+  FrameState frame;
 
   auto start = clock::now();
   m_source->render(m_buffers);
@@ -102,7 +95,7 @@ void ImagePipeline::render()
     if (!p->isEnabled())
       continue;
     start = clock::now();
-    p->render(m_buffers);
+    p->render(m_buffers, frame);
     timeStage(*p, elapsed(start));
   }
 
@@ -142,21 +135,26 @@ void ImagePipeline::timeStage(ImageStage &s, float milliseconds)
   m_passTimings.push_back({s.name(), s.role(), milliseconds});
 }
 
+void ImagePipeline::updateChannels()
+{
+  ImageChannels demand = ImageChannels::NONE;
+  for (auto &p : m_passes) {
+    if (p->isEnabled())
+      demand |= p->requiredChannels();
+  }
+  const ImageChannels channels = demand & m_source->supportedChannels();
+
+  m_source->setChannels(channels);
+  m_bufferChannels = detail::updateImageBuffers(m_buffers,
+      size_t(m_size.x) * size_t(m_size.y),
+      m_bufferChannels,
+      channels);
+}
+
 void ImagePipeline::cleanup()
 {
-  detail::free(m_buffers.color);
-  detail::free(m_buffers.hdrColor);
-  detail::free(m_buffers.depth);
-  detail::free(m_buffers.objectId);
-  detail::free(m_buffers.primitiveId);
-  detail::free(m_buffers.instanceId);
-  detail::free(m_buffers.albedo);
-  detail::free(m_buffers.normal);
-
-  // nullify all buffers, retaining the associated CUDA streams.
-  auto stream = m_buffers.stream;
-  m_buffers = {};
-  m_buffers.stream = stream;
+  detail::freeImageBuffers(m_buffers);
+  m_bufferChannels = ImageChannels::NONE;
 }
 
 } // namespace vsr::rendering

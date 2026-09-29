@@ -80,8 +80,8 @@ struct Viewport : public BaseViewport
   void updateFrame();
   void updateImage();
   void updateBoundsOutlinePass();
-  void syncDepthChannelEnabled();
   void syncImagePassState();
+  bool sourceSupports(vsr::rendering::ImageChannels channels) const;
   void updateDisplayPassState();
 
   void ui_menubar();
@@ -113,7 +113,6 @@ struct Viewport : public BaseViewport
   vsr::math::float4 m_worldBoundsColor{0.8f, 0.8f, 0.8f, 1.f};
   int m_worldBoundsWidth{1};
   std::optional<float> m_frameProgress{0.f};
-  bool m_deviceSupportsPrimitiveId{false};
 
   vsr::rendering::AOVType m_visualizeAOV{vsr::rendering::AOVType::NONE};
   float m_depthVisualMinimum{0.f};

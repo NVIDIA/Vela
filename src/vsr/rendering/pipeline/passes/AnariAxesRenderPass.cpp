@@ -166,7 +166,7 @@ void AnariAxesRenderPass::updateSize()
   anari::commitParameters(m_device, m_frame);
 }
 
-void AnariAxesRenderPass::render(ImageBuffers &b)
+void AnariAxesRenderPass::render(ImageBuffers &b, FrameState & /*frame*/)
 {
   if (!isValid())
     return;

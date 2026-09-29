@@ -26,11 +26,12 @@ struct PickPass : public ImagePass
   PickPass();
   ~PickPass() override;
   const char *name() const override;
+  ImageChannels requiredChannels() const override;
 
   void setPickOperation(PickOpFunc &&f);
 
  private:
-  void render(ImageBuffers &b) override;
+  void render(ImageBuffers &b, FrameState &frame) override;
 
   PickOpFunc m_op;
 };

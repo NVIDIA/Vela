@@ -27,14 +27,21 @@ void OutputTransformPass::setGamma(float gamma)
   m_gamma = std::max(gamma, 1e-6f);
 }
 
-void OutputTransformPass::render(ImageBuffers &b)
+ImageChannels OutputTransformPass::requiredChannels() const
+{
+  return m_colorFormat == ANARI_FLOAT32_VEC4 ? ImageChannels::HDR_COLOR
+                                             : ImageChannels::NONE;
+}
+
+void OutputTransformPass::render(ImageBuffers &b, FrameState & /*frame*/)
 {
   if (m_colorFormat == ANARI_UFIXED8_RGBA_SRGB)
     return;
 
   const auto size = dimensions();
   const uint32_t totalPixels = size.x * size.y;
-  if (totalPixels == 0 || !b.color)
+  const bool needsHdr = m_colorFormat == ANARI_FLOAT32_VEC4;
+  if (totalPixels == 0 || !b.color || (needsHdr && !b.hdrColor))
     return;
 
   const float invGamma = 1.f / m_gamma;

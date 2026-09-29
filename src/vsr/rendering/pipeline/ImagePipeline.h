@@ -31,6 +31,10 @@ namespace vsr::rendering {
  * no source, or a disabled one, render() does nothing and the previous image
  * is kept.
  *
+ * Before each frame the pipeline collects the channels enabled passes
+ * require, clips them to what the source supports, hands the result to the
+ * source and backs exactly those buffers; unrequested channels stay null.
+ *
  * Stage pointers returned by setSource/addPass/addSink are owned by the
  * pipeline and stay valid until clear(), or, for the source, until it is
  * replaced by another setSource() call.
@@ -79,12 +83,14 @@ struct ImagePipeline final
   void sizeStage(ImageStage &s) const;
   void setSourceImpl(std::unique_ptr<ImageSource> s);
   void timeStage(ImageStage &s, float milliseconds);
+  void updateChannels();
 
   std::unique_ptr<ImageSource> m_source;
   std::vector<std::unique_ptr<ImagePass>> m_passes;
   std::vector<std::unique_ptr<ImageSink>> m_sinks;
   std::vector<PassTiming> m_passTimings;
   ImageBuffers m_buffers;
+  ImageChannels m_bufferChannels{ImageChannels::NONE};
   vsr::math::uint2 m_size{0, 0};
 };
 

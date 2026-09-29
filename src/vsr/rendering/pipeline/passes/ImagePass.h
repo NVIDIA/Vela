@@ -12,15 +12,39 @@
 namespace vsr::rendering {
 
 /*
- * POD struct holding pointers to all per-pixel output buffers (color, depth,
- * object/primitive/instance IDs, albedo, normals, hdrColor and
- * exposure setting) shared across the stages of an Image Pipeline.
+ * Optional per-pixel channels an Image Source can produce in addition to the
+ * always-present 8-bit color. Image Passes declare the channels they read;
+ * the pipeline forwards the union to its source and backs exactly those.
+ */
+enum class ImageChannels : uint32_t
+{
+  NONE = 0,
+  DEPTH = 1u << 0,
+  OBJECT_ID = 1u << 1,
+  PRIMITIVE_ID = 1u << 2,
+  INSTANCE_ID = 1u << 3,
+  ALBEDO = 1u << 4,
+  NORMAL = 1u << 5,
+  HDR_COLOR = 1u << 6
+};
+
+constexpr ImageChannels operator|(ImageChannels a, ImageChannels b);
+constexpr ImageChannels operator&(ImageChannels a, ImageChannels b);
+constexpr ImageChannels operator^(ImageChannels a, ImageChannels b);
+constexpr ImageChannels &operator|=(ImageChannels &a, ImageChannels b);
+// True when every channel of 'subset' is in 'set'.
+constexpr bool hasChannels(ImageChannels set, ImageChannels subset);
+
+/*
+ * Per-pixel buffers shared across the stages of an Image Pipeline. 'color' is
+ * always backed; every other buffer is null unless its channel was requested
+ * by an enabled pass and is supported by the source. Channel buffers start
+ * out as "background": infinite depth, ~0u IDs, zero elsewhere.
  */
 struct ImageBuffers
 {
   uint32_t *color{nullptr};
   float *hdrColor{nullptr};
-  float exposure{0.f};
   float *depth{nullptr};
   uint32_t *objectId{nullptr};
   uint32_t *primitiveId{nullptr};
@@ -28,6 +52,14 @@ struct ImageBuffers
   vsr::math::float3 *albedo{nullptr};
   vsr::math::float3 *normal{nullptr};
   detail::ComputeStream stream{};
+};
+
+/*
+ * Per-frame scalars passed between Image Passes; reset before every frame.
+ */
+struct FrameState
+{
+  float exposure{0.f}; // auto exposure in EV, written by AutoExposurePass
 };
 
 enum class ImageStageRole
@@ -86,9 +118,20 @@ struct ImageStage
 struct ImageSource : public ImageStage
 {
   ImageStageRole role() const override;
+  // The auxiliary channels this source can produce right now.
+  virtual ImageChannels supportedChannels() const;
+  // The channels the pipeline asked for; always within supportedChannels().
+  ImageChannels channels() const;
 
  protected:
+  // Called after channels() changed; start or stop producing channels here.
+  virtual void updateChannels();
   virtual void render(ImageBuffers &b) = 0;
+
+ private:
+  void setChannels(ImageChannels channels);
+
+  ImageChannels m_channels{ImageChannels::NONE};
 
   friend struct ImagePipeline;
 };
@@ -99,16 +142,20 @@ struct ImageSource : public ImageStage
  *
  * Example:
  *   struct MyPass : ImagePass {
- *     void render(ImageBuffers &b) override { ... }
+ *     ImageChannels requiredChannels() const override { return DEPTH; }
+ *     void render(ImageBuffers &b, FrameState &f) override { ... }
  *   };
  *   pipeline.addPass<MyPass>();
  */
 struct ImagePass : public ImageStage
 {
   ImageStageRole role() const override;
+  // The channels this pass reads in its current configuration. A requested
+  // channel may still be null in render() when the source cannot produce it.
+  virtual ImageChannels requiredChannels() const;
 
  protected:
-  virtual void render(ImageBuffers &b) = 0;
+  virtual void render(ImageBuffers &b, FrameState &frame) = 0;
 
   friend struct ImagePipeline;
 };
@@ -161,6 +208,44 @@ inline void free(T *ptr)
   detail::free_(ptr);
 }
 
+// Backs 'b' with color plus exactly 'channels' for 'numPixels' pixels.
+// Buffers of channels already in 'current' are kept as-is; newly backed ones
+// are filled with background values. Returns the new current channel set.
+ImageChannels updateImageBuffers(ImageBuffers &b,
+    size_t numPixels,
+    ImageChannels current,
+    ImageChannels channels);
+// Frees every buffer of 'b', keeping its stream.
+void freeImageBuffers(ImageBuffers &b);
+
 } // namespace detail
+
+// Inlined definitions ////////////////////////////////////////////////////////
+
+constexpr ImageChannels operator|(ImageChannels a, ImageChannels b)
+{
+  return ImageChannels(uint32_t(a) | uint32_t(b));
+}
+
+constexpr ImageChannels operator&(ImageChannels a, ImageChannels b)
+{
+  return ImageChannels(uint32_t(a) & uint32_t(b));
+}
+
+constexpr ImageChannels operator^(ImageChannels a, ImageChannels b)
+{
+  return ImageChannels(uint32_t(a) ^ uint32_t(b));
+}
+
+constexpr ImageChannels &operator|=(ImageChannels &a, ImageChannels b)
+{
+  a = a | b;
+  return a;
+}
+
+constexpr bool hasChannels(ImageChannels set, ImageChannels subset)
+{
+  return (set & subset) == subset;
+}
 
 } // namespace vsr::rendering

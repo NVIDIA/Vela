@@ -20,11 +20,12 @@ struct OutlineRenderPass : public ImagePass
   OutlineRenderPass();
   ~OutlineRenderPass() override;
   const char *name() const override;
+  ImageChannels requiredChannels() const override;
 
   void setOutlineId(uint32_t id);
 
  private:
-  void render(ImageBuffers &b) override;
+  void render(ImageBuffers &b, FrameState &frame) override;
 
   uint32_t m_outlineId{~0u};
 };

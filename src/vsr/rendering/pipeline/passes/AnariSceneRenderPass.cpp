@@ -34,25 +34,68 @@ bool deviceSupportsExtension(anari::Device d, const char *extension)
 
 // Helper functions ///////////////////////////////////////////////////////////
 
+static bool deviceHasExtension(anari::Device d, const char *extension)
+{
+  auto list = (const char *const *)anariGetObjectInfo(
+      d, ANARI_DEVICE, "default", "extension", ANARI_STRING_LIST);
+  if (!list)
+    return false;
+
+  for (const char *const *i = list; *i != nullptr; ++i) {
+    if (std::strcmp(*i, extension) == 0)
+      return true;
+  }
+  return false;
+}
+
 static bool supportsCUDAFbData(anari::Device d)
 {
 #ifdef ENABLE_CUDA
-  bool supportsCUDA = false;
-  auto list = (const char *const *)anariGetObjectInfo(
-      d, ANARI_DEVICE, "default", "extension", ANARI_STRING_LIST);
-
-  for (const char *const *i = list; *i != nullptr; ++i) {
-    if (std::string(*i) == "ANARI_NV_FRAME_BUFFERS_CUDA") {
-      supportsCUDA = true;
-      break;
-    }
-  }
-
-  return supportsCUDA;
+  return deviceHasExtension(d, "ANARI_NV_FRAME_BUFFERS_CUDA");
 #else
   return false;
 #endif
 }
+
+// Auxiliary channels the device can produce; depth is core ANARI.
+static ImageChannels deviceChannels(anari::Device d)
+{
+  struct
+  {
+    const char *extension;
+    ImageChannels channel;
+  } constexpr optional[] = {
+      {"ANARI_KHR_FRAME_CHANNEL_OBJECT_ID", ImageChannels::OBJECT_ID},
+      {"ANARI_KHR_FRAME_CHANNEL_PRIMITIVE_ID", ImageChannels::PRIMITIVE_ID},
+      {"ANARI_KHR_FRAME_CHANNEL_INSTANCE_ID", ImageChannels::INSTANCE_ID},
+      {"ANARI_KHR_FRAME_CHANNEL_ALBEDO", ImageChannels::ALBEDO},
+      {"ANARI_KHR_FRAME_CHANNEL_NORMAL", ImageChannels::NORMAL},
+  };
+
+  ImageChannels channels = ImageChannels::DEPTH;
+  for (const auto &o : optional) {
+    if (deviceHasExtension(d, o.extension))
+      channels |= o.channel;
+  }
+  return channels;
+}
+
+// ANARI frame parameter and element type backing each auxiliary channel.
+struct FrameChannel
+{
+  ImageChannels channel;
+  const char *parameter;
+  anari::DataType type;
+};
+
+static constexpr FrameChannel FRAME_CHANNELS[] = {
+    {ImageChannels::DEPTH, "channel.depth", ANARI_FLOAT32},
+    {ImageChannels::OBJECT_ID, "channel.objectId", ANARI_UINT32},
+    {ImageChannels::PRIMITIVE_ID, "channel.primitiveId", ANARI_UINT32},
+    {ImageChannels::INSTANCE_ID, "channel.instanceId", ANARI_UINT32},
+    {ImageChannels::ALBEDO, "channel.albedo", ANARI_FLOAT32_VEC3},
+    {ImageChannels::NORMAL, "channel.normal", ANARI_FLOAT32_VEC3},
+};
 
 // AnariSceneRenderPass definitions ///////////////////////////////////////////
 
@@ -61,7 +104,6 @@ AnariSceneRenderPass::AnariSceneRenderPass(anari::Device d) : m_device(d)
   anari::retain(d, d);
   m_frame = anari::newObject<anari::Frame>(d);
   anari::setParameter(d, m_frame, "channel.color", ANARI_UFIXED8_RGBA_SRGB);
-  anari::setParameter(d, m_frame, "channel.depth", ANARI_FLOAT32);
   anari::setParameter(d, m_frame, "accumulation", true);
   // Placeholder size so every intermediate commit/flush finalizes validly
   // (devices warn/skip on sizeless frames, e.g. helide "invalid frame
@@ -71,6 +113,7 @@ AnariSceneRenderPass::AnariSceneRenderPass(anari::Device d) : m_device(d)
   anari::setParameter(d, m_frame, "size", vsr::math::uint2(64, 64));
 
   m_deviceSupportsCUDAFrames = supportsCUDAFbData(d);
+  m_deviceChannels = deviceChannels(d);
 
   if (m_deviceSupportsCUDAFrames)
     vsr::core::logStatus("[ImagePipeline] using CUDA-mapped fb channels");
@@ -80,7 +123,7 @@ AnariSceneRenderPass::AnariSceneRenderPass(anari::Device d) : m_device(d)
 
 AnariSceneRenderPass::~AnariSceneRenderPass()
 {
-  cleanup();
+  detail::freeImageBuffers(m_buffers);
 
   anari::discard(m_device, m_frame);
   waitForCompletion();
@@ -130,137 +173,54 @@ void AnariSceneRenderPass::setColorFormat(anari::DataType t)
   anari::commitParameters(m_device, m_frame);
 }
 
-void AnariSceneRenderPass::setEnableDepth(bool on)
+ImageChannels AnariSceneRenderPass::supportedChannels() const
 {
-  if (on == m_enableDepth)
-    return;
+  // HDR color exists only when the frame itself renders float color.
+  const ImageChannels hdr = m_format == ANARI_FLOAT32_VEC4
+      ? ImageChannels::HDR_COLOR
+      : ImageChannels::NONE;
+  return m_deviceChannels | hdr;
+}
 
-  m_enableDepth = on;
+void AnariSceneRenderPass::updateChannels()
+{
+  const ImageChannels wanted = channels();
 
-  if (on) {
-    vsr::core::logInfo("[ImagePipeline] enabling depth frame channel");
-    anari::setParameter(m_device, m_frame, "channel.depth", ANARI_FLOAT32);
-  } else {
-    vsr::core::logInfo("[ImagePipeline] disabling depth frame channel");
-    anari::unsetParameter(m_device, m_frame, "channel.depth");
+  bool changed = false;
+  bool added = false;
+  for (const auto &c : FRAME_CHANNELS) {
+    const bool want = hasChannels(wanted, c.channel);
+    if (want == hasChannels(m_frameChannels, c.channel))
+      continue;
+    changed = true;
+    added |= want;
+    vsr::core::logInfo("[ImagePipeline] %s frame %s",
+        want ? "enabling" : "disabling",
+        c.parameter);
+    if (want)
+      anari::setParameter(m_device, m_frame, c.parameter, c.type);
+    else
+      anari::unsetParameter(m_device, m_frame, c.parameter);
   }
+  if (changed)
+    anari::commitParameters(m_device, m_frame);
 
-  anari::commitParameters(m_device, m_frame);
+  m_frameChannels = wanted;
+  resizeStaging();
 
-  if (on)
+  // A frame already in flight lacks the added channels: restart once, at the
+  // next render(), so they are produced before being read.
+  if (added)
     m_pendingRestart = true;
 }
 
-void AnariSceneRenderPass::setEnableIDs(bool on)
+void AnariSceneRenderPass::resizeStaging()
 {
-  if (on == m_enableIDs)
-    return;
-
-  m_enableIDs = on;
-
-  if (on) {
-    vsr::core::logInfo("[ImagePipeline] enabling objectId frame channel");
-    anari::setParameter(m_device, m_frame, "channel.objectId", ANARI_UINT32);
-  } else {
-    vsr::core::logInfo("[ImagePipeline] disabling objectId frame channel");
-    anari::unsetParameter(m_device, m_frame, "channel.objectId");
-    auto size = dimensions();
-    const size_t totalSize = size_t(size.x) * size_t(size.y);
-    std::fill(m_buffers.objectId, m_buffers.objectId + totalSize, ~0u);
-  }
-
-  anari::commitParameters(m_device, m_frame);
-
-  if (on)
-    m_pendingRestart = true;
-}
-
-void AnariSceneRenderPass::setEnablePrimitiveId(bool on)
-{
-  if (on == m_enablePrimitiveId)
-    return;
-
-  m_enablePrimitiveId = on;
-
-  if (on) {
-    vsr::core::logInfo("[ImagePipeline] enabling primitiveId frame channel");
-    anari::setParameter(m_device, m_frame, "channel.primitiveId", ANARI_UINT32);
-  } else {
-    vsr::core::logInfo("[ImagePipeline] disabling primitiveId frame channel");
-    anari::unsetParameter(m_device, m_frame, "channel.primitiveId");
-
-    auto size = dimensions();
-    const size_t totalSize = size_t(size.x) * size_t(size.y);
-    std::fill(m_buffers.primitiveId, m_buffers.primitiveId + totalSize, ~0u);
-  }
-
-  anari::commitParameters(m_device, m_frame);
-
-  if (on)
-    m_pendingRestart = true;
-}
-
-void AnariSceneRenderPass::setEnableInstanceId(bool on)
-{
-  if (on == m_enableInstanceId)
-    return;
-
-  m_enableInstanceId = on;
-
-  if (on) {
-    vsr::core::logInfo("[ImagePipeline] enabling instanceId frame channel");
-    anari::setParameter(m_device, m_frame, "channel.instanceId", ANARI_UINT32);
-  } else {
-    vsr::core::logInfo("[ImagePipeline] disabling instanceId frame channel");
-    anari::unsetParameter(m_device, m_frame, "channel.instanceId");
-
-    auto size = dimensions();
-    const size_t totalSize = size_t(size.x) * size_t(size.y);
-    std::fill(m_buffers.instanceId, m_buffers.instanceId + totalSize, ~0u);
-  }
-
-  anari::commitParameters(m_device, m_frame);
-
-  if (on)
-    m_pendingRestart = true;
-}
-
-void AnariSceneRenderPass::setEnableAlbedo(bool on)
-{
-  if (on == m_enableAlbedo)
-    return;
-
-  m_enableAlbedo = on;
-
-  if (on) {
-    vsr::core::logInfo("[ImagePipeline] enabling albedo frame channel");
-    anari::setParameter(
-        m_device, m_frame, "channel.albedo", ANARI_FLOAT32_VEC3);
-  } else {
-    vsr::core::logInfo("[ImagePipeline] disabling albedo frame channel");
-    anari::unsetParameter(m_device, m_frame, "channel.albedo");
-  }
-
-  anari::commitParameters(m_device, m_frame);
-}
-
-void AnariSceneRenderPass::setEnableNormals(bool on)
-{
-  if (on == m_enableNormals)
-    return;
-
-  m_enableNormals = on;
-
-  if (on) {
-    vsr::core::logInfo("[ImagePipeline] enabling normal frame channel");
-    anari::setParameter(
-        m_device, m_frame, "channel.normal", ANARI_FLOAT32_VEC3);
-  } else {
-    vsr::core::logInfo("[ImagePipeline] disabling normal frame channel");
-    anari::unsetParameter(m_device, m_frame, "channel.normal");
-  }
-
-  anari::commitParameters(m_device, m_frame);
+  const auto size = dimensions();
+  m_stagingChannels = detail::updateImageBuffers(m_buffers,
+      size_t(size.x) * size_t(size.y),
+      m_stagingChannels,
+      m_frameChannels);
 }
 
 void AnariSceneRenderPass::setUseImplicitAspectRatio(bool on)
@@ -302,24 +262,15 @@ anari::Frame AnariSceneRenderPass::getFrame() const
 
 void AnariSceneRenderPass::updateSize()
 {
-  cleanup();
   auto size = dimensions();
   anari::setParameter(m_device, m_frame, "size", size);
   anari::commitParameters(m_device, m_frame);
 
   updateCameraAspect();
 
-  m_depthIsInf = false; // shared 'b.depth' was reallocated
-  const size_t totalSize = size_t(size.x) * size_t(size.y);
-  m_buffers.color = detail::allocate<uint32_t>(totalSize);
-  m_buffers.hdrColor = detail::allocate<float>(totalSize * 4);
-  m_buffers.depth = detail::allocate<float>(totalSize);
-  std::fill(m_buffers.depth, m_buffers.depth + totalSize, vsr::math::inf);
-  m_buffers.objectId = detail::allocate<uint32_t>(totalSize);
-  m_buffers.primitiveId = detail::allocate<uint32_t>(totalSize);
-  m_buffers.instanceId = detail::allocate<uint32_t>(totalSize);
-  m_buffers.albedo = detail::allocate<vsr::math::float3>(totalSize);
-  m_buffers.normal = detail::allocate<vsr::math::float3>(totalSize);
+  detail::freeImageBuffers(m_buffers);
+  m_stagingChannels = ImageChannels::NONE;
+  resizeStaging();
 
   // Render the new size synchronously so the first frame displayed after a
   // resize is valid.
@@ -420,9 +371,14 @@ void AnariSceneRenderPass::copyFrameData()
   const char *normalChannel =
       m_deviceSupportsCUDAFrames ? "channel.normalCUDA" : "channel.normal";
 
+  const auto has = [&](ImageChannels c) {
+    return hasChannels(m_frameChannels, c);
+  };
+  const bool enableDepth = has(ImageChannels::DEPTH);
+
   auto color = anari::map<void>(m_device, m_frame, colorChannel);
   anari::MappedFrameData<float> depth{};
-  if (m_enableDepth)
+  if (enableDepth)
     depth = anari::map<float>(m_device, m_frame, depthChannel);
 
   const vsr::math::uint2 size(dimensions());
@@ -430,23 +386,24 @@ void AnariSceneRenderPass::copyFrameData()
 
   // All channels this frame requested must have mapped successfully. Note
   // depth is only mapped when requested, so a null depth is fine unless
-  // m_enableDepth asked for it.
+  // depth was requested.
   const bool sizeMatches =
       totalSize > 0 && size.x == color.width && size.y == color.height;
   const bool colorMapped =
       color.data != nullptr && color.pixelType != ANARI_UNKNOWN;
-  const bool depthMappedIfRequested = !m_enableDepth || depth.data != nullptr;
+  const bool depthMappedIfRequested = !enableDepth || depth.data != nullptr;
 
   const bool valid = sizeMatches && colorMapped && depthMappedIfRequested;
   if (!valid) {
     anari::unmap(m_device, m_frame, colorChannel);
-    if (m_enableDepth)
+    if (enableDepth)
       anari::unmap(m_device, m_frame, depthChannel);
     return;
   }
 
   if (color.pixelType == ANARI_FLOAT32_VEC4) {
-    detail::copy(m_buffers.hdrColor, (float *)color.data, totalSize * 4);
+    if (m_buffers.hdrColor)
+      detail::copy(m_buffers.hdrColor, (float *)color.data, totalSize * 4);
     detail::convertFloatColorBuffer_(m_buffers.stream,
         (const float *)color.data,
         (uint8_t *)m_buffers.color,
@@ -454,50 +411,75 @@ void AnariSceneRenderPass::copyFrameData()
   } else
     detail::copy(m_buffers.color, (uint32_t *)color.data, totalSize);
 
-  if (m_enableDepth)
+  if (enableDepth)
     detail::copy(m_buffers.depth, depth.data, totalSize);
-  if (m_enableIDs) {
-    auto objectId = anari::map<uint32_t>(m_device, m_frame, objectIdChannel);
-    if (objectId.data)
-      detail::copy(m_buffers.objectId, objectId.data, totalSize);
+  // A requested channel that fails to map this frame reads as background
+  // rather than keeping an earlier frame's values.
+  const uint32_t totalPixels = uint32_t(totalSize);
+  auto fillIds = [&](uint32_t *buf) {
+#ifdef VSR_ALGORITHMS_HAS_CUDA
+    if (m_buffers.stream) {
+      vsr::algorithms::cuda::fill(m_buffers.stream, buf, totalPixels, ~0u);
+      return;
+    }
+#endif
+    vsr::algorithms::cpu::fill(buf, totalPixels, ~0u);
+  };
+  auto fillZero3 = [&](vsr::math::float3 *buf) {
+    auto *f = reinterpret_cast<float *>(buf);
+#ifdef VSR_ALGORITHMS_HAS_CUDA
+    if (m_buffers.stream) {
+      vsr::algorithms::cuda::fill(m_buffers.stream, f, totalPixels * 3, 0.f);
+      return;
+    }
+#endif
+    vsr::algorithms::cpu::fill(f, totalPixels * 3, 0.f);
+  };
+  auto copyOr = [&](auto *dst, const auto &mapped, auto &&background) {
+    if (mapped.data)
+      detail::copy(dst, mapped.data, totalSize);
+    else
+      background(dst);
+  };
+
+  if (has(ImageChannels::OBJECT_ID)) {
+    copyOr(m_buffers.objectId,
+        anari::map<uint32_t>(m_device, m_frame, objectIdChannel),
+        fillIds);
   }
-  if (m_enablePrimitiveId) {
-    auto primitiveId =
-        anari::map<uint32_t>(m_device, m_frame, primitiveIdChannel);
-    if (primitiveId.data)
-      detail::copy(m_buffers.primitiveId, primitiveId.data, totalSize);
+  if (has(ImageChannels::PRIMITIVE_ID)) {
+    copyOr(m_buffers.primitiveId,
+        anari::map<uint32_t>(m_device, m_frame, primitiveIdChannel),
+        fillIds);
   }
-  if (m_enableInstanceId) {
-    auto instanceId =
-        anari::map<uint32_t>(m_device, m_frame, instanceIdChannel);
-    if (instanceId.data)
-      detail::copy(m_buffers.instanceId, instanceId.data, totalSize);
+  if (has(ImageChannels::INSTANCE_ID)) {
+    copyOr(m_buffers.instanceId,
+        anari::map<uint32_t>(m_device, m_frame, instanceIdChannel),
+        fillIds);
   }
-  if (m_enableAlbedo) {
-    auto albedo =
-        anari::map<vsr::math::float3>(m_device, m_frame, albedoChannel);
-    if (albedo.data)
-      detail::copy(m_buffers.albedo, albedo.data, totalSize);
+  if (has(ImageChannels::ALBEDO)) {
+    copyOr(m_buffers.albedo,
+        anari::map<vsr::math::float3>(m_device, m_frame, albedoChannel),
+        fillZero3);
   }
-  if (m_enableNormals) {
-    auto normal =
-        anari::map<vsr::math::float3>(m_device, m_frame, normalChannel);
-    if (normal.data)
-      detail::copy(m_buffers.normal, normal.data, totalSize);
+  if (has(ImageChannels::NORMAL)) {
+    copyOr(m_buffers.normal,
+        anari::map<vsr::math::float3>(m_device, m_frame, normalChannel),
+        fillZero3);
   }
 
   anari::unmap(m_device, m_frame, colorChannel);
-  if (m_enableDepth)
+  if (enableDepth)
     anari::unmap(m_device, m_frame, depthChannel);
-  if (m_enableIDs)
+  if (has(ImageChannels::OBJECT_ID))
     anari::unmap(m_device, m_frame, objectIdChannel);
-  if (m_enablePrimitiveId)
+  if (has(ImageChannels::PRIMITIVE_ID))
     anari::unmap(m_device, m_frame, primitiveIdChannel);
-  if (m_enableInstanceId)
+  if (has(ImageChannels::INSTANCE_ID))
     anari::unmap(m_device, m_frame, instanceIdChannel);
-  if (m_enableAlbedo)
+  if (has(ImageChannels::ALBEDO))
     anari::unmap(m_device, m_frame, albedoChannel);
-  if (m_enableNormals)
+  if (has(ImageChannels::NORMAL))
     anari::unmap(m_device, m_frame, normalChannel);
 }
 
@@ -506,47 +488,22 @@ void AnariSceneRenderPass::publish(ImageBuffers &b)
   const vsr::math::uint2 size(dimensions());
   const size_t totalSize = size.x * size.y;
 
+  // The pipeline backs exactly channels(), which the staging mirrors.
   detail::copy(b.color, m_buffers.color, totalSize);
-  if (m_format == ANARI_FLOAT32_VEC4)
+  if (b.hdrColor && m_buffers.hdrColor)
     detail::copy(b.hdrColor, m_buffers.hdrColor, totalSize * 4);
-  if (m_enableDepth) {
+  if (b.depth && m_buffers.depth)
     detail::copy(b.depth, m_buffers.depth, totalSize);
-    m_depthIsInf = false;
-  } else if (!m_depthIsInf) {
-    // No depth produced this frame: make the shared buffer read as
-    // "background" so depth-testing passes (box outline) fall back instead of
-    // using stale values.
-    const uint32_t totalPixels = uint32_t(totalSize);
-#ifdef VSR_ALGORITHMS_HAS_CUDA
-    if (b.stream)
-      vsr::algorithms::cuda::fill(
-          b.stream, b.depth, totalPixels, vsr::math::inf);
-    else
-#endif
-      vsr::algorithms::cpu::fill(b.depth, totalPixels, vsr::math::inf);
-    m_depthIsInf = true;
-  }
-  detail::copy(b.objectId, m_buffers.objectId, totalSize);
-  if (m_enablePrimitiveId)
+  if (b.objectId && m_buffers.objectId)
+    detail::copy(b.objectId, m_buffers.objectId, totalSize);
+  if (b.primitiveId && m_buffers.primitiveId)
     detail::copy(b.primitiveId, m_buffers.primitiveId, totalSize);
-  if (m_enableInstanceId)
+  if (b.instanceId && m_buffers.instanceId)
     detail::copy(b.instanceId, m_buffers.instanceId, totalSize);
-  if (m_enableAlbedo)
+  if (b.albedo && m_buffers.albedo)
     detail::copy(b.albedo, m_buffers.albedo, totalSize);
-  if (m_enableNormals)
+  if (b.normal && m_buffers.normal)
     detail::copy(b.normal, m_buffers.normal, totalSize);
-}
-
-void AnariSceneRenderPass::cleanup()
-{
-  detail::free(m_buffers.color);
-  detail::free(m_buffers.hdrColor);
-  detail::free(m_buffers.depth);
-  detail::free(m_buffers.objectId);
-  detail::free(m_buffers.primitiveId);
-  detail::free(m_buffers.instanceId);
-  detail::free(m_buffers.albedo);
-  detail::free(m_buffers.normal);
 }
 
 } // namespace vsr::rendering

@@ -21,7 +21,12 @@ void OutlineRenderPass::setOutlineId(uint32_t id)
   m_outlineId = id;
 }
 
-void OutlineRenderPass::render(ImageBuffers &b)
+ImageChannels OutlineRenderPass::requiredChannels() const
+{
+  return m_outlineId != ~0u ? ImageChannels::OBJECT_ID : ImageChannels::NONE;
+}
+
+void OutlineRenderPass::render(ImageBuffers &b, FrameState & /*frame*/)
 {
   if (!b.objectId || m_outlineId == ~0u)
     return;

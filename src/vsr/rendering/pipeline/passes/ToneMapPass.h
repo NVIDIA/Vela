@@ -15,6 +15,7 @@ struct ToneMapPass : public ImagePass
   ToneMapPass();
   ~ToneMapPass() override;
   const char *name() const override;
+  ImageChannels requiredChannels() const override;
 
   void setOperator(ToneMapOperator op);
   void setAutoExposureEnabled(bool enabled);
@@ -22,7 +23,7 @@ struct ToneMapPass : public ImagePass
   void setHDREnabled(bool enabled);
 
  protected:
-  void render(ImageBuffers &b) override;
+  void render(ImageBuffers &b, FrameState &frame) override;
 
  private:
   ToneMapOperator m_operator{ToneMapOperator::ACES};

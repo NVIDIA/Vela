@@ -138,7 +138,8 @@ struct ViewportPasses
   std::optional<PickSample> takePick();
 
  private:
-  void syncChannels();
+  void updateIdChannelFlag();
+  bool sourceSupports(vsr::rendering::ImageChannels channels) const;
   bool doPrimitiveOutline() const;
 
   vsr::rendering::AnariSceneRenderPass *m_scenePass{nullptr};

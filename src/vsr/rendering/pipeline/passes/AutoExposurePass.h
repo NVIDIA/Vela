@@ -14,12 +14,13 @@ struct AutoExposurePass : public ImagePass
   AutoExposurePass();
   ~AutoExposurePass() override;
   const char *name() const override;
+  ImageChannels requiredChannels() const override;
 
   void setHDREnabled(bool enabled);
   float currentExposure() const;
 
  private:
-  void render(ImageBuffers &b) override;
+  void render(ImageBuffers &b, FrameState &frame) override;
 
   // Opaque persistent device scratch for the CUDA luminance reduction
   // (created lazily on first use; empty when built without CUDA).

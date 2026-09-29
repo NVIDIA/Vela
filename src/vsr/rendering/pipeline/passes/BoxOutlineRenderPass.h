@@ -21,6 +21,7 @@ struct BoxOutlineRenderPass : public ImagePass
   BoxOutlineRenderPass();
   ~BoxOutlineRenderPass() override;
   const char *name() const override;
+  ImageChannels requiredChannels() const override;
 
   void setBox(const vsr::math::box3 &box);
   void setPerspectiveView(const vsr::math::float3 &eye,
@@ -39,7 +40,7 @@ struct BoxOutlineRenderPass : public ImagePass
   void setDepthTestEnabled(bool enabled);
 
  private:
-  void render(ImageBuffers &b) override;
+  void render(ImageBuffers &b, FrameState &frame) override;
 
   enum class ViewKind
   {

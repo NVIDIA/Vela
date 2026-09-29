@@ -79,9 +79,37 @@ ImageStageRole ImageSource::role() const
   return ImageStageRole::SOURCE;
 }
 
+ImageChannels ImageSource::supportedChannels() const
+{
+  return ImageChannels::NONE;
+}
+
+ImageChannels ImageSource::channels() const
+{
+  return m_channels;
+}
+
+void ImageSource::updateChannels()
+{
+  // no-op
+}
+
+void ImageSource::setChannels(ImageChannels channels)
+{
+  if (channels == m_channels)
+    return;
+  m_channels = channels;
+  updateChannels();
+}
+
 ImageStageRole ImagePass::role() const
 {
   return ImageStageRole::PASS;
+}
+
+ImageChannels ImagePass::requiredChannels() const
+{
+  return ImageChannels::NONE;
 }
 
 ImageStageRole ImageSink::role() const
@@ -120,6 +148,69 @@ void memcpy_(void *dst, const void *src, size_t numBytes)
 #else
   std::memcpy(dst, src, numBytes);
 #endif
+}
+
+template <typename T>
+static void updateChannelBuffer(
+    T *&buffer, size_t count, bool wanted, bool had, T background)
+{
+  if (wanted && had)
+    return;
+  detail::free(buffer);
+  buffer = nullptr;
+  if (!wanted)
+    return;
+  buffer = detail::allocate<T>(count);
+  std::fill(buffer, buffer + count, background);
+}
+
+ImageChannels updateImageBuffers(ImageBuffers &b,
+    size_t numPixels,
+    ImageChannels current,
+    ImageChannels channels)
+{
+  if (!b.color)
+    current = ImageChannels::NONE; // nothing backed yet
+  if (numPixels == 0) {
+    freeImageBuffers(b);
+    return ImageChannels::NONE;
+  }
+
+  if (!b.color) {
+    b.color = detail::allocate<uint32_t>(numPixels);
+    std::fill(b.color, b.color + numPixels, 0u);
+  }
+
+  auto update = [&](auto *&buffer, size_t count, ImageChannels c, auto bg) {
+    updateChannelBuffer(
+        buffer, count, hasChannels(channels, c), hasChannels(current, c), bg);
+  };
+
+  update(b.hdrColor, numPixels * 4, ImageChannels::HDR_COLOR, 0.f);
+  update(b.depth, numPixels, ImageChannels::DEPTH, vsr::math::inf);
+  update(b.objectId, numPixels, ImageChannels::OBJECT_ID, ~0u);
+  update(b.primitiveId, numPixels, ImageChannels::PRIMITIVE_ID, ~0u);
+  update(b.instanceId, numPixels, ImageChannels::INSTANCE_ID, ~0u);
+  update(b.albedo, numPixels, ImageChannels::ALBEDO, vsr::math::float3(0.f));
+  update(b.normal, numPixels, ImageChannels::NORMAL, vsr::math::float3(0.f));
+
+  return channels;
+}
+
+void freeImageBuffers(ImageBuffers &b)
+{
+  detail::free(b.color);
+  detail::free(b.hdrColor);
+  detail::free(b.depth);
+  detail::free(b.objectId);
+  detail::free(b.primitiveId);
+  detail::free(b.instanceId);
+  detail::free(b.albedo);
+  detail::free(b.normal);
+
+  const auto stream = b.stream;
+  b = {};
+  b.stream = stream;
 }
 
 void convertFloatColorBuffer_(
