@@ -5,8 +5,9 @@ This directory contains example user color-map files for VSR applications.
 To make VSR pick up a color map, copy a `.1dt` file into your user config
 color-map directory:
 
-- Linux/macOS: `~/.config/vsr/colormaps/`
-- Windows: `%APPDATA%/vsr/colormaps/`
+- Linux/macOS: `~/.config/vela/colormaps/` (`$XDG_CONFIG_HOME/vela/colormaps/`
+  on Linux when set)
+- Windows: `%APPDATA%/vela/colormaps/`
 
 VSR loads these files once at application startup. The filename stem becomes
 the transfer-function editor dropdown name, so `Sunset Test.1dt` appears as

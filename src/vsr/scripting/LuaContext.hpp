@@ -86,7 +86,7 @@ class LuaContext
   // Returns search paths in priority order:
   //   1. <source>/scripts/         (dev builds with VSR_SOURCE_DIR)
   //   2. <exe>/../share/vsr/scripts/
-  //   3. ~/.config/vsr/scripts/    (or %APPDATA%/vsr/scripts/ on Windows)
+  //   3. <User Config Directory>/scripts/ (vsr/core/UserConfig.hpp)
   //   4. VSR_LUA_PACKAGE_PATHS env var (: or ; separated)
   static std::vector<std::string> defaultSearchPaths();
 

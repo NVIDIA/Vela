@@ -97,8 +97,8 @@ Studio reuses the `vsr::network` transport as-is — Boost.Asio TCP,
   (ssh, job script). Configuration is argv only: `--port` (default 12345; 0
   asks the OS for a free port, named in the `Listening on port N` line),
   `--library <anari lib>`, `--data-root` (repeatable), optional
-  `--project <path>`. The server is config-free (`~/.config/vsr/studio` is
-  frontend-only), outlives client connections, and exits only on an explicit
+  `--project <path>`. The server is config-free (the User Config Directory,
+  `~/.config/vela`, is frontend-only), outlives client connections, and exits only on an explicit
   `Shutdown` request or a signal. Clients never spawn servers in v1.
 - **Hello exchange, exact-match version.** One integer `PROTOCOL_VERSION`
   compiled into both binaries, bumped on any wire-visible change. On accept:
@@ -654,8 +654,8 @@ a spawner needs).
   residual CWD fallback exists in `src/vsr/io/importers/PbrtParser.cpp`;
   implementation should not add more.
 - **Config.** The server is config-free (CLI flags only);
-  `~/.config/vsr/studio` (recent projects, layout) becomes frontend-only. No
-  server-side config reads, ever.
+  the User Config Directory (`~/.config/vela`: recent projects, layout) is
+  frontend-only. No server-side config reads, ever.
 - **Ports.** The demo servers hard-code 12345 in five places; `--port`
   already fixes this, and loopback uses any free port.
 - **Latency.** No decision assumes remoteness: latest-frame-wins pacing and

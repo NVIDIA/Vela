@@ -17,6 +17,7 @@
 #include "windows/ShotEditor.h"
 
 #include "vsr/core/Logging.hpp"
+#include "vsr/core/UserConfig.hpp"
 #include "vsr/ui/imgui/windows/LayerTree.h"
 #include "vsr/ui/imgui/windows/Log.h"
 #include "vsr/ui/imgui/windows/ObjectEditor.h"
@@ -43,15 +44,7 @@ constexpr std::size_t MAX_RECENT_PROJECTS = 10;
 
 std::filesystem::path studioConfigDirectory()
 {
-#ifdef _WIN32
-  if (const char *appData = std::getenv("APPDATA"); appData != nullptr)
-    return std::filesystem::path(appData) / "vsr" / "studio";
-#else
-  if (const char *home = std::getenv("HOME"); home != nullptr)
-    return std::filesystem::path(home) / ".config" / "vsr" / "studio";
-#endif
-
-  return std::filesystem::path("studio");
+  return vsr::core::userConfigDirectory() / "studio";
 }
 
 std::filesystem::path normalizedAbsolutePath(const std::filesystem::path &path)

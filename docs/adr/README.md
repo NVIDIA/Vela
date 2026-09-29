@@ -66,6 +66,17 @@ boundary between its in-memory and serialized forms.
 See [`src/vsr/core/CONTEXT.md`](../../src/vsr/core/CONTEXT.md) for the
 resulting vocabulary.
 
+## Application-owned state
+
+What an application remembers between runs, and where it keeps it.
+
+| ADR | Decision | Supersedes / revised by |
+| --- | --- | --- |
+| [0041](0041-name-the-user-config-directory-after-vela.md) | Name the User Config Directory after Vela, not VSR | |
+
+See [`src/vsr/app/CONTEXT.md`](../../src/vsr/app/CONTEXT.md) for the
+resulting vocabulary.
+
 ## VSR I/O vocabulary
 
 | ADR | Decision | Supersedes / revised by |

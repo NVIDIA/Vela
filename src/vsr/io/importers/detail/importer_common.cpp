@@ -6,6 +6,7 @@
 #include "vsr/core/ColorMapUtil.hpp"
 #include "vsr/core/Logging.hpp"
 #include "vsr/core/Token.hpp"
+#include "vsr/core/UserConfig.hpp"
 // vsr_io
 #include "vsr/io/importers.hpp"
 // mikktspace
@@ -588,15 +589,7 @@ core::TransferFunction importTransferFunction(const std::string &filepath)
 
 std::filesystem::path userColorMapDirectory()
 {
-#ifdef _WIN32
-  if (const char *appData = std::getenv("APPDATA"); appData != nullptr)
-    return std::filesystem::path(appData) / "vsr" / "colormaps";
-#else
-  if (const char *home = std::getenv("HOME"); home != nullptr)
-    return std::filesystem::path(home) / ".config" / "vsr" / "colormaps";
-#endif
-
-  return std::filesystem::path("colormaps");
+  return vsr::core::userConfigDirectory() / "colormaps";
 }
 
 std::vector<UserColorMap> loadUserColorMaps()

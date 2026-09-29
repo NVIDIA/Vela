@@ -89,8 +89,17 @@ Lua module search paths (lowest to highest priority):
 
 1. `<source>/scripts/` (dev builds)
 2. `<install>/share/vsr/scripts/`
-3. `~/.config/vsr/scripts/`
+3. `~/.config/vela/scripts/`
 4. `VSR_LUA_PACKAGE_PATHS` (`:` separated)
+
+### User Config Directory
+
+Per-user state lives in `~/.config/vela/` (`$XDG_CONFIG_HOME/vela/` on Linux
+when set, `%APPDATA%\vela\` on Windows), resolved only by
+`vsr::core::userConfigDirectory()`. It holds `preferences.vsr` (Application
+Preferences), per-application state, `colormaps/` and `scripts/`. It is named
+for the product, not the library: see
+[docs/adr/0041](docs/adr/0041-name-the-user-config-directory-after-vela.md).
 
 ### Environment Variables
 
