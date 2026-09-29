@@ -8,6 +8,7 @@
 // vsr_scene
 #include "vsr/scene/Scene.hpp"
 // vsr_rendering
+#include "vsr/rendering/pick/PickRequest.h"
 #include "vsr/rendering/pipeline/ImagePipeline.h"
 // vsr_core
 #include "vsr/core/VSRMath.hpp"
@@ -23,64 +24,23 @@ namespace vsr::scivis_studio::server {
 // The fovy a perspective camera object renders with when it sets none.
 constexpr float DEFAULT_CAMERA_FOVY = vsr::math::radians(40.f);
 
-// The shot camera object's view as the passes and the pick read it: pose
-// with the camera's defaults, and either the vertical field of view
-// (perspective) or the image-plane height (orthographic; the position is the
-// eye on that plane, see vsr::rendering::updateCameraObject).
-struct CameraView
-{
-  vsr::math::float3 position{0.f, 0.f, 0.f};
-  vsr::math::float3 direction{0.f, 0.f, -1.f};
-  vsr::math::float3 up{0.f, 1.f, 0.f};
-  bool orthographic{false};
-  float fovy{DEFAULT_CAMERA_FOVY}; // radians
-  float height{1.f};
-};
-
-CameraView readCameraView(const vsr::scene::Object &camera);
-
-// What one serviced Pick read out of the id and depth buffers. objectId is
-// the RenderIndex's packed id (pool index plus a volume bit), ~0u on
-// background; depth is the ANARI ray distance at that pixel.
-struct PickSample
-{
-  uint32_t objectId{~0u};
-  float depth{0.f};
-
-  // The (ANARI_SURFACE or ANARI_VOLUME, pool index) the packed id names;
-  // empty on background. The inverse of the packing setOutline() does.
-  std::optional<SceneObjectRef> identity() const;
-};
-
-// Where the ray through frame pixel (x, y) -- x right, y down from the
-// top-left of a width x height frame -- ends after `depth` units, for `view`.
-// The ray construction mirrors the monolith Viewport's focus pick; an
-// orthographic view offsets the origin across its image plane instead.
-vsr::math::float3 pickWorldPosition(const CameraView &view,
-    uint32_t width,
-    uint32_t height,
-    int x,
-    int y,
-    float depth);
+// The shot camera's projection, including its explicit aspect when set.
+// Unsupported camera subtypes have no view.
+std::optional<vsr::rendering::CameraView> readCameraView(
+    const vsr::scene::Object &camera);
+std::optional<SceneObjectRef> sceneObjectRef(
+    const vsr::rendering::PickHit &hit);
 
 /*
  * The server's Viewport Pass suite: the monolith Viewport's id-driven passes
  * (VisualizeAOVPass, PrimitiveOutlineRenderPass, OutlineRenderPass,
- * BoxOutlineRenderPass) plus the PickPass, appended to the ImagePipeline
- * right after the AnariSceneRenderPass and before the copy-out pass, in the
- * monolith's order. It keeps the last applied ViewportSettings and outline
- * identity and derives from them which ANARI frame channels the scene pass
- * must enable, so `needIDs` is recomputed whenever either changes: an
- * outline, the EDGES/OBJECT_ID AOVs and the primitive outline need
- * objectId; PRIMITIVE_ID and the primitive outline also need primitiveId,
- * which the device may not offer (queried once at setup; unsupported means
- * both stay silently off).
+ * BoxOutlineRenderPass), added after the ANARI Image Source and before the
+ * copy-out sink. Enabled passes declare their channel demand to the pipeline;
+ * unsupported AOVs and primitive outlines stay off.
  *
- * Picks are one-shot: armPick() enables the id channel and the PickPass for
- * the next render, takePick() returns what that render read and restores the
- * id channel to what the settings need. Pixel convention: x right, y down
- * from the top-left corner of the frame; the pass converts to ANARI's
- * bottom-up buffer.
+ * Picks are one-shot: armPick() stores a request and takePick() executes it
+ * against the source without changing the displayed frame or its channels.
+ * Wire pixels count from the top-left; takePick() converts to ANARI row order.
  *
  * Loop thread only, like the pipeline it lives in.
  *
@@ -94,8 +54,8 @@ vsr::math::float3 pickWorldPosition(const CameraView &view,
  */
 struct ViewportPasses
 {
-  // Appends the suite to `pipeline`; `scenePass` must be the pass appended
-  // just before, and the copy-out pass is appended by the caller after.
+  // Adds the suite to `pipeline`; `scenePass` is its source, and the caller
+  // adds the copy-out sink afterwards.
   void setup(vsr::rendering::ImagePipeline &pipeline,
       vsr::rendering::AnariSceneRenderPass *scenePass,
       anari::Device device);
@@ -116,7 +76,7 @@ struct ViewportPasses
   uint32_t outlineId() const;
   bool needIDs() const;
   bool primitiveIdSupported() const;
-  // Whether the scene pass currently renders the objectId channel.
+  // Whether the enabled display passes request a supported objectId channel.
   bool idChannelEnabled() const;
 
   // Per frame //
@@ -130,12 +90,11 @@ struct ViewportPasses
 
   // Picking //
 
-  // Arms the PickPass for the next render at frame pixel (x, y), top-left
-  // origin; coordinates outside the frame are clamped to its edge.
+  // Arms a request at frame pixel (x, y), top-left origin; coordinates outside
+  // the frame are clamped before converting to ANARI row order.
   void armPick(int x, int y);
-  // What the render since armPick() read; empty when none was armed or the
-  // pipeline did not run. Restores the id channel to what needIDs() says.
-  std::optional<PickSample> takePick();
+  // Executes the armed request; empty when none was armed or on a miss.
+  std::optional<vsr::rendering::PickHit> takePick();
 
  private:
   void updateIdChannelFlag();
@@ -143,7 +102,6 @@ struct ViewportPasses
   bool doPrimitiveOutline() const;
 
   vsr::rendering::AnariSceneRenderPass *m_scenePass{nullptr};
-  vsr::rendering::PickPass *m_pickPass{nullptr};
   vsr::rendering::VisualizeAOVPass *m_aovPass{nullptr};
   vsr::rendering::PrimitiveOutlineRenderPass *m_primitiveOutlinePass{nullptr};
   vsr::rendering::OutlineRenderPass *m_outlinePass{nullptr};
@@ -159,7 +117,7 @@ struct ViewportPasses
 
   bool m_pickArmed{false};
   vsr::math::int2 m_pickPixel{0, 0};
-  std::optional<PickSample> m_pickSample;
+  std::optional<vsr::rendering::CameraView> m_view;
 };
 
 } // namespace vsr::scivis_studio::server

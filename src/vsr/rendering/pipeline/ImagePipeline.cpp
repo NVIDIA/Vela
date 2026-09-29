@@ -34,6 +34,11 @@ const uint32_t *ImagePipeline::getColorBuffer() const
   return m_buffers.color;
 }
 
+vsr::math::uint2 ImagePipeline::dimensions() const
+{
+  return m_size;
+}
+
 const std::vector<ImagePipeline::PassTiming> &ImagePipeline::getPassTimings()
     const
 {

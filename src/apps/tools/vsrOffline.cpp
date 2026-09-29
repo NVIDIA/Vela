@@ -3,6 +3,7 @@
 
 #include <vsr/app/Context.h>
 #include <vsr/rendering/pipeline/ImagePipeline.h>
+#include <vsr/rendering/pipeline/saveImage.h>
 #include <vsr/core/Logging.hpp>
 #include <vsr/core/Timer.hpp>
 #include <vsr/io/procedural.hpp>
@@ -10,7 +11,6 @@
 #include <vsr/rendering/view/ManipulatorToAnari.hpp>
 #include <vsr/rendering/view/ManipulatorToVSR.hpp>
 #include <vsr/scene/Scene.hpp>
-#include "stb_image_write.h"
 
 #ifdef VSR_USE_MPI
 #include <mpi.h>
@@ -828,8 +828,6 @@ static void renderFrames()
     fflush(stdout);
   }
 
-  stbi_flip_vertically_on_write(1);
-
   if (!g_usingSceneCamera) {
     const auto &pose = g_cameraPoses[0];
     g_manipulator.setConfig(pose);
@@ -874,12 +872,7 @@ static void renderFrames()
       outPath = g_config.outputFile;
     }
 
-    stbi_write_png(outPath.c_str(),
-        frameWidth,
-        frameHeight,
-        4,
-        g_renderPipeline->getColorBuffer(),
-        4 * frameWidth);
+    vsr::rendering::saveImage(*g_renderPipeline, outPath);
 
     printf("[rank %d] written: %s (%.2f ms)\n",
         mpiRank,

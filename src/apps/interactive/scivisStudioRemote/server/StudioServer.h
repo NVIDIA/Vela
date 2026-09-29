@@ -102,9 +102,10 @@ const char *toString(SessionState state);
  * The Viewport Pass suite (ViewportPasses) composites the outline, AOV and
  * world-bounds passes over each frame before it is copied out; SetOutline
  * and ViewportSettings are latch slots feeding it. Pick is a latch slot too,
- * one in flight, latest-wins: the loop services it by rendering one frame
- * with the id channel on, even while paused, and answers with a PickReply
- * before the next Frame. RequestArrayHistogram is a sync Project Op.
+ * one in flight, latest-wins: the loop services it on a separate query frame,
+ * even while paused, without running the display pipeline, and answers with
+ * a PickReply before the next Frame. RequestArrayHistogram is a sync Project
+ * Op.
  *
  * RenderShot is an exclusive Server Task (ProjectOpDispatcher): while it is
  * queued or running, mutating requests are refused with "render in
@@ -380,9 +381,9 @@ struct StudioServer
   void applyViewportControl(const ControlState &control);
   // Refreshes the world-bounds pass from the world and the shot camera.
   void prepareViewportPasses();
-  // Renders one frame with the id channel on for m_pendingPick, replies, and
-  // when rendering sends that frame as well; true when a Frame went out.
-  bool servicePendingPick();
+  // Answers m_pendingPick on a separate query frame, without running the
+  // display pipeline or sending a Frame. Streaming is scheduled by run().
+  void servicePendingPick();
   const vsr::scene::Object *shotCameraObject() const;
 
   ServerOptions m_options;

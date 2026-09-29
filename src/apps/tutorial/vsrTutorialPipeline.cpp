@@ -7,11 +7,10 @@
 #include <vsr/io/procedural.hpp>
 // vsr_rendering
 #include <vsr/rendering/pipeline/ImagePipeline.h>
+#include <vsr/rendering/pipeline/saveImage.h>
 #include <vsr/rendering/index/RenderIndexFlatRegistry.hpp>
 // std
 #include <cstdio>
-// stb_image
-#include "stb_image_write.h"
 
 static void statusFunc(const void *,
     ANARIDevice,
@@ -132,13 +131,7 @@ int main()
 
   printf("done!\n");
 
-  stbi_flip_vertically_on_write(1);
-  stbi_write_png("pipeline.png",
-      imageSize.x,
-      imageSize.y,
-      4,
-      rpipe.getColorBuffer(),
-      4 * imageSize.x);
+  vsr::rendering::saveImage(rpipe, "pipeline.png");
 
   // Cleanup remaining ANARI objets //
 

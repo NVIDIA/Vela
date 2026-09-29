@@ -8,7 +8,7 @@
 #include "vsr/rendering/index/RenderIndexAllLayers.hpp"
 #include "vsr/rendering/pipeline/ImagePipeline.h"
 #include "vsr/rendering/pipeline/passes/AnariSceneRenderPass.h"
-#include "vsr/rendering/pipeline/passes/SaveToFilePass.h"
+#include "vsr/rendering/pipeline/saveImage.h"
 
 #include <filesystem>
 #include <iomanip>
@@ -199,9 +199,6 @@ RenderShotResult renderActiveShotToFrames(
   anariPass->setRenderer(renderer);
   anariPass->setCamera(renderIndex->camera(shot->camera.objectIndex));
 
-  auto *savePass = pipeline.addSink<vsr::rendering::SaveToFilePass>();
-  savePass->setSingleShotMode(false);
-
   if (auto camera = renderIndex->camera(shot->camera.objectIndex)) {
     anari::setParameter(device,
         camera,
@@ -268,12 +265,11 @@ RenderShotResult renderActiveShotToFrames(
 
     std::ostringstream ss;
     ss << prefix << '_' << std::setfill('0') << std::setw(4) << frame << ".png";
-    savePass->setFilename((outputDirectory / ss.str()).string());
-
-    for (uint32_t sample = 0; sample < shot->renderSettings.samples; ++sample) {
-      savePass->setEnabled(sample + 1 == shot->renderSettings.samples);
+    for (uint32_t sample = 0; sample < shot->renderSettings.samples; ++sample)
       pipeline.render();
-    }
+    const auto filename = (outputDirectory / ss.str()).string();
+    if (!vsr::rendering::saveImage(pipeline, filename))
+      return failRender(out, "Failed to save rendered frame '" + filename + "'");
     ++out.framesCompleted;
   }
 

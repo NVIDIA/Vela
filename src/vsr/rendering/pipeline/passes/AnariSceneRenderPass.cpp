@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cstring>
 #include <string>
+#include <type_traits>
 
 namespace vsr::rendering {
 
@@ -184,8 +185,17 @@ ImageChannels AnariSceneRenderPass::supportedChannels() const
 
 void AnariSceneRenderPass::updateChannels()
 {
-  const ImageChannels wanted = channels();
+  const bool added = setFrameChannels(channels());
+  resizeStaging();
 
+  // A frame already in flight lacks the added channels: restart once, at the
+  // next render(), so they are produced before being read.
+  if (added)
+    m_pendingRestart = true;
+}
+
+bool AnariSceneRenderPass::setFrameChannels(ImageChannels wanted)
+{
   bool changed = false;
   bool added = false;
   for (const auto &c : FRAME_CHANNELS) {
@@ -206,12 +216,74 @@ void AnariSceneRenderPass::updateChannels()
     anari::commitParameters(m_device, m_frame);
 
   m_frameChannels = wanted;
-  resizeStaging();
+  return added;
+}
 
-  // A frame already in flight lacks the added channels: restart once, at the
-  // next render(), so they are produced before being read.
-  if (added)
-    m_pendingRestart = true;
+vsr::math::uint2 AnariSceneRenderPass::pickImageSize() const
+{
+  return dimensions();
+}
+
+std::optional<PickSample> AnariSceneRenderPass::renderPickSample(
+    vsr::math::uint2 pixel)
+{
+  const auto size = dimensions();
+  if (!m_device || !m_camera || !m_renderer || !m_world || size.x == 0
+      || size.y == 0)
+    return {};
+
+  // A separate frame sharing the display's camera, renderer and world sees
+  // the same image, so the display frame keeps its channels, accumulation and
+  // any render in flight. Created per pick: picks are rare, and a full-size
+  // frame with depth and ID channels is too large to keep around.
+  // Per ANARI this leaves the display frame's accumulation alone; some devices
+  // (VisRTX, OSPRay, Barney, Visionaray as of 2026-09) still reset or perturb
+  // other frames on an unrelated frame commit -- a device bug, not handled
+  // here.
+  auto frame = anari::newObject<anari::Frame>(m_device);
+  anari::setParameter(m_device, frame, "size", size);
+  anari::setParameter(m_device, frame, "camera", m_camera);
+  anari::setParameter(m_device, frame, "renderer", m_renderer);
+  anari::setParameter(m_device, frame, "world", m_world);
+  anari::setParameter(m_device, frame, "accumulation", false);
+  // Enable only the channels the query reads; no color output is needed.
+  constexpr ImageChannels PICK_CHANNELS = ImageChannels::DEPTH
+      | ImageChannels::OBJECT_ID | ImageChannels::INSTANCE_ID
+      | ImageChannels::PRIMITIVE_ID;
+  const ImageChannels channels = PICK_CHANNELS & m_deviceChannels;
+  for (const auto &c : FRAME_CHANNELS) {
+    if (hasChannels(channels, c.channel))
+      anari::setParameter(m_device, frame, c.parameter, c.type);
+  }
+  anari::commitParameters(m_device, frame);
+
+  anari::render(m_device, frame);
+  anari::wait(m_device, frame);
+
+  // Host-mapped channels: only one pixel is read.
+  const size_t i = size_t(pixel.y) * size.x + pixel.x;
+  auto read = [&](const char *channel, auto &out) {
+    using T = std::remove_reference_t<decltype(out)>;
+    auto mapped = anari::map<T>(m_device, frame, channel);
+    const bool ok =
+        mapped.data && mapped.width == size.x && mapped.height == size.y;
+    if (ok)
+      out = mapped.data[i];
+    anari::unmap(m_device, frame, channel);
+  };
+
+  PickSample sample;
+  if (hasChannels(channels, ImageChannels::DEPTH))
+    read("channel.depth", sample.depth);
+  if (hasChannels(channels, ImageChannels::OBJECT_ID))
+    read("channel.objectId", sample.objectId);
+  if (hasChannels(channels, ImageChannels::INSTANCE_ID))
+    read("channel.instanceId", sample.instanceId);
+  if (hasChannels(channels, ImageChannels::PRIMITIVE_ID))
+    read("channel.primitiveId", sample.primitiveId);
+
+  anari::release(m_device, frame);
+  return sample;
 }
 
 void AnariSceneRenderPass::resizeStaging()

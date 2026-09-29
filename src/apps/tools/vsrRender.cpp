@@ -10,13 +10,12 @@
 // vsr_rendering
 #include <vsr/rendering/pipeline/ImagePipeline.h>
 #include <vsr/rendering/pipeline/passes/VisualizeAOVPass.h>
+#include <vsr/rendering/pipeline/saveImage.h>
 #include <vsr/rendering/index/RenderIndexAllLayers.hpp>
 #include <vsr/rendering/view/ManipulatorToAnari.hpp>
 // vsr_app
 #include <vsr/app/ApplicationDump.h>
 #include <vsr/app/Context.h>
-// stb_image
-#include "stb_image_write.h"
 // std
 #include <chrono>
 #include <cstdio>
@@ -237,8 +236,6 @@ static void renderFrames()
   printf("Rendering frames (%u spp)...\n", frameSamples);
   fflush(stdout);
 
-  stbi_flip_vertically_on_write(1);
-
   g_timer.start();
 
   // Check for camera animations
@@ -291,13 +288,7 @@ static void renderFrames()
       for (int s = 0; s < frameSamples; s++)
         g_renderPipeline->render();
 
-      auto filename = frameFilename(i);
-      stbi_write_png(filename.c_str(),
-          frameWidth,
-          frameHeight,
-          4,
-          g_renderPipeline->getColorBuffer(),
-          4 * frameWidth);
+      vsr::rendering::saveImage(*g_renderPipeline, frameFilename(i));
     }
   } else {
     // Original camera-pose turntable behavior
@@ -313,12 +304,7 @@ static void renderFrames()
       for (int s = 0; s < frameSamples; s++)
         g_renderPipeline->render();
 
-      stbi_write_png(frameFilename(i).c_str(),
-          frameWidth,
-          frameHeight,
-          4,
-          g_renderPipeline->getColorBuffer(),
-          4 * frameWidth);
+      vsr::rendering::saveImage(*g_renderPipeline, frameFilename(i));
     }
   }
 
