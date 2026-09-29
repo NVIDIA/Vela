@@ -49,8 +49,13 @@ math::float3 linearToGamma(math::float3 c, float invGamma)
 
 uint32_t shadePixel(uint32_t c)
 {
+  // Round-trip the outline color through 8-bit packing like
+  // cpu::outlineObject() does, so this stays independent of helium's
+  // float->byte rounding mode.
   auto c_in = helium::cvt_color_to_float4(c);
-  auto c_out = math::lerp(c_in, math::float4(1.f, 0.5f, 0.f, 1.f), 0.8f);
+  auto c_h = helium::cvt_color_to_float4(
+      helium::cvt_color_to_uint32(math::float4(1.f, 0.5f, 0.f, 1.f)));
+  auto c_out = math::lerp(c_in, c_h, 0.8f);
   return helium::cvt_color_to_uint32(c_out);
 }
 
