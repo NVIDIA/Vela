@@ -4,6 +4,7 @@
 // vsr_core
 #include "vsr/core/Logging.hpp"
 #include "vsr/core/Timer.hpp"
+#include "vsr/core/UserConfig.hpp"
 // vsr_app
 #include "vsr/app/ApplicationDump.h"
 #include "vsr/app/UIStateTree.h"
@@ -82,6 +83,8 @@ void Application::run(int width, int height, const char *name)
 
   m_impl->init(sdlWindowFlags());
   m_impl->windows = setupWindows();
+  // After setupWindows(), where the Log window starts receiving messages.
+  vsr::core::warnIfOnlyLegacyUserConfigDirectoryExists();
   mainLoop();
   teardown();
   m_impl->cleanup();
@@ -949,15 +952,7 @@ void Application::loadGlobalApplicationSettings()
 
 std::filesystem::path Application::globalApplicationSettingsFile() const
 {
-#ifdef _WIN32
-  if (const char *appData = std::getenv("APPDATA"); appData != nullptr)
-    return std::filesystem::path(appData) / "vsr" / "appSettings.vsr";
-#else
-  if (const char *home = std::getenv("HOME"); home != nullptr)
-    return std::filesystem::path(home) / ".config" / "vsr" / "appSettings.vsr";
-#endif
-
-  return std::filesystem::path("appSettings.vsr");
+  return vsr::core::userConfigDirectory() / "preferences.vsr";
 }
 
 void Application::loadStateForNextFrame()

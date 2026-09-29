@@ -19,7 +19,8 @@ Lua module search paths (lowest to highest priority):
 
 1. `<source>/scripts/` (dev builds only)
 2. `<install>/share/vsr/scripts/`
-3. `~/.config/vsr/scripts/` (Linux/macOS) or `%APPDATA%/vsr/scripts/` (Windows)
+3. `~/.config/vela/scripts/` (Linux/macOS; `$XDG_CONFIG_HOME/vela/scripts/` on
+   Linux when set) or `%APPDATA%/vela/scripts/` (Windows)
 4. `VSR_LUA_PACKAGE_PATHS` env var (`:` separated on Unix, `;` on Windows)
 
 Each path is added to Lua's `package.path` and its `init.lua` (if present) is

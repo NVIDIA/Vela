@@ -15,6 +15,7 @@ set(VSR_CORE_CXX_SOURCES
   DataTreeText.cpp
   Logging.cpp
   Token.cpp
+  UserConfig.cpp
 )
 
 project_sources(PRIVATE ${VSR_CORE_CUDA_SOURCES} ${VSR_CORE_CXX_SOURCES})

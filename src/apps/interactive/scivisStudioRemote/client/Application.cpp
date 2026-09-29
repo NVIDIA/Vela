@@ -35,6 +35,7 @@
 // vsr_core
 #include "vsr/core/DataTree.hpp"
 #include "vsr/core/Logging.hpp"
+#include "vsr/core/UserConfig.hpp"
 // imgui
 #include <imgui.h>
 // SDL
@@ -879,21 +880,11 @@ std::vector<FrameEncoding> Application::encodingPreference() const
 // project's UI state has: `{windows, layout}` plus the one setting the View
 // menu edits, `settings/fontScale`. The client is that key's only writer --
 // it never calls the base class' "Save as Defaults" -- so a scale chosen
-// here comes back next run without disturbing appSettings.vsr, where
+// here comes back next run without disturbing preferences.vsr, where
 // uiRounding and the rest of the application settings still live.
 std::filesystem::path Application::clientUIStateFile() const
 {
-#ifdef _WIN32
-  if (const char *appData = std::getenv("APPDATA"); appData != nullptr)
-    return std::filesystem::path(appData) / "vsr" / "studioClientUI.vsr";
-#else
-  if (const char *home = std::getenv("HOME"); home != nullptr) {
-    return std::filesystem::path(home) / ".config" / "vsr"
-        / "studioClientUI.vsr";
-  }
-#endif
-
-  return std::filesystem::path("studioClientUI.vsr");
+  return vsr::core::userConfigDirectory() / "studioClientUI.vsr";
 }
 
 // At exit, with the ImGui context alive and no frame open.
@@ -951,7 +942,7 @@ void Application::loadClientUIState()
   }
 
   // Loads the windows, the dock layout and fontScale into m_uiConfig; the
-  // base class already applied appSettings.vsr and its own applySettings()
+  // base class already applied preferences.vsr and its own applySettings()
   // before setupWindows(), so the new scale needs pushing into ImGui here.
   applyUIStateTree(tree.root());
   m_appSettingsDialog->applySettings();

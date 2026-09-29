@@ -123,10 +123,11 @@ Start secondary viewport on another ANARI library:
 ## User Color Maps
 
 The transfer-function editor loads optional RGB color-map presets once at
-startup from the standard VSR config directory:
+startup from the User Config Directory:
 
-- Linux/macOS: `~/.config/vsr/colormaps/`
-- Windows: `%APPDATA%/vsr/colormaps/`
+- Linux/macOS: `~/.config/vela/colormaps/` (`$XDG_CONFIG_HOME/vela/colormaps/`
+  on Linux when set)
+- Windows: `%APPDATA%/vela/colormaps/`
 
 Only `.1dt` files are loaded. The filename stem becomes the color-map name in
 the editor, so `Magma Soft.1dt` appears as `Magma Soft`. Files are loaded in

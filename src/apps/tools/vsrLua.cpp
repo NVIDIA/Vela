@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "vsr/core/Logging.hpp"
+#include "vsr/core/UserConfig.hpp"
 #include "vsr/scripting/LuaContext.hpp"
 
 #define SOL_ALL_SAFETIES_ON 1
@@ -126,6 +127,7 @@ int main(int argc, const char *argv[])
   }
 
   vsr::core::setLogToStdout(verbose);
+  vsr::core::warnIfOnlyLegacyUserConfigDirectoryExists();
 
   // Create Lua context
   vsr::scripting::LuaContext ctx;

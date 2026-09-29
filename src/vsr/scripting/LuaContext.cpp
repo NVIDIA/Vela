@@ -7,6 +7,7 @@
 #include "vsr/animation/AnimationManager.hpp"
 // vsr_core
 #include "vsr/core/Logging.hpp"
+#include "vsr/core/UserConfig.hpp"
 // vsr_scene
 #include "vsr/scene/Scene.hpp"
 // sol
@@ -316,21 +317,12 @@ std::vector<std::string> LuaContext::defaultSearchPaths()
   }
 
   // User config directory
-#ifdef _WIN32
-  const char *appData = std::getenv("APPDATA");
-  if (appData) {
-    fs::path userPath = fs::path(appData) / "vsr" / "scripts";
+  try {
+    fs::path userPath = vsr::core::userConfigDirectory() / "scripts";
     if (fs::exists(userPath) && fs::is_directory(userPath))
       paths.push_back(userPath.string());
+  } catch (const std::exception &) {
   }
-#else
-  const char *home = std::getenv("HOME");
-  if (home) {
-    fs::path userPath = fs::path(home) / ".config" / "vsr" / "scripts";
-    if (fs::exists(userPath) && fs::is_directory(userPath))
-      paths.push_back(userPath.string());
-  }
-#endif
 
   // VSR_LUA_PACKAGE_PATHS environment variable
   const char *envPath = std::getenv("VSR_LUA_PACKAGE_PATHS");
