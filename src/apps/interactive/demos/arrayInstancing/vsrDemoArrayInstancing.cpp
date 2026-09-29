@@ -54,6 +54,11 @@ class Application : public VSRApplication
     return windows;
   }
 
+  const char *applicationIdentifier() const override
+  {
+    return "vsrDemoArrayInstancing";
+  }
+
   const char *getDefaultLayout() const override
   {
     return R"layout(

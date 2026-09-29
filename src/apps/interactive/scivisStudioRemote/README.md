@@ -498,28 +498,21 @@ ending the replay brings for such a task still toasts.
 
 **Layout.** The layout is the client's own, never the project's: which
 project is open moves no panel, and connecting, opening or saving never
-touches the docking. `Application::saveClientUIState()` writes `{windows,
-layout, settings/fontScale}` -- each window's `saveSettings`,
-`ImGui::SaveIniSettingsToMemory()` and the *View* menu's font scale -- to
-`~/.config/vela/studioClientUI.vsr`
-(`%APPDATA%\vela\...` on Windows) in `teardown()`, and
-`loadClientUIState()` applies it through the base class'
-`applyUIStateTree` in `setupWindows()`, after the built-in default layout
-that stands when the file is missing (first run) or unreadable.
-`--noDefaultLayout` skips the restore too. The client is `fontScale`'s only
-writer -- it has no App Settings dialog and never calls "Save as Defaults" --
-so the base class' `preferences.vsr`, applied earlier in `setupWindows()`,
-supplies the value on a first run and this file overrides it afterwards;
-`applyUIStateTree` only reaches `m_uiConfig`, so the restore ends with
-`m_appSettingsDialog->applySettings()` to push the scale into ImGui.
-`uiRounding` and the other application settings are not in the file and stay
-in `preferences.vsr`. *View -> Font Scale* (a drag, plus *Reset Font Scale*
-for 1.0) changes it live, and *View -> Restore Default Layout* goes back to
-the built-in default at any time. That default (`getDefaultLayout()`) is
-maintained by hand: arrange the docking, press **F1** to print
-`SaveIniSettingsToMemory()` to stdout, and paste the dump over the string.
-The client's `uiFrameStart()` replaces the base class' one, so it repeats
-that binding rather than inheriting it.
+touches the docking. The client is one more `vsr::ui::imgui::Application`
+here: its Application Identifier is `studioClient`, so the base class saves
+its UI State (each window's `saveSettings` plus the dock layout) to
+`~/.config/vela/studioClient/uiState.vsr` at exit and restores it over the
+built-in default at startup; `--noDefaultLayout` skips the restore (see
+`docs/adr/0040`). The font scale is an Application Preference, not UI State:
+*View -> Font Scale* (a drag, plus *Reset Font Scale* for 1.0) changes it for
+this run, and *View -> Save Font Scale as Default* writes
+`~/.config/vela/preferences.vsr`, which every Vela application reads at
+startup. *View -> Restore Default Layout* goes back to the built-in default
+at any time. That default (`getDefaultLayout()`) is maintained by hand:
+arrange the docking, press **F1** to print `SaveIniSettingsToMemory()` to
+stdout, and paste the dump over the string. The client's `uiFrameStart()`
+replaces the base class' one, so it repeats that binding rather than
+inheriting it.
 
 **Loss and reconnect** (`ServerConnection`). A loss keeps the mirror,
 replica and last frame as a frozen read-only view; pending requests fail

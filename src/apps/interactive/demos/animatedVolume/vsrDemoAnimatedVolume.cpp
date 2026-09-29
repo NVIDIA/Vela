@@ -101,6 +101,11 @@ class Application : public VSRApplication
     return windows;
   }
 
+  const char *applicationIdentifier() const override
+  {
+    return "vsrDemoAnimatedVolume";
+  }
+
   const char *getDefaultLayout() const override
   {
     return R"layout(

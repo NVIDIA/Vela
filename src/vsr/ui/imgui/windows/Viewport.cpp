@@ -319,10 +319,6 @@ void Viewport::refreshCurrentDevice()
 
 void Viewport::saveSettings(vsr::core::DataNode &root)
 {
-  root["anariLibrary"] = m_libName;
-  root["rendererObjectIndex"] =
-      static_cast<uint64_t>(currentRendererObjectIndex());
-
   // Viewport settings //
 
   root["showOverlay"] = m_showOverlay;
@@ -340,11 +336,6 @@ void Viewport::saveSettings(vsr::core::DataNode &root)
   root["toneMapExposure"] = m_toneMapExposure;
   root["toneMapGamma"] = m_toneMapGamma;
   root["toneMapOperator"] = static_cast<int>(m_toneMapOperator);
-
-  // Database Camera //
-
-  if (m_camera.current)
-    root["currentCamera"] = static_cast<uint64_t>(m_camera.current->index());
 
   // BaseViewport settings //
 
@@ -377,7 +368,22 @@ void Viewport::loadSettings(vsr::core::DataNode &root)
   root["toneMapOperator"].getValue(ANARI_INT32, &toneMapOperator);
   m_toneMapOperator =
       static_cast<vsr::rendering::ToneMapOperator>(toneMapOperator);
+}
 
+void Viewport::saveSceneSettings(vsr::core::DataNode &root)
+{
+  root["anariLibrary"] = m_libName;
+  root["rendererObjectIndex"] =
+      static_cast<uint64_t>(currentRendererObjectIndex());
+
+  // Database Camera //
+
+  if (m_camera.current)
+    root["currentCamera"] = static_cast<uint64_t>(m_camera.current->index());
+}
+
+void Viewport::loadSceneSettings(vsr::core::DataNode &root)
+{
   // Database Camera //
 
   if (auto *c = root.child("currentCamera"); c) {
@@ -389,8 +395,8 @@ void Viewport::loadSettings(vsr::core::DataNode &root)
 
   // Setup library //
 
-  auto *ctx = appContext();
-  if (m_app->commandLineOptions()->useDefaultRenderer) {
+  if (m_app->commandLineOptions()->useDefaultRenderer
+      && root.child("anariLibrary") != nullptr) {
     std::string libraryName;
     root["anariLibrary"].getValue(ANARI_STRING, &libraryName);
     auto rendererIndex =

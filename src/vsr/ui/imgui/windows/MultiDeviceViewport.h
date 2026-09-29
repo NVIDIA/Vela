@@ -29,7 +29,10 @@ struct MultiDeviceViewport : public Window
   void setLibrary(const std::string &libName);
 
  private:
+  void saveSettings(vsr::core::DataNode &thisWindowRoot) override;
   void loadSettings(vsr::core::DataNode &thisWindowRoot) override;
+  void saveSceneSettings(vsr::core::DataNode &thisWindowRoot) override;
+  void loadSceneSettings(vsr::core::DataNode &thisWindowRoot) override;
 
   void getSceneBounds(vsr::math::float3 bounds[2]) const;
   vsr::rendering::RenderIndexAllLayers *getRenderIndex(size_t i = 0) const;

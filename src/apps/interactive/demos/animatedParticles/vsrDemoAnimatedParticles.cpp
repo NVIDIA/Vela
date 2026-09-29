@@ -121,6 +121,11 @@ class Application : public VSRApplication
     return windows;
   }
 
+  const char *applicationIdentifier() const override
+  {
+    return "vsrDemoAnimatedParticles";
+  }
+
   const char *getDefaultLayout() const override
   {
     return R"layout(

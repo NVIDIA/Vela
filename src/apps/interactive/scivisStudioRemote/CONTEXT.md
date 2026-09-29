@@ -79,14 +79,6 @@ afterwards; browse, histogram and cancel still go through. An exclusive task
 also outlives its session when it is merely queued.
 _Avoid_: blocking task, render lock
 
-**Client Layout**:
-The `{windows, layout}` tree the client keeps for itself -- each window's
-settings and the ImGui dock layout -- written to its own file beside the
-user's application settings at exit and restored at startup. It never
-travels on the wire and never belongs to a Project, so which project is open
-moves no panel.
-_Avoid_: layout sync, project layout, window settings message
-
 **Object Metadata**:
 Free-form keyed values a scene object carries beside its parameters -- a
 camera's `manipulator.*`, a volume's `opacityControlPoints`. Unlike a

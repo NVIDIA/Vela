@@ -85,7 +85,9 @@ void Application::run(int width, int height, const char *name)
   m_impl->windows = setupWindows();
   // After setupWindows(), where the Log window starts receiving messages.
   vsr::core::warnIfOnlyLegacyUserConfigDirectoryExists();
+  restoreUIStateFile();
   mainLoop();
+  saveUIStateFile();
   teardown();
   m_impl->cleanup();
 }
@@ -210,11 +212,6 @@ void Application::showSaveLayerSubtreeArchiveDialog(
     vsr::scene::LayerNodeRef sourceRoot)
 {
   m_objectFileDialog->showSaveLayerSubtree(sourceRoot);
-}
-
-void Application::saveDefaultApplicationSettings()
-{
-  saveGlobalApplicationSettings();
 }
 
 #ifdef VSR_USE_LUA
@@ -419,7 +416,7 @@ WindowArray Application::setupWindows()
   m_applicationName = SDL_GetWindowTitle(sdlWindow());
   updateWindowTitle();
 
-  loadGlobalApplicationSettings();
+  loadApplicationPreferences();
   m_appSettingsDialog->applySettings();
 
   SDL_SetRenderVSync(sdlRenderer(), 1);
@@ -616,8 +613,8 @@ void Application::uiMainMenuBar_Edit()
 
       ImGui::Separator();
 
-      if (ImGui::MenuItem("Reset"))
-        ImGui::LoadIniSettingsFromMemory(getDefaultLayout());
+      if (ImGui::MenuItem("Restore Default"))
+        restoreDefaultLayout();
 
       ImGui::EndMenu();
     }
@@ -777,9 +774,11 @@ void Application::saveApplicationState(const char *_filename)
     root.reset();
     vsr::core::writeDataTreeMetadata(root, applicationStateMetadata());
 
-    // Window state, ImGui layout and application-owned settings
-    vsr::core::logStatus("serializing UI state...");
-    saveUIStateTree(root);
+    // Only what windows hold about this scene: UI State is the
+    // application's, not the dump's (docs/adr/0040).
+    auto &windows = root[vsr::app::UI_STATE_WINDOWS];
+    for (auto *w : m_windows)
+      w->saveSceneSettings(windows[w->name()]);
 
     // Serialize the base Application Dump
     vsr::core::logStatus("serializing application session state...");
@@ -838,9 +837,14 @@ void Application::loadApplicationState(const char *filename)
     return;
   }
 
-  applyUIStateTree(root);
-
-  m_appSettingsDialog->applySettings();
+  // A dump written before docs/adr/0040 also holds the layout, window
+  // presentation and application settings; those are left alone.
+  if (auto *windows = root.child(vsr::app::UI_STATE_WINDOWS)) {
+    for (auto *w : m_windows) {
+      if (auto *c = windows->child(w->name()); c != nullptr)
+        w->loadSceneSettings(*c);
+    }
+  }
 
   vsr::core::logStatus("...loaded state from '%s'", filename);
 
@@ -848,7 +852,7 @@ void Application::loadApplicationState(const char *filename)
   updateWindowTitle();
 }
 
-void Application::saveApplicationSettings(vsr::core::DataNode &root)
+void Application::savePreferences(vsr::core::DataNode &root)
 {
   auto &ctx = *appContext();
 
@@ -859,36 +863,7 @@ void Application::saveApplicationSettings(vsr::core::DataNode &root)
   settings["uiRounding"] = m_uiConfig.rounding;
 }
 
-void Application::saveUIStateTree(vsr::core::DataNode &root)
-{
-  auto &windows = root[vsr::app::UI_STATE_WINDOWS];
-  windows.reset();
-  for (auto *w : m_windows)
-    w->saveSettings(windows[w->name()]);
-  root[vsr::app::UI_STATE_LAYOUT] =
-      std::string(ImGui::SaveIniSettingsToMemory());
-  saveApplicationSettings(root);
-}
-
-void Application::applyUIStateTree(vsr::core::DataNode &root)
-{
-  if (auto *windows = root.child(vsr::app::UI_STATE_WINDOWS)) {
-    for (auto *w : m_windows)
-      w->loadSettings((*windows)[w->name()]);
-  }
-
-  // ImGui applies the dock settings to the windows when they next Begin,
-  // later this frame.
-  if (auto *layout = root.child(vsr::app::UI_STATE_LAYOUT)) {
-    const auto ini = layout->getValueOr<std::string>("");
-    if (!ini.empty())
-      ImGui::LoadIniSettingsFromMemory(ini.c_str());
-  }
-
-  loadApplicationSettings(root);
-}
-
-void Application::loadApplicationSettings(vsr::core::DataNode &root)
+void Application::loadPreferences(vsr::core::DataNode &root)
 {
   auto &ctx = *appContext();
 
@@ -902,9 +877,9 @@ void Application::loadApplicationSettings(vsr::core::DataNode &root)
   }
 }
 
-void Application::saveGlobalApplicationSettings()
+void Application::saveApplicationPreferences()
 {
-  const auto filename = globalApplicationSettingsFile();
+  const auto filename = applicationPreferencesFile();
   const auto directory = filename.parent_path();
 
   try {
@@ -918,41 +893,127 @@ void Application::saveGlobalApplicationSettings()
     return;
   }
 
-  auto &root = m_settings.root();
-  root.reset();
-  saveApplicationSettings(root);
+  vsr::core::DataTree tree;
+  savePreferences(tree.root());
 
-  if (!m_settings.save(filename.string().c_str())) {
-    vsr::core::logError("[Application] Failed to save defaults to '%s'",
+  if (!tree.save(filename.string().c_str())) {
+    vsr::core::logError("[Application] Failed to save preferences to '%s'",
         filename.string().c_str());
     return;
   }
 
   vsr::core::logStatus(
-      "...saved application defaults to '%s'", filename.string().c_str());
+      "...saved application preferences to '%s'", filename.string().c_str());
 }
 
-void Application::loadGlobalApplicationSettings()
+void Application::loadApplicationPreferences()
 {
-  const auto filename = globalApplicationSettingsFile();
+  const auto filename = applicationPreferencesFile();
 
   if (!std::filesystem::exists(filename))
     return;
 
-  auto &root = m_settings.root();
-  root.reset();
-  if (!m_settings.load(filename.string().c_str())) {
-    vsr::core::logWarning("[Application] Failed to load defaults from '%s'",
+  vsr::core::DataTree tree;
+  if (!tree.load(filename.string().c_str())) {
+    vsr::core::logWarning("[Application] Failed to load preferences from '%s'",
         filename.string().c_str());
     return;
   }
 
-  loadApplicationSettings(root);
+  loadPreferences(tree.root());
 }
 
-std::filesystem::path Application::globalApplicationSettingsFile() const
+std::filesystem::path Application::applicationPreferencesFile() const
 {
   return vsr::core::userConfigDirectory() / "preferences.vsr";
+}
+
+void Application::saveUIState(vsr::core::DataNode &root)
+{
+  auto &windows = root[vsr::app::UI_STATE_WINDOWS];
+  windows.reset();
+  for (auto *w : m_windows)
+    w->saveSettings(windows[w->name()]);
+  root[vsr::app::UI_STATE_LAYOUT] =
+      std::string(ImGui::SaveIniSettingsToMemory());
+}
+
+void Application::applyUIState(vsr::core::DataNode &root)
+{
+  if (auto *windows = root.child(vsr::app::UI_STATE_WINDOWS)) {
+    for (auto *w : m_windows) {
+      if (auto *c = windows->child(w->name()); c != nullptr)
+        w->loadSettings(*c);
+    }
+  }
+
+  // ImGui applies the dock settings to the windows when they next Begin.
+  if (auto *layout = root.child(vsr::app::UI_STATE_LAYOUT)) {
+    const auto ini = layout->getValueOr<std::string>("");
+    if (!ini.empty())
+      ImGui::LoadIniSettingsFromMemory(ini.c_str());
+  }
+}
+
+std::filesystem::path Application::uiStateFile() const
+{
+  return vsr::core::userConfigDirectory() / applicationIdentifier()
+      / "uiState.vsr";
+}
+
+void Application::saveUIStateFile()
+{
+  const auto filename = uiStateFile();
+  const auto directory = filename.parent_path();
+
+  try {
+    if (!directory.empty())
+      std::filesystem::create_directories(directory);
+  } catch (const std::exception &e) {
+    vsr::core::logError(
+        "[Application] Failed to create config directory '%s': %s",
+        directory.string().c_str(),
+        e.what());
+    return;
+  }
+
+  vsr::core::DataTree tree;
+  saveUIState(tree.root());
+
+  if (!tree.save(filename.string().c_str())) {
+    vsr::core::logError("[Application] Failed to save UI state to '%s'",
+        filename.string().c_str());
+    return;
+  }
+
+  vsr::core::logStatus("...saved UI state to '%s'", filename.string().c_str());
+}
+
+// After setupWindows() applied the Default Layout, so a file that is missing
+// (first run) or unreadable leaves that standing. --noDefaultLayout means
+// "impose no layout" and skips this too.
+void Application::restoreUIStateFile()
+{
+  if (!commandLineOptions()->useDefaultLayout)
+    return;
+
+  const auto filename = uiStateFile();
+  if (!std::filesystem::exists(filename))
+    return;
+
+  vsr::core::DataTree tree;
+  if (!tree.load(filename.string().c_str())) {
+    vsr::core::logWarning("[Application] Failed to load UI state from '%s'",
+        filename.string().c_str());
+    return;
+  }
+
+  applyUIState(tree.root());
+}
+
+void Application::restoreDefaultLayout()
+{
+  ImGui::LoadIniSettingsFromMemory(getDefaultLayout());
 }
 
 void Application::loadStateForNextFrame()

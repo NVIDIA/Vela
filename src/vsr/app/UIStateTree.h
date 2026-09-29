@@ -5,12 +5,13 @@
 
 namespace vsr::app {
 
-// The children of a UI-state tree: the {windows, layout, settings} subtree
-// the imgui Application saves (saveUIStateTree) and applies
-// (applyUIStateTree) -- each window's settings, the ImGui dock layout, the
-// application settings. SciVis Studio project manifests written before
-// docs/adr/0040 carry the same three children beside the project; readers
-// now ignore them.
+// Node names shared by the files the imgui Application writes:
+//   - UI State (docs/adr/0040): {windows, layout} -- each window's
+//     presentation settings and the ImGui dock layout.
+//   - an Application Dump: {windows} -- each window's scene settings. Dumps
+//     and SciVis Studio manifests written before ADR 0040 also carry layout
+//     and settings, which readers now ignore.
+//   - Application Preferences: {settings} -- font scale and UI rounding.
 constexpr const char *UI_STATE_WINDOWS = "windows";
 constexpr const char *UI_STATE_LAYOUT = "layout";
 constexpr const char *UI_STATE_SETTINGS = "settings";

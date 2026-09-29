@@ -67,6 +67,10 @@ class Application : public vsr::ui::imgui::Application
   void uiFrameStart() override;
   void teardown() override;
   void uiMainMenuBar() override;
+  const char *applicationIdentifier() const override
+  {
+    return "studio";
+  }
   const char *getDefaultLayout() const override;
 
  private:

@@ -35,6 +35,10 @@ class Application : public VSRApplication
   vsr::ui::imgui::WindowArray setupWindows() override;
   void uiFrameEnd() override;
   void teardown() override;
+  const char *applicationIdentifier() const override
+  {
+    return "vsrDemoViskores";
+  }
   const char *getDefaultLayout() const override;
 
  private:

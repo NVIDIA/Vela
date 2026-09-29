@@ -73,7 +73,7 @@ void AppSettingsDialog::buildUI_applicationSettings()
     applySettings();
 
   if (ImGui::Button("Save as Defaults"))
-    m_app->saveDefaultApplicationSettings();
+    m_app->saveApplicationPreferences();
 
   ImGui::Unindent(vsr::ui::INDENT_AMOUNT);
 }
