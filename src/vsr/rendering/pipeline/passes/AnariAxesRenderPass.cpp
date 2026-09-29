@@ -160,13 +160,13 @@ void AnariAxesRenderPass::updateSize()
   if (!isValid())
     return;
 
-  auto size = vsr::math::uint2(getDimensions() * 0.1f);
+  auto size = vsr::math::uint2(dimensions() * 0.1f);
   anari::setParameter(
       m_device, m_frame, "size", vsr::math::uint2(size.x, size.x));
   anari::commitParameters(m_device, m_frame);
 }
 
-void AnariAxesRenderPass::render(ImageBuffers &b, int /*stageId*/)
+void AnariAxesRenderPass::render(ImageBuffers &b)
 {
   if (!isValid())
     return;
@@ -178,7 +178,7 @@ void AnariAxesRenderPass::render(ImageBuffers &b, int /*stageId*/)
   }
 
   if (anari::isReady(m_device, m_frame)) {
-    const vsr::math::uint2 fbSize(getDimensions());
+    const vsr::math::uint2 fbSize(dimensions());
     auto pixels = anari::map<uint32_t>(m_device, m_frame, "channel.color");
     for (uint32_t y = 0; y < pixels.height; y++) {
       auto *start = pixels.data + (y * pixels.width);

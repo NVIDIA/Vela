@@ -10,15 +10,15 @@
 namespace vsr::rendering {
 
 /*
- * ImagePass that writes the current color buffer to an image file; in
+ * Image Sink that writes the current color buffer to an image file; in
  * single-shot mode the pass disables itself after the first successful write.
  *
  * Example:
- *   auto *pass = pipeline.emplace_back<SaveToFilePass>();
+ *   auto *pass = pipeline.addSink<SaveToFilePass>();
  *   pass->setFilename("frame.png");
  *   pass->setSingleShotMode(true);
  */
-struct SaveToFilePass : public ImagePass
+struct SaveToFilePass : public ImageSink
 {
   SaveToFilePass();
   ~SaveToFilePass() override;
@@ -30,7 +30,7 @@ struct SaveToFilePass : public ImagePass
   void setSingleShotMode(bool enabled);
 
  private:
-  void render(ImageBuffers &b, int stageId) override;
+  void render(const ImageBuffers &b) override;
 
   std::string m_filename;
   bool m_singleShot{true};

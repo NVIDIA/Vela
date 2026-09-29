@@ -15,6 +15,14 @@
 
 namespace vsr::ui::imgui {
 
+namespace {
+
+// Shown until the first frame arrives (connected) or while disconnected.
+constexpr vsr::math::float4 CONNECTED_COLOR(0.f, 0.f, 0.f, 1.f);
+constexpr vsr::math::float4 DISCONNECTED_COLOR(1.f, 0.f, 0.f, 1.f);
+
+} // namespace
+
 RemoteViewport::RemoteViewport(Application *app,
     vsr::rendering::Manipulator *m,
     vsr::network::NetworkChannel *c,
@@ -49,11 +57,11 @@ void RemoteViewport::buildUI()
     m_receivedRendererIdx = VSR_INVALID_INDEX;
     m_channel->send(MessageType::SERVER_REQUEST_CURRENT_CAMERA);
     m_channel->send(MessageType::SERVER_REQUEST_CURRENT_RENDERER);
-    m_clearPass->setClearColor(vsr::math::float4(0.f, 0.f, 0.f, 1.f));
+    m_incomingFrameSource->setFallbackColor(CONNECTED_COLOR);
   } else if (m_wasConnected && !isConnected) {
     disconnect();
-    m_incomingFramePass->setEnabled(false);
-    m_clearPass->setClearColor(vsr::math::float4(1.f, 0.f, 0.f, 1.f));
+    m_incomingFrameSource->setFrame(nullptr);
+    m_incomingFrameSource->setFallbackColor(DISCONNECTED_COLOR);
   }
 
   m_wasConnected = isConnected;
@@ -150,13 +158,10 @@ void RemoteViewport::disconnect()
 
 void RemoteViewport::imagePipeline_populate(vsr::rendering::ImagePipeline &p)
 {
-  m_clearPass = p.emplace_back<vsr::rendering::ClearBuffersPass>();
-  m_clearPass->setClearColor(vsr::math::float4(1.f, 0.f, 0.f, 1.f));
-  m_incomingFramePass = p.emplace_back<vsr::rendering::CopyToColorBufferPass>();
-  m_incomingFramePass->setExternalBuffer(m_incomingColorBuffer);
-  m_incomingFramePass->setEnabled(false);
-  m_outputPass = p.emplace_back<vsr::rendering::CopyToSDLTexturePass>(
-      m_app->sdlRenderer());
+  m_incomingFrameSource = p.setSource<vsr::rendering::ExternalFrameSource>();
+  m_incomingFrameSource->setFallbackColor(DISCONNECTED_COLOR);
+  m_outputPass =
+      p.addSink<vsr::rendering::CopyToSDLTexturePass>(m_app->sdlRenderer());
 }
 
 void RemoteViewport::camera_resetView(bool /*resetAzEl*/)
@@ -223,7 +228,7 @@ void RemoteViewport::applyIncomingFrame()
 
   m_incomingColorBuffer.swap(m_pendingColorBuffer);
   m_hasPendingFrame = false;
-  m_incomingFramePass->setEnabled(true);
+  m_incomingFrameSource->setFrame(&m_incomingColorBuffer);
 }
 
 void RemoteViewport::updateRenderer()

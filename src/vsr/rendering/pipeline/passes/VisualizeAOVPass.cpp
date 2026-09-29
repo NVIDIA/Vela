@@ -33,12 +33,12 @@ void VisualizeAOVPass::setEdgeInvert(bool invert)
   m_edgeInvert = invert;
 }
 
-void VisualizeAOVPass::render(ImageBuffers &b, int stageId)
+void VisualizeAOVPass::render(ImageBuffers &b)
 {
-  if (stageId == 0 || m_aovType == AOVType::NONE)
+  if (m_aovType == AOVType::NONE)
     return;
 
-  const auto size = getDimensions();
+  const auto size = dimensions();
 
 #ifdef VSR_ALGORITHMS_HAS_CUDA
   if (b.stream) {

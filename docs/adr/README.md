@@ -98,6 +98,15 @@ for the proposed source reorganization that follows from it.
 Background and the full audit behind this decision:
 [`vsr-io-image-import.md`](../vsr-io-image-import.md).
 
+## Rendering pipeline
+
+| ADR | Decision | Supersedes / revised by |
+| --- | --- | --- |
+| [0028](0028-give-image-pipelines-a-single-source-and-pick-outside-them.md) | Give Image Pipelines a single source, and pick outside them | |
+
+See [`src/vsr/rendering/CONTEXT.md`](../../src/vsr/rendering/CONTEXT.md) for
+the resulting vocabulary.
+
 ## USD import
 
 | ADR | Decision | Supersedes / revised by |

@@ -19,7 +19,7 @@ struct OutputTransformPass : public ImagePass
   void setGamma(float gamma);
 
  protected:
-  void render(ImageBuffers &b, int stageId) override;
+  void render(ImageBuffers &b) override;
 
  private:
   anari::DataType m_colorFormat{ANARI_UFIXED8_RGBA_SRGB};

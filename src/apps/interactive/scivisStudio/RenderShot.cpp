@@ -192,14 +192,14 @@ RenderShotResult renderActiveShotToFrames(
   pipeline.setDimensions(
       shot->renderSettings.width, shot->renderSettings.height);
   auto *anariPass =
-      pipeline.emplace_back<vsr::rendering::AnariSceneRenderPass>(device);
+      pipeline.setSource<vsr::rendering::AnariSceneRenderPass>(device);
   anariPass->setRunAsync(false);
   anariPass->setColorFormat(ANARI_UFIXED8_RGBA_SRGB);
   anariPass->setWorld(renderIndex->world());
   anariPass->setRenderer(renderer);
   anariPass->setCamera(renderIndex->camera(shot->camera.objectIndex));
 
-  auto *savePass = pipeline.emplace_back<vsr::rendering::SaveToFilePass>();
+  auto *savePass = pipeline.addSink<vsr::rendering::SaveToFilePass>();
   savePass->setSingleShotMode(false);
 
   if (auto camera = renderIndex->camera(shot->camera.objectIndex)) {

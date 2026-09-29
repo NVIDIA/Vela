@@ -160,8 +160,6 @@ void registerRenderBindings(sol::state &lua)
       &rendering::ImagePipeline::setDimensions,
       "render",
       &rendering::ImagePipeline::render,
-      "size",
-      &rendering::ImagePipeline::size,
       "empty",
       &rendering::ImagePipeline::empty,
       "clear",
@@ -270,7 +268,7 @@ void registerRenderBindings(sol::state &lua)
     anari::commitParameters(dev->device, renderer);
 
     auto *pass =
-        pipeline->emplace_back<rendering::AnariSceneRenderPass>(dev->device);
+        pipeline->setSource<rendering::AnariSceneRenderPass>(dev->device);
     pass->setWorld(index->world());
     pass->setRenderer(renderer);
     pass->setCamera(cam);

@@ -95,8 +95,7 @@ void renderAnimationSequence(Context &ctx,
   vsr::rendering::ImagePipeline pipeline;
   pipeline.setDimensions(config.frame.width, config.frame.height);
 
-  auto *anariPass =
-      pipeline.emplace_back<vsr::rendering::AnariSceneRenderPass>(d);
+  auto *anariPass = pipeline.setSource<vsr::rendering::AnariSceneRenderPass>(d);
   anariPass->setRunAsync(false);
   anariPass->setEnableIDs(false);
   anariPass->setColorFormat(ANARI_UFIXED8_RGBA_SRGB);
@@ -107,7 +106,7 @@ void renderAnimationSequence(Context &ctx,
   // AOV pass //
 
   if (config.aov.aovType != vsr::rendering::AOVType::NONE) {
-    auto *aovPass = pipeline.emplace_back<vsr::rendering::VisualizeAOVPass>();
+    auto *aovPass = pipeline.addPass<vsr::rendering::VisualizeAOVPass>();
     aovPass->setAOVType(config.aov.aovType);
     aovPass->setDepthRange(config.aov.depthMin, config.aov.depthMax);
     aovPass->setEdgeInvert(config.aov.edgeInvert);
@@ -125,7 +124,7 @@ void renderAnimationSequence(Context &ctx,
       anariPass->setEnableInstanceId(true);
   }
 
-  auto *savePass = pipeline.emplace_back<vsr::rendering::SaveToFilePass>();
+  auto *savePass = pipeline.addSink<vsr::rendering::SaveToFilePass>();
   savePass->setSingleShotMode(false);
 
   // Set aspect ratio on the render index's camera //

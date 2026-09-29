@@ -48,12 +48,12 @@ float AutoExposurePass::currentExposure() const
   return m_currentExposure;
 }
 
-void AutoExposurePass::render(ImageBuffers &b, int stageId)
+void AutoExposurePass::render(ImageBuffers &b)
 {
-  if (stageId == 0 || !m_hdrEnabled)
+  if (!m_hdrEnabled)
     return;
 
-  const auto size = getDimensions();
+  const auto size = dimensions();
   const uint32_t totalPixels = size.x * size.y;
   if (totalPixels == 0 || !b.hdrColor)
     return;

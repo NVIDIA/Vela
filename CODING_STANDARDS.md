@@ -275,8 +275,8 @@ struct ImagePass
   virtual const char *name() const = 0;
 
  protected:
-  virtual void render(ImageBuffers &b, int stageId) = 0; // required hook
-  virtual void updateSize();                             // optional, no-op default
+  virtual void render(ImageBuffers &b) = 0; // required hook
+  virtual void updateSize();               // optional, no-op default
 
  private:
   friend struct ImagePipeline; // owner drives the protected API

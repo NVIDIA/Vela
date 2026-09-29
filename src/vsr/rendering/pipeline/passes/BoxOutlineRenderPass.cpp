@@ -62,12 +62,12 @@ void BoxOutlineRenderPass::setDepthTestEnabled(bool enabled)
   m_depthTestEnabled = enabled;
 }
 
-void BoxOutlineRenderPass::render(ImageBuffers &b, int stageId)
+void BoxOutlineRenderPass::render(ImageBuffers &b)
 {
-  if (!b.color || stageId == 0 || m_viewKind == ViewKind::NONE)
+  if (!b.color || m_viewKind == ViewKind::NONE)
     return;
 
-  const auto size = getDimensions();
+  const auto size = dimensions();
   if (size.x == 0 || size.y == 0)
     return;
 

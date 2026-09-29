@@ -28,8 +28,8 @@ namespace vsr::scivis_studio::client {
 /*
  * The thin client's viewport. It renders nothing itself: each UI frame it
  * takes the newest Frame the ServerConnection holds, decodes it with the
- * FrameCodec into RGBA8 and presents it through the demo's pass chain
- * (clear -> copy external buffer -> SDL texture). The pipeline follows the
+ * FrameCodec into RGBA8 and presents it through an External Frame Source
+ * and an SDL texture sink. The pipeline follows the
  * frame's own dimensions, so a frame rendered before a resize is shown
  * scaled instead of dropped.
  *
@@ -149,7 +149,7 @@ struct StudioViewport : public vsr::ui::imgui::BaseViewport
 
   bool m_hasFrame{false};
   protocol::FrameHeader m_lastHeader;
-  std::vector<uint8_t> m_pixels; // what the copy pass reads
+  std::vector<uint8_t> m_pixels; // what the External Frame Source reads
   std::vector<uint8_t> m_decodeScratch; // so a failed decode keeps m_pixels
   vsr::math::int2 m_pipelineSize{0, 0};
   vsr::math::uint2 m_sentFrameConfig{0, 0};
@@ -162,8 +162,7 @@ struct StudioViewport : public vsr::ui::imgui::BaseViewport
   std::optional<SceneObjectRef> m_sentOutline;
   protocol::ViewportSettings m_settings;
 
-  vsr::rendering::ClearBuffersPass *m_clearPass{nullptr};
-  vsr::rendering::CopyToColorBufferPass *m_framePass{nullptr};
+  vsr::rendering::ExternalFrameSource *m_frameSource{nullptr};
   vsr::rendering::CopyToSDLTexturePass *m_outputPass{nullptr};
 };
 

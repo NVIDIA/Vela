@@ -9,16 +9,16 @@
 namespace vsr::rendering {
 
 /*
- * ImagePass that copies the pipeline's internal color buffer out to a
+ * Image Sink that copies the pipeline's internal color buffer out to a
  * caller-owned byte vector; useful for extracting rendered pixels for encoding
  * or network transmission.
  *
  * Example:
  *   std::vector<uint8_t> pixels;
- *   auto *pass = pipeline.emplace_back<CopyFromColorBufferPass>();
+ *   auto *pass = pipeline.addSink<CopyFromColorBufferPass>();
  *   pass->setExternalBuffer(pixels);
  */
-struct CopyFromColorBufferPass : public ImagePass
+struct CopyFromColorBufferPass : public ImageSink
 {
   CopyFromColorBufferPass();
   ~CopyFromColorBufferPass() override;
@@ -26,7 +26,7 @@ struct CopyFromColorBufferPass : public ImagePass
   void setExternalBuffer(std::vector<uint8_t> &buffer);
 
  private:
-  void render(ImageBuffers &b, int stageId) override;
+  void render(const ImageBuffers &b) override;
 
   std::vector<uint8_t> *m_externalBuffer{nullptr};
 };

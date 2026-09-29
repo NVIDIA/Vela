@@ -25,6 +25,7 @@ project_add_executable(
   test_Forest.cpp
   test_Geometry.cpp
   test_ImageImport.cpp
+  test_ImagePipeline.cpp
   test_Importers.cpp
   test_LayerSubtreeArchive.cpp
   test_Manipulator.cpp
@@ -148,6 +149,7 @@ add_test(NAME vsr::FlatMap       COMMAND ${PROJECT_NAME} "[FlatMap]"      )
 add_test(NAME vsr::Forest        COMMAND ${PROJECT_NAME} "[Forest]"       )
 add_test(NAME vsr::Geometry      COMMAND ${PROJECT_NAME} "[Geometry]"     )
 add_test(NAME vsr::ImageImport   COMMAND ${PROJECT_NAME} "[ImageImport]"  )
+add_test(NAME vsr::ImagePipeline COMMAND ${PROJECT_NAME} "[ImagePipeline]")
 add_test(NAME vsr::Importers     COMMAND ${PROJECT_NAME} "[Importers]"    )
 add_test(NAME vsr::LayerSubtreeArchive
   COMMAND ${PROJECT_NAME} "[LayerSubtreeArchive]")

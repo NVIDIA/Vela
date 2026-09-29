@@ -315,7 +315,7 @@ bool StudioServer::setupRendering(std::string *error)
   m_pipeline.setDimensions(m_frameWidth, m_frameHeight);
 
   m_scenePass =
-      m_pipeline.emplace_back<vsr::rendering::AnariSceneRenderPass>(m_device);
+      m_pipeline.setSource<vsr::rendering::AnariSceneRenderPass>(m_device);
   // Blocking renders keep each Frame consistent with the edits applied just
   // before it; the one-in-flight rule already paces the loop.
   m_scenePass->setRunAsync(false);
@@ -329,7 +329,7 @@ bool StudioServer::setupRendering(std::string *error)
   m_viewport.setup(m_pipeline, m_scenePass, m_device);
 
   auto *copy =
-      m_pipeline.emplace_back<vsr::rendering::CopyFromColorBufferPass>();
+      m_pipeline.addSink<vsr::rendering::CopyFromColorBufferPass>();
   copy->setExternalBuffer(m_colorBytes);
 
   m_sceneRecorder = scene.updateDelegate().emplace<ServerPushDelegate>();

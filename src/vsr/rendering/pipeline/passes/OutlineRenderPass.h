@@ -12,7 +12,7 @@ namespace vsr::rendering {
  * a configured value, by scanning the objectId AOV buffer.
  *
  * Example:
- *   auto *pass = pipeline.emplace_back<OutlineRenderPass>();
+ *   auto *pass = pipeline.addPass<OutlineRenderPass>();
  *   pass->setOutlineId(selectedObjectId);
  */
 struct OutlineRenderPass : public ImagePass
@@ -24,7 +24,7 @@ struct OutlineRenderPass : public ImagePass
   void setOutlineId(uint32_t id);
 
  private:
-  void render(ImageBuffers &b, int stageId) override;
+  void render(ImageBuffers &b) override;
 
   uint32_t m_outlineId{~0u};
 };

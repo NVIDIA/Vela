@@ -29,6 +29,27 @@ ImagePipeline::~ImagePipeline()
 #endif
 }
 
+const uint32_t *ImagePipeline::getColorBuffer() const
+{
+  return m_buffers.color;
+}
+
+const std::vector<ImagePipeline::PassTiming> &ImagePipeline::getPassTimings()
+    const
+{
+  return m_passTimings;
+}
+
+ImageSource *ImagePipeline::source() const
+{
+  return m_source.get();
+}
+
+bool ImagePipeline::empty() const
+{
+  return !m_source && m_passes.empty() && m_sinks.empty();
+}
+
 void ImagePipeline::setDimensions(uint32_t width, uint32_t height)
 {
   if (m_size.x == width && m_size.y == height)
@@ -51,51 +72,74 @@ void ImagePipeline::setDimensions(uint32_t width, uint32_t height)
   m_buffers.albedo = detail::allocate<vsr::math::float3>(totalSize);
   m_buffers.normal = detail::allocate<vsr::math::float3>(totalSize);
 
+  if (m_source)
+    m_source->setDimensions(width, height);
   for (auto &p : m_passes)
     p->setDimensions(width, height);
+  for (auto &s : m_sinks)
+    s->setDimensions(width, height);
 }
 
 void ImagePipeline::render()
 {
-  int stageId = 0;
-  m_buffers.exposure = 0.f;
   m_passTimings.clear();
+  if (!m_source || !m_source->isEnabled() || !m_buffers.color)
+    return;
+
+  using clock = std::chrono::steady_clock;
+  auto elapsed = [](clock::time_point start) {
+    return std::chrono::duration<float, std::milli>(clock::now() - start)
+        .count();
+  };
+
+  m_buffers.exposure = 0.f;
+
+  auto start = clock::now();
+  m_source->render(m_buffers);
+  timeStage(*m_source, elapsed(start));
+
   for (auto &p : m_passes) {
     if (!p->isEnabled())
       continue;
-    auto start = std::chrono::steady_clock::now();
-    p->render(m_buffers, stageId++);
-    auto end = std::chrono::steady_clock::now();
-    auto time = std::chrono::duration<float, std::milli>(end - start).count();
-    m_passTimings.push_back({p->name(), time});
+    start = clock::now();
+    p->render(m_buffers);
+    timeStage(*p, elapsed(start));
   }
-}
 
-const uint32_t *ImagePipeline::getColorBuffer() const
-{
-  return m_buffers.color;
-}
-
-const std::vector<ImagePipeline::PassTiming> &ImagePipeline::getPassTimings()
-    const
-{
-  return m_passTimings;
-}
-
-size_t ImagePipeline::size() const
-{
-  return m_passes.size();
-}
-
-bool ImagePipeline::empty() const
-{
-  return m_passes.empty();
+  const ImageBuffers &finished = m_buffers;
+  for (auto &s : m_sinks) {
+    if (!s->isEnabled())
+      continue;
+    start = clock::now();
+    s->render(finished);
+    timeStage(*s, elapsed(start));
+  }
 }
 
 void ImagePipeline::clear()
 {
+  m_sinks.clear();
   m_passes.clear();
+  m_source.reset();
+  m_passTimings.clear();
   setDimensions(0, 0);
+}
+
+void ImagePipeline::sizeStage(ImageStage &s) const
+{
+  if (m_size.x != 0 && m_size.y != 0)
+    s.setDimensions(m_size.x, m_size.y);
+}
+
+void ImagePipeline::setSourceImpl(std::unique_ptr<ImageSource> s)
+{
+  sizeStage(*s);
+  m_source = std::move(s);
+}
+
+void ImagePipeline::timeStage(ImageStage &s, float milliseconds)
+{
+  m_passTimings.push_back({s.name(), s.role(), milliseconds});
 }
 
 void ImagePipeline::cleanup()

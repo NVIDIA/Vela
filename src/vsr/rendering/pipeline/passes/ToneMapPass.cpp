@@ -38,12 +38,12 @@ void ToneMapPass::setHDREnabled(bool enabled)
   m_hdrEnabled = enabled;
 }
 
-void ToneMapPass::render(ImageBuffers &b, int stageId)
+void ToneMapPass::render(ImageBuffers &b)
 {
-  if (stageId == 0 || !m_hdrEnabled)
+  if (!m_hdrEnabled)
     return;
 
-  const auto size = getDimensions();
+  const auto size = dimensions();
   const uint32_t totalPixels = size.x * size.y;
   if (totalPixels == 0 || !b.hdrColor)
     return;

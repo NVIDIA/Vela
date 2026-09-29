@@ -27,12 +27,12 @@ void OutputTransformPass::setGamma(float gamma)
   m_gamma = std::max(gamma, 1e-6f);
 }
 
-void OutputTransformPass::render(ImageBuffers &b, int stageId)
+void OutputTransformPass::render(ImageBuffers &b)
 {
-  if (stageId == 0 || m_colorFormat == ANARI_UFIXED8_RGBA_SRGB)
+  if (m_colorFormat == ANARI_UFIXED8_RGBA_SRGB)
     return;
 
-  const auto size = getDimensions();
+  const auto size = dimensions();
   const uint32_t totalPixels = size.x * size.y;
   if (totalPixels == 0 || !b.color)
     return;

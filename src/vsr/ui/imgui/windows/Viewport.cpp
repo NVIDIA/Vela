@@ -411,20 +411,20 @@ void Viewport::imagePipeline_populate(vsr::rendering::ImagePipeline &p)
       m_libName.c_str(),
       m_timeToLoadDevice);
 
-  m_anariPass = p.emplace_back<vsr::rendering::AnariSceneRenderPass>(m_device);
+  m_anariPass = p.setSource<vsr::rendering::AnariSceneRenderPass>(m_device);
   m_anariPass->setEnabled(m_renderingEnabled);
   m_anariPass->setUseImplicitAspectRatio(m_camera.useImplicitAspectRatio);
 
-  m_saveToFilePass = p.emplace_back<vsr::rendering::SaveToFilePass>();
+  m_saveToFilePass = p.addSink<vsr::rendering::SaveToFilePass>();
   m_saveToFilePass->setEnabled(false);
   m_saveToFilePass->setSingleShotMode(true);
 
-  m_pickPass = p.emplace_back<vsr::rendering::PickPass>();
+  m_pickPass = p.addPass<vsr::rendering::PickPass>();
   m_pickPass->setEnabled(false);
   m_pickPass->setPickOperation([&](vsr::rendering::ImageBuffers &b) {
     // Get depth //
 
-    auto [width, height] = m_pickPass->getDimensions();
+    auto [width, height] = m_pickPass->dimensions();
 
     auto l = linalg::clamp(m_pickCoord,
         vsr::math::int2(0, 0),
@@ -509,30 +509,30 @@ void Viewport::imagePipeline_populate(vsr::rendering::ImagePipeline &p)
     m_pickPass->setEnabled(false);
   });
 
-  m_autoExposurePass = p.emplace_back<vsr::rendering::AutoExposurePass>();
+  m_autoExposurePass = p.addPass<vsr::rendering::AutoExposurePass>();
 
-  m_toneMapPass = p.emplace_back<vsr::rendering::ToneMapPass>();
+  m_toneMapPass = p.addPass<vsr::rendering::ToneMapPass>();
   m_toneMapPass->setOperator(m_toneMapOperator);
   m_toneMapPass->setAutoExposureEnabled(m_autoExposureEnabled);
   m_toneMapPass->setExposure(m_toneMapExposure);
 
-  m_outputTransformPass = p.emplace_back<vsr::rendering::OutputTransformPass>();
+  m_outputTransformPass = p.addPass<vsr::rendering::OutputTransformPass>();
   m_outputTransformPass->setGamma(m_toneMapGamma);
 
-  m_visualizeAOVPass = p.emplace_back<vsr::rendering::VisualizeAOVPass>();
+  m_visualizeAOVPass = p.addPass<vsr::rendering::VisualizeAOVPass>();
   m_visualizeAOVPass->setEnabled(false);
   m_visualizeAOVPass->setEdgeInvert(m_edgeInvert);
 
   m_primitiveOutlinePass =
-      p.emplace_back<vsr::rendering::PrimitiveOutlineRenderPass>();
+      p.addPass<vsr::rendering::PrimitiveOutlineRenderPass>();
 
-  m_outlinePass = p.emplace_back<vsr::rendering::OutlineRenderPass>();
+  m_outlinePass = p.addPass<vsr::rendering::OutlineRenderPass>();
 
-  m_boundsOutlinePass = p.emplace_back<vsr::rendering::BoxOutlineRenderPass>();
+  m_boundsOutlinePass = p.addPass<vsr::rendering::BoxOutlineRenderPass>();
   m_boundsOutlinePass->setEnabled(false);
 
-  m_outputPass = p.emplace_back<vsr::rendering::CopyToSDLTexturePass>(
-      m_app->sdlRenderer());
+  m_outputPass =
+      p.addSink<vsr::rendering::CopyToSDLTexturePass>(m_app->sdlRenderer());
 
   syncImagePassState();
 }
@@ -1305,9 +1305,13 @@ void Viewport::ui_overlay()
     const auto &passTimings = imagePipeline().getPassTimings();
     if (!passTimings.empty()) {
       ImGui::Separator();
-      ImGui::Text("passes:");
-      for (const auto &timing : passTimings)
-        ImGui::Text("  %s: %.2fms", timing.name, timing.milliseconds);
+      ImGui::Text("stages:");
+      for (const auto &timing : passTimings) {
+        ImGui::Text("  [%s] %s: %.2fms",
+            vsr::rendering::toString(timing.role),
+            timing.name,
+            timing.milliseconds);
+      }
     }
   }
   ImGui::EndChild();
