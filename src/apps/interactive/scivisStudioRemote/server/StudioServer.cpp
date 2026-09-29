@@ -169,8 +169,8 @@ bool StudioServer::loadDevice(std::string *error)
   std::string requested = m_options.library;
   if (requested.empty()) {
     // The monolith viewport's default: the first loadable list entry.
-    for (const auto &name : deviceManager.libraryList()) {
-      if (deviceManager.isLoadableLibrary(name)) {
+    for (const auto &name : deviceManager.deviceList()) {
+      if (deviceManager.isLoadableDevice(name)) {
         requested = name;
         break;
       }

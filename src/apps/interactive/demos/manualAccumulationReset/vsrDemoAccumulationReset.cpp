@@ -32,7 +32,7 @@ class Application : public VSRApplication
     std::vector<std::string> libList;
     libList.push_back("visrtx");
     libList.push_back("{none}");
-    ctx->anari.setLibraryList(libList);
+    ctx->anari.setDeviceList(libList);
 
     auto *manipulator = &ctx->view.manipulator;
     ctx->vsr.sceneLoadComplete = true;

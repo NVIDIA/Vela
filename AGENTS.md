@@ -96,6 +96,6 @@ Lua module search paths (lowest to highest priority):
 
 | Variable | Purpose |
 |---|---|
-| `VSR_ANARI_LIBRARIES` | Comma-separated ANARI libraries shown in `vsrViewer` device selector |
-| `ANARI_VSR_LIBRARY` | Backend library used by `anari_vsr` device (default: `helide`) |
+| `VSR_ANARI_LIBRARIES` | Comma-separated Device Identifiers (`[subtype@]library`) shown in `vsrViewer` device selector |
+| `ANARI_VSR_LIBRARY` | Backend Device Identifier used by `anari_vsr` device (default: `helide`) |
 | `VSR_LUA_PACKAGE_PATHS` | Additional Lua module search paths |

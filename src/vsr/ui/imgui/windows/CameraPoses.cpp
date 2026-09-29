@@ -318,11 +318,11 @@ void CameraPoses::renderInterpolatedPath()
   // Auto-initialize offline renderer settings if not configured
   if (ctx->offline.renderer.rendererObjects.empty()
       || ctx->offline.renderer.libraryName.empty()) {
-    const auto &libraryList = appContext()->anari.libraryList();
-    if (!libraryList.empty()) {
+    const auto &deviceList = appContext()->anari.deviceList();
+    if (!deviceList.empty()) {
       vsr::core::logStatus(
           "[CameraPoses] Initializing offline renderer from viewport device");
-      ctx->setOfflineRenderingLibrary(libraryList[0]);
+      ctx->setOfflineRenderingLibrary(deviceList[0]);
     } else {
       vsr::core::logError(
           "[CameraPoses] No ANARI library available. Cannot render.");

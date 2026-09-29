@@ -34,8 +34,8 @@ using vsr::rendering::deviceSupportsExtension;
 
 std::string defaultLibraryName(const vsr::app::ANARIDeviceManager &adm)
 {
-  for (const auto &libName : adm.libraryList()) {
-    if (adm.isLoadableLibrary(libName))
+  for (const auto &libName : adm.deviceList()) {
+    if (adm.isLoadableDevice(libName))
       return libName;
   }
 
@@ -139,7 +139,7 @@ void Viewport::setLibrary(
   teardownDevice();
 
   auto &adm = appContext()->anari;
-  if (adm.isLoadableLibrary(libName)) {
+  if (adm.isLoadableDevice(libName)) {
     vsr::core::logStatus(
         "[viewport] *** setting viewport to use ANARI device '%s' ***",
         libName.c_str());
@@ -155,7 +155,7 @@ void Viewport::setLibrary(
     auto selectedLibName = libName;
     auto d = adm.loadDevice(selectedLibName);
 
-    if (!d && adm.isLoadableLibrary(selectedLibName)) {
+    if (!d && adm.isLoadableDevice(selectedLibName)) {
       vsr::core::logWarning(
           "[viewport] failed to load ANARI device '%s'; falling back to a "
           "default device",
@@ -268,7 +268,7 @@ void Viewport::setLibraryToDefault()
     return;
 
   setLibrary(m_app->commandLineOptions()->useDefaultRenderer
-          ? appContext()->anari.libraryList()[0]
+          ? appContext()->anari.deviceList()[0]
           : "");
 }
 
@@ -907,8 +907,8 @@ void Viewport::ui_menubar()
 void Viewport::ui_menubar_Device()
 {
   if (ImGui::BeginMenu("Device")) {
-    const auto &libraryList = appContext()->anari.libraryList();
-    for (auto &libName : libraryList) {
+    const auto &deviceList = appContext()->anari.deviceList();
+    for (auto &libName : deviceList) {
       const bool isThisLibrary = m_libName == libName;
       if (ImGui::RadioButton(libName.c_str(), isThisLibrary))
         setLibrary(libName);
