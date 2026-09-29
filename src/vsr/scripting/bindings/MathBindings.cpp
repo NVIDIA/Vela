@@ -46,9 +46,13 @@ void registerMathBindings(sol::state &lua)
   auto float2Type = vsr.new_usertype<math::float2>("float2",
       sol::constructors<math::float2(), math::float2(float, float)>(),
       "x",
-      &math::float2::x,
+      sol::property(
+          [](math::float2 &v) { return v.x; },
+          [](math::float2 &v, float x) { v.x = x; }),
       "y",
-      &math::float2::y,
+      sol::property(
+          [](math::float2 &v) { return v.y; },
+          [](math::float2 &v, float y) { v.y = y; }),
       sol::meta_function::to_string,
       [](const math::float2 &v) {
         return fmt::format("float2({}, {})", v.x, v.y);
@@ -58,11 +62,17 @@ void registerMathBindings(sol::state &lua)
   auto float3Type = vsr.new_usertype<math::float3>("float3",
       sol::constructors<math::float3(), math::float3(float, float, float)>(),
       "x",
-      &math::float3::x,
+      sol::property(
+          [](math::float3 &v) { return v.x; },
+          [](math::float3 &v, float x) { v.x = x; }),
       "y",
-      &math::float3::y,
+      sol::property(
+          [](math::float3 &v) { return v.y; },
+          [](math::float3 &v, float y) { v.y = y; }),
       "z",
-      &math::float3::z,
+      sol::property(
+          [](math::float3 &v) { return v.z; },
+          [](math::float3 &v, float z) { v.z = z; }),
       sol::meta_function::to_string,
       [](const math::float3 &v) {
         return fmt::format("float3({}, {}, {})", v.x, v.y, v.z);
@@ -73,13 +83,21 @@ void registerMathBindings(sol::state &lua)
       sol::constructors<math::float4(),
           math::float4(float, float, float, float)>(),
       "x",
-      &math::float4::x,
+      sol::property(
+          [](math::float4 &v) { return v.x; },
+          [](math::float4 &v, float x) { v.x = x; }),
       "y",
-      &math::float4::y,
+      sol::property(
+          [](math::float4 &v) { return v.y; },
+          [](math::float4 &v, float y) { v.y = y; }),
       "z",
-      &math::float4::z,
+      sol::property(
+          [](math::float4 &v) { return v.z; },
+          [](math::float4 &v, float z) { v.z = z; }),
       "w",
-      &math::float4::w,
+      sol::property(
+          [](math::float4 &v) { return v.w; },
+          [](math::float4 &v, float w) { v.w = w; }),
       sol::meta_function::to_string,
       [](const math::float4 &v) {
         return fmt::format("float4({}, {}, {}, {})", v.x, v.y, v.z, v.w);
