@@ -424,7 +424,7 @@ void ProjectContext::ensureRendererDefaults(Shot &shot)
   if (!m_ctx)
     return;
 
-  for (const auto &lib : m_ctx->anari.libraryList()) {
+  for (const auto &lib : m_ctx->anari.deviceList()) {
     if (lib != "{none}") {
       shot.renderSettings.rendererLibrary = lib;
       break;

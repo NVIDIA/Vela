@@ -81,7 +81,7 @@ bool ShotEditor::buildUI_deviceSelector(Shot &shot)
   }
 
   if (ImGui::BeginCombo("Device", preview.c_str())) {
-    for (const auto &libName : ctx->anari.libraryList()) {
+    for (const auto &libName : ctx->anari.deviceList()) {
       const bool selected = settings.rendererLibrary == libName;
       if (ImGui::Selectable(libName.c_str(), selected)) {
         if (settings.rendererLibrary != libName) {
@@ -108,7 +108,7 @@ bool ShotEditor::buildUI_rendererSelector(Shot &shot)
   std::vector<vsr::scene::RendererAppRef> renderers;
   vsr::scene::RendererAppRef currentRenderer;
 
-  if (ctx && ctx->anari.isLoadableLibrary(settings.rendererLibrary)) {
+  if (ctx && ctx->anari.isLoadableDevice(settings.rendererLibrary)) {
     auto &scene = ctx->vsr.scene;
     // A library the scene has no renderers for gets its device loaded once,
     // so the bind can create the standard set; a library that fails to load

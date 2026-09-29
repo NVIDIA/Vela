@@ -270,11 +270,11 @@ void Context::initializeOfflineRenderer()
   if (offline.renderer.activeRenderer >= 0)
     return;
 
-  const auto &libraryList = anari.libraryList();
+  const auto &deviceList = anari.deviceList();
   if (!offline.renderer.libraryName.empty())
     setOfflineRenderingLibrary(offline.renderer.libraryName);
-  else if (!libraryList.empty())
-    setOfflineRenderingLibrary(libraryList.front());
+  else if (!deviceList.empty())
+    setOfflineRenderingLibrary(deviceList.front());
 }
 
 void Context::setOfflineRenderingLibrary(const std::string &libName)

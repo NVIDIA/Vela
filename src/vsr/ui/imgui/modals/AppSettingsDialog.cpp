@@ -245,11 +245,11 @@ void AppSettingsDialog::buildUI_offlineRenderSettings()
   }
 
   ImGui::SameLine();
-  const auto &libraryList = appContext()->anari.libraryList();
+  const auto &deviceList = appContext()->anari.deviceList();
   if (ImGui::BeginCombo("##library_combo", "", ImGuiComboFlags_NoPreview)) {
-    for (size_t n = 0; n < libraryList.size(); n++) {
-      if (ImGui::Selectable(libraryList[n].c_str(), false))
-        ctx->setOfflineRenderingLibrary(libraryList[n]);
+    for (size_t n = 0; n < deviceList.size(); n++) {
+      if (ImGui::Selectable(deviceList[n].c_str(), false))
+        ctx->setOfflineRenderingLibrary(deviceList[n]);
     }
     ImGui::EndCombo();
   }

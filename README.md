@@ -79,10 +79,13 @@ functions, and can save and reload full sessions as `.vsr` files.
 The list of devices offered in the UI comes from a comma-separated list in the
 `VSR_ANARI_LIBRARIES` environment variable. If it is unset the app falls back
 to a small set of defaults, but defining it in your environment (e.g. in a
-`.bashrc`) gives you control over what appears:
+`.bashrc`) gives you control over what appears. Each entry is a device
+identifier of the form `[subtype@]library`: a bare library name loads that
+library's `default` device, and a `subtype@` prefix selects another device from
+the same library:
 
 ```bash
-% export VSR_ANARI_LIBRARIES=helide,visrtx
+% export VSR_ANARI_LIBRARIES=helide,visrtx,gpu@visrtx
 % ./vsrViewer
 ```
 
@@ -113,7 +116,8 @@ state into a VSR scene and writes a `live_capture.vsr` archive as frames are
 committed. Point an existing ANARI application at it to capture what that
 application actually submits, then open the result in `vsrViewer`. It can also
 forward rendering to a real backend device, selected with the
-`ANARI_VSR_LIBRARY` environment variable (`helide` by default).
+`ANARI_VSR_LIBRARY` environment variable (`helide` by default; it accepts the
+same `[subtype@]library` device identifiers as `VSR_ANARI_LIBRARIES`).
 
 ## Scripting
 

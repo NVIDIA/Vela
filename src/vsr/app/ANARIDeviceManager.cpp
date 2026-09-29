@@ -41,7 +41,54 @@ void anariStatusFunc(const void *_verboseFlag,
     vsr::core::logDebug("[ANARI][DEBUG][%s][%p] %s", typeStr, source, message);
 }
 
-static std::vector<std::string> parseLibraryList()
+// DeviceIdentifier definitions ///////////////////////////////////////////////
+
+std::optional<DeviceIdentifier> DeviceIdentifier::parse(
+    std::string_view identifier)
+{
+  if (identifier == "{none}")
+    return std::nullopt;
+
+  DeviceIdentifier id;
+  const auto at = identifier.find('@');
+  if (at == identifier.npos)
+    id.library = identifier;
+  else {
+    if (identifier.find('@', at + 1) != identifier.npos)
+      return std::nullopt;
+    if (at > 0)
+      id.subtype = identifier.substr(0, at);
+    id.library = identifier.substr(at + 1);
+  }
+
+  if (id.library.empty())
+    return std::nullopt;
+
+  return id;
+}
+
+std::string DeviceIdentifier::str() const
+{
+  return subtype == "default" ? library : subtype + '@' + library;
+}
+
+// Helper functions ///////////////////////////////////////////////////////////
+
+// Libraries that advertise no subtypes are trusted to handle any name.
+static bool libraryHasDeviceSubtype(
+    anari::Library library, const std::string &subtype)
+{
+  const char **subtypes = anariGetDeviceSubtypes(library);
+  if (!subtypes || !*subtypes)
+    return true;
+  for (; *subtypes; subtypes++) {
+    if (subtype == *subtypes)
+      return true;
+  }
+  return false;
+}
+
+static std::vector<std::string> parseDeviceList()
 {
   const char *libsFromEnv = getenv("VSR_ANARI_LIBRARIES");
 
@@ -79,7 +126,7 @@ static std::vector<std::string> parseLibraryList()
 ANARIDeviceManager::ANARIDeviceManager(const bool *verboseFlag)
     : m_verboseFlag(verboseFlag)
 {
-  m_libraryList = parseLibraryList();
+  m_deviceList = parseDeviceList();
 }
 
 ANARIDeviceManager::~ANARIDeviceManager()
@@ -88,46 +135,70 @@ ANARIDeviceManager::~ANARIDeviceManager()
   unloadAllLibraries();
 }
 
-const std::vector<std::string> &ANARIDeviceManager::libraryList() const
+const std::vector<std::string> &ANARIDeviceManager::deviceList() const
 {
-  return m_libraryList;
+  return m_deviceList;
 }
 
-void ANARIDeviceManager::setLibraryList(const std::vector<std::string> &libs)
+void ANARIDeviceManager::setDeviceList(
+    const std::vector<std::string> &deviceIds)
 {
-  m_libraryList = libs;
+  m_deviceList = deviceIds;
 }
 
-bool ANARIDeviceManager::isLoadableLibrary(const std::string &libraryName) const
+bool ANARIDeviceManager::isLoadableDevice(const std::string &deviceId) const
 {
-  return !libraryName.empty() && libraryName != "{none}";
+  return DeviceIdentifier::parse(deviceId).has_value();
 }
 
-anari::Device ANARIDeviceManager::loadDevice(const std::string &libraryName,
+anari::Device ANARIDeviceManager::loadDevice(const std::string &deviceId,
     const std::vector<DeviceInitParam> &initialDeviceParams)
 {
-  if (!isLoadableLibrary(libraryName))
+  const auto id = DeviceIdentifier::parse(deviceId);
+  if (!id)
     return nullptr;
 
-  anari::Device dev = m_loadedDevices[libraryName];
+  const auto key = id->str();
+  anari::Device dev = m_loadedDevices[key];
   if (dev) {
     anari::retain(dev, dev);
     return dev;
   }
 
-  anari::Library library = m_loadedLibraries[libraryName];
+  anari::Library library = m_loadedLibraries[id->library];
   if (!library) {
     library =
-        anari::loadLibrary(libraryName.c_str(), anariStatusFunc, m_verboseFlag);
+        anari::loadLibrary(id->library.c_str(), anariStatusFunc, m_verboseFlag);
     if (!library)
       return nullptr;
-    m_loadedLibraries[libraryName] = library;
+    m_loadedLibraries[id->library] = library;
   }
 
-  dev = anari::newDevice(library, "default");
+  // Some libraries hand back their default device for any subtype, so check
+  // the advertised subtypes to keep a typo from silently loading 'default'.
+  if (!libraryHasDeviceSubtype(library, id->subtype)) {
+    vsr::core::logWarning(
+        "[ANARIDeviceManager] ANARI library '%s' has no device subtype '%s'"
+        " (from '%s')",
+        id->library.c_str(),
+        id->subtype.c_str(),
+        deviceId.c_str());
+    return nullptr;
+  }
 
-  m_loadedDeviceExtensions[libraryName] =
-      anari::extension::getDeviceExtensionStruct(library, "default");
+  dev = anari::newDevice(library, id->subtype.c_str());
+  if (!dev) {
+    vsr::core::logWarning(
+        "[ANARIDeviceManager] ANARI library '%s' failed to create device"
+        " subtype '%s' (from '%s')",
+        id->library.c_str(),
+        id->subtype.c_str(),
+        deviceId.c_str());
+    return nullptr;
+  }
+
+  m_loadedDeviceExtensions[key] =
+      anari::extension::getDeviceExtensionStruct(library, id->subtype.c_str());
 
   anari::setParameter(dev, dev, "glAPI", "OpenGL");
 
@@ -141,45 +212,46 @@ anari::Device ANARIDeviceManager::loadDevice(const std::string &libraryName,
 
   anari::commitParameters(dev, dev);
 
-  m_loadedDevices[libraryName] = dev;
+  m_loadedDevices[key] = dev;
   anari::retain(dev, dev);
 
   return dev;
 }
 
-anari::Device ANARIDeviceManager::loadFirstAvailableDevice(std::string &libName)
+anari::Device ANARIDeviceManager::loadFirstAvailableDevice(
+    std::string &deviceId)
 {
-  if (auto device = loadDevice(libName))
+  if (auto device = loadDevice(deviceId))
     return device;
 
-  if (isLoadableLibrary(libName)) {
+  if (isLoadableDevice(deviceId)) {
     vsr::core::logWarning(
         "[ANARIDeviceManager] failed to load ANARI device '%s'; trying the"
-        " other libraries",
-        libName.c_str());
+        " other devices",
+        deviceId.c_str());
   }
 
-  for (const auto &fallback : m_libraryList) {
-    if (fallback == libName)
+  for (const auto &fallback : m_deviceList) {
+    if (fallback == deviceId)
       continue;
     if (auto device = loadDevice(fallback)) {
-      libName = fallback;
+      deviceId = fallback;
       return device;
     }
   }
 
-  libName.clear();
+  deviceId.clear();
   return nullptr;
 }
 
 const anari::Extensions *ANARIDeviceManager::loadDeviceExtensions(
-    const std::string &libName)
+    const std::string &deviceId)
 {
-  auto d = loadDevice(libName);
+  auto d = loadDevice(deviceId);
   if (!d)
     return nullptr;
   anari::release(d, d);
-  return &m_loadedDeviceExtensions[libName];
+  return &m_loadedDeviceExtensions[DeviceIdentifier::parse(deviceId)->str()];
 }
 
 vsr::rendering::RenderIndex *ANARIDeviceManager::acquireRenderIndex(

@@ -23,7 +23,7 @@ SCENARIO(
 
   GIVEN("a list whose first entry is not a library")
   {
-    manager.setLibraryList({"no_such_anari_library", "helide", "{none}"});
+    manager.setDeviceList({"no_such_anari_library", "helide", "{none}"});
 
     WHEN("the missing library is requested")
     {
@@ -60,7 +60,7 @@ SCENARIO(
 
   GIVEN("a list with nothing loadable")
   {
-    manager.setLibraryList({"no_such_anari_library", "{none}"});
+    manager.setDeviceList({"no_such_anari_library", "{none}"});
 
     WHEN("a device is requested")
     {
@@ -74,6 +74,94 @@ SCENARIO(
       }
     }
   }
+}
+
+SCENARIO("Device Identifiers name a subtype of an ANARI library", "[App]")
+{
+  using vsr::app::DeviceIdentifier;
+
+  GIVEN("a bare library name")
+  {
+    auto id = DeviceIdentifier::parse("helide");
+
+    THEN("it names the library's default subtype")
+    {
+      REQUIRE(id);
+      REQUIRE(id->library == "helide");
+      REQUIRE(id->subtype == "default");
+      REQUIRE(id->str() == "helide");
+    }
+  }
+
+  GIVEN("an explicit subtype")
+  {
+    auto id = DeviceIdentifier::parse("gpu@visrtx");
+
+    THEN("both parts are split on '@' and kept in the canonical form")
+    {
+      REQUIRE(id);
+      REQUIRE(id->library == "visrtx");
+      REQUIRE(id->subtype == "gpu");
+      REQUIRE(id->str() == "gpu@visrtx");
+    }
+  }
+
+  GIVEN("an explicit or empty default subtype")
+  {
+    THEN("the canonical form drops it")
+    {
+      REQUIRE(DeviceIdentifier::parse("default@helide")->str() == "helide");
+      REQUIRE(DeviceIdentifier::parse("@helide")->str() == "helide");
+    }
+  }
+
+  GIVEN("identifiers naming no loadable device")
+  {
+    THEN("they do not parse")
+    {
+      REQUIRE_FALSE(DeviceIdentifier::parse(""));
+      REQUIRE_FALSE(DeviceIdentifier::parse("{none}"));
+      REQUIRE_FALSE(DeviceIdentifier::parse("gpu@"));
+      REQUIRE_FALSE(DeviceIdentifier::parse("a@b@c"));
+    }
+  }
+}
+
+SCENARIO("The ANARI device manager loads devices by Device Identifier", "[App]")
+{
+  vsr::app::ANARIDeviceManager manager;
+
+  auto device = manager.loadDevice("helide");
+  if (!device) {
+    WARN("helide ANARI library unavailable, skipping the identifier test");
+    return;
+  }
+
+  WHEN("the default subtype is named explicitly")
+  {
+    auto same = manager.loadDevice("default@helide");
+
+    THEN("the already-loaded device is returned")
+    {
+      REQUIRE(same == device);
+    }
+    anari::release(same, same);
+  }
+
+  WHEN("an unknown subtype of a loaded library is requested")
+  {
+    auto bogus = manager.loadDevice("no_such_subtype@helide");
+
+    THEN("there is no device, and the library remains usable")
+    {
+      REQUIRE(bogus == nullptr);
+      auto again = manager.loadDevice("helide");
+      REQUIRE(again == device);
+      anari::release(again, again);
+    }
+  }
+
+  anari::release(device, device);
 }
 
 SCENARIO("Application Dumps embed required Archives without owning the root",
