@@ -59,7 +59,7 @@ struct BaseUpdateDelegate
   // Bracket a run of mutations that should produce at most one downstream
   // rebuild. Nesting is counted, so an outer batch is not ended by an inner
   // one. Every signal above still arrives; only the work they trigger is
-  // coalesced. Optional hooks (STYLEGUIDE section 13): a delegate that has
+  // coalesced. Optional hooks (CODING_STANDARDS section 13): a delegate that has
   // nothing to coalesce need not say so.
   virtual void signalUpdateBatchBegin() {}
   virtual void signalUpdateBatchEnd() {}
@@ -70,7 +70,7 @@ struct BaseUpdateDelegate
   // are collected and arrive as one signalMetadataBatchUpdated() when the
   // batch ends, ahead of that batch's parameters, so a consumer sees the
   // object's metadata before the parameters written beside it. Optional
-  // hooks (STYLEGUIDE section 13): a delegate that does not care about
+  // hooks (CODING_STANDARDS section 13): a delegate that does not care about
   // metadata need not say so.
   virtual void signalMetadataUpdated(const Object *o, const char *name) {}
   virtual void signalMetadataBatchUpdated(

@@ -6,7 +6,7 @@ This file provides guidance for coding agents working in this repository.
 
 Vela is a C++17 project built around VSR ("Vela Scene Runtime"), a scene graph library that pairs a live, editable scene description with one or more ANARI devices. It is **experimental** and has no API stability guarantees.
 
-See [STYLEGUIDE.md](STYLEGUIDE.md) for VSR-specific and project-wide C++ coding
+See [CODING_STANDARDS.md](CODING_STANDARDS.md) for VSR-specific and project-wide C++ coding
 conventions, and [CONTEXT-MAP.md](CONTEXT-MAP.md) for how the domain contexts
 below relate to each other.
 

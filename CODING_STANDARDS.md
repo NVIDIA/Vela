@@ -1,4 +1,4 @@
-# VSR Style Guide
+# VSR Coding Standards
 
 This document is the complete set of coding conventions for this repository —
 both the general C++/CUDA rules and the VSR-specific ones. It has no parent

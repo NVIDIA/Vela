@@ -133,7 +133,7 @@ variable. See [src/vsr/scripting/](src/vsr/scripting/) for the API and
 - [AGENTS.md](AGENTS.md) — architecture overview, dependency layers, and key design patterns
 - [CONTEXT-MAP.md](CONTEXT-MAP.md) — how the project's domain contexts relate, with links to per-area glossaries
 - [docs/adr/](docs/adr/README.md) — architecture decision records
-- [STYLEGUIDE.md](STYLEGUIDE.md) — C++ coding conventions used throughout the project
+- [CODING_STANDARDS.md](CODING_STANDARDS.md) — C++ coding conventions used throughout the project
 
 ## Licensing
 
