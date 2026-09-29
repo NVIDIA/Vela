@@ -97,9 +97,11 @@ Lua module search paths (lowest to highest priority):
 Per-user state lives in `~/.config/vela/` (`$XDG_CONFIG_HOME/vela/` on Linux
 when set, `%APPDATA%\vela\` on Windows), resolved only by
 `vsr::core::userConfigDirectory()`. It holds `preferences.vsr` (Application
-Preferences), per-application state, `colormaps/` and `scripts/`. It is named
-for the product, not the library: see
-[docs/adr/0041](docs/adr/0041-name-the-user-config-directory-after-vela.md).
+Preferences), `<applicationIdentifier>/uiState.vsr` (each imgui app's UI
+State, saved at exit), `colormaps/` and `scripts/`. It is named for the
+product, not the library: see
+[docs/adr/0041](docs/adr/0041-name-the-user-config-directory-after-vela.md)
+and [docs/adr/0040](docs/adr/0040-keep-ui-state-per-application-not-per-document.md).
 
 ### Environment Variables
 

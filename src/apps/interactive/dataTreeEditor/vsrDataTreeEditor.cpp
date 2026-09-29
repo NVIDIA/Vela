@@ -50,6 +50,11 @@ class Application : public VSRApplication
     return windows;
   }
 
+  const char *applicationIdentifier() const override
+  {
+    return "vsrDataTreeEditor";
+  }
+
   const char *getDefaultLayout() const override
   {
     return R"layout(

@@ -170,6 +170,11 @@ class Application : public VSRApplication
     VSRApplication::teardown();
   }
 
+  const char *applicationIdentifier() const override
+  {
+    return "vsrViewer";
+  }
+
   const char *getDefaultLayout() const override
   {
     return R"layout(

@@ -42,11 +42,6 @@ namespace {
 
 constexpr std::size_t MAX_RECENT_PROJECTS = 10;
 
-std::filesystem::path studioConfigDirectory()
-{
-  return vsr::core::userConfigDirectory() / "studio";
-}
-
 std::filesystem::path normalizedAbsolutePath(const std::filesystem::path &path)
 {
   std::error_code ec;
@@ -323,7 +318,8 @@ void Application::continueDirtyAction()
 
 std::filesystem::path Application::recentProjectsFile() const
 {
-  return studioConfigDirectory() / "recent_projects.txt";
+  return vsr::core::userConfigDirectory() / applicationIdentifier()
+      / "recent_projects.txt";
 }
 
 void Application::loadRecentProjects()

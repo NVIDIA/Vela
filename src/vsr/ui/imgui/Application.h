@@ -110,7 +110,8 @@ class Application
   void showLoadLayerSubtreeArchiveDialog(
       vsr::scene::LayerNodeRef destinationParent);
   void showSaveLayerSubtreeArchiveDialog(vsr::scene::LayerNodeRef sourceRoot);
-  void saveDefaultApplicationSettings();
+  // Writes the Application Preferences file (Settings -> Save as Defaults).
+  void saveApplicationPreferences();
 
   ExtensionManager *extensionManager() const;
 
@@ -156,19 +157,30 @@ class Application
       const vsr::core::DataTreeMetadataReadResult &metadata,
       const vsr::core::DataNode &root,
       const char *filename) const;
-  void saveApplicationSettings(vsr::core::DataNode &root);
-  void loadApplicationSettings(vsr::core::DataNode &root);
-  // The UI-state tree (vsr/app/UIStateTree.h): saveUIStateTree() writes each
-  // window's settings under "windows", the ImGui dock layout under "layout"
-  // and the application settings (saveApplicationSettings); it is the UI part
-  // of an application-state file and what a SciVis Studio project stores.
-  // applyUIStateTree() applies one, skipping missing children. Call both
-  // between NewFrame and Render.
-  void saveUIStateTree(vsr::core::DataNode &root);
-  void applyUIStateTree(vsr::core::DataNode &root);
-  void saveGlobalApplicationSettings();
-  void loadGlobalApplicationSettings();
-  std::filesystem::path globalApplicationSettingsFile() const;
+
+  // Application Preferences: settings every Vela application shares, kept in
+  // <User Config Directory>/preferences.vsr and written only on request.
+  void savePreferences(vsr::core::DataNode &root);
+  void loadPreferences(vsr::core::DataNode &root);
+  void loadApplicationPreferences();
+  std::filesystem::path applicationPreferencesFile() const;
+
+  // UI State (docs/adr/0040): the dock layout plus each window's presentation
+  // settings, in the shape of vsr/app/UIStateTree.h. It belongs to this
+  // application, never to a document: run() restores it from uiStateFile()
+  // before the first frame (unless --noDefaultLayout) and saves it at exit.
+  // Both work with or without an open frame.
+  void saveUIState(vsr::core::DataNode &root);
+  void applyUIState(vsr::core::DataNode &root);
+  std::filesystem::path uiStateFile() const;
+  void saveUIStateFile();
+  void restoreUIStateFile();
+  void restoreDefaultLayout();
+
+  // The Application Identifier: the stable name that keeps this
+  // application's UI State apart from every other's. Changing it abandons
+  // the users' saved UI State.
+  virtual const char *applicationIdentifier() const = 0;
 
   void loadStateForNextFrame();
 

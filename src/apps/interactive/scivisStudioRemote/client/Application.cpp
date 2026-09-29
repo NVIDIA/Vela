@@ -30,12 +30,8 @@
 #include "vsr/ui/imgui/windows/TransferFunctionEditor.h"
 // vsr_scene
 #include "vsr/scene/Scene.hpp"
-// vsr_app
-#include "vsr/app/UIStateTree.h"
 // vsr_core
-#include "vsr/core/DataTree.hpp"
 #include "vsr/core/Logging.hpp"
-#include "vsr/core/UserConfig.hpp"
 // imgui
 #include <imgui.h>
 // SDL
@@ -44,8 +40,6 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
-#include <exception>
-#include <filesystem>
 #include <iterator>
 #include <optional>
 #include <string>
@@ -329,9 +323,6 @@ vsr_ui::WindowArray Application::setupWindows()
           std::make_unique<RemoteBrowseProvider>(this, &m_editorContext),
           std::make_unique<RemoteFileAnimationAction>(&m_editorContext));
 
-  // After setWindowArray(): the restore addresses the windows by name.
-  loadClientUIState();
-
   if (m_options.connectAtStartup)
     m_autoConnectInFrames = AUTO_CONNECT_DELAY_FRAMES;
 
@@ -389,7 +380,6 @@ void Application::uiMainMenuBar()
 
 void Application::teardown()
 {
-  saveClientUIState();
   const auto state = m_connection->state();
   if (state == ConnectionState::Connected || state == ConnectionState::Lost)
     disconnect();
@@ -533,9 +523,10 @@ void Application::uiMenu_View()
 
   ImGui::Separator();
 
-  // The one application setting this client exposes: it has no App Settings
-  // dialog, and a font too small to read is worth a menu of its own. The
-  // change applies at once and is saved with the layout.
+  // The one Application Preference this client exposes: it has no App
+  // Settings dialog, and a font too small to read is worth a menu of its
+  // own. The change applies at once and lasts for this run; saving it
+  // changes every Vela application's font scale.
   ImGui::SetNextItemWidth(220.f);
   if (ImGui::DragFloat("Font Scale", &uiConfig()->fontScale, 0.01f, 0.5f, 4.f))
     m_appSettingsDialog->applySettings();
@@ -543,11 +534,13 @@ void Application::uiMenu_View()
     uiConfig()->fontScale = 1.f;
     m_appSettingsDialog->applySettings();
   }
+  if (ImGui::MenuItem("Save Font Scale as Default"))
+    saveApplicationPreferences();
 
   ImGui::Separator();
 
   if (ImGui::MenuItem("Restore Default Layout"))
-    ImGui::LoadIniSettingsFromMemory(getDefaultLayout());
+    restoreDefaultLayout();
 
   ImGui::EndMenu();
 }
@@ -875,78 +868,6 @@ std::vector<FrameEncoding> Application::encodingPreference() const
 }
 
 // Layout /////////////////////////////////////////////////////////////////////
-
-// Beside the base class' application settings, and in the same shape a
-// project's UI state has: `{windows, layout}` plus the one setting the View
-// menu edits, `settings/fontScale`. The client is that key's only writer --
-// it never calls the base class' "Save as Defaults" -- so a scale chosen
-// here comes back next run without disturbing preferences.vsr, where
-// uiRounding and the rest of the application settings still live.
-std::filesystem::path Application::clientUIStateFile() const
-{
-  return vsr::core::userConfigDirectory() / "studioClientUI.vsr";
-}
-
-// At exit, with the ImGui context alive and no frame open.
-void Application::saveClientUIState()
-{
-  const auto filename = clientUIStateFile();
-  const auto directory = filename.parent_path();
-
-  try {
-    if (!directory.empty())
-      std::filesystem::create_directories(directory);
-  } catch (const std::exception &e) {
-    vsr::core::logError("[Client] failed to create config directory '%s': %s",
-        directory.string().c_str(),
-        e.what());
-    return;
-  }
-
-  vsr::core::DataTree tree;
-  auto &root = tree.root();
-  auto &windows = root[vsr::app::UI_STATE_WINDOWS];
-  for (auto *window : m_windows)
-    window->saveSettings(windows[window->name()]);
-  root[vsr::app::UI_STATE_LAYOUT] =
-      std::string(ImGui::SaveIniSettingsToMemory());
-  root[vsr::app::UI_STATE_SETTINGS]["fontScale"] = uiConfig()->fontScale;
-
-  if (!tree.save(filename.string().c_str())) {
-    vsr::core::logError("[Client] failed to save the layout to '%s'",
-        filename.string().c_str());
-    return;
-  }
-
-  vsr::core::logStatus(
-      "[Client] saved the layout to '%s'", filename.string().c_str());
-}
-
-// At startup, after the base class applied the built-in default layout, so a
-// file that is missing (first run) or unreadable leaves that default
-// standing. --noDefaultLayout means "impose no layout" and skips this too.
-void Application::loadClientUIState()
-{
-  if (!commandLineOptions()->useDefaultLayout)
-    return;
-
-  const auto filename = clientUIStateFile();
-  if (!std::filesystem::exists(filename))
-    return;
-
-  vsr::core::DataTree tree;
-  if (!tree.load(filename.string().c_str())) {
-    vsr::core::logWarning("[Client] failed to load the layout from '%s'",
-        filename.string().c_str());
-    return;
-  }
-
-  // Loads the windows, the dock layout and fontScale into m_uiConfig; the
-  // base class already applied preferences.vsr and its own applySettings()
-  // before setupWindows(), so the new scale needs pushing into ImGui here.
-  applyUIStateTree(tree.root());
-  m_appSettingsDialog->applySettings();
-}
 
 const char *Application::getDefaultLayout() const
 {

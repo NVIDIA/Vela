@@ -102,6 +102,11 @@ class Application : public VSRApplication
     VSRApplication::teardown();
   }
 
+  const char *applicationIdentifier() const override
+  {
+    return "vsrMPIViewer";
+  }
+
   const char *getDefaultLayout() const override
   {
     return R"layout(

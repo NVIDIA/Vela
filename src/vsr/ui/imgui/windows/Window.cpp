@@ -62,6 +62,16 @@ void Window::loadSettings(vsr::core::DataNode &thisWindowRoot)
   thisWindowRoot["visible"].getValue(ANARI_BOOL, visiblePtr());
 }
 
+void Window::saveSceneSettings(vsr::core::DataNode &)
+{
+  // no-op
+}
+
+void Window::loadSceneSettings(vsr::core::DataNode &)
+{
+  // no-op
+}
+
 ImGuiWindowFlags Window::windowFlags() const
 {
   return 0;

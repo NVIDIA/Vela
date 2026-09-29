@@ -179,6 +179,17 @@ void MultiDeviceViewport::setLibrary(const std::string &libName)
   anari::unloadLibrary(library);
 }
 
+void MultiDeviceViewport::saveSettings(vsr::core::DataNode &root)
+{
+  Window::saveSettings(root);
+
+  // Viewport settings //
+
+  root["fov"] = m_fov;
+  root["resolutionScale"] = m_resolutionScale;
+  root["showAxes"] = m_showAxes;
+}
+
 void MultiDeviceViewport::loadSettings(vsr::core::DataNode &root)
 {
   Window::loadSettings(root);
@@ -188,7 +199,24 @@ void MultiDeviceViewport::loadSettings(vsr::core::DataNode &root)
   root["fov"].getValue(ANARI_FLOAT32, &m_fov);
   root["resolutionScale"].getValue(ANARI_FLOAT32, &m_resolutionScale);
   root["showAxes"].getValue(ANARI_BOOL, &m_showAxes);
+}
 
+void MultiDeviceViewport::saveSceneSettings(vsr::core::DataNode &root)
+{
+  // Camera //
+
+  auto &camera = root["camera"];
+  camera["at"] = m_arcball->at();
+  camera["distance"] = m_arcball->distance();
+  camera["azel"] = m_arcball->azel();
+  camera["up"] = static_cast<int>(m_arcball->axis());
+  camera["mode"] = static_cast<int>(m_arcball->mode());
+  camera["apertureRadius"] = m_apertureRadius;
+  camera["focusDistance"] = m_focusDistance;
+}
+
+void MultiDeviceViewport::loadSceneSettings(vsr::core::DataNode &root)
+{
   // Camera //
 
   if (auto *c = root.child("camera"); c != nullptr) {

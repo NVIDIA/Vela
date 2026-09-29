@@ -80,6 +80,11 @@ class Application : public VSRApplication
       incrementVersion();
   }
 
+  const char *applicationIdentifier() const override
+  {
+    return "vsrDemoAccumulationReset";
+  }
+
   const char *getDefaultLayout() const override
   {
     return R"layout(

@@ -44,6 +44,8 @@ void BaseViewport::setManipulator(vsr::rendering::Manipulator *m)
 
 void BaseViewport::saveSettings(vsr::core::DataNode &root)
 {
+  Window::saveSettings(root);
+
   // Viewport settings //
 
   root["viewport.scale"] = m_viewport.resolutionScale;
@@ -60,6 +62,8 @@ void BaseViewport::saveSettings(vsr::core::DataNode &root)
 
 void BaseViewport::loadSettings(vsr::core::DataNode &root)
 {
+  Window::loadSettings(root);
+
   // Viewport settings //
 
   root["viewport.scale"].getValue(ANARI_FLOAT32, &m_viewport.resolutionScale);

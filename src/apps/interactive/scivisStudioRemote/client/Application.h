@@ -17,7 +17,6 @@
 #include "vsr/ui/imgui/Application.h"
 // std
 #include <cstdint>
-#include <filesystem>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -59,8 +58,8 @@ struct ClientCommandLine
  * Rig, Camera Rig) reading the Project Replica and sending Project Ops. The
  * Tasks panel lists Server Tasks. Nothing here touches ProjectContext or
  * project persistence, and every project path is a server path chosen
- * through Remote Browse; the one local file is the client's own layout
- * (clientUIStateFile()).
+ * through Remote Browse; the only local files are the base class' UI State
+ * and Application Preferences.
  *
  * Connection State drives the UI: Connected enables the menus and editors;
  * Lost freezes the last frame under a banner (auto-retry, then Retry and
@@ -97,6 +96,10 @@ class Application : public vsr::ui::imgui::Application
   void uiFrameStart() override;
   void uiMainMenuBar() override;
   void teardown() override;
+  const char *applicationIdentifier() const override
+  {
+    return "studioClient";
+  }
   const char *getDefaultLayout() const override;
 
  private:
@@ -114,16 +117,6 @@ class Application : public vsr::ui::imgui::Application
   // Runs `action` at once, or after the user agrees to discard a dirty
   // project.
   void requestDirtyAction(std::string message, std::function<void()> action);
-
-  // Layout //
-
-  // The client's own layout, kept beside the user's application settings
-  // rather than in the project: windows, the ImGui dock layout and the View
-  // menu's font scale, saved at exit and restored at startup, so which
-  // project is open never moves a panel.
-  std::filesystem::path clientUIStateFile() const;
-  void saveClientUIState();
-  void loadClientUIState();
 
   // Notifications //
 

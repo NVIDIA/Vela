@@ -27,6 +27,10 @@ struct Application : public VSRApplication
   vsr::ui::imgui::WindowArray setupWindows() override;
   void uiMainMenuBar() override;
   void teardown() override;
+  const char *applicationIdentifier() const override
+  {
+    return "vsrRemoteViewer";
+  }
   const char *getDefaultLayout() const override;
 
  private:

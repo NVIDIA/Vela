@@ -60,6 +60,8 @@ struct Viewport : public BaseViewport
 
   void saveSettings(vsr::core::DataNode &thisWindowRoot) override;
   void loadSettings(vsr::core::DataNode &thisWindowRoot) override;
+  void saveSceneSettings(vsr::core::DataNode &thisWindowRoot) override;
+  void loadSceneSettings(vsr::core::DataNode &thisWindowRoot) override;
 
   void imagePipeline_populate(vsr::rendering::ImagePipeline &p) override;
 
