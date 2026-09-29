@@ -9,6 +9,7 @@
 #include "vsr/scene/objects/Camera.hpp"
 // vsr_rendering
 #include "vsr/rendering/index/RenderIndex.hpp"
+#include "vsr/rendering/pick/PickRequest.h"
 #include "vsr/rendering/pipeline/ImagePipeline.h"
 #include "vsr/rendering/pipeline/passes/AnariSceneRenderPass.h"
 #include "vsr/rendering/pipeline/passes/AutoExposurePass.h"
@@ -16,11 +17,10 @@
 #include "vsr/rendering/pipeline/passes/CopyToSDLTexturePass.h"
 #include "vsr/rendering/pipeline/passes/OutlineRenderPass.h"
 #include "vsr/rendering/pipeline/passes/OutputTransformPass.h"
-#include "vsr/rendering/pipeline/passes/PickPass.h"
 #include "vsr/rendering/pipeline/passes/PrimitiveOutlineRenderPass.h"
-#include "vsr/rendering/pipeline/passes/SaveToFilePass.h"
 #include "vsr/rendering/pipeline/passes/ToneMapPass.h"
 #include "vsr/rendering/pipeline/passes/VisualizeAOVPass.h"
+#include "vsr/rendering/pipeline/saveImage.h"
 #include "vsr/rendering/view/Manipulator.hpp"
 // anari
 #include <anari/frontend/anari_enums.h>
@@ -74,7 +74,9 @@ struct Viewport : public BaseViewport
   void renderer_resetParameterDefaults() override;
 
   void teardownDevice();
-  void pick(vsr::math::int2 location, bool selectObject);
+  // 'pixel' in render-image pixels, row 0 at the bottom.
+  void pick(vsr::math::uint2 pixel, bool selectObject);
+  std::optional<vsr::rendering::CameraView> currentCameraView() const;
   void setSelectionVisibilityFilterEnabled(bool enabled);
 
   void updateFrame();
@@ -91,6 +93,7 @@ struct Viewport : public BaseViewport
   void ui_menubar_World();
 
   bool ui_picking();
+  std::optional<vsr::math::uint2> imagePixelUnderMouse() const;
   void ui_overlay();
 
   // Data /////////////////////////////////////////////////////////////////////
@@ -127,11 +130,9 @@ struct Viewport : public BaseViewport
   float m_toneMapGamma{2.2f};
   float m_currentAutoExposure{0.f};
 
-  // Picking state //
-
-  bool m_selectObjectNextPick{false};
-  vsr::math::int2 m_pickCoord{0, 0};
-  float m_pickedDepth{0.f};
+  // Where the render image was last drawn, in ImGui screen coordinates.
+  vsr::math::float2 m_imageRectMin{0.f, 0.f};
+  vsr::math::float2 m_imageRectMax{0.f, 0.f};
 
   // ANARI objects //
 
@@ -143,7 +144,6 @@ struct Viewport : public BaseViewport
   // Display //
 
   vsr::rendering::AnariSceneRenderPass *m_anariPass{nullptr};
-  vsr::rendering::PickPass *m_pickPass{nullptr};
   vsr::rendering::VisualizeAOVPass *m_visualizeAOVPass{nullptr};
   vsr::rendering::AutoExposurePass *m_autoExposurePass{nullptr};
   vsr::rendering::ToneMapPass *m_toneMapPass{nullptr};
@@ -152,7 +152,6 @@ struct Viewport : public BaseViewport
   vsr::rendering::OutlineRenderPass *m_outlinePass{nullptr};
   vsr::rendering::BoxOutlineRenderPass *m_boundsOutlinePass{nullptr};
   vsr::rendering::CopyToSDLTexturePass *m_outputPass{nullptr};
-  vsr::rendering::SaveToFilePass *m_saveToFilePass{nullptr};
 
   float m_latestFL{0.f};
   float m_latestAnariFL{0.f};

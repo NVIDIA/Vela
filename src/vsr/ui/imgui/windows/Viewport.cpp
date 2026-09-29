@@ -94,6 +94,10 @@ void Viewport::buildUI()
         imageSize,
         ImVec2(0, 1),
         ImVec2(1, 0));
+    const ImVec2 rectMin = ImGui::GetItemRectMin();
+    const ImVec2 rectMax = ImGui::GetItemRectMax();
+    m_imageRectMin = vsr::math::float2(rectMin.x, rectMin.y);
+    m_imageRectMax = vsr::math::float2(rectMax.x, rectMax.y);
   }
 
   BaseViewport::ui_gizmo();
@@ -398,100 +402,6 @@ void Viewport::imagePipeline_populate(vsr::rendering::ImagePipeline &p)
   if (!sourceSupports(vsr::rendering::requiredChannels(m_visualizeAOV)))
     m_visualizeAOV = vsr::rendering::AOVType::NONE;
 
-  m_saveToFilePass = p.addSink<vsr::rendering::SaveToFilePass>();
-  m_saveToFilePass->setEnabled(false);
-  m_saveToFilePass->setSingleShotMode(true);
-
-  m_pickPass = p.addPass<vsr::rendering::PickPass>();
-  m_pickPass->setEnabled(false);
-  m_pickPass->setPickOperation([&](vsr::rendering::ImageBuffers &b) {
-    // Get depth //
-
-    auto [width, height] = m_pickPass->dimensions();
-
-    auto l = linalg::clamp(m_pickCoord,
-        vsr::math::int2(0, 0),
-        vsr::math::int2(width - 1, height - 1));
-    l.x = width - l.x;
-    l.y = height - l.y;
-    const auto i = l.y * width + l.x;
-
-    m_pickedDepth = b.depth ? b.depth[i] : 1e30f;
-
-    if (!m_selectObjectNextPick) {
-      // Do object selection //
-      auto mPos = ImGui::GetMousePos();
-      auto wMin = ImGui::GetItemRectMin();
-      auto pixel = m_pickCoord;
-      pixel.x = int(mPos[0] - wMin[0]);
-      pixel.y = m_viewport.size.y - int(mPos[1] - wMin[1]);
-
-      const float aspect = m_viewport.size.x / float(m_viewport.size.y);
-      anari::math::float2 imgPlaneSize;
-
-      auto fov = m_camera.current->parameterValueAs<float>("fovy").value_or(
-          math::radians(40.f));
-      imgPlaneSize.y = 2.f * tanf(0.5f * fov);
-      imgPlaneSize.x = imgPlaneSize.y * aspect;
-
-      const auto d = m_camera.arcball->dir();
-      const auto u = m_camera.arcball->up();
-
-      const auto dir_du =
-          anari::math::normalize(anari::math::cross(d, u)) * imgPlaneSize.x;
-      const auto dir_dv = anari::math::normalize(anari::math::cross(dir_du, d))
-          * imgPlaneSize.y;
-      const auto dir_00 = d - .5f * dir_du - .5f * dir_dv;
-
-      const auto screen = anari::math::float2(1.f / m_viewport.size.x * pixel.x,
-          (1.f / m_viewport.size.y * pixel.y));
-
-      const auto dir = anari::math::normalize(
-          dir_00 + screen.x * dir_du + screen.y * dir_dv);
-
-      const auto p = m_camera.arcball->eye();
-      const auto c = p + m_pickedDepth * dir;
-
-      vsr::core::logStatus(
-          "[viewport] pick [%i, %i] {%f, %f} depth %f / %f| {%f, %f, %f}",
-          int(pixel.x),
-          int(pixel.y),
-          screen.x,
-          screen.y,
-          m_pickedDepth,
-          m_camera.arcball->distance(),
-          c.x,
-          c.y,
-          c.z);
-
-      m_camera.arcball->setCenter(c);
-    } else {
-      // Do object selection //
-
-      uint32_t id = b.objectId ? b.objectId[i] : ~0u;
-      if (id != ~0u) {
-        vsr::core::logStatus("[viewport] picked object '%u' @ (%i, %i) | z: %f",
-            id,
-            l.x,
-            l.y,
-            m_pickedDepth);
-      }
-
-      anari::DataType objectType = ANARI_SURFACE;
-      if (id != ~0u && id & 0x80000000u) {
-        objectType = ANARI_VOLUME;
-        id &= 0x7FFFFFFF;
-      }
-
-      auto *obj = (id == ~0u)
-          ? nullptr
-          : appContext()->vsr.scene.getObject(objectType, id);
-      appContext()->setSelected(obj);
-    }
-
-    m_pickPass->setEnabled(false);
-  });
-
   m_autoExposurePass = p.addPass<vsr::rendering::AutoExposurePass>();
 
   m_toneMapPass = p.addPass<vsr::rendering::ToneMapPass>();
@@ -623,7 +533,6 @@ void Viewport::teardownDevice()
     BaseViewport::viewport_setActive(false);
 
   m_anariPass = nullptr;
-  m_pickPass = nullptr;
   m_visualizeAOVPass = nullptr;
   m_autoExposurePass = nullptr;
   m_toneMapPass = nullptr;
@@ -632,7 +541,6 @@ void Viewport::teardownDevice()
   m_outlinePass = nullptr;
   m_boundsOutlinePass = nullptr;
   m_outputPass = nullptr;
-  m_saveToFilePass = nullptr;
 
   if (m_rIdx)
     appContext()->anari.releaseRenderIndex(appContext()->vsr.scene, m_device);
@@ -652,17 +560,69 @@ void Viewport::teardownDevice()
   m_device = nullptr;
 }
 
-void Viewport::pick(vsr::math::int2 l, bool selectObject)
+void Viewport::pick(vsr::math::uint2 pixel, bool selectObject)
 {
-  m_selectObjectNextPick = selectObject;
-  m_pickCoord = l;
-  // The enabled pick pass requests depth and object IDs for this frame.
-  m_pickPass->setEnabled(true);
+  if (!m_anariPass || !m_camera.current)
+    return;
 
-  // Render synchronous frame to ensure pick pass has available AOVs available
-  m_anariPass->setRunAsync(false);
-  BaseViewport::imagePipeline_render();
-  m_anariPass->setRunAsync(true);
+  vsr::rendering::PickRequest request;
+  request.pixel = pixel;
+  request.view = currentCameraView();
+
+  const auto hit = vsr::rendering::pick(*m_anariPass, request);
+
+  if (!selectObject) {
+    if (!hit || !hit->position)
+      return;
+    const auto c = *hit->position;
+    vsr::core::logStatus(
+        "[viewport] pick center [%u, %u] depth %f | {%f, %f, %f}",
+        pixel.x,
+        pixel.y,
+        hit->depth,
+        c.x,
+        c.y,
+        c.z);
+    m_camera.arcball->setCenter(c);
+    return;
+  }
+
+  const auto object = hit ? hit->object : std::nullopt;
+  if (object) {
+    vsr::core::logStatus("[viewport] picked %s %zu @ (%u, %u) | z: %f",
+        anari::toString(object->type),
+        object->index,
+        pixel.x,
+        pixel.y,
+        hit->depth);
+  }
+
+  auto *obj = object
+      ? appContext()->vsr.scene.getObject(object->type, object->index)
+      : nullptr;
+  appContext()->setSelected(obj);
+}
+
+std::optional<vsr::rendering::CameraView> Viewport::currentCameraView() const
+{
+  if (!m_camera.current)
+    return {};
+
+  const auto subtype = m_camera.current->subtype();
+  const auto &m = *m_camera.arcball;
+  if (subtype == scene::tokens::camera::perspective) {
+    const float fovy =
+        m_camera.current->parameterValueAs<float>("fovy").value_or(
+            math::radians(40.f));
+    return vsr::rendering::CameraView::perspective(
+        m.eye(), m.dir(), m.up(), fovy);
+  }
+  if (subtype == scene::tokens::camera::orthographic) {
+    // Must match updateCameraParametersOrthographic().
+    return vsr::rendering::CameraView::orthographic(
+        m.eye_FixedDistance(), m.dir(), m.up(), m.distance() * 0.75f);
+  }
+  return {};
 }
 
 void Viewport::setSelectionVisibilityFilterEnabled(bool enabled)
@@ -724,13 +684,10 @@ void Viewport::updateImage()
       && selectedObject
       && (selectedObject->type() == ANARI_SURFACE
           || selectedObject->type() == ANARI_VOLUME);
-  auto id = uint32_t(~0u);
-  if (doHighlight) {
-    id = selectedObject->index();
-    if (selectedObject->type() == ANARI_VOLUME)
-      id |= 0x80000000u;
-  }
-  m_outlinePass->setOutlineId(id);
+  m_outlinePass->setOutlineId(doHighlight
+          ? vsr::scene::encodeObjectId(
+                selectedObject->type(), selectedObject->index())
+          : vsr::scene::NO_OBJECT_ID);
 
   updateBoundsOutlinePass();
 
@@ -1118,8 +1075,8 @@ void Viewport::ui_menubar_Viewport()
       std::filesystem::path workingDir = std::filesystem::current_path();
       std::filesystem::path filename = workingDir / ss.str();
 
-      m_saveToFilePass->setFilename(filename.string());
-      m_saveToFilePass->setEnabled(true);
+      // The last rendered frame, as displayed.
+      vsr::rendering::saveImage(imagePipeline(), filename.string());
     }
 
     ImGui::EndMenu();
@@ -1170,43 +1127,35 @@ void Viewport::ui_menubar_World()
 
 bool Viewport::ui_picking()
 {
-  const ImGuiIO &io = ImGui::GetIO();
-
-  if (!m_camera.current)
+  if (!m_camera.current || !ImGui::IsWindowHovered()
+      || !ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
     return false;
 
-  // Pick view center //
+  const auto pixel = imagePixelUnderMouse();
+  if (!pixel)
+    return false;
 
-  const bool shouldPickCenter =
-      m_camera.current->subtype() == scene::tokens::camera::perspective
-      && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)
-      && ImGui::IsKeyDown(ImGuiKey_LeftShift);
-  if (shouldPickCenter && ImGui::IsWindowHovered()) {
-    auto mPos = ImGui::GetMousePos();
-    auto wMin = ImGui::GetItemRectMin();
-    auto pixel = vsr::math::int2(
-        vsr::math::float2(
-            m_viewport.size.x - (mPos[0] - wMin[0]), mPos[1] - wMin[1])
-        * m_viewport.resolutionScale);
-    pick(pixel, false);
-    return true;
-  }
+  // Shift + double-click recenters the view; double-click selects.
+  const bool pickCenter = ImGui::IsKeyDown(ImGuiKey_LeftShift);
+  pick(*pixel, !pickCenter);
+  return true;
+}
 
-  // Pick object //
+std::optional<vsr::math::uint2> Viewport::imagePixelUnderMouse() const
+{
+  const auto size = m_viewport.renderSize;
+  const auto extent = m_imageRectMax - m_imageRectMin;
+  if (size.x <= 0 || size.y <= 0 || extent.x <= 0.f || extent.y <= 0.f)
+    return {};
 
-  const bool shouldPickObject =
-      ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
-  if (shouldPickObject && ImGui::IsWindowHovered()) {
-    auto mPos = ImGui::GetMousePos();
-    auto wMin = ImGui::GetItemRectMin();
-    auto pixel = vsr::math::float2(
-                     m_viewport.size.x - (mPos[0] - wMin[0]), mPos[1] - wMin[1])
-        * m_viewport.resolutionScale;
-    pick(vsr::math::int2(pixel), true);
-    return true;
-  }
+  const ImVec2 mouse = ImGui::GetMousePos();
+  // The texture is drawn flipped vertically: ANARI row 0 is the bottom.
+  const vsr::math::float2 uv((mouse.x - m_imageRectMin.x) / extent.x,
+      (m_imageRectMax.y - mouse.y) / extent.y);
+  if (uv.x < 0.f || uv.x >= 1.f || uv.y < 0.f || uv.y >= 1.f)
+    return {}; // letterbox border
 
-  return false;
+  return vsr::math::uint2(uint32_t(uv.x * size.x), uint32_t(uv.y * size.y));
 }
 
 void Viewport::ui_overlay()

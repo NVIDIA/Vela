@@ -13,6 +13,7 @@
 // vsr_rendering
 #include "vsr/rendering/index/RenderIndex.hpp"
 #include "vsr/rendering/pipeline/ImagePipeline.h"
+#include "vsr/rendering/pipeline/saveImage.h"
 #include "vsr/rendering/view/ManipulatorToAnari.hpp"
 // imgui
 #include <misc/cpp/imgui_stdlib.h>
@@ -483,9 +484,6 @@ void CameraPoses::renderInterpolatedPath()
           aovPass->setEdgeInvert(config.aov.edgeInvert);
         }
 
-        auto *savePass = pipeline->addSink<vsr::rendering::SaveToFilePass>();
-        savePass->setSingleShotMode(false);
-
         // Render interpolated frames
         int frameIndex = 0;
         vsr::rendering::Manipulator manipulator;
@@ -519,13 +517,12 @@ void CameraPoses::renderInterpolatedPath()
           ss << std::setfill('0') << std::setw(4) << frameIndex << ".png";
           std::filesystem::path filename =
               std::filesystem::path(capturedOutputDirectory) / ss.str();
-          savePass->setFilename(filename.string());
 
           for (int sampleIdx = 0; sampleIdx < config.frame.samples;
               ++sampleIdx) {
-            savePass->setEnabled(sampleIdx == config.frame.samples - 1);
             pipeline->render();
           }
+          vsr::rendering::saveImage(*pipeline, filename.string());
           frameIndex++;
         }
 

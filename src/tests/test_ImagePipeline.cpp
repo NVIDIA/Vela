@@ -1,12 +1,21 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+// tests
+#include "TestDirectories.h"
 // catch
 #include "catch.hpp"
 // vsr_rendering
 #include "vsr/rendering/pipeline/ImagePipeline.h"
+#include "vsr/rendering/pipeline/saveImage.h"
+// stb_image
+#include "stb_image.h"
+#include "stb_image_write.h"
 // std
+#include <algorithm>
 #include <cstring>
+#include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -15,6 +24,22 @@ namespace rendering = vsr::rendering;
 namespace {
 
 using Log = std::vector<std::string>;
+
+struct ScopedWriteFlip
+{
+  ScopedWriteFlip();
+  ~ScopedWriteFlip();
+};
+
+ScopedWriteFlip::ScopedWriteFlip()
+{
+  stbi_flip_vertically_on_write(1);
+}
+
+ScopedWriteFlip::~ScopedWriteFlip()
+{
+  stbi_flip_vertically_on_write(0);
+}
 
 struct FakeSource : public rendering::ImageSource
 {
@@ -481,4 +506,80 @@ TEST_CASE(
   REQUIRE(probe->sawColor);
   REQUIRE(!probe->sawDepth);
   REQUIRE(!probe->sawObjectId);
+}
+
+// Saving
+// ///////////////////////////////////////////////////////////////////////
+
+TEST_CASE("saveImage is independent of another stb writer's orientation",
+    "[ImagePipeline]")
+{
+  ScopedFixtureDirectory scratch("vsr_save_orientation_");
+  ScopedWriteFlip flip;
+  const auto before = (scratch.path / "before.png").string();
+  const auto saved = (scratch.path / "saved.png").string();
+  const auto after = (scratch.path / "after.png").string();
+
+  // The shared stb writer is configured for bottom-up input by its caller.
+  std::vector<uint8_t> frame{10, 20, 30, 255, 40, 50, 60, 255};
+  REQUIRE(stbi_write_png(before.c_str(), 1, 2, 4, frame.data(), 4));
+
+  rendering::ImagePipeline pipeline(1, 2);
+  pipeline.setSource<rendering::ExternalFrameSource>()->setFrame(&frame);
+  pipeline.render();
+  REQUIRE(rendering::saveImage(pipeline, saved));
+  REQUIRE(stbi_write_png(after.c_str(), 1, 2, 4, frame.data(), 4));
+
+  for (const auto &path : {before, saved, after}) {
+    INFO(path);
+    int width = 0, height = 0, channels = 0;
+    std::unique_ptr<stbi_uc, decltype(&stbi_image_free)> pixels(
+        stbi_load(path.c_str(), &width, &height, &channels, 4),
+        stbi_image_free);
+    REQUIRE(pixels);
+    REQUIRE(width == 1);
+    REQUIRE(height == 2);
+    REQUIRE(pixels.get()[0] == 40);
+    REQUIRE(pixels.get()[4] == 10);
+  }
+}
+
+TEST_CASE("saveImage writes the pipeline's color buffer as top-down PNG",
+    "[ImagePipeline]")
+{
+  const auto path =
+      (std::filesystem::temp_directory_path() / "vsr_save_image.png").string();
+  std::filesystem::remove(path);
+
+  rendering::ImagePipeline pipeline(2, 2);
+
+  SECTION("nothing rendered yet: no file")
+  {
+    REQUIRE(!rendering::saveImage(pipeline, path));
+    REQUIRE(!std::filesystem::exists(path));
+  }
+
+  SECTION("rendered frame round-trips, bottom row last")
+  {
+    // Row 0 (bottom in ANARI order) is 0xAA, row 1 (top) is 0xBB.
+    std::vector<uint8_t> frame(2 * 2 * 4);
+    std::fill(frame.begin(), frame.begin() + 8, uint8_t(0xAA));
+    std::fill(frame.begin() + 8, frame.end(), uint8_t(0xBB));
+    auto *source = pipeline.setSource<rendering::ExternalFrameSource>();
+    source->setFrame(&frame);
+    pipeline.render();
+
+    REQUIRE(rendering::saveImage(pipeline, path));
+
+    int w = 0, h = 0, n = 0;
+    auto *pixels = stbi_load(path.c_str(), &w, &h, &n, 4);
+    REQUIRE(pixels);
+    REQUIRE(w == 2);
+    REQUIRE(h == 2);
+    REQUIRE(pixels[0] == 0xBB); // file row 0 is the top
+    REQUIRE(pixels[2 * 4] == 0xAA);
+    stbi_image_free(pixels);
+  }
+
+  std::filesystem::remove(path);
 }

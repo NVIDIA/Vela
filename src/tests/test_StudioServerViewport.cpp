@@ -35,6 +35,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <numeric>
 #include <optional>
@@ -229,6 +230,91 @@ Message bogusAOVSettings()
 }
 
 } // namespace
+
+SCENARIO(
+    "StudioServer paused picks render only depth and IDs on the query frame",
+    "[StudioServer]")
+{
+  if (!helideAvailable()) {
+    WARN("helide ANARI library unavailable, skipping the pick test");
+    return;
+  }
+
+  ScopedFixtureDirectory scratch("vsr_studio_pick_trace_");
+  {
+    auto options = testServerOptions();
+    options.library = "debug";
+    StudioServer server(options);
+    auto &devices = server.appContext().anari;
+    auto backend = devices.loadDevice("helide");
+    REQUIRE(backend);
+    // Observe the ANARI boundary with the SDK's tracer, not a test-only
+    // counter or an accessor into the server's private display pipeline.
+    auto traced = devices.loadDevice("debug",
+        {{"wrappedDevice", vsr::core::Any(backend)},
+            {"traceMode", vsr::core::Any("code")},
+            {"traceDir", vsr::core::Any(scratch.path.string() + "/")}});
+    anari::release(backend, backend);
+    if (!traced) {
+      WARN("debug ANARI library unavailable, skipping the trace test");
+      return;
+    }
+    anari::release(traced, traced);
+
+    std::string error;
+    const bool started = server.start(&error);
+    INFO(error);
+    REQUIRE(started);
+    REQUIRE(server.libraryName() == "debug");
+    ServerLoop loop(&server);
+    TestClient client;
+    bootstrapClient(client, server.port());
+    REQUIRE(waitFor(
+        [&] { return server.sessionState() == SessionState::Established; }));
+
+    Pick pick;
+    pick.requestId = 1;
+    pick.x = 32;
+    pick.y = 24;
+    client.send(pick);
+    REQUIRE(client.waitForCount(StudioMessageType::PickReply, 1));
+    const auto reply = client.lastDecoded<PickReply>();
+    REQUIRE(reply);
+    REQUIRE(reply->requestId == pick.requestId);
+    REQUIRE(client.count(StudioMessageType::Frame) == 0);
+  }
+
+  // Device destruction flushes the trace. A paused query must not also
+  // render the persistent display frame.
+  std::ifstream trace(scratch.path / "out.c");
+  REQUIRE(trace.is_open());
+  size_t renders = 0;
+  std::vector<std::string> queryChannels;
+  for (std::string line; std::getline(trace, line);) {
+    // The temporary query frame is created after the persistent display
+    // frame. Inspect its requests separately from normal display channels.
+    if (line.find("anariNewFrame(") != std::string::npos)
+      queryChannels.clear();
+    const auto channel = line.find("\"channel.");
+    if (line.find("anariSetParameter(") != std::string::npos
+        && channel != std::string::npos) {
+      const auto end = line.find('"', channel + 1);
+      REQUIRE(end != std::string::npos);
+      queryChannels.push_back(line.substr(channel + 1, end - channel - 1));
+    }
+    renders += line.find("anariRenderFrame(") != std::string::npos;
+  }
+  REQUIRE(renders == 1);
+  bool requestedDepth = false;
+  for (const auto &channel : queryChannels) {
+    INFO(channel);
+    REQUIRE((channel == "channel.depth" || channel == "channel.objectId"
+        || channel == "channel.instanceId"
+        || channel == "channel.primitiveId"));
+    requestedDepth |= channel == "channel.depth";
+  }
+  REQUIRE(requestedDepth);
+}
 
 SCENARIO("StudioServer picks against its frames", "[StudioServer]")
 {

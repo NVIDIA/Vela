@@ -13,6 +13,7 @@
 #include "vsr/rendering/index/RenderIndexAllLayers.hpp"
 #include "vsr/rendering/pipeline/ImagePipeline.h"
 #include "vsr/rendering/pipeline/passes/VisualizeAOVPass.h"
+#include "vsr/rendering/pipeline/saveImage.h"
 // std
 #include <filesystem>
 #include <iomanip>
@@ -111,9 +112,6 @@ void renderAnimationSequence(Context &ctx,
     aovPass->setEdgeInvert(config.aov.edgeInvert);
   }
 
-  auto *savePass = pipeline.addSink<vsr::rendering::SaveToFilePass>();
-  savePass->setSingleShotMode(false);
-
   // Set aspect ratio on the render index's camera //
 
   {
@@ -166,13 +164,11 @@ void renderAnimationSequence(Context &ctx,
        << ".png";
     std::filesystem::path filename =
         std::filesystem::path(outputDir) / ss.str();
-    savePass->setFilename(filename.string());
 
-    // Accumulate samples, save on last //
-    for (int s = 0; s < config.frame.samples; ++s) {
-      savePass->setEnabled(s == config.frame.samples - 1);
+    // Accumulate samples, then save //
+    for (int s = 0; s < config.frame.samples; ++s)
       pipeline.render();
-    }
+    vsr::rendering::saveImage(pipeline, filename.string());
   }
 
   // Restore animation state //

@@ -327,8 +327,7 @@ bool StudioServer::setupRendering(std::string *error)
   // out; the server has no tonemap stage in between.
   m_viewport.setup(m_pipeline, m_scenePass, m_device);
 
-  auto *copy =
-      m_pipeline.addSink<vsr::rendering::CopyFromColorBufferPass>();
+  auto *copy = m_pipeline.addSink<vsr::rendering::CopyFromColorBufferPass>();
   copy->setExternalBuffer(m_colorBytes);
 
   m_sceneRecorder = scene.updateDelegate().emplace<ServerPushDelegate>();
@@ -445,14 +444,12 @@ void StudioServer::run()
     m_playback.commitScrubIfQuiet();
     followProjectRevisions();
 
-    // A pick renders its own frame, with ids, paused or not.
-    bool frameSent = false;
+    // Queries use their own frame; normal streaming remains independent.
     if (m_session.pendingPick && sessionEstablished())
-      frameSent = servicePendingPick();
+      servicePendingPick();
 
     if (m_streaming) {
-      if (!frameSent)
-        renderAndSendFrame();
+      renderAndSendFrame();
     } else if (m_state == SessionState::Listening) {
       std::this_thread::sleep_for(LISTENING_SLEEP);
     } else {
@@ -1081,7 +1078,7 @@ void StudioServer::prepareViewportPasses()
   m_viewport.updateWorldBounds(m_worldBounds, shotCameraObject());
 }
 
-bool StudioServer::servicePendingPick()
+void StudioServer::servicePendingPick()
 {
   const Pick pick = *m_session.pendingPick;
   m_session.pendingPick.reset();
@@ -1095,27 +1092,20 @@ bool StudioServer::servicePendingPick()
         + " refused: no active shot to render";
     vsr::core::logWarning("[StudioServer] %s", error.message.c_str());
     send(encode(error));
-    return false;
+    return;
   }
 
   m_viewport.armPick(pick.x, pick.y);
   prepareViewportPasses();
-  renderPipeline();
   const auto sample = m_viewport.takePick();
 
   PickReply reply;
   reply.requestId = pick.requestId;
-  reply.objectIdentity = sample ? sample->identity() : std::nullopt;
+  reply.objectIdentity = sample ? sceneObjectRef(*sample) : std::nullopt;
   reply.hit = reply.objectIdentity.has_value();
   if (reply.hit) {
-    if (const auto *camera = shotCameraObject()) {
-      reply.worldPosition = pickWorldPosition(readCameraView(*camera),
-          m_frameWidth,
-          m_frameHeight,
-          pick.x,
-          pick.y,
-          sample->depth);
-    }
+    if (sample->position)
+      reply.worldPosition = *sample->position;
     vsr::core::logStatus(
         "[StudioServer] Pick %llu at (%d, %d): %s %zu, depth %f",
         static_cast<unsigned long long>(pick.requestId),
@@ -1131,14 +1121,6 @@ bool StudioServer::servicePendingPick()
         pick.y);
   }
   send(encode(reply));
-
-  // The frame that carried the ids is as good as any: send it when the
-  // client is streaming and the previous one is off the wire.
-  if (m_streaming && vsr::network::is_ready(m_session.frameInFlight)) {
-    sendRenderedFrame();
-    return true;
-  }
-  return false;
 }
 
 // IO thread //////////////////////////////////////////////////////////////////
@@ -1241,8 +1223,8 @@ void StudioServer::onMessage(const Message &msg)
     vsr::network::messages::TransferArrayData parsed(msg, nullptr);
     const auto &root = parsed.tree().root();
     if (root.child("a") == nullptr || root.child("d") == nullptr) {
-      refuseRequest(msg,
-          "malformed " + std::string(toString(*type)) + " payload");
+      refuseRequest(
+          msg, "malformed " + std::string(toString(*type)) + " payload");
       return;
     }
     std::lock_guard lock(m_controlMutex);

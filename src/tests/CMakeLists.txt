@@ -36,6 +36,7 @@ project_add_executable(
   test_ObjectArchive.cpp
   test_ObjectUsePtr.cpp
   test_Parameter.cpp
+  test_PickRequest.cpp
   test_Procedural.cpp
   test_RenderIndex.cpp
   test_Scene.cpp
@@ -108,6 +109,7 @@ PRIVATE
   vsr_rendering
   vsr_scene
   vela_ext_catch2
+  vela_ext_stb_image
 )
 if (TARGET vsr_scivis_studio_model)
   target_link_libraries(${PROJECT_NAME} PRIVATE vsr_scivis_studio_model)
@@ -161,6 +163,7 @@ add_test(NAME vsr::Object        COMMAND ${PROJECT_NAME} "[Object]"       )
 add_test(NAME vsr::ObjectArchive COMMAND ${PROJECT_NAME} "[ObjectArchive]")
 add_test(NAME vsr::ObjectUsePtr  COMMAND ${PROJECT_NAME} "[ObjectUsePtr]" )
 add_test(NAME vsr::Downsample    COMMAND ${PROJECT_NAME} "[Downsample]"   )
+add_test(NAME vsr::PickRequest   COMMAND ${PROJECT_NAME} "[PickRequest]"  )
 add_test(NAME vsr::Parameter     COMMAND ${PROJECT_NAME} "[Parameter]"    )
 add_test(NAME vsr::RenderIndex   COMMAND ${PROJECT_NAME} "[RenderIndex]"  )
 add_test(NAME vsr::Scene         COMMAND ${PROJECT_NAME} "[Scene]"        )

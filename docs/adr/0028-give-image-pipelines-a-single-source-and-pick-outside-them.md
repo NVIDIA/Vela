@@ -21,7 +21,12 @@ ordering convention.
 
 Picking stays outside the pipeline so that it never changes the displayed
 image and never pays for passes or sinks. It is a capability of sources that
-can produce one synchronous frame with depth and IDs. Multi-device and
+can produce one synchronous frame with depth and IDs. The ANARI source renders
+it on a temporary frame that shares the display's camera, renderer and world,
+never on the display frame itself: under ANARI semantics that leaves the
+display's accumulation alone. Some devices currently reset or perturb other
+frames when a frame is committed; that is treated as a device bug, not worked
+around by reusing the display frame. Multi-device and
 remote-frame sources are not pickable, which matches how they behaved before.
 A Pick Request returns a decoded hit (depth, object type and index, instance,
 primitive, world-space point), so the volume-ID bit and the ray reconstruction

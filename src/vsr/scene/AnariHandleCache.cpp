@@ -4,6 +4,7 @@
 #include "vsr/scene/AnariHandleCache.hpp"
 // vsr_core
 #include "vsr/core/Logging.hpp"
+#include "vsr/scene/ObjectId.hpp"
 #include "vsr/scene/Scene.hpp"
 
 namespace vsr::scene {
@@ -65,10 +66,8 @@ anari::Object AnariHandleCache::getHandle(
     auto d = device;
     o = obj->makeANARIObject(d);
     obj->updateAllANARIParameters(d, o, this);
-    if (type == ANARI_SURFACE)
-      anari::setParameter(d, o, "id", uint32_t(idx));
-    else if (type == ANARI_VOLUME)
-      anari::setParameter(d, o, "id", uint32_t(idx) | 0x80000000u);
+    if (type == ANARI_SURFACE || type == ANARI_VOLUME)
+      anari::setParameter(d, o, "id", encodeObjectId(type, idx));
     anari::commitParameters(d, o);
     this->replaceHandle(o, type, idx);
     if (anari::isArray(type))

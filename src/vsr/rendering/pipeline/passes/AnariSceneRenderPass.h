@@ -4,6 +4,8 @@
 #pragma once
 
 #include "ImagePass.h"
+// vsr_rendering
+#include "vsr/rendering/pick/PickRequest.h"
 // anari
 #include <anari/anari_cpp.hpp>
 
@@ -17,13 +19,14 @@ bool deviceSupportsExtension(anari::Device d, const char *extension);
 /*
  * Image Source that drives a single ANARI Frame with a configurable camera,
  * renderer, and world; optionally captures auxiliary AOV buffers
- * (depth, normals, albedo, object/primitive/instance IDs).
+ * (depth, normals, albedo, object/primitive/instance IDs). Answers Pick
+ * Requests (see vsr::rendering::pick()).
  *
  * Example:
  *   auto *pass = pipeline.setSource<AnariSceneRenderPass>(device);
  *   pass->setCamera(cam); pass->setRenderer(rend); pass->setWorld(world);
  */
-struct AnariSceneRenderPass : public ImageSource
+struct AnariSceneRenderPass : public ImageSource, public PickableSource
 {
   AnariSceneRenderPass(anari::Device d);
   ~AnariSceneRenderPass() override;
@@ -49,9 +52,16 @@ struct AnariSceneRenderPass : public ImageSource
 
   anari::Frame getFrame() const;
 
+  // PickableSource: one synchronous render of a temporary frame sharing this
+  // source's camera, renderer and world; the display frame is untouched.
+  vsr::math::uint2 pickImageSize() const override;
+  std::optional<PickSample> renderPickSample(vsr::math::uint2 pixel) override;
+
  private:
   void updateSize() override;
   void updateChannels() override;
+  // Returns true if any channel was added.
+  bool setFrameChannels(ImageChannels wanted);
   void resizeStaging();
   void updateCameraAspect();
   void restartFrame();
