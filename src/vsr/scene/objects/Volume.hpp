@@ -38,6 +38,7 @@ using VolumeRef = ObjectPoolRef<Volume>;
 
 namespace tokens::volume {
 
+extern const Token gaussianSplat;
 extern const Token structuredRegular;
 extern const Token structuredRectilinear;
 extern const Token transferFunction1D;

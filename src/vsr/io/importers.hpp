@@ -30,6 +30,7 @@ using namespace vsr::scene;
 
 // Full scene importers //
 
+void import_3DGSPLY(Scene &scene, vsr::animation::AnimationManager &animMgr, const char *filename, LayerNodeRef location = {});
 void import_AGX(Scene &scene, vsr::animation::AnimationManager &animMgr, const char *filename, LayerNodeRef location = {});
 void import_ASSIMP(Scene &scene, vsr::animation::AnimationManager &animMgr, const char *filename, LayerNodeRef location = {}, bool flatten = false);
 void import_AXYZ(Scene &scene, vsr::animation::AnimationManager &animMgr, const char *filename, LayerNodeRef location = {});
@@ -140,6 +141,7 @@ VolumeRef import_volume_animation(Scene &scene,
 
 enum class ImporterType
 {
+  _3DGSPLY,
   AGX,
   ASSIMP,
   ASSIMP_FLAT,
