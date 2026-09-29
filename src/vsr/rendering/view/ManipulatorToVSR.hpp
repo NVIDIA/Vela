@@ -3,10 +3,12 @@
 
 #pragma once
 
+#include "CameraView.h"
 #include "Manipulator.hpp"
-// vsr_core
+// vsr_scene
 #include "vsr/scene/objects/Camera.hpp"
 // std
+#include <optional>
 #include <string_view>
 
 namespace vsr::rendering {
@@ -35,5 +37,10 @@ void updateManipulatorFromCamera(Manipulator &m, const vsr::scene::Camera &c);
 // of the three.
 void updateManipulatorFromCameraPose(
     Manipulator &m, const vsr::scene::Camera &c);
+
+// The projection updateCameraObject() gives 'c' for 'm'; nothing for camera
+// subtypes other than perspective and orthographic.
+std::optional<CameraView> makeCameraView(
+    const vsr::scene::Camera &c, const Manipulator &m);
 
 } // namespace vsr::rendering

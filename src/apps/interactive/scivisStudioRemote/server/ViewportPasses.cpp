@@ -218,16 +218,9 @@ void ViewportPasses::updateWorldBounds(
       && bounds.lower.y <= bounds.upper.y && bounds.lower.z <= bounds.upper.z;
   const bool enabled = m_settings.showWorldBounds && haveBounds && m_view;
   m_boundsPass->setEnabled(enabled);
-  if (!enabled)
-    return;
-  m_boundsPass->setBox(bounds);
-  if (m_view->kind == vsr::rendering::CameraView::Kind::PERSPECTIVE) {
-    m_boundsPass->setPerspectiveView(
-        m_view->eye, m_view->dir, m_view->up, m_view->fovy);
-  } else {
-    m_boundsPass->setOrthographicView(
-        m_view->eye, m_view->dir, m_view->up, m_view->height);
-  }
+  m_boundsPass->setView(m_view);
+  if (enabled)
+    m_boundsPass->setBox(bounds);
 }
 
 // Picking ////////////////////////////////////////////////////////////////////

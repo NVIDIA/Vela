@@ -24,6 +24,7 @@ PRIVATE
   pipeline/passes/ImagePass.cpp
   pipeline/passes/ToneMapPass.cpp
   pipeline/passes/VisualizeAOVPass.cpp
+  overlay/WorldBoundsOverlay.cpp
   pick/PickRequest.cpp
   pipeline/ImagePipeline.cpp
   pipeline/saveImage.cpp

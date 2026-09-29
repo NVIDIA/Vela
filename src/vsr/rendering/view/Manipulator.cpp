@@ -395,4 +395,9 @@ anari::math::float2 Manipulator::directionToAzel(
   return {-vsr::math::degrees(az), -vsr::math::degrees(el)};
 }
 
+float orthographicHeight(const Manipulator &m)
+{
+  return m.distance() * 0.75f;
+}
+
 } // namespace vsr::rendering

@@ -421,8 +421,7 @@ void Viewport::imagePipeline_populate(vsr::rendering::ImagePipeline &p)
 
   m_outlinePass = p.addPass<vsr::rendering::OutlineRenderPass>();
 
-  m_boundsOutlinePass = p.addPass<vsr::rendering::BoxOutlineRenderPass>();
-  m_boundsOutlinePass->setEnabled(false);
+  m_worldBounds.emplace(p);
 
   m_outputPass =
       p.addSink<vsr::rendering::CopyToSDLTexturePass>(m_app->sdlRenderer());
@@ -539,7 +538,7 @@ void Viewport::teardownDevice()
   m_outputTransformPass = nullptr;
   m_primitiveOutlinePass = nullptr;
   m_outlinePass = nullptr;
-  m_boundsOutlinePass = nullptr;
+  m_worldBounds.reset();
   m_outputPass = nullptr;
 
   if (m_rIdx)
@@ -567,7 +566,8 @@ void Viewport::pick(vsr::math::uint2 pixel, bool selectObject)
 
   vsr::rendering::PickRequest request;
   request.pixel = pixel;
-  request.view = currentCameraView();
+  request.view =
+      vsr::rendering::makeCameraView(*m_camera.current, *m_camera.arcball);
 
   const auto hit = vsr::rendering::pick(*m_anariPass, request);
 
@@ -601,28 +601,6 @@ void Viewport::pick(vsr::math::uint2 pixel, bool selectObject)
       ? appContext()->vsr.scene.getObject(object->type, object->index)
       : nullptr;
   appContext()->setSelected(obj);
-}
-
-std::optional<vsr::rendering::CameraView> Viewport::currentCameraView() const
-{
-  if (!m_camera.current)
-    return {};
-
-  const auto subtype = m_camera.current->subtype();
-  const auto &m = *m_camera.arcball;
-  if (subtype == scene::tokens::camera::perspective) {
-    const float fovy =
-        m_camera.current->parameterValueAs<float>("fovy").value_or(
-            math::radians(40.f));
-    return vsr::rendering::CameraView::perspective(
-        m.eye(), m.dir(), m.up(), fovy);
-  }
-  if (subtype == scene::tokens::camera::orthographic) {
-    // Must match updateCameraParametersOrthographic().
-    return vsr::rendering::CameraView::orthographic(
-        m.eye_FixedDistance(), m.dir(), m.up(), m.distance() * 0.75f);
-  }
-  return {};
 }
 
 void Viewport::setSelectionVisibilityFilterEnabled(bool enabled)
@@ -689,7 +667,7 @@ void Viewport::updateImage()
                 selectedObject->type(), selectedObject->index())
           : vsr::scene::NO_OBJECT_ID);
 
-  updateBoundsOutlinePass();
+  updateWorldBoundsOverlay();
 
   auto start = std::chrono::steady_clock::now();
   BaseViewport::imagePipeline_render();
@@ -706,50 +684,22 @@ void Viewport::updateImage()
   m_maxFL = m_maxFL ? std::max(*m_maxFL, m_latestAnariFL) : m_latestAnariFL;
 }
 
-void Viewport::updateBoundsOutlinePass()
+void Viewport::updateWorldBoundsOverlay()
 {
-  if (!m_boundsOutlinePass)
+  if (!m_worldBounds)
     return;
 
-  const auto subtype =
-      m_camera.current ? m_camera.current->subtype() : vsr::core::Token();
-  const bool supportedCamera = subtype == scene::tokens::camera::perspective
-      || subtype == scene::tokens::camera::orthographic;
-  const bool enabled = m_showWorldBounds && supportedCamera;
-  m_boundsOutlinePass->setEnabled(enabled);
-  if (!enabled)
-    return;
+  m_worldBounds->setShown(m_showWorldBounds);
+  m_worldBounds->setColor(m_worldBoundsColor);
+  m_worldBounds->setWidth(uint32_t(std::max(1, m_worldBoundsWidth)));
 
-  vsr::math::box3 bounds;
-  anariGetProperty(m_device,
-      m_rIdx->world(),
-      "bounds",
-      ANARI_FLOAT32_BOX3,
-      &bounds,
-      sizeof(bounds),
-      ANARI_WAIT);
-  m_boundsOutlinePass->setBox(bounds);
-
-  m_boundsOutlinePass->setColor(m_worldBoundsColor);
-  m_boundsOutlinePass->setWidth(uint32_t(std::max(1, m_worldBoundsWidth)));
-
-  if (subtype == scene::tokens::camera::perspective) {
-    const float fovy =
-        m_camera.current->parameterValueAs<float>("fovy").value_or(
-            math::radians(40.f));
-    m_boundsOutlinePass->setPerspectiveView(m_camera.arcball->eye(),
-        m_camera.arcball->dir(),
-        m_camera.arcball->up(),
-        fovy);
-  } else {
-    // Eye and height must match updateCameraParametersOrthographic so the
-    // outline lands on the same image as the rendered scene.
-    m_boundsOutlinePass->setOrthographicView(
-        m_camera.arcball->eye_FixedDistance(),
-        m_camera.arcball->dir(),
-        m_camera.arcball->up(),
-        m_camera.arcball->distance() * 0.75f);
-  }
+  const auto view = m_camera.current
+      ? vsr::rendering::makeCameraView(*m_camera.current, *m_camera.arcball)
+      : std::nullopt;
+  const auto bounds = m_showWorldBounds
+      ? vsr::rendering::queryWorldBounds(m_device, m_rIdx->world())
+      : std::nullopt;
+  m_worldBounds->update(bounds, view);
 }
 
 void Viewport::syncImagePassState()
@@ -1101,24 +1051,19 @@ void Viewport::ui_menubar_World()
     ImGui::Separator();
 
     if (ImGui::MenuItem("Print Bounds")) {
-      vsr::math::float3 bounds[2];
-
-      anariGetProperty(m_device,
-          m_rIdx->world(),
-          "bounds",
-          ANARI_FLOAT32_BOX3,
-          &bounds[0],
-          sizeof(bounds),
-          ANARI_WAIT);
-
-      vsr::core::logStatus(
-          "[viewport] current world bounds {%f, %f, %f} x {%f, %f, %f}",
-          bounds[0].x,
-          bounds[0].y,
-          bounds[0].z,
-          bounds[1].x,
-          bounds[1].y,
-          bounds[1].z);
+      const auto b =
+          vsr::rendering::queryWorldBounds(m_device, m_rIdx->world());
+      if (b) {
+        vsr::core::logStatus(
+            "[viewport] current world bounds {%f, %f, %f} x {%f, %f, %f}",
+            b->lower.x,
+            b->lower.y,
+            b->lower.z,
+            b->upper.x,
+            b->upper.y,
+            b->upper.z);
+      } else
+        vsr::core::logStatus("[viewport] current world has no bounds");
     }
 
     ImGui::EndMenu();

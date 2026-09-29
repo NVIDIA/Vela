@@ -160,4 +160,8 @@ class Manipulator
   ManipulatorMode m_mode{ManipulatorMode::Orbit};
 };
 
+// Image-plane height (world units) an orthographic camera driven by 'm' uses,
+// so zooming the manipulator zooms the orthographic view.
+float orthographicHeight(const Manipulator &m);
+
 } // namespace vsr::rendering

@@ -19,7 +19,7 @@ void updateCameraParametersOrthographic(
   anari::setParameter(d, c, "position", m.eye_FixedDistance());
   anari::setParameter(d, c, "direction", m.dir());
   anari::setParameter(d, c, "up", m.up());
-  anari::setParameter(d, c, "height", m.distance() * 0.75f);
+  anari::setParameter(d, c, "height", orthographicHeight(m));
 }
 
 } // namespace vsr::rendering
