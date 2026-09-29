@@ -44,8 +44,6 @@ struct ProjectSaveRequest
   vsr::animation::AnimationManager &animationManager;
   std::filesystem::path directory;
   std::vector<std::filesystem::path> pendingAssetRemovals;
-  // {windows, layout, settings}; see ProjectContext::saveProject.
-  const vsr::core::DataNode *uiState{nullptr};
 };
 
 struct ProjectSaveResult
@@ -74,7 +72,6 @@ struct ProjectOpenOptions
 struct ProjectOpenStage
 {
   Project project;
-  vsr::core::DataTree ui;
 
  private:
   std::shared_ptr<detail::ProjectOpenState> m_state;

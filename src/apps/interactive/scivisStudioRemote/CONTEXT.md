@@ -84,8 +84,7 @@ The `{windows, layout}` tree the client keeps for itself -- each window's
 settings and the ImGui dock layout -- written to its own file beside the
 user's application settings at exit and restored at startup. It never
 travels on the wire and never belongs to a Project, so which project is open
-moves no panel. A UI-state node an opened project's manifest carries (the
-monolith writes one) is held by the server only to be written back on save.
+moves no panel.
 _Avoid_: layout sync, project layout, window settings message
 
 **Object Metadata**:

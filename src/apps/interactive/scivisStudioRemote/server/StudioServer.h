@@ -414,10 +414,6 @@ struct StudioServer
   DataRoots m_dataRoots;
   ServerTaskRunner m_tasks;
   ProjectOpDispatcher m_dispatcher;
-  // The UI state of the opened project, preserved across saves; null until
-  // a project carrying one opens. Never leaves the server.
-  protocol::SubtreePtr m_uiState;
-
   std::shared_ptr<vsr::network::NetworkServer> m_server;
   bool m_started{false};
 

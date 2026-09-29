@@ -91,7 +91,6 @@ ProjectOpDispatcher::Host StudioServer::makeDispatcherHost()
   host.tasks = &m_tasks;
   host.send = [this](Message &&msg) { send(std::move(msg)); };
   host.flushSceneSnapshot = [this] { flushSceneSnapshot(); };
-  host.uiState = &m_uiState;
   return host;
 }
 
@@ -202,19 +201,14 @@ bool StudioServer::loadDevice(std::string *error)
 bool StudioServer::setupProject(std::string *error)
 {
   if (!m_options.projectDirectory.empty()) {
-    // The same tree the dispatcher keeps after an OpenProject: no client
-    // ever sees it, and a save writes it back untouched.
-    auto uiState = makeSubtree();
     std::string openError;
-    if (!m_projectContext.openProject(
-            m_options.projectDirectory, &uiState->root(), &openError)) {
+    if (!m_projectContext.openProject(m_options.projectDirectory, &openError)) {
       if (error) {
         *error = "failed to open project '"
             + m_options.projectDirectory.string() + "': " + openError;
       }
       return false;
     }
-    m_uiState = uiState;
     vsr::core::logStatus("[StudioServer] opened project '%s' (%s)",
         m_projectContext.project().name.c_str(),
         m_options.projectDirectory.c_str());

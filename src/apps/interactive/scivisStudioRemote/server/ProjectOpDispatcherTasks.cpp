@@ -124,12 +124,8 @@ void ProjectOpDispatcher::handle(const OpenProject &req)
           if (!stageProjectOpen(directory, stage, {}, &error))
             return taskFailure(error);
           progress("applying");
-          auto uiState = makeSubtree();
-          if (!context().openStagedProject(stage, &uiState->root(), &error))
+          if (!context().openStagedProject(stage, &error))
             return taskFailure(error);
-          // Held, never sent: the client owns its layout, so this tree only
-          // exists so the next save writes back what the project came with.
-          *m_host.uiState = uiState;
           return TaskResult{};
         });
       });
@@ -164,14 +160,8 @@ void ProjectOpDispatcher::handle(const SaveProject &req)
               return taskFailure(error);
           }
           progress("writing");
-          // The project is written back with whatever UI state it opened
-          // with, so a project authored by the monolith keeps its layout
-          // even though no client here has one to send.
-          const auto &tree = *m_host.uiState;
-          if (!context().saveProject(
-                  *directory, tree ? &tree->root() : nullptr, &error)) {
+          if (!context().saveProject(*directory, &error))
             return taskFailure(error);
-          }
           return TaskResult{};
         });
       });

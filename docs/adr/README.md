@@ -72,6 +72,7 @@ What an application remembers between runs, and where it keeps it.
 
 | ADR | Decision | Supersedes / revised by |
 | --- | --- | --- |
+| [0040](0040-keep-ui-state-per-application-not-per-document.md) | Keep UI State per application, not per document | |
 | [0041](0041-name-the-user-config-directory-after-vela.md) | Name the User Config Directory after Vela, not VSR | |
 
 See [`src/vsr/app/CONTEXT.md`](../../src/vsr/app/CONTEXT.md) for the
