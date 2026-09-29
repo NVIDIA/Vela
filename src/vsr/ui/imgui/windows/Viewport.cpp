@@ -30,8 +30,6 @@ namespace vsr::ui::imgui {
 
 namespace {
 
-using vsr::rendering::deviceSupportsExtension;
-
 std::string defaultLibraryName(const vsr::app::ANARIDeviceManager &adm)
 {
   for (const auto &libName : adm.deviceList()) {
@@ -102,7 +100,7 @@ void Viewport::buildUI()
   const bool widgetActive = BaseViewport::ui_orientationWidget();
   if (!widgetActive)
     BaseViewport::ui_handleInput();
-  bool didPick = ui_picking(); // Needs to happen before ui_menubar
+  ui_picking(); // Needs to happen before ui_menubar
 
   // Render the overlay after input handling so it does not interfere.
   if (m_showOverlay)
@@ -111,17 +109,6 @@ void Viewport::buildUI()
   BaseViewport::ui_animationSlider();
 
   ImGui::EndDisabled();
-
-  if (m_anariPass && !didPick) {
-    const bool doPrimitiveOutline = m_outlinePrimitives
-        && m_deviceSupportsPrimitiveId
-        && m_visualizeAOV == vsr::rendering::AOVType::NONE;
-    bool needIDs = appContext()->getFirstSelected().valid()
-        || m_visualizeAOV == vsr::rendering::AOVType::EDGES
-        || m_visualizeAOV == vsr::rendering::AOVType::OBJECT_ID
-        || doPrimitiveOutline;
-    m_anariPass->setEnableIDs(needIDs);
-  }
 
   if (m_rIdx) {
     auto kind = appContext()->anari.renderIndexKind();
@@ -178,13 +165,6 @@ void Viewport::setLibrary(
 
     if (d) {
       m_device = d;
-      m_deviceSupportsPrimitiveId =
-          deviceSupportsExtension(d, "ANARI_KHR_FRAME_CHANNEL_PRIMITIVE_ID");
-
-      if (!m_deviceSupportsPrimitiveId
-          && m_visualizeAOV == vsr::rendering::AOVType::PRIMITIVE_ID) {
-        m_visualizeAOV = vsr::rendering::AOVType::NONE;
-      }
 
       vsr::core::logStatus("[viewport] setting up renderer objects...");
 
@@ -414,6 +394,9 @@ void Viewport::imagePipeline_populate(vsr::rendering::ImagePipeline &p)
   m_anariPass = p.setSource<vsr::rendering::AnariSceneRenderPass>(m_device);
   m_anariPass->setEnabled(m_renderingEnabled);
   m_anariPass->setUseImplicitAspectRatio(m_camera.useImplicitAspectRatio);
+
+  if (!sourceSupports(vsr::rendering::requiredChannels(m_visualizeAOV)))
+    m_visualizeAOV = vsr::rendering::AOVType::NONE;
 
   m_saveToFilePass = p.addSink<vsr::rendering::SaveToFilePass>();
   m_saveToFilePass->setEnabled(false);
@@ -667,17 +650,14 @@ void Viewport::teardownDevice()
   m_prevRenderer = {};
 
   m_device = nullptr;
-  m_deviceSupportsPrimitiveId = false;
 }
 
 void Viewport::pick(vsr::math::int2 l, bool selectObject)
 {
   m_selectObjectNextPick = selectObject;
   m_pickCoord = l;
+  // The enabled pick pass requests depth and object IDs for this frame.
   m_pickPass->setEnabled(true);
-  m_anariPass->setEnableIDs(true);
-  // The pick operation reads 'b.depth' at the pick location.
-  m_anariPass->setEnableDepth(true);
 
   // Render synchronous frame to ensure pick pass has available AOVs available
   m_anariPass->setRunAsync(false);
@@ -753,7 +733,6 @@ void Viewport::updateImage()
   m_outlinePass->setOutlineId(id);
 
   updateBoundsOutlinePass();
-  syncDepthChannelEnabled();
 
   auto start = std::chrono::steady_clock::now();
   BaseViewport::imagePipeline_render();
@@ -821,8 +800,6 @@ void Viewport::syncImagePassState()
   if (!m_anariPass)
     return;
 
-  syncDepthChannelEnabled();
-
   m_anariPass->setColorFormat(m_colorFormat);
 
   if (m_visualizeAOVPass) {
@@ -832,48 +809,20 @@ void Viewport::syncImagePassState()
     m_visualizeAOVPass->setEdgeInvert(m_edgeInvert);
   }
 
-  m_anariPass->setEnableAlbedo(
-      m_visualizeAOV == vsr::rendering::AOVType::ALBEDO);
-  m_anariPass->setEnableNormals(
-      m_visualizeAOV == vsr::rendering::AOVType::NORMAL);
-  const bool doPrimitiveOutline = m_outlinePrimitives
-      && m_deviceSupportsPrimitiveId
-      && m_visualizeAOV == vsr::rendering::AOVType::NONE;
-  m_anariPass->setEnablePrimitiveId(m_deviceSupportsPrimitiveId
-      && (m_visualizeAOV == vsr::rendering::AOVType::PRIMITIVE_ID
-          || doPrimitiveOutline));
-  m_anariPass->setEnableInstanceId(
-      m_visualizeAOV == vsr::rendering::AOVType::INSTANCE_ID);
-
-  const auto selectedNode = appContext()->getFirstSelected();
-  const bool needIDs = selectedNode.valid()
-      || m_visualizeAOV == vsr::rendering::AOVType::EDGES
-      || m_visualizeAOV == vsr::rendering::AOVType::OBJECT_ID
-      || doPrimitiveOutline;
-  m_anariPass->setEnableIDs(needIDs);
-
-  if (m_primitiveOutlinePass)
-    m_primitiveOutlinePass->setEnabled(doPrimitiveOutline);
+  if (m_primitiveOutlinePass) {
+    m_primitiveOutlinePass->setEnabled(m_outlinePrimitives
+        && m_visualizeAOV == vsr::rendering::AOVType::NONE
+        && sourceSupports(m_primitiveOutlinePass->requiredChannels()));
+  }
 
   updateDisplayPassState();
 }
 
-void Viewport::syncDepthChannelEnabled()
+bool Viewport::sourceSupports(vsr::rendering::ImageChannels channels) const
 {
-  if (!m_anariPass)
-    return;
-
-  // Depth is expensive to produce and map (an extra ray channel plus a
-  // device->host copy of a full-screen float buffer per frame), so request
-  // it only while a consumer is active. pick() enables it on demand for the
-  // pick render; everything else is a viewport state that can be checked
-  // here.
-  const bool boundsOutlineActive =
-      m_boundsOutlinePass && m_boundsOutlinePass->isEnabled();
-  const bool needDepth =
-      m_visualizeAOV == vsr::rendering::AOVType::DEPTH || boundsOutlineActive;
-
-  m_anariPass->setEnableDepth(needDepth);
+  return m_anariPass
+      && vsr::rendering::hasChannels(
+          m_anariPass->supportedChannels(), channels);
 }
 
 void Viewport::updateDisplayPassState()
@@ -999,12 +948,12 @@ void Viewport::ui_menubar_Viewport()
           "object ID",
           "primitive ID",
           "instance ID"};
-      const int primitiveIdAOV = int(vsr::rendering::AOVType::PRIMITIVE_ID);
       if (ImGui::BeginCombo("AOV", aovItems[int(m_visualizeAOV)])) {
         for (int i = 0; i < IM_ARRAYSIZE(aovItems); ++i) {
           const bool isSelected = i == int(m_visualizeAOV);
           const bool supported =
-              i != primitiveIdAOV || m_deviceSupportsPrimitiveId;
+              sourceSupports(vsr::rendering::requiredChannels(
+                  static_cast<vsr::rendering::AOVType>(i)));
           if (!supported)
             ImGui::BeginDisabled();
           if (ImGui::Selectable(aovItems[i], isSelected) && supported) {
@@ -1122,7 +1071,8 @@ void Viewport::ui_menubar_Viewport()
       ImGui::Checkbox("Highlight Selected", &m_highlightSelection);
       ImGui::EndDisabled();
 
-      ImGui::BeginDisabled(!m_deviceSupportsPrimitiveId);
+      ImGui::BeginDisabled(!m_primitiveOutlinePass
+          || !sourceSupports(m_primitiveOutlinePass->requiredChannels()));
       if (ImGui::Checkbox("Outline Primitives", &m_outlinePrimitives))
         syncImagePassState();
       ImGui::EndDisabled();

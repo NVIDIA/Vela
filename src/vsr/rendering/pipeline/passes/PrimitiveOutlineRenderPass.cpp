@@ -27,7 +27,12 @@ void PrimitiveOutlineRenderPass::setThickness(uint32_t thickness)
   m_thickness = thickness;
 }
 
-void PrimitiveOutlineRenderPass::render(ImageBuffers &b)
+ImageChannels PrimitiveOutlineRenderPass::requiredChannels() const
+{
+  return ImageChannels::OBJECT_ID | ImageChannels::PRIMITIVE_ID;
+}
+
+void PrimitiveOutlineRenderPass::render(ImageBuffers &b, FrameState & /*frame*/)
 {
   if (!b.objectId || !b.primitiveId)
     return;

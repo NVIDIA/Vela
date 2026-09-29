@@ -38,7 +38,12 @@ void ToneMapPass::setHDREnabled(bool enabled)
   m_hdrEnabled = enabled;
 }
 
-void ToneMapPass::render(ImageBuffers &b)
+ImageChannels ToneMapPass::requiredChannels() const
+{
+  return m_hdrEnabled ? ImageChannels::HDR_COLOR : ImageChannels::NONE;
+}
+
+void ToneMapPass::render(ImageBuffers &b, FrameState &frame)
 {
   if (!m_hdrEnabled)
     return;
@@ -49,7 +54,7 @@ void ToneMapPass::render(ImageBuffers &b)
     return;
 
   const float exposure =
-      (m_autoExposureEnabled ? b.exposure : 0.f) + m_exposure;
+      (m_autoExposureEnabled ? frame.exposure : 0.f) + m_exposure;
   const float exposureScale = std::exp2(exposure);
 
 #ifdef VSR_ALGORITHMS_HAS_CUDA

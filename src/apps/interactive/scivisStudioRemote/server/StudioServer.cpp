@@ -323,7 +323,6 @@ bool StudioServer::setupRendering(std::string *error)
   m_scenePass->setWorld(m_renderIndex->world());
   m_scenePass->setRenderer(m_renderIndex->renderer(m_renderer->index()));
   m_scenePass->setCamera(m_renderIndex->camera(m_cameraIndex));
-  m_scenePass->setEnableIDs(false);
   // The id-driven passes composite over the LDR color before it is copied
   // out; the server has no tonemap stage in between.
   m_viewport.setup(m_pipeline, m_scenePass, m_device);

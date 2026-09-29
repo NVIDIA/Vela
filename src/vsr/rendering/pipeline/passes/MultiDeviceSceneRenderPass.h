@@ -25,6 +25,7 @@ struct MultiDeviceSceneRenderPass : public ImageSource
 {
   MultiDeviceSceneRenderPass(const std::vector<anari::Device> &devices);
   ~MultiDeviceSceneRenderPass() override;
+  ImageChannels supportedChannels() const override;
 
   size_t numDevices() const;
 

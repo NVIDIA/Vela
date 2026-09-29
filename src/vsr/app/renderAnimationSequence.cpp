@@ -97,7 +97,6 @@ void renderAnimationSequence(Context &ctx,
 
   auto *anariPass = pipeline.setSource<vsr::rendering::AnariSceneRenderPass>(d);
   anariPass->setRunAsync(false);
-  anariPass->setEnableIDs(false);
   anariPass->setColorFormat(ANARI_UFIXED8_RGBA_SRGB);
   anariPass->setWorld(renderIndex->world());
   anariPass->setRenderer(r);
@@ -110,18 +109,6 @@ void renderAnimationSequence(Context &ctx,
     aovPass->setAOVType(config.aov.aovType);
     aovPass->setDepthRange(config.aov.depthMin, config.aov.depthMax);
     aovPass->setEdgeInvert(config.aov.edgeInvert);
-
-    if (config.aov.aovType == vsr::rendering::AOVType::ALBEDO)
-      anariPass->setEnableAlbedo(true);
-    else if (config.aov.aovType == vsr::rendering::AOVType::NORMAL)
-      anariPass->setEnableNormals(true);
-    else if (config.aov.aovType == vsr::rendering::AOVType::EDGES
-        || config.aov.aovType == vsr::rendering::AOVType::OBJECT_ID)
-      anariPass->setEnableIDs(true);
-    else if (config.aov.aovType == vsr::rendering::AOVType::PRIMITIVE_ID)
-      anariPass->setEnablePrimitiveId(true);
-    else if (config.aov.aovType == vsr::rendering::AOVType::INSTANCE_ID)
-      anariPass->setEnableInstanceId(true);
   }
 
   auto *savePass = pipeline.addSink<vsr::rendering::SaveToFilePass>();

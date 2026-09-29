@@ -33,7 +33,33 @@ void VisualizeAOVPass::setEdgeInvert(bool invert)
   m_edgeInvert = invert;
 }
 
-void VisualizeAOVPass::render(ImageBuffers &b)
+ImageChannels requiredChannels(AOVType type)
+{
+  switch (type) {
+  case AOVType::DEPTH:
+    return ImageChannels::DEPTH;
+  case AOVType::ALBEDO:
+    return ImageChannels::ALBEDO;
+  case AOVType::NORMAL:
+    return ImageChannels::NORMAL;
+  case AOVType::EDGES:
+  case AOVType::OBJECT_ID:
+    return ImageChannels::OBJECT_ID;
+  case AOVType::PRIMITIVE_ID:
+    return ImageChannels::PRIMITIVE_ID;
+  case AOVType::INSTANCE_ID:
+    return ImageChannels::INSTANCE_ID;
+  default:
+    return ImageChannels::NONE;
+  }
+}
+
+ImageChannels VisualizeAOVPass::requiredChannels() const
+{
+  return rendering::requiredChannels(m_aovType);
+}
+
+void VisualizeAOVPass::render(ImageBuffers &b, FrameState & /*frame*/)
 {
   if (m_aovType == AOVType::NONE)
     return;

@@ -172,7 +172,6 @@ void RenderServer::setup_ImagePipeline()
   arp->setWorld(m_renderIndex->world());
   arp->setRenderer(m_renderIndex->renderer(m_currentRenderer->index()));
   arp->setCamera(m_renderIndex->camera(m_camera->index()));
-  arp->setEnableIDs(false);
   m_sceneImagePass = arp;
 
   auto *ccbp =

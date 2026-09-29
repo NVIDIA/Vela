@@ -46,7 +46,7 @@ struct AddPass : public rendering::ImagePass
   }
 
  private:
-  void render(rendering::ImageBuffers &b) override
+  void render(rendering::ImageBuffers &b, rendering::FrameState &) override
   {
     m_log->push_back(m_tag);
     const auto size = dimensions();
@@ -247,4 +247,238 @@ TEST_CASE("External Frame Source copies a matching frame or falls back",
     REQUIRE(pipeline.getColorBuffer()[0] == expected[0]);
     REQUIRE(pipeline.getColorBuffer()[1] == expected[1]);
   }
+}
+
+// Channel demand /////////////////////////////////////////////////////////////
+
+namespace {
+
+using rendering::ImageChannels;
+
+struct ChannelSource : public rendering::ImageSource
+{
+  ChannelSource(ImageChannels supported) : m_supported(supported) {}
+  const char *name() const override
+  {
+    return "Channel Source";
+  }
+  ImageChannels supportedChannels() const override
+  {
+    return m_supported;
+  }
+
+  int channelUpdates{0};
+  float depthValue{1.f};
+  bool writeDepth{true};
+
+ private:
+  void updateChannels() override
+  {
+    channelUpdates++;
+  }
+  void render(rendering::ImageBuffers &b) override
+  {
+    const auto size = dimensions();
+    const size_t n = size_t(size.x) * size_t(size.y);
+    std::fill(b.color, b.color + n, 1u);
+    if (b.depth && writeDepth)
+      std::fill(b.depth, b.depth + n, depthValue);
+  }
+
+  ImageChannels m_supported{ImageChannels::NONE};
+};
+
+// Records which buffers it was handed, and the depth it saw.
+struct ProbePass : public rendering::ImagePass
+{
+  ProbePass(ImageChannels required) : required(required) {}
+  const char *name() const override
+  {
+    return "Probe";
+  }
+  ImageChannels requiredChannels() const override
+  {
+    return required;
+  }
+
+  ImageChannels required{ImageChannels::NONE};
+  bool sawColor{false};
+  bool sawHdr{false};
+  bool sawDepth{false};
+  bool sawObjectId{false};
+  bool sawPrimitiveId{false};
+  bool sawInstanceId{false};
+  bool sawAlbedo{false};
+  bool sawNormal{false};
+  float depth{0.f};
+
+ private:
+  void render(rendering::ImageBuffers &b, rendering::FrameState &) override
+  {
+    sawColor = b.color != nullptr;
+    sawHdr = b.hdrColor != nullptr;
+    sawDepth = b.depth != nullptr;
+    sawObjectId = b.objectId != nullptr;
+    sawPrimitiveId = b.primitiveId != nullptr;
+    sawInstanceId = b.instanceId != nullptr;
+    sawAlbedo = b.albedo != nullptr;
+    sawNormal = b.normal != nullptr;
+    depth = b.depth ? b.depth[0] : 0.f;
+  }
+};
+
+constexpr ImageChannels ALL_CHANNELS = ImageChannels::DEPTH
+    | ImageChannels::OBJECT_ID | ImageChannels::PRIMITIVE_ID
+    | ImageChannels::INSTANCE_ID | ImageChannels::ALBEDO | ImageChannels::NORMAL
+    | ImageChannels::HDR_COLOR;
+
+} // namespace
+
+TEST_CASE("Image Pipeline hands the source the channels enabled passes need",
+    "[ImagePipeline]")
+{
+  rendering::ImagePipeline pipeline(1, 1);
+  auto *source = pipeline.setSource<ChannelSource>(ALL_CHANNELS);
+  pipeline.addPass<ProbePass>(ImageChannels::DEPTH);
+  auto *ids = pipeline.addPass<ProbePass>(ImageChannels::OBJECT_ID);
+  ids->setEnabled(false);
+
+  pipeline.render();
+  REQUIRE(source->channels() == ImageChannels::DEPTH);
+
+  ids->setEnabled(true);
+  pipeline.render();
+  REQUIRE(
+      source->channels() == (ImageChannels::DEPTH | ImageChannels::OBJECT_ID));
+}
+
+TEST_CASE("Image Pipeline channel demand follows pass state", "[ImagePipeline]")
+{
+  rendering::ImagePipeline pipeline(1, 1);
+  auto *source = pipeline.setSource<ChannelSource>(ALL_CHANNELS);
+  auto *probe = pipeline.addPass<ProbePass>(ImageChannels::NONE);
+
+  pipeline.render();
+  REQUIRE(source->channels() == ImageChannels::NONE);
+  const int updates = source->channelUpdates;
+
+  probe->required = ImageChannels::NORMAL;
+  pipeline.render();
+  REQUIRE(source->channels() == ImageChannels::NORMAL);
+  REQUIRE(source->channelUpdates == updates + 1);
+
+  pipeline.render();
+  REQUIRE(source->channelUpdates == updates + 1);
+}
+
+TEST_CASE("Image Pipeline clips demand to what the source supports",
+    "[ImagePipeline]")
+{
+  rendering::ImagePipeline pipeline(1, 1);
+  auto *source = pipeline.setSource<ChannelSource>(ImageChannels::DEPTH);
+  auto *probe =
+      pipeline.addPass<ProbePass>(ImageChannels::DEPTH | ImageChannels::NORMAL);
+
+  pipeline.render();
+
+  REQUIRE(source->channels() == ImageChannels::DEPTH);
+  REQUIRE(probe->sawDepth);
+  REQUIRE(!probe->sawNormal);
+}
+
+TEST_CASE("Image Pipeline allocates only requested channels", "[ImagePipeline]")
+{
+  rendering::ImagePipeline pipeline(1, 1);
+  pipeline.setSource<ChannelSource>(ALL_CHANNELS);
+  auto *probe = pipeline.addPass<ProbePass>(ImageChannels::NONE);
+
+  SECTION("nothing requested: color only")
+  {
+    pipeline.render();
+    REQUIRE(probe->sawColor);
+    REQUIRE(!probe->sawHdr);
+    REQUIRE(!probe->sawDepth);
+    REQUIRE(!probe->sawObjectId);
+    REQUIRE(!probe->sawPrimitiveId);
+    REQUIRE(!probe->sawInstanceId);
+    REQUIRE(!probe->sawAlbedo);
+    REQUIRE(!probe->sawNormal);
+  }
+
+  SECTION("everything requested")
+  {
+    probe->required = ALL_CHANNELS;
+    pipeline.render();
+    REQUIRE(probe->sawHdr);
+    REQUIRE(probe->sawDepth);
+    REQUIRE(probe->sawObjectId);
+    REQUIRE(probe->sawPrimitiveId);
+    REQUIRE(probe->sawInstanceId);
+    REQUIRE(probe->sawAlbedo);
+    REQUIRE(probe->sawNormal);
+  }
+}
+
+TEST_CASE("Image Pipeline keeps a channel's buffer while it stays requested",
+    "[ImagePipeline]")
+{
+  rendering::ImagePipeline pipeline(1, 1);
+  auto *source = pipeline.setSource<ChannelSource>(ALL_CHANNELS);
+  auto *probe = pipeline.addPass<ProbePass>(ImageChannels::DEPTH);
+
+  source->depthValue = 7.f;
+  pipeline.render();
+  REQUIRE(probe->depth == 7.f);
+
+  // The source stops writing depth; the buffer must still hold the last
+  // value, even when an unrelated channel is added.
+  source->writeDepth = false;
+  probe->required = ImageChannels::DEPTH | ImageChannels::NORMAL;
+  pipeline.render();
+  REQUIRE(probe->depth == 7.f);
+}
+
+TEST_CASE("Image Pipeline resets frame state every frame", "[ImagePipeline]")
+{
+  struct WriterPass : public rendering::ImagePass
+  {
+    void render(rendering::ImageBuffers &, rendering::FrameState &f) override
+    {
+      f.exposure = 3.f;
+    }
+  };
+  struct ReaderPass : public rendering::ImagePass
+  {
+    float seen{-1.f};
+    void render(rendering::ImageBuffers &, rendering::FrameState &f) override
+    {
+      seen = f.exposure;
+    }
+  };
+
+  rendering::ImagePipeline pipeline(1, 1);
+  pipeline.setSource<ChannelSource>(ImageChannels::NONE);
+  auto *writer = pipeline.addPass<WriterPass>();
+  auto *reader = pipeline.addPass<ReaderPass>();
+
+  pipeline.render();
+  REQUIRE(reader->seen == 3.f);
+
+  writer->setEnabled(false);
+  pipeline.render();
+  REQUIRE(reader->seen == 0.f);
+}
+
+TEST_CASE(
+    "External Frame Source produces no auxiliary channels", "[ImagePipeline]")
+{
+  rendering::ImagePipeline pipeline(1, 1);
+  pipeline.setSource<rendering::ExternalFrameSource>();
+  auto *probe = pipeline.addPass<ProbePass>(ALL_CHANNELS);
+
+  pipeline.render();
+
+  REQUIRE(probe->sawColor);
+  REQUIRE(!probe->sawDepth);
+  REQUIRE(!probe->sawObjectId);
 }

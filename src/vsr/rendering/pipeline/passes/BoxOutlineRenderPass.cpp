@@ -62,7 +62,14 @@ void BoxOutlineRenderPass::setDepthTestEnabled(bool enabled)
   m_depthTestEnabled = enabled;
 }
 
-void BoxOutlineRenderPass::render(ImageBuffers &b)
+ImageChannels BoxOutlineRenderPass::requiredChannels() const
+{
+  const bool drawn = m_viewKind != ViewKind::NONE;
+  return drawn && m_depthTestEnabled ? ImageChannels::DEPTH
+                                     : ImageChannels::NONE;
+}
+
+void BoxOutlineRenderPass::render(ImageBuffers &b, FrameState & /*frame*/)
 {
   if (!b.color || m_viewKind == ViewKind::NONE)
     return;

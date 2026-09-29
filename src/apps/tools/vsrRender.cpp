@@ -212,15 +212,6 @@ static void setupImagePipeline()
     aovPass->setDepthRange(
         g_ctx->offline.aov.depthMin, g_ctx->offline.aov.depthMax);
     aovPass->setEdgeInvert(g_ctx->offline.aov.edgeInvert);
-
-    // Enable necessary frame channels
-    if (g_ctx->offline.aov.aovType == vsr::rendering::AOVType::ALBEDO) {
-      arp->setEnableAlbedo(true);
-    } else if (g_ctx->offline.aov.aovType == vsr::rendering::AOVType::NORMAL) {
-      arp->setEnableNormals(true);
-    } else if (g_ctx->offline.aov.aovType == vsr::rendering::AOVType::EDGES) {
-      arp->setEnableIDs(true);
-    }
   }
 
   anari::release(g_device, r);

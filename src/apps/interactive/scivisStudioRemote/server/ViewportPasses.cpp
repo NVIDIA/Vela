@@ -140,7 +140,7 @@ void ViewportPasses::setup(vsr::rendering::ImagePipeline &pipeline,
 
   m_settings = protocol::ViewportSettings{};
   m_outlineIdentity = ~0u;
-  syncChannels();
+  updateIdChannelFlag();
 }
 
 void ViewportPasses::teardown()
@@ -161,8 +161,8 @@ void ViewportPasses::teardown()
 void ViewportPasses::apply(const protocol::ViewportSettings &settings)
 {
   m_settings = settings;
-  if (!m_primitiveIdSupported
-      && m_settings.visualizeAOV == AOVType::PRIMITIVE_ID) {
+  if (!sourceSupports(
+          vsr::rendering::requiredChannels(m_settings.visualizeAOV))) {
     m_settings.visualizeAOV = AOVType::NONE;
   }
   if (!m_aovPass)
@@ -178,7 +178,7 @@ void ViewportPasses::apply(const protocol::ViewportSettings &settings)
   m_boundsPass->setWidth(uint32_t(std::max(1, m_settings.worldBoundsWidth)));
   if (!m_settings.showWorldBounds)
     m_boundsPass->setEnabled(false);
-  syncChannels();
+  updateIdChannelFlag();
 }
 
 void ViewportPasses::setOutline(const std::optional<SceneObjectRef> &identity,
@@ -199,7 +199,7 @@ void ViewportPasses::setOutline(const std::optional<SceneObjectRef> &identity,
   if (!m_outlinePass)
     return;
   m_outlinePass->setOutlineId(outlineId());
-  syncChannels();
+  updateIdChannelFlag();
 }
 
 const protocol::ViewportSettings &ViewportPasses::settings() const
@@ -235,19 +235,19 @@ bool ViewportPasses::idChannelEnabled() const
   return m_idChannelEnabled;
 }
 
-void ViewportPasses::syncChannels()
+bool ViewportPasses::sourceSupports(
+    vsr::rendering::ImageChannels channels) const
 {
-  if (!m_scenePass)
-    return;
-  const auto aov = m_settings.visualizeAOV;
-  m_scenePass->setEnableAlbedo(aov == AOVType::ALBEDO);
-  m_scenePass->setEnableNormals(aov == AOVType::NORMAL);
-  m_scenePass->setEnablePrimitiveId(m_primitiveIdSupported
-      && (aov == AOVType::PRIMITIVE_ID || doPrimitiveOutline()));
-  m_scenePass->setEnableInstanceId(aov == AOVType::INSTANCE_ID);
-  // An armed pick keeps the ids on until it has been read out.
-  m_idChannelEnabled = needIDs() || m_pickArmed;
-  m_scenePass->setEnableIDs(m_idChannelEnabled);
+  return m_scenePass
+      && vsr::rendering::hasChannels(
+          m_scenePass->supportedChannels(), channels);
+}
+
+void ViewportPasses::updateIdChannelFlag()
+{
+  m_idChannelEnabled =
+      (needIDs() || m_pickArmed)
+      && sourceSupports(vsr::rendering::ImageChannels::OBJECT_ID);
 }
 
 // Per frame //////////////////////////////////////////////////////////////////
@@ -291,7 +291,7 @@ void ViewportPasses::armPick(int x, int y)
   m_pickSample.reset();
   m_pickArmed = true;
   m_pickPass->setEnabled(true);
-  syncChannels();
+  updateIdChannelFlag();
 }
 
 std::optional<PickSample> ViewportPasses::takePick()
@@ -302,7 +302,7 @@ std::optional<PickSample> ViewportPasses::takePick()
   m_pickSample.reset();
   m_pickArmed = false;
   m_pickPass->setEnabled(false);
-  syncChannels();
+  updateIdChannelFlag();
   return sample;
 }
 

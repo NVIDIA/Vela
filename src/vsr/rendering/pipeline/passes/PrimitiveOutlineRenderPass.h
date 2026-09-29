@@ -14,12 +14,13 @@ struct PrimitiveOutlineRenderPass : public ImagePass
   PrimitiveOutlineRenderPass();
   ~PrimitiveOutlineRenderPass() override;
   const char *name() const override;
+  ImageChannels requiredChannels() const override;
 
   void setOutlineColor(const vsr::math::float4 &color);
   void setThickness(uint32_t thickness);
 
  private:
-  void render(ImageBuffers &b) override;
+  void render(ImageBuffers &b, FrameState &frame) override;
 
   vsr::math::float4 m_outlineColor{0.8f, 0.8f, 0.8f, 1.f};
   uint32_t m_thickness{1};

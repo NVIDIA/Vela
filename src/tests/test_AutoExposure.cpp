@@ -10,9 +10,11 @@
 #include <cmath>
 
 using vsr::rendering::AutoExposurePass;
+using vsr::rendering::FrameState;
 using vsr::rendering::ImageBuffers;
-using vsr::rendering::ImagePipeline;
+using vsr::rendering::ImageChannels;
 using vsr::rendering::ImagePass;
+using vsr::rendering::ImagePipeline;
 using vsr::rendering::ImageSource;
 
 namespace {
@@ -27,19 +29,42 @@ struct FillSource : ImageSource
 {
   float luminance{MID_GRAY};
 
-  void render(ImageBuffers &b) override
-  {
-    if (!b.hdrColor)
-      return;
-    // Grey, so luminance(r,g,b) == the channel value exactly.
-    for (size_t i = 0; i < size_t(WIDTH) * HEIGHT; i++) {
-      b.hdrColor[i * 4 + 0] = luminance;
-      b.hdrColor[i * 4 + 1] = luminance;
-      b.hdrColor[i * 4 + 2] = luminance;
-      b.hdrColor[i * 4 + 3] = 1.f;
-    }
-  }
+  ImageChannels supportedChannels() const override;
+
+ private:
+  void render(ImageBuffers &b) override;
 };
+
+void FillSource::render(ImageBuffers &b)
+{
+  if (!b.hdrColor)
+    return;
+  // Grey, so luminance(r,g,b) == the channel value exactly.
+  for (size_t i = 0; i < size_t(WIDTH) * HEIGHT; i++) {
+    b.hdrColor[i * 4 + 0] = luminance;
+    b.hdrColor[i * 4 + 1] = luminance;
+    b.hdrColor[i * 4 + 2] = luminance;
+    b.hdrColor[i * 4 + 3] = 1.f;
+  }
+}
+
+ImageChannels FillSource::supportedChannels() const
+{
+  return ImageChannels::HDR_COLOR;
+}
+
+struct ProbePass : ImagePass
+{
+  float seen{-999.f};
+
+ private:
+  void render(ImageBuffers &b, FrameState &frame) override;
+};
+
+void ProbePass::render(ImageBuffers &, FrameState &frame)
+{
+  seen = frame.exposure;
+}
 
 // The exposure the pass should converge on for a uniform image: the stops
 // needed to bring that luminance to mid-grey.
@@ -117,8 +142,8 @@ SCENARIO("AutoExposurePass seeds and then eases toward the target exposure",
   }
 }
 
-SCENARIO("AutoExposurePass publishes its exposure to the shared buffers",
-    "[AutoExposure]")
+SCENARIO(
+    "AutoExposurePass publishes its exposure to frame state", "[AutoExposure]")
 {
   GIVEN("a frame darker than mid-grey")
   {
@@ -134,12 +159,6 @@ SCENARIO("AutoExposurePass publishes its exposure to the shared buffers",
         const float exposure = f.pass->currentExposure();
         REQUIRE(exposure == Approx(2.f).margin(1e-3));
 
-        // A probe stage after the auto-exposure pass observes b.exposure.
-        struct ProbePass : ImagePass
-        {
-          float seen{-999.f};
-          void render(ImageBuffers &b) override { seen = b.exposure; }
-        };
         auto *probe = f.pipeline.addPass<ProbePass>();
         f.pipeline.render();
         REQUIRE(probe->seen == Approx(f.pass->currentExposure()));
@@ -175,6 +194,21 @@ SCENARIO("AutoExposurePass ignores frames it must not act on", "[AutoExposure]")
     f.pipeline.render();
     const float adapted = f.pass->currentExposure();
     REQUIRE(adapted == Approx(-4.f).margin(1e-3));
+
+    WHEN("HDR is disabled after publishing exposure")
+    {
+      auto *probe = f.pipeline.addPass<ProbePass>();
+      f.pipeline.render();
+      REQUIRE(probe->seen == Approx(adapted));
+      f.pass->setHDREnabled(false);
+      f.pipeline.render();
+
+      THEN("downstream passes see fresh frame state, not stale exposure")
+      {
+        REQUIRE(probe->seen == Approx(0.f));
+        REQUIRE(f.pass->currentExposure() == Approx(adapted));
+      }
+    }
 
     WHEN("HDR is toggled off and back on")
     {

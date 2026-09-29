@@ -19,6 +19,9 @@ enum class AOVType
   INSTANCE_ID
 };
 
+// The channels an Image Source must produce to visualize 'type'.
+ImageChannels requiredChannels(AOVType type);
+
 /*
  * ImagePass that remaps a selected AOV channel (depth, albedo, normals,
  * edge detection, or ID buffers) into the RGBA color buffer for debugging.
@@ -33,13 +36,14 @@ struct VisualizeAOVPass : public ImagePass
   VisualizeAOVPass();
   ~VisualizeAOVPass() override;
   const char *name() const override;
+  ImageChannels requiredChannels() const override;
 
   void setAOVType(AOVType type);
   void setDepthRange(float minDepth, float maxDepth);
   void setEdgeInvert(bool invert);
 
  private:
-  void render(ImageBuffers &b) override;
+  void render(ImageBuffers &b, FrameState &frame) override;
 
   AOVType m_aovType{AOVType::NONE};
   float m_minDepth{0.f};

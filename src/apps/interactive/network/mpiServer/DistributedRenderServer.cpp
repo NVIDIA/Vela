@@ -291,7 +291,6 @@ void DistributedRenderServer::setup_ImagePipeline()
   arp->setWorld(m_renderIndex->world());
   arp->setRenderer(m_renderIndex->renderer(m_renderers[0]->index()));
   arp->setCamera(m_renderIndex->camera(m_camera->index()));
-  arp->setEnableIDs(false);
   m_sceneImagePass = arp;
 
   // Only rank 0 needs to read back the color buffer for network transmission

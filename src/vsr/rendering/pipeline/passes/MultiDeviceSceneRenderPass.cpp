@@ -33,6 +33,11 @@ MultiDeviceSceneRenderPass::~MultiDeviceSceneRenderPass()
   });
 }
 
+ImageChannels MultiDeviceSceneRenderPass::supportedChannels() const
+{
+  return ImageChannels::DEPTH; // always rendered: devices composite by depth
+}
+
 size_t MultiDeviceSceneRenderPass::numDevices() const
 {
   return m_devices.size();
@@ -146,7 +151,8 @@ void MultiDeviceSceneRenderPass::publish(ImageBuffers &b)
   const size_t totalSize = size.x * size.y;
 
   detail::copy(b.color, m_buffers.color, totalSize);
-  detail::copy(b.depth, m_buffers.depth, totalSize);
+  if (b.depth)
+    detail::copy(b.depth, m_buffers.depth, totalSize);
 }
 
 void MultiDeviceSceneRenderPass::cleanup()

@@ -31,7 +31,7 @@ struct AnariAxesRenderPass : public ImagePass
   bool isValid() const;
   void setupWorld();
   void updateSize() override;
-  void render(ImageBuffers &b) override;
+  void render(ImageBuffers &b, FrameState &frame) override;
 
   bool m_deviceUsable{true};
   bool m_firstFrame{true};
