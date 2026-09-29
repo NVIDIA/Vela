@@ -64,7 +64,9 @@ void import_file(Scene &scene,
     vsr::core::logStatus("...loading file '%s'", file.c_str());
   }
 
-  if (f.first == ImporterType::AGX)
+  if (f.first == ImporterType::_3DGSPLY)
+    vsr::io::import_3DGSPLY(scene, animMgr, file.c_str(), root);
+  else if (f.first == ImporterType::AGX)
     vsr::io::import_AGX(scene, animMgr, file.c_str(), root);
   else if (f.first == ImporterType::ASSIMP)
     vsr::io::import_ASSIMP(scene, animMgr, file.c_str(), root, false);

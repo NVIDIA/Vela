@@ -1981,6 +1981,8 @@ bool ProjectContext::openStagedProject(
 const char *toString(vsr::io::ImporterType importerType)
 {
   switch (importerType) {
+  case vsr::io::ImporterType::_3DGSPLY:
+    return "3DGSPLY";
   case vsr::io::ImporterType::AGX:
     return "AGX";
   case vsr::io::ImporterType::ASSIMP:

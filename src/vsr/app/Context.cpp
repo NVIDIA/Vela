@@ -75,7 +75,9 @@ void Context::parseCommandLine(std::vector<std::string> &args)
       if (++i >= args.size())
         throw std::runtime_error("A Scene Archive filename must follow -vsr");
       this->commandLine.sceneInputs.push_back(SceneArchiveLoad{args[i]});
-    } else if (arg == "-agx")
+    } else if (arg == "-3dgs")
+      importerType = vsr::io::ImporterType::_3DGSPLY;
+    else if (arg == "-agx")
       importerType = vsr::io::ImporterType::AGX;
     else if (arg == "-assimp")
       importerType = vsr::io::ImporterType::ASSIMP;

@@ -38,6 +38,7 @@ PRIVATE
   importers/detail/pbrt/PbrtLexer.cpp
   importers/detail/pbrt/PbrtParser.cpp
   importers/detail/pbrt/PbrtScene.cpp
+  importers/import_3DGSPLY.cpp
   importers/import_AGX.cpp
   importers/import_ASSIMP.cpp
   importers/import_AXYZ.cpp

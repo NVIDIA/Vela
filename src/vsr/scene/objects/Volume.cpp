@@ -74,6 +74,7 @@ anari::Object Volume::makeANARIObject(anari::Device d) const
 
 namespace tokens::volume {
 
+const Token gaussianSplat = "gaussianSplat";
 const Token structuredRegular = "structuredRegular";
 const Token structuredRectilinear = "structuredRectilinear";
 const Token transferFunction1D = "transferFunction1D";
