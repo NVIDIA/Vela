@@ -192,7 +192,8 @@ ShotID RenderSession::prepareSavedShot(const std::filesystem::path &projectDir,
 }
 
 // Puts a UI-state node into a saved project's manifest, as the monolith
-// writes one: `windows`, `layout` and `settings` beside "scivisStudio".
+// wrote one before docs/adr/0040: `windows`, `layout` and `settings` beside
+// "scivisStudio".
 void writeManifestUIState(const std::filesystem::path &projectDir)
 {
   const auto manifest = projectDir / "project.vsr";
@@ -557,7 +558,7 @@ SCENARIO(
 }
 
 SCENARIO(
-    "StudioServer preserves the UI state a project carries", "[StudioServer]")
+    "StudioServer drops the UI state an old project carries", "[StudioServer]")
 {
   if (!helideAvailable()) {
     WARN("helide ANARI library unavailable, skipping the UI state tests");
@@ -583,9 +584,9 @@ SCENARIO(
       REQUIRE(saved);
       REQUIRE(saved->completed);
 
-      THEN("the manifest still carries it, though no client ever saw it")
+      THEN("the manifest no longer carries it")
       {
-        REQUIRE(manifestLayout(data.projectDir) == LAYOUT_MARKER);
+        REQUIRE(manifestLayout(data.projectDir).empty());
       }
     }
 
@@ -601,9 +602,9 @@ SCENARIO(
       REQUIRE(saved);
       REQUIRE(saved->completed);
 
-      THEN("the tree the open read is written back unchanged")
+      THEN("the manifest no longer carries it")
       {
-        REQUIRE(manifestLayout(data.projectDir) == LAYOUT_MARKER);
+        REQUIRE(manifestLayout(data.projectDir).empty());
       }
     }
   }

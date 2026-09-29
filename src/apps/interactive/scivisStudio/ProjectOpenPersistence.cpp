@@ -9,7 +9,6 @@
 #include "ProjectSerialization.h"
 
 #include "vsr/animation/AnimationManager.hpp"
-#include "vsr/app/UIStateTree.h"
 #include "vsr/core/DataTreeMetadata.hpp"
 #include "vsr/core/Logging.hpp"
 #include "vsr/io/archives/CameraArchive.hpp"
@@ -469,7 +468,6 @@ bool stageProjectOpen(const std::filesystem::path &directory,
 {
   stage.m_state.reset();
   stage.project = {};
-  stage.ui.root().reset();
 
   const auto validation = validateProjectRoot(directory);
   if (!validation.ok)
@@ -578,15 +576,9 @@ bool stageProjectOpen(const std::filesystem::path &directory,
     }
   }
 
-  {
-    using namespace vsr::app;
-    if (auto *windows = root.child(UI_STATE_WINDOWS))
-      stage.ui.root()[UI_STATE_WINDOWS] = *windows;
-    if (auto *layout = root.child(UI_STATE_LAYOUT))
-      stage.ui.root()[UI_STATE_LAYOUT] = layout->getValueAs<std::string>();
-    if (auto *settings = root.child(UI_STATE_SETTINGS))
-      stage.ui.root()[UI_STATE_SETTINGS] = *settings;
-  }
+  // A manifest written before docs/adr/0040 also holds UI state
+  // ({windows, layout, settings}); it belongs to the application now and is
+  // ignored, and the next save drops it.
 
   vsr::scene::Scene stagedScene;
   vsr::animation::AnimationManager stagedAnimations(&stagedScene);

@@ -1890,9 +1890,8 @@ void ProjectContext::writeAnimationStateToShot(Shot &shot) const
   shot::clampToValidRanges(shot);
 }
 
-bool ProjectContext::saveProject(const std::filesystem::path &directory,
-    const vsr::core::DataNode *uiState,
-    std::string *error)
+bool ProjectContext::saveProject(
+    const std::filesystem::path &directory, std::string *error)
 {
   if (!m_ctx)
     return fail("missing VSR application context", error);
@@ -1900,7 +1899,6 @@ bool ProjectContext::saveProject(const std::filesystem::path &directory,
   ProjectSaveRequest request(
       m_project, m_ctx->vsr.scene, m_ctx->vsr.animationMgr, directory);
   request.pendingAssetRemovals = m_pendingAssetRemovals;
-  request.uiState = uiState;
 
   ProjectSaveResult save;
   if (!buildProjectSavePlan(request, save, error))
@@ -1919,7 +1917,6 @@ bool ProjectContext::saveProject(const std::filesystem::path &directory,
 }
 
 bool ProjectContext::openProject(const std::filesystem::path &directory,
-    vsr::core::DataNode *uiStateOut,
     std::string *error,
     const ProjectOpenOptions &options)
 {
@@ -1929,7 +1926,7 @@ bool ProjectContext::openProject(const std::filesystem::path &directory,
   ProjectOpenStage stage;
   if (!stageProjectOpen(directory, stage, options, error))
     return false;
-  if (!openStagedProject(stage, uiStateOut, error))
+  if (!openStagedProject(stage, error))
     return false;
 
   vsr::core::logStatus(
@@ -1937,9 +1934,8 @@ bool ProjectContext::openProject(const std::filesystem::path &directory,
   return true;
 }
 
-bool ProjectContext::openStagedProject(ProjectOpenStage &stage,
-    vsr::core::DataNode *uiStateOut,
-    std::string *error)
+bool ProjectContext::openStagedProject(
+    ProjectOpenStage &stage, std::string *error)
 {
   if (!m_ctx)
     return fail("missing VSR application context", error);
@@ -1977,11 +1973,6 @@ bool ProjectContext::openStagedProject(ProjectOpenStage &stage,
   markRevised();
   markActiveShotRevised();
   syncAnimationManagerToActiveShot();
-
-  // The staged tree holds only {windows, layout, settings}; node assignment
-  // replaces the destination's children and keeps its name.
-  if (uiStateOut)
-    *uiStateOut = stage.ui.root();
 
   applyActiveShot();
   return true;

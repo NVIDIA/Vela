@@ -242,7 +242,6 @@ void ProjectOpDispatcher::fail(uint64_t requestId, const std::string &error)
 void ProjectOpDispatcher::handle(const NewProject &req)
 {
   context().createUnsavedProject();
-  *m_host.uiState = nullptr;
   ok(req);
 }
 

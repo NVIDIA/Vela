@@ -225,12 +225,8 @@ bool Application::saveProject()
 
 bool Application::saveProjectAs(const std::filesystem::path &directory)
 {
-  vsr::core::DataTree scratch;
-  saveUIStateTree(scratch.root());
-
   std::string error;
-  const bool ok =
-      m_projectContext.saveProject(directory, &scratch.root(), &error);
+  const bool ok = m_projectContext.saveProject(directory, &error);
   if (!ok)
     vsr::core::logError("[SciVisStudio] Save failed: %s", error.c_str());
   else
@@ -241,13 +237,16 @@ bool Application::saveProjectAs(const std::filesystem::path &directory)
 bool Application::openProject(
     const std::filesystem::path &directory, const ProjectOpenOptions &options)
 {
-  if (m_viewport)
+  // The viewport's device is the application's choice, not the project's
+  // (docs/adr/0040): the new scene is shown on the device the old one was.
+  std::string library;
+  if (m_viewport) {
+    library = m_viewport->libraryName();
     m_viewport->releaseSceneReferences();
+  }
 
-  vsr::core::DataTree scratch;
   std::string error;
-  const bool ok =
-      m_projectContext.openProject(directory, &scratch.root(), &error, options);
+  const bool ok = m_projectContext.openProject(directory, &error, options);
   if (!ok) {
     vsr::core::logError("[SciVisStudio] Open failed: %s", error.c_str());
     if (m_viewport)
@@ -255,7 +254,12 @@ bool Application::openProject(
     return false;
   }
 
-  applyUIStateTree(scratch.root());
+  if (m_viewport) {
+    if (library.empty())
+      m_viewport->setLibraryToDefault();
+    else
+      m_viewport->setLibrary(library, VSR_INVALID_INDEX, false);
+  }
   addRecentProject(directory);
   return true;
 }
