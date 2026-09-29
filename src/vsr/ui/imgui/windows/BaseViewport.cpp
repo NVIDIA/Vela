@@ -356,8 +356,7 @@ void BaseViewport::ui_gizmo()
     };
   } else if (m_camera.current->subtype()
       == scene::tokens::camera::orthographic) {
-    // The 0.75 factor is to match updateCameraParametersOrthographic
-    const float height = m_camera.arcball->distance() * 0.75f;
+    const float height = vsr::rendering::orthographicHeight(*m_camera.arcball);
     const float halfHeight = height * 0.5f;
     const float halfWidth = halfHeight * aspect;
     const float left = -halfWidth;

@@ -6,6 +6,10 @@
 #include "ImagePass.h"
 // vsr_core
 #include "vsr/core/VSRMath.hpp"
+// vsr_rendering
+#include "vsr/rendering/view/CameraView.h"
+// std
+#include <optional>
 
 namespace vsr::rendering {
 
@@ -24,17 +28,9 @@ struct BoxOutlineRenderPass : public ImagePass
   ImageChannels requiredChannels() const override;
 
   void setBox(const vsr::math::box3 &box);
-  void setPerspectiveView(const vsr::math::float3 &eye,
-      const vsr::math::float3 &dir,
-      const vsr::math::float3 &up,
-      float fovy);
-  // 'eye' must lie on the plane where the camera's rays originate (the same
-  // eye handed to the ANARI camera, e.g. Manipulator::eye_FixedDistance()) —
-  // fragment depth is measured from that plane along 'dir'.
-  void setOrthographicView(const vsr::math::float3 &eye,
-      const vsr::math::float3 &dir,
-      const vsr::math::float3 &up,
-      float height);
+  // Nothing is drawn without a view. For orthographic views, fragment depth
+  // is measured from the eye plane along 'dir' (see CameraView).
+  void setView(const std::optional<CameraView> &view);
   void setColor(const vsr::math::float4 &color);
   void setWidth(uint32_t width);
   void setDepthTestEnabled(bool enabled);
@@ -42,20 +38,8 @@ struct BoxOutlineRenderPass : public ImagePass
  private:
   void render(ImageBuffers &b, FrameState &frame) override;
 
-  enum class ViewKind
-  {
-    NONE,
-    PERSPECTIVE,
-    ORTHOGRAPHIC
-  };
-
   vsr::math::box3 m_box{{0.f, 0.f, 0.f}, {0.f, 0.f, 0.f}};
-  ViewKind m_viewKind{ViewKind::NONE};
-  vsr::math::float3 m_eye{0.f, 0.f, 0.f};
-  vsr::math::float3 m_dir{0.f, 0.f, -1.f};
-  vsr::math::float3 m_up{0.f, 1.f, 0.f};
-  float m_fovy{0.f}; // radians, perspective only
-  float m_height{0.f}; // world units, orthographic only
+  std::optional<CameraView> m_view;
   vsr::math::float4 m_color{0.8f, 0.8f, 0.8f, 1.f};
   uint32_t m_width{1};
   bool m_depthTestEnabled{true};

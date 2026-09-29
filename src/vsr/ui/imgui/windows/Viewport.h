@@ -9,11 +9,11 @@
 #include "vsr/scene/objects/Camera.hpp"
 // vsr_rendering
 #include "vsr/rendering/index/RenderIndex.hpp"
+#include "vsr/rendering/overlay/WorldBoundsOverlay.h"
 #include "vsr/rendering/pick/PickRequest.h"
 #include "vsr/rendering/pipeline/ImagePipeline.h"
 #include "vsr/rendering/pipeline/passes/AnariSceneRenderPass.h"
 #include "vsr/rendering/pipeline/passes/AutoExposurePass.h"
-#include "vsr/rendering/pipeline/passes/BoxOutlineRenderPass.h"
 #include "vsr/rendering/pipeline/passes/CopyToSDLTexturePass.h"
 #include "vsr/rendering/pipeline/passes/OutlineRenderPass.h"
 #include "vsr/rendering/pipeline/passes/OutputTransformPass.h"
@@ -76,12 +76,11 @@ struct Viewport : public BaseViewport
   void teardownDevice();
   // 'pixel' in render-image pixels, row 0 at the bottom.
   void pick(vsr::math::uint2 pixel, bool selectObject);
-  std::optional<vsr::rendering::CameraView> currentCameraView() const;
   void setSelectionVisibilityFilterEnabled(bool enabled);
 
   void updateFrame();
   void updateImage();
-  void updateBoundsOutlinePass();
+  void updateWorldBoundsOverlay();
   void syncImagePassState();
   bool sourceSupports(vsr::rendering::ImageChannels channels) const;
   void updateDisplayPassState();
@@ -150,7 +149,7 @@ struct Viewport : public BaseViewport
   vsr::rendering::OutputTransformPass *m_outputTransformPass{nullptr};
   vsr::rendering::PrimitiveOutlineRenderPass *m_primitiveOutlinePass{nullptr};
   vsr::rendering::OutlineRenderPass *m_outlinePass{nullptr};
-  vsr::rendering::BoxOutlineRenderPass *m_boundsOutlinePass{nullptr};
+  std::optional<vsr::rendering::WorldBoundsOverlay> m_worldBounds;
   vsr::rendering::CopyToSDLTexturePass *m_outputPass{nullptr};
 
   float m_latestFL{0.f};

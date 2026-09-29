@@ -23,28 +23,9 @@ void BoxOutlineRenderPass::setBox(const vsr::math::box3 &box)
   m_box = box;
 }
 
-void BoxOutlineRenderPass::setPerspectiveView(const vsr::math::float3 &eye,
-    const vsr::math::float3 &dir,
-    const vsr::math::float3 &up,
-    float fovy)
+void BoxOutlineRenderPass::setView(const std::optional<CameraView> &view)
 {
-  m_viewKind = ViewKind::PERSPECTIVE;
-  m_eye = eye;
-  m_dir = dir;
-  m_up = up;
-  m_fovy = fovy;
-}
-
-void BoxOutlineRenderPass::setOrthographicView(const vsr::math::float3 &eye,
-    const vsr::math::float3 &dir,
-    const vsr::math::float3 &up,
-    float height)
-{
-  m_viewKind = ViewKind::ORTHOGRAPHIC;
-  m_eye = eye;
-  m_dir = dir;
-  m_up = up;
-  m_height = height;
+  m_view = view;
 }
 
 void BoxOutlineRenderPass::setColor(const vsr::math::float4 &color)
@@ -64,24 +45,25 @@ void BoxOutlineRenderPass::setDepthTestEnabled(bool enabled)
 
 ImageChannels BoxOutlineRenderPass::requiredChannels() const
 {
-  const bool drawn = m_viewKind != ViewKind::NONE;
+  const bool drawn = m_view.has_value();
   return drawn && m_depthTestEnabled ? ImageChannels::DEPTH
                                      : ImageChannels::NONE;
 }
 
 void BoxOutlineRenderPass::render(ImageBuffers &b, FrameState & /*frame*/)
 {
-  if (!b.color || m_viewKind == ViewKind::NONE)
+  if (!b.color || !m_view)
     return;
+  const CameraView &v = *m_view;
+  const bool orthographic = v.kind == CameraView::Kind::ORTHOGRAPHIC;
 
   const auto size = dimensions();
   if (size.x == 0 || size.y == 0)
     return;
 
-  const float aspect = size.x / float(size.y);
+  const float aspect = effectiveAspect(v, size.x / float(size.y));
 
-  const auto view =
-      linalg::lookat_matrix(m_eye, m_eye + m_dir, m_up);
+  const auto view = linalg::lookat_matrix(v.eye, v.eye + v.dir, v.up);
 
   // Only the projected xy is consumed downstream (fragment depth comes from
   // the interpolated world position), so near/far need no scene fitting.
@@ -89,8 +71,8 @@ void BoxOutlineRenderPass::render(ImageBuffers &b, FrameState & /*frame*/)
   constexpr float far = 1000.f;
 
   vsr::math::mat4 proj;
-  if (m_viewKind == ViewKind::PERSPECTIVE) {
-    const float oneOverTanFov = 1.f / std::tan(m_fovy / 2.f);
+  if (!orthographic) {
+    const float oneOverTanFov = 1.f / std::tan(v.fovy / 2.f);
     proj = vsr::math::mat4{
         {oneOverTanFov / aspect, 0.f, 0.f, 0.f},
         {0.f, oneOverTanFov, 0.f, 0.f},
@@ -98,7 +80,7 @@ void BoxOutlineRenderPass::render(ImageBuffers &b, FrameState & /*frame*/)
         {0.f, 0.f, -2.f * far * near / (far - near), 0.f},
     };
   } else {
-    const float halfHeight = m_height * 0.5f;
+    const float halfHeight = v.height * 0.5f;
     const float halfWidth = halfHeight * aspect;
     proj = vsr::math::mat4{
         {1.f / halfWidth, 0.f, 0.f, 0.f},
@@ -111,16 +93,15 @@ void BoxOutlineRenderPass::render(ImageBuffers &b, FrameState & /*frame*/)
   const auto projView = vsr::math::mul(proj, view);
   const auto color = helium::cvt_color_to_uint32(m_color);
   const float *depth = m_depthTestEnabled ? b.depth : nullptr;
-  const bool orthographicDepth = m_viewKind == ViewKind::ORTHOGRAPHIC;
 
 #ifdef VSR_ALGORITHMS_HAS_CUDA
   if (b.stream) {
     vsr::algorithms::cuda::boxOutline(b.stream,
         m_box,
         projView,
-        m_eye,
-        m_dir,
-        orthographicDepth,
+        v.eye,
+        v.dir,
+        orthographic,
         depth,
         b.color,
         color,
@@ -132,9 +113,9 @@ void BoxOutlineRenderPass::render(ImageBuffers &b, FrameState & /*frame*/)
 #endif
   vsr::algorithms::cpu::boxOutline(m_box,
       projView,
-      m_eye,
-      m_dir,
-      orthographicDepth,
+      v.eye,
+      v.dir,
+      orthographic,
       depth,
       b.color,
       color,
