@@ -30,6 +30,8 @@ struct AutoExposurePass : public ImagePass
   bool m_hasExposure{false};
   float m_currentExposure{0.f};
   float m_response{0.15f};
+  // Re-seeds the host sampler's jitter every frame.
+  uint32_t m_frameIndex{0};
 };
 
 // Inlined definitions ////////////////////////////////////////////////////////

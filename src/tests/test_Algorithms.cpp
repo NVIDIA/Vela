@@ -23,6 +23,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <utility>
 #include <vector>
 
 namespace cpu = vsr::algorithms::cpu;
@@ -120,7 +121,7 @@ SCENARIO(
 
     WHEN("Reducing the full 2x2 image")
     {
-      const auto mean = cpu::meanLogLuminance(hdr.data(), 2u, 2u);
+      const auto mean = cpu::meanLogLuminance(hdr.data(), 2u, 2u, 0u);
 
       THEN("Every pixel contributes to the exact mean")
       {
@@ -132,13 +133,65 @@ SCENARIO(
     }
   }
 
+  GIVEN("An image larger than the sample budget with 1-texel column stripes")
+  {
+    // 1024x512 alternates luminance 1 (log2 = 0) and 16 (log2 = 4) per
+    // column, so the exact mean is 2. A linear-stride sampler whose stride
+    // shares a factor with the width lands on one stripe parity only; the
+    // per-cell jitter reads both.
+    const uint32_t w = 1024, h = 512;
+    std::vector<float> hdr(size_t(w) * h * 4, 1.f);
+    for (size_t i = 0; i < size_t(w) * h; i++) {
+      const float v = (i % 2 == 0) ? 1.f : 16.f;
+      hdr[i * 4 + 0] = v;
+      hdr[i * 4 + 1] = v;
+      hdr[i * 4 + 2] = v;
+    }
+
+    THEN("Every seed estimates the exact mean")
+    {
+      for (uint32_t seed = 0; seed < 8; seed++) {
+        const auto mean = cpu::meanLogLuminance(hdr.data(), w, h, seed);
+        REQUIRE(mean.has_value());
+        REQUIRE(*mean == Approx(2.f).margin(0.05));
+      }
+    }
+
+    THEN("The same seed reproduces the same estimate")
+    {
+      REQUIRE(*cpu::meanLogLuminance(hdr.data(), w, h, 7u)
+          == *cpu::meanLogLuminance(hdr.data(), w, h, 7u));
+    }
+  }
+
+  GIVEN("Uniform images above the budget whose sizes split into uneven cells")
+  {
+    // Cells differ in size by up to one texel, and a thin image clamps its
+    // short axis to one cell row. The area weights must still sum to the
+    // texel count, so a uniform image reduces exactly on any seed.
+    const std::array<std::pair<uint32_t, uint32_t>, 3> sizes{
+        {{1000u, 301u}, {100000u, 1u}, {1u, 100000u}}};
+
+    THEN("The estimate is exact, whatever the seed")
+    {
+      for (const auto &[w, h] : sizes) {
+        const std::vector<float> hdr(size_t(w) * h * 4, 8.f);
+        for (uint32_t seed = 0; seed < 4; seed++) {
+          const auto mean = cpu::meanLogLuminance(hdr.data(), w, h, seed);
+          REQUIRE(mean.has_value());
+          REQUIRE(*mean == Approx(3.f).margin(1e-5));
+        }
+      }
+    }
+  }
+
   GIVEN("A black HDR sample")
   {
     const std::array<float, 4> hdr{0.f, 0.f, 0.f, 1.f};
 
     WHEN("The luminance is reduced")
     {
-      const auto mean = cpu::meanLogLuminance(hdr.data(), 1u, 1u);
+      const auto mean = cpu::meanLogLuminance(hdr.data(), 1u, 1u, 0u);
 
       THEN("The minimum luminance clamp is respected")
       {
@@ -175,7 +228,7 @@ SCENARIO(
 
     WHEN("The image is reduced")
     {
-      const auto mean = cpu::meanLogLuminance(hdr.data(), 2u, 2u);
+      const auto mean = cpu::meanLogLuminance(hdr.data(), 2u, 2u, 0u);
 
       THEN("The result is finite, with NaN at the floor and Inf at the ceiling")
       {
@@ -199,9 +252,11 @@ SCENARIO(
       {
         // 0.f is a *valid* mean (luminance 1.0), so absence must be
         // distinguishable from it.
-        REQUIRE_FALSE(cpu::meanLogLuminance(hdr.data(), 0u, 4u).has_value());
-        REQUIRE_FALSE(cpu::meanLogLuminance(hdr.data(), 4u, 0u).has_value());
-        REQUIRE_FALSE(cpu::meanLogLuminance(nullptr, 2u, 2u).has_value());
+        REQUIRE_FALSE(
+            cpu::meanLogLuminance(hdr.data(), 0u, 4u, 0u).has_value());
+        REQUIRE_FALSE(
+            cpu::meanLogLuminance(hdr.data(), 4u, 0u, 0u).has_value());
+        REQUIRE_FALSE(cpu::meanLogLuminance(nullptr, 2u, 2u, 0u).has_value());
       }
     }
 
@@ -212,7 +267,7 @@ SCENARIO(
         // 65536 * 65536 wraps to exactly 0 in uint32_t. No allocation is
         // made: the size is rejected before the buffer is ever read.
         REQUIRE_FALSE(
-            cpu::meanLogLuminance(hdr.data(), 65536u, 65536u).has_value());
+            cpu::meanLogLuminance(hdr.data(), 65536u, 65536u, 0u).has_value());
       }
     }
   }

@@ -9,11 +9,16 @@
 
 namespace vsr::algorithms::cpu {
 
-// Mean of log2(luminance) over an interleaved RGBA float host buffer. Same
-// API as vsr::algorithms::cuda::meanLogLuminance; the CUDA path reduces every
-// texel exactly through an SPD-style downsampler, while this host path strides
-// to a fixed sample budget (a full-image scan is too slow per frame on the
-// CPU). The strided mean tracks the exact mean to within ~0.02 stops.
+// Mean of log2(luminance) over an interleaved RGBA float host buffer. The
+// CUDA path (vsr::algorithms::cuda::meanLogLuminance) reduces every texel
+// exactly; this host path estimates the mean from a fixed budget of
+// stratified samples — one jittered texel per square cell, weighted by cell
+// area — so its cost does not grow with resolution. Images within the budget
+// are reduced exactly, matching the CUDA result.
+//
+// `seed` picks the jitter. Vary it per frame (e.g. a frame counter) so the
+// sampling error averages out under temporal smoothing instead of freezing
+// into a constant bias; the same seed always yields the same result.
 //
 // Luminance is clamped into [MIN_LUMINANCE, MAX_LUMINANCE] with NaN treated as
 // black (math::clampedLuminance), so the result is always finite.
@@ -22,6 +27,6 @@ namespace vsr::algorithms::cpu {
 // buffer, an empty image, or more than UINT32_MAX texels. Callers must not
 // substitute a number for absence: 0.f is a *valid* mean (luminance 1.0).
 std::optional<float> meanLogLuminance(
-    const float *hdrColor, uint32_t width, uint32_t height);
+    const float *hdrColor, uint32_t width, uint32_t height, uint32_t seed);
 
 } // namespace vsr::algorithms::cpu

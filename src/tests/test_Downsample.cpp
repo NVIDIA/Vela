@@ -335,8 +335,8 @@ SCENARIO("vsr::algorithms::cuda::meanLogLuminance", "[Downsample]")
     THEN("the CPU and CUDA reductions agree")
     {
       const std::vector<float> rgba = toRGBA(lum);
-      const float host =
-          require(vsr::algorithms::cpu::meanLogLuminance(rgba.data(), w, h));
+      const float host = require(
+          vsr::algorithms::cpu::meanLogLuminance(rgba.data(), w, h, 0u));
       const float device = require(gpuMeanLogLum(lum, w, h));
       REQUIRE(std::isfinite(host));
       REQUIRE(device == Approx(host).margin(1e-3));

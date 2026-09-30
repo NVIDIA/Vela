@@ -36,7 +36,7 @@ by `VSR_USE_TBB` — callers don't need to know.
 | Header | Function(s) | Description |
 |--------|-------------|-------------|
 | `toneMap` | `toneMap` | In-place HDR tone mapping with exposure scale. Operators: NONE, REINHARD, ACES, HABLE, KHRONOS_PBR_NEUTRAL, AGX. |
-| `downsample` | `meanLogLuminance` | Mean of log2(luminance). Same API on both backends: CUDA reduces every texel exactly through a single-pass SPD downsampler; the CPU backend strides to a fixed sample budget (bounded per-frame cost, ~0.02-stop accuracy). CUDA callers hold a `MeanLogLuminanceScratch` across calls so per-frame cost never includes a device alloc/free cycle. |
+| `downsample` | `meanLogLuminance` | Mean of log2(luminance). CUDA reduces every texel exactly through a single-pass SPD downsampler; the CPU backend estimates it from a fixed budget of stratified samples jittered by a caller-supplied seed (bounded per-frame cost; exact within the budget). CUDA callers hold a `MeanLogLuminanceScratch` across calls so per-frame cost never includes a device alloc/free cycle. |
 | `outputTransform` | `outputTransform` | Gamma correction and conversion to packed uint32 RGBA. Reads float4 or packed uint32 input depending on `anari::DataType`. |
 | `visualizeAOV` | `visualizeId`, `visualizeDepth`, `visualizeAlbedo`, `visualizeNormal`, `visualizeEdges` | Convert render AOVs to displayable colors. ID AOVs (object/primitive/instance) map to pseudo-random colors; depth normalizes to grayscale; normals remap from [-1,1] to [0,1]; edges detect object boundaries. |
 | `outline` | `outline` | Highlight selected-object edges by blending orange on boundary pixels (3x3 neighborhood test). |
