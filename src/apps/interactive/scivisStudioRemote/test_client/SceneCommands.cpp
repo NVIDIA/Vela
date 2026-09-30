@@ -6,7 +6,7 @@
  * one-way messages: scene edits (set-param, remove-param,
  * set-node-transform), playback and the viewport (set-time, pick,
  * set-outline, viewport-settings, find-object), inspection (dump-scene,
- * dump-layers, dump-project, dump-frame) and assert. The table in
+ * dump-layers, dump-project, dump-frame), assert and await. The table in
  * CommandRunner.cpp
  * has checked each command's argument count before a handler runs.
  */
@@ -37,6 +37,17 @@ using vsr::core::Any;
 
 namespace {
 
+// The operators compareValues() takes; empty when `op` is one, the FAIL
+// reason otherwise.
+std::optional<std::string> unknownComparison(const std::string &op)
+{
+  for (const char *known : {"==", "!=", "<", "<=", ">", ">=", "contains"}) {
+    if (op == known)
+      return {};
+  }
+  return "unknown operator '" + op + "'; valid: == != < <= > >= contains";
+}
+
 // Numbers compare numerically at float32 precision for equality (the scene's
 // values are float32, so `== 0.9` must hold for a value set from "0.9");
 // anything else compares as text.
@@ -46,6 +57,10 @@ bool compareValues(const std::string &lhs,
     bool &result,
     std::string &error)
 {
+  if (const auto unknown = unknownComparison(op)) {
+    error = *unknown;
+    return false;
+  }
   if (op == "contains") {
     result = lhs.find(rhs) != std::string::npos;
     return true;
@@ -74,12 +89,8 @@ bool compareValues(const std::string &lhs,
     result = cmp <= 0;
   else if (op == ">")
     result = cmp > 0;
-  else if (op == ">=")
+  else
     result = cmp >= 0;
-  else {
-    error = "unknown operator '" + op + "'; valid: == != < <= > >= contains";
-    return false;
-  }
   return true;
 }
 
@@ -463,6 +474,61 @@ CommandRunner::Failure CommandRunner::assertValue(const Command &command)
 {
   if (const auto pending = drainEvents())
     return pending;
+  return compareNamedValues(command);
+}
+
+CommandRunner::Failure CommandRunner::awaitValue(
+    const Command &command, Deadline deadline)
+{
+  if (const auto pending = drainEvents())
+    return pending;
+  if (const auto invalid = comparisonError(command))
+    return invalid;
+  // Until the comparison holds, whatever order the messages that make it
+  // hold arrive in; a value not available yet (a shot the replica does not
+  // hold) is one that may come.
+  auto mismatch = compareNamedValues(command);
+  if (mismatch) {
+    if (const auto lost = notConnected())
+      return *mismatch + "; " + *lost;
+    const auto wait = pumpUntil(
+        [&] {
+          mismatch = compareNamedValues(command);
+          return !mismatch;
+        },
+        deadline);
+    if (wait == WaitEnd::TimedOut) {
+      return *mismatch + " after " + std::to_string(deadline.count()) + " ms";
+    }
+    if (wait != WaitEnd::Done) {
+      return waitFailure(wait,
+          command.args[0] + " " + command.args[1] + " " + command.args[2],
+          deadline);
+    }
+  }
+  // The snapshot that made it hold is not one a later await-snapshot waits
+  // for.
+  m_snapshots.markAt(m_session->snapshotsReceived());
+  return {};
+}
+
+CommandRunner::Failure CommandRunner::comparisonError(
+    const Command &command) const
+{
+  std::string error;
+  size_t prefix = 0;
+  if (!findNamedValue(command.args[0], prefix, error))
+    return error;
+  if (const auto unknown = unknownComparison(command.args[1]))
+    return unknown;
+  if (command.args[2].size() > 1 && command.args[2][0] == '@'
+      && !findNamedValue(command.args[2].substr(1), prefix, error))
+    return error;
+  return {};
+}
+
+CommandRunner::Failure CommandRunner::compareNamedValues(const Command &command)
+{
   std::string error;
   const auto lhs = namedValue(command.args[0], error);
   if (!lhs)

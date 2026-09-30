@@ -94,19 +94,18 @@ assert project.dirty == false
 dump-project
 
 # A sync op sent behind a queued import waits for the import: the shot it
-# creates binds the dataset the import produced. The create-shot reply is
-# awaited last: await-snapshot waits past the last reply or task awaited, and
-# the shot's snapshot is the one after its reply, not after the import's end.
+# creates binds the dataset the import produced. The import's snapshot and
+# the shot's race the waits, so the script awaits the shot count rather than
+# counting snapshots.
 no-wait import-static-dataset $dataRoot/triangle.obj Late OBJ
 no-wait create-shot Third
 assert replies.pending == 2
 await-reply
-await-task
 await-reply
-await-snapshot
+await-task
+await project.shots == 3
 assert tasks.completed == 4
 assert project.datasets == 2
-assert project.shots == 3
 assert shot.$lastShotId.name == Third
 assert shot.$lastShotId.binding.$lastDatasetId == true
 
@@ -122,14 +121,13 @@ assert replies.pending == 4
 await-reply
 await-reply
 await-reply
+await-reply
 await-task 5
 expect-fail await-task 6
-await-reply
-await-snapshot
+await project.shots == 4
 assert tasks.completed == 5
 assert tasks.failed == 1
 assert project.datasets == 3
-assert project.shots == 4
 assert shot.$lastShotId.name == Fourth
 assert shot.$lastShotId.binding.dataset_0003 == true
 assert project.activeShot == $lastShotId

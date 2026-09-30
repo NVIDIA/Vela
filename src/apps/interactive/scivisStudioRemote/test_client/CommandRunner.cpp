@@ -72,6 +72,11 @@ const std::vector<CommandRunner::CommandSpec> &CommandRunner::commands()
           "compare a named value (the assert values below); OP in"
           " == != < <= > >= contains; RHS a literal, or @NAME for another"
           " named value"},
+      {"await", "<value> <op> <rhs>", 3, 3, K::Session,
+          &CommandRunner::awaitValue,
+          "wait until an assert comparison holds, whatever order the"
+          " messages that make it hold arrive in; FAIL at the deadline with"
+          " the last mismatch"},
       {"await-frame", "[count]", 0, 1, K::Session,
           &CommandRunner::awaitFrame,
           "wait for COUNT (default 1) further frames"},

@@ -305,6 +305,13 @@ struct CommandRunner
   Failure dumpProject(const Command &);
   Failure dumpFrame(const Command &);
   Failure assertValue(const Command &);
+  Failure awaitValue(const Command &, Deadline);
+  // What no wait can change in an `await`: an unknown value name (either
+  // side) or operator.
+  Failure comparisonError(const Command &) const;
+  // Whether the comparison holds now: empty when it does, the mismatch or
+  // why a value is not available otherwise.
+  Failure compareNamedValues(const Command &);
 
   // The request commands with arguments of their own (RequestCommands.cpp);
   // the rest are request shapes bound in the table.
@@ -386,6 +393,10 @@ struct CommandRunner
   std::optional<uint64_t> taskIdArgument(
       const std::vector<std::string> &args, std::string &error) const;
 
+  // The namedValues() row a name resolves through, with the length of the
+  // pattern's prefix in `prefix`; null with the reason when there is none.
+  static const ValueSpec *findNamedValue(
+      const std::string &name, size_t &prefix, std::string &error);
   // The current text of a named value: its namedValues() row resolved;
   // empty with the reason when there is no row or the value is not available
   // yet.

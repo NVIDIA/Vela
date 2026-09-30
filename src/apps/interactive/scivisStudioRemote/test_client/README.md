@@ -107,6 +107,7 @@ anything reaches the wire.
 |---------|------|------|
 | `add-light <lightRigId> [subtype]` | request | sync; adds a light to the rig (SUBTYPE defaults to directional); the reply carries lightNode=LAYER:NODE |
 | `assert <value> <op> <rhs>` | session | compare a named value (the assert values below); OP in == != < <= > >= contains; RHS a literal, or @NAME for another named value |
+| `await <value> <op> <rhs>` | session | wait until an assert comparison holds, whatever order the messages that make it hold arrive in; FAIL at the deadline with the last mismatch |
 | `await-frame [count]` | session | wait for COUNT (default 1) further frames |
 | `await-frame-advance [count]` | session | wait for COUNT (default 1) further frames whose header frame differs from the previous frame's |
 | `await-frame-at <frame>` | session | wait for a Frame whose header says frame == FRAME; the headers meanwhile print as they come |
@@ -297,8 +298,17 @@ awaited: the reply to the last request command, the end of the last
 `await-task`, or the previous `await-snapshot`. Each `await-snapshot`
 consumes one snapshot, so two that land together (a `set-playing`'s and the
 auto-stop's) are awaited one at a time. A snapshot that arrived before the
-mark belongs to something earlier, so await a task that sends none (a
-cancelled one) before the one whose snapshot is wanted.
+mark belongs to something earlier, so await last the reply or task whose
+snapshot is wanted: a task that sends none (a cancelled one), or one that
+ended before a queued sync op's reply, goes first.
+
+`await VALUE OP RHS` waits until an `assert` comparison holds instead of
+counting snapshots, so it suits ops whose messages race (a sync op queued
+behind a task, a cancel): `await project.shots == 3`. An unknown value or
+operator FAILs at once; a value not available yet (a shot the replica does
+not hold) is waited for; at the deadline the FAIL is the last mismatch. It
+checks only where the replica ends up, not each snapshot on the way, and
+the next `await-snapshot` waits past the snapshots it saw.
 
 A refused request FAILs the command with the server's reason; written as an
 expectation, the reason is still there to check:

@@ -561,8 +561,8 @@ const std::vector<CommandRunner::ValueSpec> &CommandRunner::namedValues()
 
 // Looking a name up //////////////////////////////////////////////////////////
 
-std::optional<std::string> CommandRunner::namedValue(
-    const std::string &name, std::string &error)
+const CommandRunner::ValueSpec *CommandRunner::findNamedValue(
+    const std::string &name, size_t &prefix, std::string &error)
 {
   // An exact row wins; otherwise the pattern row with the longest prefix
   // (the text before its first `<`) that opens the name.
@@ -590,9 +590,20 @@ std::optional<std::string> CommandRunner::namedValue(
     for (const auto &spec : namedValues())
       names.emplace_back(spec.name);
     error = "unknown value '" + name + "'; valid: " + join(names, ", ");
-    return {};
+    return nullptr;
   }
-  return match->resolve(*this, name, name.substr(matchedPrefix), error);
+  prefix = matchedPrefix;
+  return match;
+}
+
+std::optional<std::string> CommandRunner::namedValue(
+    const std::string &name, std::string &error)
+{
+  size_t prefix = 0;
+  const auto *spec = findNamedValue(name, prefix, error);
+  if (!spec)
+    return {};
+  return spec->resolve(*this, name, name.substr(prefix), error);
 }
 
 } // namespace vsr::scivis_studio::test_client

@@ -54,6 +54,49 @@ SCENARIO("the test client drives project ops against a fake server",
       }
     }
 
+    WHEN("a script awaits a value instead of a snapshot")
+    {
+      server.snapshotDelay = 150ms;
+      const auto result = runScript(session,
+          "connect " + endpoint + "\n"
+          // The reply is in; the snapshot that adds the shot is 150 ms off.
+          "create-shot A\n"
+          "await project.shots == 2\n"
+          "assert project.activeShot == $lastShotId\n"
+          // A value that holds already ends the wait at once.
+          "await shot.$lastShotId.name == A\n"
+          // The snapshot the await saw is not one await-snapshot waits for.
+          "await-snapshot timeout=300\n"
+          "await nosuch == 1\n"
+          "await project.shots ~ 2\n"
+          "await project.shots == @nosuch\n"
+          "await project.shots == 9 timeout=100\n"
+          "await shot.shot_0009.name == X timeout=100\n"
+          "disconnect\n",
+          keepGoing());
+
+      THEN("the wait ends when the value holds, and FAILs name why it did not")
+      {
+        REQUIRE(hasLine(result.records, "OK await project.shots == 2"));
+        REQUIRE(hasLine(
+            result.records, "OK assert project.activeShot == $lastShotId"));
+        REQUIRE(hasLine(result.records, "OK await shot.$lastShotId.name == A"));
+        const auto fails = failLines(result.records);
+        REQUIRE(fails.size() == 6);
+        REQUIRE(fails[0] == "FAIL await-snapshot timeout=300: no ProjectSnapshot"
+                            " within 300 ms");
+        REQUIRE(fails[1].find("FAIL await nosuch == 1: unknown value 'nosuch'")
+            == 0);
+        REQUIRE(fails[2].find("unknown operator '~'") != std::string::npos);
+        REQUIRE(fails[3].find("unknown value 'nosuch'") != std::string::npos);
+        REQUIRE(fails[4] == "FAIL await project.shots == 9 timeout=100:"
+                            " project.shots is \"2\", not == \"9\" after 100 ms");
+        REQUIRE(fails[5].find("shot_0009") != std::string::npos);
+        REQUIRE(fails[5].find("after 100 ms") != std::string::npos);
+        REQUIRE(hasLine(result.records, "OK disconnect"));
+      }
+    }
+
     WHEN("a script runs the request, task, browse and wait commands")
     {
       const std::string script =
