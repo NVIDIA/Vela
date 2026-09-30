@@ -58,9 +58,8 @@ void AutoExposurePass::render(ImageBuffers &b, int stageId)
   if (totalPixels == 0 || !b.hdrColor)
     return;
 
-  // Mean log-luminance via the same API on either backend, both exact
-  // full-image reductions: the CUDA path via an SPD downsampler, the host
-  // path via a parallel full-image reduce.
+  // Mean log-luminance: exact on CUDA (SPD downsampler), a per-frame
+  // re-jittered stratified estimate on the host.
   std::optional<float> meanLogLum;
 #ifdef VSR_ALGORITHMS_HAS_CUDA
   if (b.stream) {
@@ -71,8 +70,8 @@ void AutoExposurePass::render(ImageBuffers &b, int stageId)
   } else
 #endif
   {
-    meanLogLum =
-        vsr::algorithms::cpu::meanLogLuminance(b.hdrColor, size.x, size.y);
+    meanLogLum = vsr::algorithms::cpu::meanLogLuminance(
+        b.hdrColor, size.x, size.y, m_frameIndex++);
   }
 
   // A failed reduction carries no exposure information, so hold the last
