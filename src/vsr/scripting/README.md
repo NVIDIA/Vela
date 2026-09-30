@@ -81,8 +81,10 @@ ri:populate() -- bootstrap the scene-owned live render index
 local cam = vsr.CameraSetup.new()
 cam.position, cam.direction, cam.up = vsr.float3(0, 0, 5), vsr.float3(0, 0, -1), vsr.float3(0, 1, 0)
 cam.fovy, cam.aspect = 45.0, 16/9
-local pl = vsr.render.createPipeline(1920, 1080, device, ri, cam)
-vsr.render.renderToFile(pl, 128, "output.png", 1920, 1080)
+local renderer = vsr.render.createRenderer(1920, 1080, device, ri, cam)
+renderer:renderToFile(128, "output.png")
+local hit = renderer:pick(960, 540) -- nil on a miss; (0, 0) is top-left
+if hit then print(hit.objectType, hit.objectIndex, hit.position) end
 ```
 
 ### Example Scripts

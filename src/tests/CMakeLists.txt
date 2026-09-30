@@ -63,6 +63,11 @@ endif()
 if (TARGET vsr_network)
   target_sources(${PROJECT_NAME} PRIVATE test_NetworkChannel.cpp)
 endif()
+if (TARGET vsr_lua)
+  target_sources(${PROJECT_NAME} PRIVATE test_LuaRenderer.cpp)
+  target_link_libraries(${PROJECT_NAME} PRIVATE vsr_lua)
+  add_test(NAME vsr::LuaRenderer COMMAND ${PROJECT_NAME} "[LuaRenderer]")
+endif()
 if (TARGET vsr_scivis_studio_client_core)
   target_sources(${PROJECT_NAME} PRIVATE
     test_StudioClientConnection.cpp

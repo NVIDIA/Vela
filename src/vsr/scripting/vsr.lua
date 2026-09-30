@@ -736,24 +736,32 @@ function RenderIndex:world() end
 ---@return any
 function RenderIndex:device() end
 
----@class vsr.ImagePipeline
-local ImagePipeline = {}
+---@class vsr.PickHit
+---@field depth number            # distance along the pixel's ray; math.huge if none
+---@field objectType? "surface"|"volume"
+---@field objectIndex? integer    # index of the surface or volume in the scene
+---@field instanceId? integer
+---@field primitiveId? integer
+---@field position? vsr.float3    # world-space hit point, when depth is finite
 
----@overload fun(): vsr.ImagePipeline
----@overload fun(width: integer, height: integer): vsr.ImagePipeline
----@return vsr.ImagePipeline
-function ImagePipeline.new(...) end
+--- An ANARI renderer for one image size, created by vsr.render.createRenderer.
+---@class vsr.Renderer
+local Renderer = {}
 
----@param width integer
----@param height integer
-function ImagePipeline:setDimensions(width, height) end
+--- Render `samples` accumulated frames and save the image.
+--- Supported formats: png, jpg/jpeg, bmp, tga, ppm.
+--- Throws if `samples < 1`, the extension is unsupported or the write fails.
+---@param samples integer
+---@param filename string
+function Renderer:renderToFile(samples, filename) end
 
-function ImagePipeline:render() end
-
----@return boolean
-function ImagePipeline:empty() end
-
-function ImagePipeline:clear() end
+--- What lies under pixel (x, y), with (0, 0) the top-left pixel of the saved
+--- image. Renders one synchronous frame. Returns nil on a miss.
+--- Throws if the pixel is outside the image.
+---@param x integer
+---@param y integer
+---@return vsr.PickHit?
+function Renderer:pick(x, y) end
 
 ------------------------------------------------------------------------
 -- Module-level table (injected as a global by the C++ runtime)
@@ -1177,7 +1185,8 @@ function vsr.render.createRenderIndex(scene, device) end
 ---@return {min: vsr.float3, max: vsr.float3}
 function vsr.render.getWorldBounds(device, index) end
 
---- Create a render pipeline with a scene render pass.
+--- Create a renderer for `width` x `height` images of the render index's
+--- world, seen through `camera`.
 --- Throws if width/height are <= 0, or if `device`/`index` are nil/invalid.
 ---@param width integer
 ---@param height integer
@@ -1188,19 +1197,8 @@ function vsr.render.getWorldBounds(device, index) end
 --- Special key "renderer" selects subtype (default: "default").
 --- Supports vector values for params like background (float4), ambientColor (float3).
 ---@param rendererParams? table<string, boolean|number|string|vsr.float2|vsr.float3|vsr.float4|vsr.mat4|number[]>
----@return vsr.ImagePipeline
-function vsr.render.createPipeline(width, height, device, index, camera, rendererParams) end
-
---- Render multiple samples and save to an image file.
---- Supported formats: png, jpg/jpeg, bmp, tga, ppm.
---- Throws if `pipeline` is nil, `samples < 1`, or width/height are <= 0.
---- The pipeline dimensions are set to `(width, height)` before rendering.
----@param pipeline vsr.ImagePipeline
----@param samples integer
----@param filename string
----@param width integer
----@param height integer
-function vsr.render.renderToFile(pipeline, samples, filename, width, height) end
+---@return vsr.Renderer
+function vsr.render.createRenderer(width, height, device, index, camera, rendererParams) end
 
 ------------------------------------------------------------------------
 -- Global variable: the pre-bound scene instance

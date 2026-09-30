@@ -122,8 +122,8 @@ camera.up = vsr.float3(0, 1, 0)
 camera.fovy = 40.0
 camera.aspect = width / height
 
-print("Creating render pipeline...")
-local pipeline = vsr.render.createPipeline(
+print("Creating renderer...")
+local renderer = vsr.render.createRenderer(
     width, height, device, renderIndex, camera,
     { denoise = denoise }
 )
@@ -134,10 +134,10 @@ for frame = 0, numFrames - 1 do
     local angle = vsr.radians(frame * 360.0 / numFrames)
     local rot = vsr.rotation(vsr.float3(0, 1, 0), angle)
     rootXfm:setAsTransform(rot)
-    scene:signalLayerChange(layer)
+    scene:signalLayerTransformChanged(layer)
 
     local filename = string.format("%s_%04d.png", outPrefix, frame)
-    vsr.render.renderToFile(pipeline, samples, filename, width, height)
+    renderer:renderToFile(samples, filename)
     print(string.format("  frame %d/%d  angle=%6.1f°  -> %s",
         frame + 1, numFrames, math.deg(angle), filename))
 end
