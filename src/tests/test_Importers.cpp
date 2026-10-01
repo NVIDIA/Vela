@@ -10,8 +10,10 @@
 #include "vsr/io/importers.hpp"
 #include "vsr/io/importers/detail/importer_common.hpp"
 #include "vsr/scene/Scene.hpp"
+#include "vsr/scene/objects/Array.hpp"
 // std
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <system_error>
@@ -114,6 +116,42 @@ SCENARIO("A volume imports under a name relative to the working directory",
   }
 
   std::filesystem::remove(directory / name);
+}
+
+SCENARIO("A signed integer RAW name keeps a signed voxel type", "[Importers]")
+{
+  // The filename token is the voxel type. uint16 is an unsigned normalized
+  // width. int16 is the signed width, which is ANARI_FIXED16. Both used to
+  // land on ANARI_UFIXED16.
+  const auto directory = std::filesystem::temp_directory_path();
+  vsr::scene::Scene scene;
+
+  auto fieldType = [&](const char *name, const void *bytes, size_t numBytes) {
+    {
+      std::ofstream file(directory / name, std::ios::binary);
+      file.write(static_cast<const char *>(bytes), numBytes);
+    }
+    const auto previous = std::filesystem::current_path();
+    std::filesystem::current_path(directory);
+    auto field = vsr::io::import_spatial_field(scene, name);
+    std::filesystem::current_path(previous);
+    std::filesystem::remove(directory / name);
+    REQUIRE(field);
+    auto *data = field->parameterValueAsObject<vsr::scene::Array>("data");
+    REQUIRE(data != nullptr);
+    return data->elementType();
+  };
+
+  const int16_t signedVoxel = -1;
+  const uint16_t unsignedVoxel = 1;
+  const float floatVoxel = 1.f;
+
+  REQUIRE(fieldType("vsr_test_1x1x1_int16.raw", &signedVoxel, sizeof(signedVoxel))
+      == ANARI_FIXED16);
+  REQUIRE(fieldType("vsr_test_1x1x1_uint16.raw", &unsignedVoxel, sizeof(unsignedVoxel))
+      == ANARI_UFIXED16);
+  REQUIRE(fieldType("vsr_test_1x1x1_float32.raw", &floatVoxel, sizeof(floatVoxel))
+      == ANARI_FLOAT32);
 }
 
 SCENARIO(
