@@ -25,6 +25,20 @@ namespace vsr_viewer {
 using VSRApplication = vsr::ui::imgui::Application;
 namespace vsr_ui = vsr::ui::imgui;
 
+// Whether --secondaryView was given decides if this viewport is shown, so the
+// UI State restores its other settings but not its visibility.
+struct SecondaryViewport : public vsr_ui::Viewport
+{
+  using vsr_ui::Viewport::Viewport;
+
+  void loadSettings(vsr::core::DataNode &thisWindowRoot) override
+  {
+    const bool visible = m_visible;
+    vsr_ui::Viewport::loadSettings(thisWindowRoot);
+    m_visible = visible;
+  }
+};
+
 class Application : public VSRApplication
 {
  public:
@@ -94,7 +108,7 @@ class Application : public VSRApplication
     auto *viewport =
         new vsr_ui::Viewport(this, &ctx->view.manipulator, "Viewport");
     auto *viewport2 =
-        new vsr_ui::Viewport(this, &ctx->view.manipulator, "Secondary View");
+        new SecondaryViewport(this, &ctx->view.manipulator, "Secondary View");
     auto *animations = new vsr_ui::Animations(this);
     auto *timeline = new vsr_ui::Timeline(this);
     auto *cameras = new vsr_ui::CameraPoses(this);
