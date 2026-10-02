@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // catch
+#include "TestDirectories.h"
 #include "catch.hpp"
 // vsr
 #include "vsr/animation/AnimationManager.hpp"
@@ -118,40 +119,64 @@ SCENARIO("A volume imports under a name relative to the working directory",
   std::filesystem::remove(directory / name);
 }
 
-SCENARIO("A signed integer RAW name keeps a signed voxel type", "[Importers]")
+namespace {
+
+template <typename T>
+void requireSingleVoxelImport(vsr::scene::Scene &scene,
+    const std::filesystem::path &file,
+    T voxel,
+    anari::DataType expectedType)
 {
-  // The filename token is the voxel type. uint16 is an unsigned normalized
-  // width. int16 is the signed width, which is ANARI_FIXED16. Both used to
-  // land on ANARI_UFIXED16.
-  const auto directory = std::filesystem::temp_directory_path();
+  std::ofstream(file, std::ios::binary)
+      .write(reinterpret_cast<const char *>(&voxel), sizeof(voxel));
+
+  auto field = vsr::io::import_spatial_field(scene, file.string().c_str());
+  REQUIRE(field);
+  const auto *data = field->parameterValueAsObject<vsr::scene::Array>("data");
+  REQUIRE(data != nullptr);
+  REQUIRE(data->elementType() == expectedType);
+  REQUIRE(*data->dataAs<T>() == voxel);
+}
+
+} // namespace
+
+SCENARIO("A RAW volume takes its voxel type from its name", "[Importers]")
+{
+  // Read as unsigned, an int16 -1 is 0xFFFF: the top of the range instead of
+  // just below zero.
+  ScopedFixtureDirectory scratch("vsr_importers_raw_");
   vsr::scene::Scene scene;
 
-  auto fieldType = [&](const char *name, const void *bytes, size_t numBytes) {
+  GIVEN("A signed integer token")
+  {
+    THEN("The voxels are signed fixed point and keep their sign")
     {
-      std::ofstream file(directory / name, std::ios::binary);
-      file.write(static_cast<const char *>(bytes), numBytes);
+      requireSingleVoxelImport<int8_t>(
+          scene, scratch.path / "v_1x1x1_int8.raw", -1, ANARI_FIXED8);
+      requireSingleVoxelImport<int16_t>(
+          scene, scratch.path / "v_1x1x1_int16.raw", -1, ANARI_FIXED16);
     }
-    const auto previous = std::filesystem::current_path();
-    std::filesystem::current_path(directory);
-    auto field = vsr::io::import_spatial_field(scene, name);
-    std::filesystem::current_path(previous);
-    std::filesystem::remove(directory / name);
-    REQUIRE(field);
-    auto *data = field->parameterValueAsObject<vsr::scene::Array>("data");
-    REQUIRE(data != nullptr);
-    return data->elementType();
-  };
+  }
 
-  const int16_t signedVoxel = -1;
-  const uint16_t unsignedVoxel = 1;
-  const float floatVoxel = 1.f;
+  GIVEN("An unsigned integer token")
+  {
+    THEN("The voxels are unsigned fixed point")
+    {
+      requireSingleVoxelImport<uint8_t>(
+          scene, scratch.path / "v_1x1x1_uint8.raw", 255, ANARI_UFIXED8);
+      requireSingleVoxelImport<uint16_t>(
+          scene, scratch.path / "v_1x1x1_uint16.raw", 65535, ANARI_UFIXED16);
+    }
+  }
 
-  REQUIRE(fieldType("vsr_test_1x1x1_int16.raw", &signedVoxel, sizeof(signedVoxel))
-      == ANARI_FIXED16);
-  REQUIRE(fieldType("vsr_test_1x1x1_uint16.raw", &unsignedVoxel, sizeof(unsignedVoxel))
-      == ANARI_UFIXED16);
-  REQUIRE(fieldType("vsr_test_1x1x1_float32.raw", &floatVoxel, sizeof(floatVoxel))
-      == ANARI_FLOAT32);
+  GIVEN("A float token")
+  {
+    THEN("The voxels are floats")
+    {
+      requireSingleVoxelImport<float>(
+          scene, scratch.path / "v_1x1x1_float32.raw", -1.5f, ANARI_FLOAT32);
+    }
+  }
 }
 
 SCENARIO(
