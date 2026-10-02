@@ -179,6 +179,27 @@ SCENARIO("A RAW volume takes its voxel type from its name", "[Importers]")
   }
 }
 
+SCENARIO("An MHD volume of MET_SHORT voxels keeps their sign", "[Importers]")
+{
+  ScopedFixtureDirectory scratch("vsr_importers_mhd_");
+  vsr::scene::Scene scene;
+
+  const int16_t voxel = -1;
+  std::ofstream(scratch.path / "v.raw", std::ios::binary)
+      .write(reinterpret_cast<const char *>(&voxel), sizeof(voxel));
+  std::ofstream(scratch.path / "v.mhd") << "DimSize = 1 1 1\n"
+                                           "ElementType = MET_SHORT\n"
+                                           "ElementDataFile = v.raw\n";
+
+  auto field = vsr::io::import_spatial_field(
+      scene, (scratch.path / "v.mhd").string().c_str());
+  REQUIRE(field);
+  const auto *data = field->parameterValueAsObject<vsr::scene::Array>("data");
+  REQUIRE(data != nullptr);
+  REQUIRE(data->elementType() == ANARI_FIXED16);
+  REQUIRE(*data->dataAs<int16_t>() == voxel);
+}
+
 SCENARIO(
     "Volume transfer functions reject missing control points", "[Importers]")
 {
