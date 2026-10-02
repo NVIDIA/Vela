@@ -63,7 +63,7 @@ MHDHeader readMHDHeader(const string &filename)
         if (value == "MET_UCHAR") {
           header.elementType = ANARI_UFIXED8;
         } else if (value == "MET_SHORT") {
-          header.elementType = ANARI_UFIXED16;
+          header.elementType = ANARI_FIXED16;
         } else if (value == "MET_FLOAT") {
           header.elementType = ANARI_FLOAT32;
         }

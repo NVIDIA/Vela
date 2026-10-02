@@ -28,11 +28,11 @@ SpatialFieldRef import_RAW(Scene &scene, const char *filepath)
       int bits = 0;
       if (sscanf(str.c_str(), "int%i", &bits) == 1) {
         if (bits == 8)
-          type = ANARI_UFIXED8;
+          type = ANARI_FIXED8;
         else if (bits == 16)
-          type = ANARI_UFIXED16;
+          type = ANARI_FIXED16;
         else if (bits == 32)
-          type = ANARI_UFIXED32;
+          type = ANARI_FIXED32;
       }
 
       if (sscanf(str.c_str(), "uint%i", &bits) == 1) {
