@@ -491,7 +491,7 @@ inline DataNode &DataNode::operator=(const DataNode &o)
   if (selfRef) {
     for (size_t i = 0; i < o.numChildren(); ++i) {
       if (auto *child = o.child(i))
-        append(child->name()) = *child;
+        append(child->m_data.anonymous ? "" : child->name()) = *child;
     }
   }
 

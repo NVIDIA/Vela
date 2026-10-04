@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+#include "TestDirectories.h"
 // catch
 #include "catch.hpp"
 // vsr
@@ -479,6 +480,90 @@ SCENARIO(
   REQUIRE(animation.name() == "legacy animation");
   REQUIRE(animation.objectParameterBindings().front().target()
       == target.vsr.scene.getObject<vsr::scene::Geometry>(0).data());
+}
+
+TEST_CASE(
+    "Animated legacy dumps round-trip directly in both encodings", "[App]")
+{
+  vsr::app::Context source;
+  auto geometry = source.vsr.scene.createObject<vsr::scene::Geometry>("sphere");
+  geometry->setName("legacy geometry");
+  auto camera = source.vsr.scene.defaultCamera();
+  camera->setName("legacy camera");
+  const float times[] = {0.f, 1.f};
+  const float radii[] = {1.f, 2.f};
+  const float fovys[] = {0.5f, 1.f};
+  source.vsr.animationMgr.addAnimation("geometry animation")
+      .addObjectParameterBinding(
+          geometry.data(), "radius", ANARI_FLOAT32, radii, times, 2);
+  source.vsr.animationMgr.addAnimation("camera animation")
+      .addObjectParameterBinding(
+          camera.data(), "fovy", ANARI_FLOAT32, fovys, times, 2);
+  source.vsr.animationMgr.setAnimationTotalFrames(41);
+  source.vsr.animationMgr.setAnimationFPS(24.f);
+  source.vsr.animationMgr.setAnimationTime(0.25f);
+
+  for (bool wrapped : {false, true}) {
+    for (auto encoding :
+        {vsr::core::Encoding::Binary, vsr::core::Encoding::Text}) {
+      DYNAMIC_SECTION("context wrapper: "
+          << wrapped << ", text: " << (encoding == vsr::core::Encoding::Text))
+      {
+        vsr::core::DataTree tree;
+        auto &payload = wrapped ? tree.root()["context"] : tree.root();
+        vsr::app::detail::serializeLegacyApplicationContext(source, payload);
+        REQUIRE(payload["animations"]["objects"].numChildren() == 2);
+        const auto text = tree.toText();
+        ScopedFixtureDirectory directory("vsr_legacy_dump_");
+        const auto file = (directory.path / "dump.vsr").string();
+        REQUIRE(tree.save(file.c_str(), encoding));
+        vsr::core::DataTree loaded;
+        REQUIRE(loaded.load(file.c_str()));
+        REQUIRE(loaded.toText() == text);
+
+        vsr::app::Context target;
+        target.vsr.animationMgr.addAnimation("discarded animation");
+        REQUIRE(vsr::app::deserialize_ApplicationDump(target, loaded.root()));
+        REQUIRE(target.vsr.scene.numberOfObjects(ANARI_GEOMETRY) == 1);
+        REQUIRE(target.vsr.scene.numberOfObjects(ANARI_CAMERA) == 1);
+        auto loadedGeometry =
+            target.vsr.scene.getObject<vsr::scene::Geometry>(0);
+        auto loadedCamera = target.vsr.scene.getObject<vsr::scene::Camera>(0);
+        REQUIRE(loadedGeometry->name() == "legacy geometry");
+        REQUIRE(loadedCamera->name() == "legacy camera");
+        REQUIRE(loadedGeometry->subtype().str() == "sphere");
+        REQUIRE(loadedCamera->subtype().str() == "perspective");
+        const auto &animations = target.vsr.animationMgr.animations();
+        REQUIRE(animations.size() == 2);
+        REQUIRE(animations[0].name() == "geometry animation");
+        REQUIRE(animations[1].name() == "camera animation");
+        REQUIRE(animations[0].objectParameterBindings().size() == 1);
+        REQUIRE(animations[1].objectParameterBindings().size() == 1);
+        const auto &geometryBinding =
+            animations[0].objectParameterBindings()[0];
+        const auto &cameraBinding = animations[1].objectParameterBindings()[0];
+        REQUIRE(geometryBinding.target() == loadedGeometry.data());
+        REQUIRE(cameraBinding.target() == loadedCamera.data());
+        REQUIRE(geometryBinding.paramName().str() == "radius");
+        REQUIRE(cameraBinding.paramName().str() == "fovy");
+        REQUIRE(geometryBinding.type() == ANARI_FLOAT32);
+        REQUIRE(cameraBinding.type() == ANARI_FLOAT32);
+        REQUIRE(geometryBinding.timeBase() == std::vector<float>{0.f, 1.f});
+        REQUIRE(cameraBinding.timeBase() == std::vector<float>{0.f, 1.f});
+        REQUIRE(target.vsr.animationMgr.getAnimationTotalFrames() == 41);
+        REQUIRE(target.vsr.animationMgr.getAnimationFPS() == 24.f);
+        REQUIRE(target.vsr.animationMgr.getAnimationTime() == 0.25f);
+        REQUIRE_FALSE(target.vsr.animationMgr.isPlaying());
+        for (float time : {0.f, 0.5f, 1.f}) {
+          target.vsr.animationMgr.setAnimationTime(time);
+          REQUIRE(loadedGeometry->parameterValueAs<float>("radius")
+              == Approx(1.f + time));
+          REQUIRE(loadedCamera->parameterValueAs<float>("fovy")
+              == Approx(0.5f + 0.5f * time));
+        }
+      }
+    }
+  }
 }
 
 SCENARIO(
