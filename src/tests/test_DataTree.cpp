@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+#include "TestDirectories.h"
 // catch
 #include "catch.hpp"
 // vsr
@@ -2068,6 +2069,74 @@ SCENARIO("Every malformed Text Encoding input is a hard error", "[DataTree]")
     REQUIRE(recorder.namesLineAndColumn());
     INFO(recorder.warnings[0]);
     REQUIRE(recorder.warnings[0].find(c.messageFragment) != std::string::npos);
+  }
+}
+
+TEST_CASE("Subtree assignment preserves anonymous descendants", "[DataTree]")
+{
+  vsr::core::DataTree source;
+  auto &subtree = source.root()["source"];
+  subtree.append() = 10;
+  auto &named = subtree.append("items");
+  named.append() = std::string("first");
+  named.append().append() = 2.5f;
+  named.append("samples").setValueAsArray(std::vector<int>{3, 4});
+  subtree.append("reference").setValueObject(ANARI_GEOMETRY, 7);
+  const auto sourceText = subtree.toText();
+
+  for (bool anonymousDestination : {false, true}) {
+    DYNAMIC_SECTION("anonymous destination: " << anonymousDestination)
+    {
+      vsr::core::DataTree destination;
+      auto &copy = anonymousDestination ? destination.root().append()
+                                        : destination.root()["copy"];
+      const auto name = copy.name();
+      const auto path = copy.path();
+      copy["discarded"] = true;
+      copy = subtree;
+
+      ScopedFixtureDirectory directory("vsr_subtree_copy_");
+      const auto file = (directory.path / "copied.vsr").string();
+      REQUIRE(copy.save(file.c_str(), vsr::core::Encoding::Text));
+      vsr::core::DataTree loaded;
+      REQUIRE(loaded.load(file.c_str()));
+
+      REQUIRE(copy.name() == name);
+      REQUIRE(copy.path() == path);
+      REQUIRE(copy.toText() == sourceText);
+      REQUIRE(subtree.toText() == sourceText);
+      REQUIRE(loaded.toText() == sourceText);
+      REQUIRE(copy.child(0)->path() == path.child(size_t(0)));
+      REQUIRE(copy["items"].child(1)->child(0)->path()
+          == path.child("items").child(size_t(1)).child(size_t(0)));
+      REQUIRE(copy.child("discarded") == nullptr);
+
+      auto &root = loaded.root();
+      REQUIRE(root.numChildren() == 3);
+      REQUIRE(root.child(0)->path().str() == "/[0]");
+      REQUIRE(root.child(0)->getValue().type() == ANARI_INT32);
+      REQUIRE(root.child(0)->getValueAs<int>() == 10);
+      REQUIRE(root.child(1)->name() == "items");
+      REQUIRE(root["items"].numChildren() == 3);
+      REQUIRE(root["items"].child(0)->getValueAs<std::string>() == "first");
+      auto *nested = root["items"].child(1)->child(0);
+      REQUIRE(nested->path().str() == "/items/[1]/[0]");
+      REQUIRE(nested->getValue().type() == ANARI_FLOAT32);
+      REQUIRE(nested->getValueAs<float>() == 2.5f);
+      const int *samples = nullptr;
+      size_t size = 0;
+      root["items"]["samples"].getValueAsArray<int>(&samples, &size);
+      REQUIRE(size == 2);
+      REQUIRE(root["items"]["samples"].arrayType() == ANARI_INT32);
+      REQUIRE(samples[0] == 3);
+      REQUIRE(samples[1] == 4);
+      REQUIRE(root.child(2)->name() == "reference");
+      anari::DataType type = ANARI_UNKNOWN;
+      size_t index = 0;
+      root["reference"].getValueAsObjectIdx(&type, &index);
+      REQUIRE(type == ANARI_GEOMETRY);
+      REQUIRE(index == 7);
+    }
   }
 }
 
