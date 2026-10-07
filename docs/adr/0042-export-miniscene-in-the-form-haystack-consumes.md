@@ -55,9 +55,7 @@ no releases, so a commit is pinned through `anari_sdk_fetch_project`. Vela
 compiles only the core `Scene.cpp` and `Serialized.cpp` into
 `vela_ext_miniscene` instead of using miniScene's CMake. That CMake always
 builds the importers and tools, can write `CMAKE_BUILD_TYPE` and the output
-directories, and defines its own `stb_image` target. At the pinned commit,
-`SerializedScene` never collects `ANARIMaterial` textures, so `Scene::save()`
-drops all of them. The build compiles a copy of `Serialized.cpp` patched at
-configure time, and configure fails if a pin bump moves the patched code.
-Drop the patch once the fix is upstream. miniScene ships no LICENSE file;
+directories, and defines its own `stb_image` target. The pin must include
+upstream PR #5: before it, `SerializedScene` never collected `ANARIMaterial`
+textures, so `Scene::save()` dropped all of them. miniScene ships no LICENSE file;
 its sources carry Apache-2.0 headers.
