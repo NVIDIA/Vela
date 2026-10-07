@@ -27,6 +27,7 @@ PRIVATE
   animation/UsdGeometryFileBinding.cpp
   animation/UsdInstancerFileBinding.cpp
   exporters/NanoVdbSidecar.cpp
+  exporters/SceneToMiniScene.cpp
   exporters/SceneToUSD.cpp
   exporters/StructuredVolumeToNanoVDB.cpp
   images/ImageCache.cpp
@@ -49,6 +50,7 @@ PRIVATE
   importers/import_HDRI.cpp
   importers/import_HSMESH.cpp
   importers/import_MHD.cpp
+  importers/import_MINI.cpp
   importers/import_NBODY.cpp
   importers/import_NVDB.cpp
   importers/import_OBJ.cpp
@@ -160,6 +162,15 @@ if (VSR_USE_OIIO)
   project_link_libraries(PRIVATE OpenImageIO::OpenImageIO)
 else()
   project_compile_definitions(PUBLIC -DVSR_USE_OIIO=0)
+endif()
+
+# PUBLIC so the test target can read exported files back with miniScene
+# only where the exporter exists, the same widening VSR_USE_USD makes.
+if (VSR_USE_MINISCENE)
+  project_compile_definitions(PUBLIC -DVSR_USE_MINISCENE=1)
+  project_link_libraries(PRIVATE $<BUILD_INTERFACE:vela_ext_miniscene>)
+else()
+  project_compile_definitions(PUBLIC -DVSR_USE_MINISCENE=0)
 endif()
 
 if(VSR_USE_TORCH)

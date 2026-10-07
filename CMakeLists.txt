@@ -55,6 +55,8 @@ option(VSR_USE_ASSIMP "Support loading geometry with libassimp" OFF)
 option(VSR_USE_SDL3 "Use SDL3 interop in render pipeline" ON)
 option(VSR_USE_TBB "Use TBB code paths where relevant" ON)
 option(VSR_USE_USD "Use OpenUSD where relevant" OFF)
+option(VSR_USE_MINISCENE
+  "Support importing and exporting the miniScene (.mini) format" OFF)
 option(VSR_USE_TORCH "Use PyTorch for importing neural geometries" OFF)
 option(VSR_USE_VTK "Use VTK for importing VTK file formats" OFF)
 option(VSR_USE_SILO "Use Silo for importing Silo file formats" OFF)

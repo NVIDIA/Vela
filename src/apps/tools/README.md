@@ -119,6 +119,17 @@ Example:
 ./vsrOffline -gltf scene.glb -w 1920 -h 1080 -s 256 -o render.png
 ```
 
+With `--export-mini <file>` (builds with `VSR_USE_MINISCENE=ON`), `vsrOffline`
+loads the scene the same way but writes it to a miniScene `.mini` file instead
+of rendering; no ANARI device is loaded and the rendering, camera, and light
+options are ignored. See
+[ADR 0042](../../../docs/adr/0042-export-miniscene-in-the-form-haystack-consumes.md)
+for what the export keeps.
+
+```bash
+./vsrOffline -obj model.obj --export-mini model.mini
+```
+
 ## `vsrVolumeToNanoVDB`
 
 Converts a volume file to NanoVDB and supports handling undefined values,

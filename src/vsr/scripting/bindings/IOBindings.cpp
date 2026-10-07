@@ -5,6 +5,7 @@
 #include "vsr/core/ColorMapUtil.hpp"
 #include "vsr/io/archives/AnimationManagerArchive.hpp"
 #include "vsr/io/archives/SceneArchive.hpp"
+#include "vsr/io/exporters.hpp"
 #include "vsr/io/importers.hpp"
 #include "vsr/io/procedural.hpp"
 #include "vsr/scene/Scene.hpp"
@@ -346,6 +347,19 @@ void registerIOBindings(sol::state &lua)
         VSR_LUA_IMPORT_WRAP(vsr::io::import_HSMESH(s, anim, f.c_str(), loc), f);
       });
 
+  io["importMINI"] = sol::overload(
+      [](scene::Scene &s,
+          animation::AnimationManager &anim,
+          const std::string &f) {
+        VSR_LUA_IMPORT_WRAP(vsr::io::import_MINI(s, anim, f.c_str()), f);
+      },
+      [](scene::Scene &s,
+          animation::AnimationManager &anim,
+          const std::string &f,
+          scene::LayerNodeRef loc) {
+        VSR_LUA_IMPORT_WRAP(vsr::io::import_MINI(s, anim, f.c_str(), loc), f);
+      });
+
   io["importNBODY"] = sol::overload(
       [](scene::Scene &s,
           animation::AnimationManager &anim,
@@ -597,6 +611,12 @@ void registerIOBindings(sol::state &lua)
                                           const std::string &filename) {
     if (!vsr::io::load_AnimationManagerArchive(manager, filename.c_str()))
       throw std::runtime_error("Failed to load Animation Manager Archive");
+  };
+
+  // Exports
+  io["exportSceneToMiniScene"] = [](scene::Scene &s,
+                                     const std::string &filename) {
+    return vsr::io::export_SceneToMiniScene(s, filename.c_str());
   };
 }
 

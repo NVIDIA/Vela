@@ -73,6 +73,8 @@ void import_ENSIGHT(Scene &scene,
 void import_GLTF(Scene &scene, vsr::animation::AnimationManager &animMgr, const char *filename, LayerNodeRef location = {});
 void import_HDRI(Scene &scene, vsr::animation::AnimationManager &animMgr, const char *filename, LayerNodeRef location = {});
 void import_HSMESH(Scene &scene, vsr::animation::AnimationManager &animMgr, const char *filename, LayerNodeRef location = {});
+// Needs VSR_USE_MINISCENE; logs an error otherwise.
+void import_MINI(Scene &scene, vsr::animation::AnimationManager &animMgr, const char *filename, LayerNodeRef location = {});
 void import_NBODY(Scene &scene, vsr::animation::AnimationManager &animMgr, const char *filename, LayerNodeRef location = {}, bool useDefaultMaterial = false);
 void import_OBJ(Scene &scene, vsr::animation::AnimationManager &animMgr, const char *filename, LayerNodeRef location = {}, bool useDefaultMaterial = false);
 void import_PDB(Scene &scene, vsr::animation::AnimationManager &animMgr, const char *filename, LayerNodeRef location = {});
@@ -148,6 +150,7 @@ enum class ImporterType
   GLTF,
   HDRI,
   HSMESH,
+  MINI,
   NBODY,
   OBJ,
   PDB,
