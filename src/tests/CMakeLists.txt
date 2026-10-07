@@ -29,6 +29,7 @@ project_add_executable(
   test_Importers.cpp
   test_LayerSubtreeArchive.cpp
   test_Manipulator.cpp
+  test_NormalMapImport.cpp
   test_ObjectPool.cpp
   test_Material.cpp
   test_Math.cpp
@@ -46,6 +47,7 @@ project_add_executable(
   test_Token.cpp
   test_UserConfig.cpp
   test_WorldBoundsOverlay.cpp
+  test_UsdExport.cpp
   test_UsdImport.cpp
   test_UsdImport_animation.cpp
   test_UsdImport_geometry.cpp
@@ -170,6 +172,10 @@ add_test(NAME vsr::Manipulator   COMMAND ${PROJECT_NAME} "[Manipulator]"  )
 add_test(NAME vsr::ObjectPool    COMMAND ${PROJECT_NAME} "[ObjectPool]"   )
 add_test(NAME vsr::Material      COMMAND ${PROJECT_NAME} "[Material]"     )
 add_test(NAME vsr::Math          COMMAND ${PROJECT_NAME} "[Math]"         )
+add_test(NAME vsr::MiniSceneExport
+  COMMAND ${PROJECT_NAME} "[MiniSceneExport]")
+add_test(NAME vsr::MiniSceneImport
+  COMMAND ${PROJECT_NAME} "[MiniSceneImport]")
 add_test(NAME vsr::Object        COMMAND ${PROJECT_NAME} "[Object]"       )
 add_test(NAME vsr::ObjectArchive COMMAND ${PROJECT_NAME} "[ObjectArchive]")
 add_test(NAME vsr::ObjectUsePtr  COMMAND ${PROJECT_NAME} "[ObjectUsePtr]" )
@@ -184,6 +190,7 @@ add_test(NAME vsr::UserConfig    COMMAND ${PROJECT_NAME} "[UserConfig]"   )
 add_test(NAME vsr::WorldBoundsOverlay
   COMMAND ${PROJECT_NAME} "[WorldBoundsOverlay]")
 add_test(NAME vsr::UsdImport     COMMAND ${PROJECT_NAME} "[UsdImport]"    )
+add_test(NAME vsr::UsdExport     COMMAND ${PROJECT_NAME} "[UsdExport]"    )
 if (TARGET vsr_scivis_studio_model)
   add_test(NAME vsr::SciVisStudio COMMAND ${PROJECT_NAME} "[SciVisStudio]")
 endif()

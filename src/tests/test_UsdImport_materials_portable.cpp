@@ -444,4 +444,171 @@ def Points "Cloud"
   }
 }
 
+// UsdUVTexture computes `scale * texel + bias` and hands the connected input
+// one channel of it, or three. A sampler returns `outTransform * texel +
+// outOffset` and a scalar parameter reads its x, so both the remap and the
+// channel have to land in the sampler's output transform.
+SCENARIO("A UsdUVTexture's scale, bias and connected channel reach the sampler",
+    "[UsdImport]")
+{
+  GIVEN(
+      "A preview surface reading a decoded normal map, a packed metallic"
+      " channel and a remapped roughness")
+  {
+    TextureFixture normal("vsr_test_usd_scale_bias_normal.tga");
+    TextureFixture orm("vsr_test_usd_scale_bias_orm.tga");
+    TextureFixture rough("vsr_test_usd_scale_bias_rough.tga");
+    TextureFixture diffuse("vsr_test_usd_scale_bias_diffuse.tga");
+
+    ImportedStage stage("vsr_test_usd_scale_bias.usda",
+        R"(#usda 1.0
+
+def Xform "World"
+{
+    def Material "M"
+    {
+        token outputs:surface.connect = </World/M/PBR.outputs:surface>
+
+        def Shader "PBR"
+        {
+            uniform token info:id = "UsdPreviewSurface"
+            color3f inputs:diffuseColor.connect = </World/M/Diffuse.outputs:rgb>
+            normal3f inputs:normal.connect = </World/M/Normal.outputs:rgb>
+            float inputs:metallic.connect = </World/M/Orm.outputs:g>
+            float inputs:roughness.connect = </World/M/Rough.outputs:r>
+            token outputs:surface
+        }
+
+        def Shader "Diffuse"
+        {
+            uniform token info:id = "UsdUVTexture"
+            asset inputs:file = @vsr_test_usd_scale_bias_diffuse.tga@
+            float3 outputs:rgb
+        }
+
+        def Shader "Normal"
+        {
+            uniform token info:id = "UsdUVTexture"
+            asset inputs:file = @vsr_test_usd_scale_bias_normal.tga@
+            float4 inputs:scale = (2, 2, 2, 2)
+            float4 inputs:bias = (-1, -1, -1, -1)
+            float3 outputs:rgb
+        }
+
+        def Shader "Orm"
+        {
+            uniform token info:id = "UsdUVTexture"
+            asset inputs:file = @vsr_test_usd_scale_bias_orm.tga@
+            float outputs:g
+        }
+
+        def Shader "Rough"
+        {
+            uniform token info:id = "UsdUVTexture"
+            asset inputs:file = @vsr_test_usd_scale_bias_rough.tga@
+            float4 inputs:scale = (0.5, 1, 1, 1)
+            float4 inputs:bias = (0.25, 0, 0, 0)
+            float outputs:r
+        }
+    }
+
+    def Mesh "Quad" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+    )
+    {)" + std::string(QUAD_MESH_BODY)
+            + R"(
+        rel material:binding = </World/M>
+    }
+}
+)");
+
+    WHEN("The Stage is imported")
+    {
+      auto *material = boundMaterial(stage.scene);
+
+      THEN("The normal map is decoded by the authored scale and bias")
+      {
+        const auto normalOut = boundOutputTransform(*material, "normal");
+        REQUIRE(normalOut.transform
+            == vsr::math::mat4(
+                {2, 0, 0, 0}, {0, 2, 0, 0}, {0, 0, 2, 0}, {0, 0, 0, 2}));
+        REQUIRE(normalOut.offset == vsr::math::float4(-1, -1, -1, -1));
+      }
+
+      THEN("The metallic sampler returns the green channel")
+      {
+        const auto metallicOut = boundOutputTransform(*material, "metallic");
+        REQUIRE(metallicOut.transform
+            == vsr::math::mat4(
+                {0, 0, 0, 0}, {1, 1, 1, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}));
+        REQUIRE(metallicOut.offset == vsr::math::float4(0, 0, 0, 1));
+      }
+
+      THEN("The roughness sampler returns the remapped red channel")
+      {
+        const auto roughOut = boundOutputTransform(*material, "roughness");
+        REQUIRE(roughOut.transform
+            == vsr::math::mat4({0.5f, 0.5f, 0.5f, 0},
+                {0, 0, 0, 0},
+                {0, 0, 0, 0},
+                {0, 0, 0, 0}));
+        REQUIRE(roughOut.offset == vsr::math::float4(0.25f, 0.25f, 0.25f, 1));
+      }
+
+      THEN("A colour read as authored keeps the identity transform")
+      {
+        REQUIRE(boundOutputTransform(*material, "baseColor")
+            == vsr::io::OutputTransform{});
+      }
+    }
+  }
+}
+
+SCENARIO("An OmniPBR normal map is decoded for ANARI", "[UsdImport]")
+{
+  GIVEN(
+      "An OmniPBR material with a normal map, which carries no scale or bias"
+      " of its own")
+  {
+    TextureFixture normal("vsr_test_usd_omnipbr_normal.tga");
+
+    ImportedStage stage("vsr_test_usd_omnipbr_normal.usda",
+        R"(#usda 1.0
+
+def Xform "World"
+{
+    def Material "OmniPBR"
+    {
+        token outputs:mdl:surface.connect = </World/OmniPBR/Shader.outputs:out>
+        def Shader "Shader"
+        {
+            uniform token info:implementationSource = "sourceAsset"
+            uniform asset info:mdl:sourceAsset = @OmniPBR.mdl@
+            uniform token info:mdl:sourceAsset:subIdentifier = "OmniPBR"
+            asset inputs:normalmap_texture = @vsr_test_usd_omnipbr_normal.tga@
+            token outputs:out
+        }
+    }
+
+    def Mesh "Quad" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+    )
+    {)" + std::string(QUAD_MESH_BODY)
+            + R"(
+        rel material:binding = </World/OmniPBR>
+    }
+}
+)");
+
+    WHEN("The Stage is imported")
+    {
+      THEN("The sampler applies the ANARI normal decode")
+      {
+        REQUIRE(boundOutputTransform(*boundMaterial(stage.scene), "normal")
+            == vsr::io::normalMapDecode());
+      }
+    }
+  }
+}
+
 #endif // VSR_USE_USD

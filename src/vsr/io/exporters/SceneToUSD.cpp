@@ -8,6 +8,7 @@
 #include "vsr/animation/AnimationManager.hpp"
 #include "vsr/core/Logging.hpp"
 #include "vsr/io/exporters.hpp"
+#include "vsr/io/images/ImageCache.hpp"
 #include "vsr/scene/Scene.hpp"
 #include "vsr/scene/objects/Array.hpp"
 #include "vsr/scene/objects/Camera.hpp"
@@ -29,6 +30,7 @@
 // usd
 #include <pxr/base/gf/declare.h>
 #include <pxr/base/gf/matrix4d.h>
+#include <pxr/base/tf/stringUtils.h>
 #include <pxr/base/vt/array.h>
 #include <pxr/usd/sdf/path.h>
 #include <pxr/usd/sdf/types.h>
@@ -108,6 +110,15 @@ static std::string sanitizeSamplerName(const std::string &samplerName)
   usedTextureFileNames.insert(uniqueName);
 
   return uniqueName;
+}
+
+// The child of `parent` an object is written to. Object names are free text --
+// an imported USD prim keeps its whole path as its name -- so they are made
+// into valid prim names first.
+static pxr::SdfPath childPathFor(
+    const pxr::SdfPath &parent, const std::string &name)
+{
+  return parent.AppendChild(pxr::TfToken(pxr::TfMakeValidIdentifier(name)));
 }
 
 pxr::SdfPath allocateUniquePath(
@@ -224,7 +235,8 @@ static pxr::TfToken vsrSamplertoScalarOutputToken(const Sampler *sampler)
   assert(sampler);
   auto transform = sampler->parameterValueAs<math::mat4>("outTransform")
                        .value_or(math::IDENTITY_MAT4);
-  auto x = transform.row(0);
+  // The channel the sampler's x reads, whatever it scales it by.
+  auto x = abs(transform.row(0));
   switch (argmax(x)) {
   case 0:
     return pxr::TfToken("r");
@@ -239,11 +251,59 @@ static pxr::TfToken vsrSamplertoScalarOutputToken(const Sampler *sampler)
   }
 }
 
-// Helper function to create a texture shader and connect it to a material input
+// The UsdUVTexture `scale` and `bias` under which `outputs:<output>` returns
+// what the sampler does: a single channel reads the sampler's x, three read
+// its diagonal. A normal map's y is negated on top of that. The exported
+// texcoords keep VSR's `v`, which runs down the image, and only the lookup is
+// flipped back to USD's by a UsdTransform2d, so a tangent frame built from the
+// texcoords is mirrored in `v` against the one the sampler decodes for.
+static void writeTextureScaleAndBias(pxr::UsdShadeShader &textureShader,
+    const Sampler &sampler,
+    const pxr::TfToken &output,
+    bool normalMap)
+{
+  const auto out = outputTransformOf(sampler);
+  const auto &name = output.GetString();
+  const int channel = name == "r" ? 0
+      : name == "g"               ? 1
+      : name == "b"               ? 2
+      : name == "a"               ? 3
+                                  : -1;
+
+  math::float4 scale(1.f);
+  math::float4 bias(0.f);
+  if (channel >= 0) {
+    scale[channel] = out.transform[channel][0];
+    bias[channel] = out.offset.x;
+  } else {
+    for (int i = 0; i < 4; ++i)
+      scale[i] = out.transform[i][i];
+    bias = out.offset;
+  }
+  if (normalMap) {
+    scale.y = -scale.y;
+    bias.y = -bias.y;
+  }
+
+  if (scale != math::float4(1.f)) {
+    textureShader
+        .CreateInput(pxr::TfToken("scale"), pxr::SdfValueTypeNames->Float4)
+        .Set(pxr::GfVec4f(scale.x, scale.y, scale.z, scale.w));
+  }
+  if (bias != math::float4(0.f)) {
+    textureShader
+        .CreateInput(pxr::TfToken("bias"), pxr::SdfValueTypeNames->Float4)
+        .Set(pxr::GfVec4f(bias.x, bias.y, bias.z, bias.w));
+  }
+}
+
+// Helper function to create a texture shader whose `output` a material input
+// connects to
 static pxr::UsdShadeShader vsrSamplertoUSD(pxr::UsdStageRefPtr &stage,
     const pxr::SdfPath &materialPath,
     const std::string &inputName,
     const Sampler *sampler,
+    const pxr::TfToken &output,
     bool normalMap = false)
 {
   assert(sampler);
@@ -270,11 +330,7 @@ static pxr::UsdShadeShader vsrSamplertoUSD(pxr::UsdStageRefPtr &stage,
       .CreateInput(pxr::TfToken("wrapT"), pxr::SdfValueTypeNames->Token)
       .Set(pxr::TfToken("repeat"));
 
-  if (normalMap) {
-    textureShader
-        .CreateInput(pxr::TfToken("scale"), pxr::SdfValueTypeNames->Float4)
-        .Set(pxr::GfVec4f(1.0f, -1.0f, 1.0f, 1.0f));
-  }
+  writeTextureScaleAndBias(textureShader, *sampler, output, normalMap);
 
   // Create primvar reader for UV coordinates
   auto primvarName = inputName + "PrimvarReader";
@@ -322,8 +378,7 @@ static pxr::SdfPath vsrMaterialToPreviewSurfaceUSD(
     return it->second;
   }
 
-  pxr::SdfPath materialPath =
-      allMaterialsPath.AppendChild(pxr::TfToken(material->name().c_str()));
+  pxr::SdfPath materialPath = childPathFor(allMaterialsPath, material->name());
   materialPath = allocateUniquePath(stage, materialPath);
 
   auto usdMat = pxr::UsdShadeMaterial::Define(stage, materialPath);
@@ -346,8 +401,11 @@ static pxr::SdfPath vsrMaterialToPreviewSurfaceUSD(
 
     // Handle color input (texture or value)
     if (colorSampler) {
-      auto colorTextureShader =
-          vsrSamplertoUSD(stage, materialPath, "diffuseColor", colorSampler);
+      auto colorTextureShader = vsrSamplertoUSD(stage,
+          materialPath,
+          "diffuseColor",
+          colorSampler,
+          pxr::TfToken("rgb"));
       auto colorInput = previewShader.CreateInput(
           pxr::TfToken("diffuseColor"), pxr::SdfValueTypeNames->Color3f);
       colorInput.ConnectToSource(
@@ -364,11 +422,11 @@ static pxr::SdfPath vsrMaterialToPreviewSurfaceUSD(
 
     // Handle opacity input (texture or value)
     if (opacitySampler) {
-      auto opacityTextureShader =
-          vsrSamplertoUSD(stage, materialPath, "opacity", opacitySampler);
+      const auto opacityChannel = vsrSamplertoScalarOutputToken(opacitySampler);
+      auto opacityTextureShader = vsrSamplertoUSD(
+          stage, materialPath, "opacity", opacitySampler, opacityChannel);
       auto opacityInput = previewShader.CreateInput(
           pxr::TfToken("opacity"), pxr::SdfValueTypeNames->Float);
-      auto opacityChannel = vsrSamplertoScalarOutputToken(opacitySampler);
       opacityInput.ConnectToSource(
           opacityTextureShader.ConnectableAPI(), opacityChannel);
     } else {
@@ -421,8 +479,11 @@ static pxr::SdfPath vsrMaterialToPreviewSurfaceUSD(
 
     // Handle baseColor input (texture or value)
     if (baseColorSampler) {
-      auto colorTextureShader = vsrSamplertoUSD(
-          stage, materialPath, "diffuseColor", baseColorSampler);
+      auto colorTextureShader = vsrSamplertoUSD(stage,
+          materialPath,
+          "diffuseColor",
+          baseColorSampler,
+          pxr::TfToken("rgb"));
       auto colorInput = previewShader.CreateInput(
           pxr::TfToken("diffuseColor"), pxr::SdfValueTypeNames->Color3f);
       colorInput.ConnectToSource(
@@ -439,11 +500,11 @@ static pxr::SdfPath vsrMaterialToPreviewSurfaceUSD(
 
     // Handle opacity input (texture or value)
     if (opacitySampler) {
-      auto opacityTextureShader =
-          vsrSamplertoUSD(stage, materialPath, "opacity", opacitySampler);
+      const auto opacityChannel = vsrSamplertoScalarOutputToken(opacitySampler);
+      auto opacityTextureShader = vsrSamplertoUSD(
+          stage, materialPath, "opacity", opacitySampler, opacityChannel);
       auto opacityInput = previewShader.CreateInput(
           pxr::TfToken("opacity"), pxr::SdfValueTypeNames->Float);
-      auto opacityChannel = vsrSamplertoScalarOutputToken(opacitySampler);
       opacityInput.ConnectToSource(
           opacityTextureShader.ConnectableAPI(), opacityChannel);
     } else {
@@ -457,11 +518,12 @@ static pxr::SdfPath vsrMaterialToPreviewSurfaceUSD(
 
     // Handle metallic input (texture or value)
     if (metallicSampler) {
-      auto metallicTextureShader =
-          vsrSamplertoUSD(stage, materialPath, "metallic", metallicSampler);
+      const auto metallicChannel =
+          vsrSamplertoScalarOutputToken(metallicSampler);
+      auto metallicTextureShader = vsrSamplertoUSD(
+          stage, materialPath, "metallic", metallicSampler, metallicChannel);
       auto metallicInput = previewShader.CreateInput(
           pxr::TfToken("metallic"), pxr::SdfValueTypeNames->Float);
-      auto metallicChannel = vsrSamplertoScalarOutputToken(metallicSampler);
       metallicInput.ConnectToSource(
           metallicTextureShader.ConnectableAPI(), metallicChannel);
     } else {
@@ -475,11 +537,12 @@ static pxr::SdfPath vsrMaterialToPreviewSurfaceUSD(
 
     // Handle roughness input (texture or value)
     if (roughnessSampler) {
-      auto roughnessTextureShader =
-          vsrSamplertoUSD(stage, materialPath, "roughness", roughnessSampler);
+      const auto roughnessChannel =
+          vsrSamplertoScalarOutputToken(roughnessSampler);
+      auto roughnessTextureShader = vsrSamplertoUSD(
+          stage, materialPath, "roughness", roughnessSampler, roughnessChannel);
       auto roughnessInput = previewShader.CreateInput(
           pxr::TfToken("roughness"), pxr::SdfValueTypeNames->Float);
-      auto roughnessChannel = vsrSamplertoScalarOutputToken(roughnessSampler);
       roughnessInput.ConnectToSource(
           roughnessTextureShader.ConnectableAPI(), roughnessChannel);
     } else {
@@ -493,8 +556,11 @@ static pxr::SdfPath vsrMaterialToPreviewSurfaceUSD(
 
     // Handle emissive input (texture or value)
     if (emissiveSampler) {
-      auto emissiveTextureShader =
-          vsrSamplertoUSD(stage, materialPath, "emissive", emissiveSampler);
+      auto emissiveTextureShader = vsrSamplertoUSD(stage,
+          materialPath,
+          "emissive",
+          emissiveSampler,
+          pxr::TfToken("rgb"));
       auto emissiveInput = previewShader.CreateInput(
           pxr::TfToken("emissiveColor"), pxr::SdfValueTypeNames->Color3f);
       emissiveInput.ConnectToSource(
@@ -511,8 +577,12 @@ static pxr::SdfPath vsrMaterialToPreviewSurfaceUSD(
 
     // Handle normal map
     if (normalSampler) {
-      auto normalTextureShader =
-          vsrSamplertoUSD(stage, materialPath, "normal", normalSampler, true);
+      auto normalTextureShader = vsrSamplertoUSD(stage,
+          materialPath,
+          "normal",
+          normalSampler,
+          pxr::TfToken("rgb"),
+          true);
       auto normalInput = previewShader.CreateInput(
           pxr::TfToken("normal"), pxr::SdfValueTypeNames->Normal3f);
       normalInput.ConnectToSource(
@@ -578,8 +648,7 @@ static pxr::SdfPath vsrSurfaceToUSD(
     materialPath = vsrMaterialToPreviewSurfaceUSD(stage, anariMaterial);
   }
 
-  pxr::SdfPath surfacePath =
-      allSurfacesPath.AppendChild(pxr::TfToken(surface->name().c_str()));
+  pxr::SdfPath surfacePath = childPathFor(allSurfacesPath, surface->name());
   surfacePath = allocateUniquePath(stage, surfacePath);
 
   if (anariGeom->subtype() == tokens::geometry::triangle) {
@@ -768,6 +837,9 @@ void export_SceneToUSD(Scene &scene,
   const float originalTime = animMgr ? animMgr->getAnimationTime() : 0.f;
   const int exportFps = std::max(1, framesPerSecond);
 
+  // A Scope rather than the untyped prim defining a child would leave, so the
+  // layers sit under something imageable and an importer descends into them.
+  pxr::UsdGeomScope::Define(stage, allLayersPath);
   pxr::SdfPath currentPath = allLayersPath;
   std::unordered_set<pxr::SdfPath, pxr::SdfPath::Hash> existingNames;
 
@@ -780,7 +852,7 @@ void export_SceneToUSD(Scene &scene,
         // Handle depth traversal
         if (level == 0) {
           // special case for root -- output UsdGeomScope
-          currentPath = currentPath.AppendChild(pxr::TfToken(l.first.c_str()));
+          currentPath = childPathFor(currentPath, l.first.c_str());
           pxr::UsdGeomScope::Define(stage, currentPath);
           transformStack.push(math::IDENTITY_MAT4);
 
@@ -816,9 +888,8 @@ void export_SceneToUSD(Scene &scene,
             std::exit(1);
           }
 
-          auto objectPath = currentPath.AppendChild(pxr::TfToken(name.c_str()));
-          objectPath = allocateUniquePath(
-              stage, currentPath.AppendChild(pxr::TfToken(name.c_str())));
+          const auto objectPath =
+              allocateUniquePath(stage, childPathFor(currentPath, name));
 
           switch (object->type()) {
           case ANARI_CAMERA: {

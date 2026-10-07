@@ -1720,8 +1720,10 @@ static MaterialRef convertMaterial(Scene &scene,
   if (!normalMapPath.empty()) {
     try {
       auto fullPath = pbrt::resolveScenePath(basePath, normalMapPath);
-      if (auto sampler = importTexture(texCache, fullPath, true))
+      if (auto sampler = importTexture(texCache, fullPath, true)) {
+        setOutputTransform(*sampler, normalMapDecode());
         mat->setParameterObject("normal", *sampler);
+      }
     } catch (const std::exception &e) {
       logWarning("[import_PBRT] normalmap: %s", e.what());
     }
@@ -1738,8 +1740,10 @@ static MaterialRef convertMaterial(Scene &scene,
         if (resolveImagemapChain(
                 pbrtScene, (*sv)[0], basePath, heightPath, heightScale)) {
           if (auto sampler =
-                  importHeightAsNormalMap(texCache, heightPath, heightScale))
+                  importHeightAsNormalMap(texCache, heightPath, heightScale)) {
+            setOutputTransform(*sampler, normalMapDecode());
             mat->setParameterObject("normal", *sampler);
+          }
         } else {
           logWarning(
               "[import_PBRT] displacement '%s' does not resolve to a "

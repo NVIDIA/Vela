@@ -8,6 +8,7 @@
 // catch
 #include "catch.hpp"
 // vsr_tests
+#include "LogCapture.h"
 #include "UsdTestFixtures.h"
 // vsr
 #include "vsr/core/Logging.hpp"
@@ -72,37 +73,6 @@ struct UnreadableFieldFixture
 
  private:
   std::filesystem::path m_path;
-};
-
-// Collects log messages for the lifetime of one scenario. Which importer a
-// file extension reaches is otherwise invisible when the file named is a
-// stand-in that no importer can actually read.
-struct LogCapture
-{
-  LogCapture()
-  {
-    vsr::core::setLoggingCallback(
-        [this](vsr::core::LogLevel, std::string message) {
-          messages.push_back(std::move(message));
-        });
-  }
-
-  ~LogCapture()
-  {
-    // No callback is the state the test binary starts in.
-    vsr::core::setNoLogging();
-  }
-
-  bool sawMessageContaining(const char *text) const
-  {
-    for (const auto &message : messages) {
-      if (message.find(text) != std::string::npos)
-        return true;
-    }
-    return false;
-  }
-
-  std::vector<std::string> messages;
 };
 
 } // namespace

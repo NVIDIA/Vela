@@ -8,6 +8,7 @@
 #pragma once
 
 // tests
+#include "SamplerAssertions.h"
 #include "TestDirectories.h"
 // catch
 #include "catch.hpp"
