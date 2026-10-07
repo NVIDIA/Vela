@@ -6,6 +6,7 @@
 #include <vsr/rendering/pipeline/saveImage.h>
 #include <vsr/core/Logging.hpp>
 #include <vsr/core/Timer.hpp>
+#include <vsr/io/exporters.hpp>
 #include <vsr/io/procedural.hpp>
 #include <vsr/rendering/index/RenderIndexAllLayers.hpp>
 #include <vsr/rendering/view/ManipulatorToAnari.hpp>
@@ -54,6 +55,9 @@ struct Config
 
   std::string rendererName = "default";
   std::string outputFile = "vsrOffline.png";
+
+  // Export the loaded scene to this miniScene file instead of rendering
+  std::string exportMiniFile;
 
   std::string animOutputDir;
   std::string animPrefix = "frame_";
@@ -111,6 +115,13 @@ static void printUsage(const char *programName)
   std::cout
       << "                             Add directional light (direction + color + intensity)\n";
   std::cout << "  --help                     Show this help message\n";
+#if VSR_USE_MINISCENE
+  std::cout << "\n";
+  std::cout << "Export Options:\n";
+  std::cout
+      << "  --export-mini <file>       Write the loaded scene to a miniScene (.mini)\n";
+  std::cout << "                             file instead of rendering\n";
+#endif
   std::cout << "\n";
   std::cout << "Animation Options:\n";
   std::cout
@@ -508,6 +519,18 @@ static int parseRenderingOptions(
         return -1;
       }
       g_config.outputFile = argv[++i];
+    } else if (arg == "--export-mini") {
+      if (i + 1 >= argc) {
+        std::cerr << "Error: --export-mini requires an argument\n";
+        return -1;
+      }
+#if VSR_USE_MINISCENE
+      g_config.exportMiniFile = argv[++i];
+#else
+      std::cerr
+          << "Error: --export-mini needs a build with VSR_USE_MINISCENE=ON\n";
+      return -1;
+#endif
     } else if (arg == "--lib") {
       if (i + 1 >= argc) {
         std::cerr << "Error: " << arg << " requires an argument\n";
@@ -944,6 +967,23 @@ int main(int argc, const char *argv[])
 
   // Let Context parse importer options (-gltf, -obj, -volume, etc.)
   g_ctx->parseCommandLine(importerArgc, importerArgv.data());
+
+  if (!g_config.exportMiniFile.empty()) {
+    int result = 0;
+    if (mpiRank == 0) {
+      populateVSRScene();
+      if (!g_ctx->vsr.animationMgr.animations().empty())
+        printf("Scene is animated; exporting its first frame\n");
+      if (!vsr::io::export_SceneToMiniScene(
+              g_ctx->vsr.scene, g_config.exportMiniFile.c_str()))
+        result = 1;
+    }
+    g_ctx.reset();
+#ifdef VSR_USE_MPI
+    MPI_Finalize();
+#endif
+    return result;
+  }
 
   if (mpiRank == 0) {
     printf("vsrOffline - Headless VSR Renderer\n");
