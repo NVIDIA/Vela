@@ -695,9 +695,10 @@ mini::Texture::SP MiniSceneExporter::textureFor(const Sampler &s)
     return texture;
   }
 
-  // ANARI images are stored top row first (ADR 0014); miniScene, like the
-  // OBJ files it is usually built from, stores the bottom row first.
-  texture = convertImage(*image, true);
+  // Rows and texcoords go out as VSR holds them -- top row first, v running
+  // down the image (ADR 0014). They only have to agree with each other, and
+  // ANARI consumers sample them as given (ADR 0042).
+  texture = convertImage(*image, false);
   if (texture && stringOr(s, "filter", "linear") == "nearest")
     texture->filterMode = mini::Texture::FILTER_NEAREST;
   return texture;
@@ -836,9 +837,10 @@ void MiniSceneExporter::emitLight(const Light &l, const mat4 &xfm)
       return;
     }
 
-    // Env maps keep the top row first: miniScene's addEnvLight tool writes
-    // them that way and hayStack flips them on load (ADR 0042).
-    auto texture = convertImage(*radiance, false);
+    // An hdri light's radiance is held bottom row first (ADR 0014), but
+    // .mini env maps are top row first: miniScene's addEnvLight writes them
+    // that way and hayStack flips every one on load (ADR 0042).
+    auto texture = convertImage(*radiance, true);
     if (!texture)
       return;
     if (texture->format != mini::Texture::FLOAT4) {

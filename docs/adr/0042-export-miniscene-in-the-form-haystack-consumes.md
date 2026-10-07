@@ -16,12 +16,23 @@ matrix.
 
 Decisions that follow from targeting hayStack:
 
-- **Texture rows are flipped.** ANARI images are stored top row first
-  (ADR [0014](0014-store-images-in-anari-orientation.md)). The `.mini` files
-  produced by miniScene's own OBJ importer store the bottom row first and keep
-  uv unchanged, so the exporter flips image rows and leaves texcoords alone.
-  **Environment maps are not flipped.** miniScene's `addEnvLight` tool writes
-  them top row first, and hayStack flips them on load to compensate.
+- **Material textures go out exactly as VSR holds them.** Rows stay top
+  row first and texcoord v stays running down the image
+  (ADR [0014](0014-store-images-in-anari-orientation.md)). Rows and
+  texcoords only have to agree with each other, because ANARI samples both as
+  given. That leaves the files on a different convention from obj2mini
+  (rows bottom-first, v up), but they render the same in hayStack. An earlier
+  version flipped the rows but not v, and every texture came out upside down.
+- **Environment maps are flipped to top row first.** An `hdri` light's
+  radiance is held bottom row first (ADR 0014). miniScene's `addEnvLight`
+  writes env maps top row first, and hayStack flips every `.mini` env map on
+  load, so the exporter flips VSR's rows to match.
+- **`alphaMode` is written as authored.** Barney ignores `alphaMode` and
+  always takes coverage as `baseColor.a * opacity`. hayStack also passes
+  `alphaMode` to ANARI as an int rather than a string. So a material that is
+  `opaque` in VSR but has an RGBA texture with alpha below 1 renders
+  see-through in hayStack. The fix belongs in hayStack and Barney, not in a
+  baked copy of the texture.
 - **8-bit textures are copied byte for byte, sRGB included.** miniScene has no
   sRGB flag and hayStack uploads RGBA8 as linear, just as it does for every
   `.mini` file made by obj2mini. Decoding sRGB to float would quadruple texture

@@ -225,7 +225,7 @@ SCENARIO("Only what renders is exported", "[MiniSceneExport]")
   }
 }
 
-SCENARIO("physicallyBased textures are exported bottom row first",
+SCENARIO("physicallyBased textures are exported as VSR holds them",
     "[MiniSceneExport]")
 {
   GIVEN("A physicallyBased material with a 1x2 baseColor texture")
@@ -263,7 +263,7 @@ SCENARIO("physicallyBased textures are exported bottom row first",
         REQUIRE(pbr->alphaMode == mini::ANARIMaterial::AM_OPAQUE);
       }
 
-      THEN("The texture survives the save, with its rows flipped")
+      THEN("The texture survives the save, rows in VSR's order")
       {
         REQUIRE(pbr);
         auto tex = pbr->baseColor_texture;
@@ -272,7 +272,7 @@ SCENARIO("physicallyBased textures are exported bottom row first",
         REQUIRE(tex->filterMode == mini::Texture::FILTER_NEAREST);
         REQUIRE(tex->size == mini::vec2i(1, 2));
         REQUIRE(
-            tex->data == std::vector<uint8_t>{0, 0, 255, 255, 255, 0, 0, 255});
+            tex->data == std::vector<uint8_t>{255, 0, 0, 255, 0, 0, 255, 255});
       }
     }
   }
@@ -327,6 +327,45 @@ SCENARIO("Lights map to miniScene's light kinds", "[MiniSceneExport]")
         REQUIRE(mini->instances.empty());
         REQUIRE(mini->dirLights.size() == 1);
         REQUIRE(mini->quadLights.size() == 1);
+      }
+    }
+  }
+}
+
+
+SCENARIO("An hdri light becomes a top-row-first env map", "[MiniSceneExport]")
+{
+  GIVEN("An hdri light with a 1x2 radiance image, held bottom row first")
+  {
+    Scene scene;
+    auto radiance = scene.createArray(ANARI_FLOAT32_VEC3, 1, 2);
+    // row 0 is the bottom of the environment (ADR 0014)
+    radiance->setData(std::vector<float3>{{1.f, 0.f, 0.f}, {0.f, 0.f, 1.f}});
+    auto hdri = scene.createObject<Light>(tokens::light::hdri);
+    hdri->setParameterObject("radiance", *radiance);
+    hdri->setParameter("scale", 2.f);
+    scene.insertChildObjectNode(scene.defaultLayer()->root(), hdri);
+
+    WHEN("The scene is exported and read back")
+    {
+      auto mini = exportAndLoad(scene, "vsr_test_mini_hdri.mini");
+
+      THEN("The env map holds the top row first, scaled")
+      {
+        REQUIRE(mini->envMapLight);
+        auto tex = mini->envMapLight->texture;
+        REQUIRE(tex);
+        REQUIRE(tex->format == mini::Texture::FLOAT4);
+        const auto *texels = reinterpret_cast<const float *>(tex->data.data());
+        REQUIRE(texels[2] == 2.f); // top (blue) first
+        REQUIRE(texels[4] == 2.f); // then bottom (red)
+      }
+
+      THEN("hayStack's reading of the frame recovers up and direction")
+      {
+        auto &l = mini->envMapLight->transform.l;
+        REQUIRE(l.vz.y == Approx(1.f)); // up = vz
+        REQUIRE(-l.vx.x == Approx(1.f)); // direction = -vx
       }
     }
   }
