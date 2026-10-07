@@ -25,3 +25,7 @@ if(VSR_USE_LUA)
   add_subdirectory(vela_lua)
   add_subdirectory(vela_sol2 EXCLUDE_FROM_ALL)
 endif()
+
+if(VSR_USE_MINISCENE)
+  add_subdirectory(vela_miniscene)
+endif()

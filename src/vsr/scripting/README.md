@@ -69,6 +69,7 @@ vsr.io.importGLTF(scene, "model.gltf")
 vsr.io.importHDRI(scene, "env.exr")
 vsr.io.saveSceneArchive(scene, "scene.vsr")
 vsr.io.saveAnimationManagerArchive(animationMgr, "animations.vsr")
+vsr.io.exportSceneToMiniScene(scene, "scene.mini") -- needs VSR_USE_MINISCENE; returns false on failure
 
 -- Procedural generators
 vsr.io.generateRandomSpheres(scene)

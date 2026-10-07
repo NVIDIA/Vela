@@ -460,6 +460,16 @@ void Application::uiFrameStart()
     loadStateForNextFrame();
   }
 
+  if (!m_filenameToExportMiniSceneNextFrame.empty()) {
+    if (!m_ctx.vsr.animationMgr.animations().empty()) {
+      vsr::core::logStatus(
+          "[export_miniScene] scene is animated; exporting the current frame");
+    }
+    io::export_SceneToMiniScene(
+        m_ctx.vsr.scene, m_filenameToExportMiniSceneNextFrame.c_str());
+    m_filenameToExportMiniSceneNextFrame.clear();
+  }
+
   // Main Menu //
 
   if (ImGui::BeginMainMenuBar()) {
@@ -589,6 +599,15 @@ void Application::uiMainMenuBar_File()
           "scene.usda",
           m_ctx.view.pathSettings.framesPerSecond);
     }
+
+#if VSR_USE_MINISCENE
+    if (ImGui::MenuItem("Export as miniScene...")) {
+      this->getFilenameFromDialog(m_filenameToExportMiniSceneNextFrame, true);
+    }
+
+    tooltipForPreviousItem(
+        "Export the scene as currently rendered to a miniScene (.mini) file");
+#endif
 
     ImGui::Separator();
 

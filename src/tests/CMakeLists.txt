@@ -32,6 +32,7 @@ project_add_executable(
   test_ObjectPool.cpp
   test_Material.cpp
   test_Math.cpp
+  test_MiniSceneExport.cpp
   test_Object.cpp
   test_ObjectArchive.cpp
   test_ObjectUsePtr.cpp
@@ -119,6 +120,9 @@ PRIVATE
 )
 if (TARGET vsr_scivis_studio_model)
   target_link_libraries(${PROJECT_NAME} PRIVATE vsr_scivis_studio_model)
+endif()
+if (TARGET vela_ext_miniscene)
+  target_link_libraries(${PROJECT_NAME} PRIVATE vela_ext_miniscene)
 endif()
 if (TARGET vsr_network)
   target_link_libraries(${PROJECT_NAME} PRIVATE vsr_network)

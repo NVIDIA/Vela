@@ -33,6 +33,12 @@ void export_SceneToUSD(scene::Scene &scene,
     const char *filename,
     int framesPerSecond = 30,
     animation::AnimationManager *animMgr = nullptr);
+// Writes the scene as it currently renders -- active layers, enabled nodes --
+// to a miniScene (.mini) file, in the form hayStack consumes (ADR 0042).
+// Content miniScene cannot represent is skipped with one warning per kind.
+// Returns false if the file could not be written or miniScene support is not
+// built (VSR_USE_MINISCENE=OFF).
+bool export_SceneToMiniScene(const scene::Scene &scene, const char *filename);
 void export_StructuredVolumeToNanoVDB(const scene::SpatialField *spatialField,
     std::string_view outputFilename,
     bool useUndefinedValue = false,

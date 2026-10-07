@@ -233,6 +233,7 @@ class Application
   std::string m_currentSessionFilename;
   std::string m_filenameToSaveNextFrame;
   std::string m_filenameToLoadNextFrame;
+  std::string m_filenameToExportMiniSceneNextFrame;
 
   std::unique_ptr<ExtensionManager> m_extensionManager;
 

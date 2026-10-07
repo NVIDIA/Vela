@@ -74,6 +74,7 @@ What an application remembers between runs, and where it keeps it.
 | --- | --- | --- |
 | [0040](0040-keep-ui-state-per-application-not-per-document.md) | Keep UI State per application, not per document | |
 | [0041](0041-name-the-user-config-directory-after-vela.md) | Name the User Config Directory after Vela, not VSR | |
+| [0042](0042-export-miniscene-in-the-form-haystack-consumes.md) | Export miniScene in the form hayStack consumes | |
 
 See [`src/vsr/app/CONTEXT.md`](../../src/vsr/app/CONTEXT.md) for the
 resulting vocabulary.
