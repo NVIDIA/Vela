@@ -12,6 +12,7 @@
 #include <vector>
 #if VSR_USE_ASSIMP
 // assimp
+#include <assimp/GltfMaterial.h>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
 #include <assimp/DefaultLogger.hpp>
@@ -303,6 +304,14 @@ static std::vector<MaterialRef> importASSIMPMaterials(
       return settings;
     };
 
+    // glTF's normal scale, which Assimp keeps per texture; other formats
+    // have none.
+    auto normalScaleOf = [&](aiTextureType type, unsigned int index) {
+      ai_real scale = 1;
+      assimpMat->Get(AI_MATKEY_GLTF_TEXTURE_SCALE(type, index), scale);
+      return float(scale);
+    };
+
     if (matType == aiShadingMode_PBR_BRDF) {
       m = scene.createObject<Material>(tokens::material::physicallyBased);
 
@@ -494,6 +503,9 @@ static std::vector<MaterialRef> importASSIMPMaterials(
             AI_MATKEY_UVTRANSFORM(aiTextureType_CLEARCOAT, 2));
         if (auto sampler = loadTexture(clearcoatNormalTexture, true, settings);
             sampler) {
+          setOutputTransform(*sampler,
+              normalMapDecode(
+                  normalScaleOf(AI_MATKEY_CLEARCOAT_NORMAL_TEXTURE)));
           m->setParameterObject("clearcoatNormal", *sampler);
         }
       }
@@ -541,6 +553,8 @@ static std::vector<MaterialRef> importASSIMPMaterials(
             AI_MATKEY_UVTRANSFORM(aiTextureType_NORMALS, 0));
         if (auto sampler = loadTexture(normalTexture, true, settings);
             sampler) {
+          setOutputTransform(*sampler,
+              normalMapDecode(normalScaleOf(aiTextureType_NORMALS, 0)));
           m->setParameterObject("normal", *sampler);
         }
       }

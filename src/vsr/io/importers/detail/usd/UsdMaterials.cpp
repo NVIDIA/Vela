@@ -43,6 +43,13 @@ const pxr::TfToken TRANSFORM_2D_ID("UsdTransform2d");
 // The Render Context OpenUSD publishes MaterialX networks under.
 const pxr::TfToken MATERIALX_CONTEXT("mtlx");
 
+// The upstream end of a connection: a node, and which of its outputs.
+struct Connection
+{
+  pxr::TfToken node;
+  pxr::TfToken output;
+};
+
 // One resolved UsdPreviewSurface network, walked lazily out of the Hydra
 // material network container.
 struct NetworkWalker
@@ -55,6 +62,8 @@ struct NetworkWalker
       const pxr::TfToken &nodePath, const char *paramName) const;
   std::string stringParameter(
       const pxr::TfToken &nodePath, const char *paramName) const;
+  Connection connection(
+      const pxr::TfToken &nodePath, const char *inputName) const;
   pxr::TfToken connectedNode(
       const pxr::TfToken &nodePath, const char *inputName) const;
 };
@@ -100,7 +109,7 @@ std::string NetworkWalker::stringParameter(
   return {};
 }
 
-pxr::TfToken NetworkWalker::connectedNode(
+Connection NetworkWalker::connection(
     const pxr::TfToken &nodePath, const char *inputName) const
 {
   auto n = node(nodePath);
@@ -109,8 +118,19 @@ pxr::TfToken NetworkWalker::connectedNode(
   auto connections = n.GetInputConnections().Get(pxr::TfToken(inputName));
   if (!connections || connections.GetNumElements() == 0)
     return {};
-  auto upstream = connections.GetElement(0).GetUpstreamNodePath();
-  return upstream ? upstream->GetTypedValue(0) : pxr::TfToken();
+  const auto element = connections.GetElement(0);
+  Connection retval;
+  if (auto upstream = element.GetUpstreamNodePath())
+    retval.node = upstream->GetTypedValue(0);
+  if (auto output = element.GetUpstreamNodeOutputName())
+    retval.output = output->GetTypedValue(0);
+  return retval;
+}
+
+pxr::TfToken NetworkWalker::connectedNode(
+    const pxr::TfToken &nodePath, const char *inputName) const
+{
+  return connection(nodePath, inputName).node;
 }
 
 // The UV primvar a texture reads, found by following the texture's `st` input
@@ -161,6 +181,57 @@ std::optional<UvTransform> uvTransformOfTexture(
   retval[0][0] = s.x;
   retval[1][1] = s.y;
   return UvTransform{retval, math::float4(t.x, 1.f - s.y - t.y, 0.f, 0.f)};
+}
+
+math::float4 asFloat4(const pxr::VtValue &v, const math::float4 &alt)
+{
+  if (!v.IsHolding<pxr::GfVec4f>())
+    return alt;
+  const auto c = v.UncheckedGet<pxr::GfVec4f>();
+  return math::float4(c[0], c[1], c[2], c[3]);
+}
+
+// What a UsdUVTexture hands the input connected to `output`, as the sampler's
+// output transform. The texture computes `scale * texel + bias` and the output
+// picks channels of it; with S that pick and s0 its own constant, the sampler
+// returns S * diag(scale) * texel + (S * bias + s0). A single channel fills x,
+// y and z, so it reads alike as a scalar or a colour, with alpha 1. `rgb`
+// passes alpha through rather than replacing it with 1 -- no physicallyBased
+// parameter a three-channel output feeds reads alpha, and the identity keeps a
+// colour read as authored free of output parameters it does not need.
+OutputTransform outputTransformOfTexture(const NetworkWalker &walker,
+    const pxr::TfToken &texturePath,
+    const pxr::TfToken &output)
+{
+  const auto scale =
+      asFloat4(walker.parameter(texturePath, "scale"), math::float4(1.f));
+  const auto bias =
+      asFloat4(walker.parameter(texturePath, "bias"), math::float4(0.f));
+
+  OutputTransform retval;
+  const auto &name = output.GetString();
+  const int channel = name == "r" ? 0
+      : name == "g"               ? 1
+      : name == "b"               ? 2
+      : name == "a"               ? 3
+                                  : -1;
+  if (channel < 0) {
+    for (int i = 0; i < 4; ++i)
+      retval.transform[i][i] = scale[i];
+    retval.offset = bias;
+    return retval;
+  }
+
+  retval.transform = math::mat4(math::float4(0.f),
+      math::float4(0.f),
+      math::float4(0.f),
+      math::float4(0.f));
+  for (int row = 0; row < 3; ++row) {
+    retval.transform[channel][row] = scale[channel];
+    retval.offset[row] = bias[channel];
+  }
+  retval.offset.w = 1.f;
+  return retval;
 }
 
 std::string wrapModeOf(const NetworkWalker &walker,
@@ -475,7 +546,12 @@ MaterialRef tryOmniPbrMapping(ImportContext &ctx,
         "roughness", scalar("reflection_roughness_constant").value_or(0.5f));
   }
 
-  bindTexture("normalmap_texture", "normal", false);
+  // OmniPBR's MDL decodes its normal map itself, so USD authors no scale or
+  // bias for it and the decode ANARI expects has to be added here.
+  if (bindTexture("normalmap_texture", "normal", false)) {
+    setOutputTransform(*material->parameterValueAsObject<Sampler>("normal"),
+        normalMapDecode());
+  }
   bindTexture("ao_texture", "occlusion", false);
 
   if (shaderInputValue<bool>(shader, "enable_opacity", ctx.importTime)
@@ -942,7 +1018,8 @@ ResolvedMaterial convertPreviewSurface(ImportContext &ctx,
 
   auto bindTexture =
       [&](const char *usdName, const char *vsrName, bool colorRole) -> bool {
-    const auto texturePath = walker.connectedNode(surfacePath, usdName);
+    const auto connection = walker.connection(surfacePath, usdName);
+    const auto &texturePath = connection.node;
     if (walker.nodeId(texturePath) != UV_TEXTURE_ID)
       return false;
 
@@ -980,6 +1057,13 @@ ResolvedMaterial convertPreviewSurface(ImportContext &ctx,
           file);
       return false;
     }
+
+    // makeImageSampler leaves the output side alone, so the texture's own
+    // remap and channel selection go straight onto it.
+    const auto output =
+        outputTransformOfTexture(walker, texturePath, connection.output);
+    if (output != OutputTransform{})
+      setOutputTransform(*sampler, output);
 
     material->setParameterObject(Token(vsrName), *sampler);
     return true;

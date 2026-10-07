@@ -234,14 +234,6 @@ static SamplerRef importGLTFTexture(ImageCache &cache,
   return makeImageSampler(cache, decoded, displayName, settings);
 }
 
-static void applyNormalTextureScale(SamplerRef sampler, float scale)
-{
-  sampler->setParameter("outTransform",
-      mat4({scale, 0, 0, 0}, {0, scale, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}));
-  const float offset = 0.5f * (1.0f - scale);
-  sampler->setParameter("outOffset", float4(offset, offset, 0.0f, 0.0f));
-}
-
 static std::vector<MaterialRef> importGLTFMaterials(
     Scene &scene, const tinygltf::Model &model, const std::string &filename)
 {
@@ -356,8 +348,8 @@ static std::vector<MaterialRef> importGLTFMaterials(
             true,
             "normal",
             gltfMaterial.normalTexture.texCoord)) {
-      float normalScale = gltfMaterial.normalTexture.scale;
-      applyNormalTextureScale(sampler, normalScale);
+      setOutputTransform(
+          *sampler, normalMapDecode(float(gltfMaterial.normalTexture.scale)));
       material->setParameterObject("normal", *sampler);
     }
 
@@ -584,7 +576,7 @@ static std::vector<MaterialRef> importGLTFMaterials(
               true,
               "clearcoatNormal",
               clearcoatNormalTexCoord)) {
-        applyNormalTextureScale(sampler, clearcoatNormalScale);
+        setOutputTransform(*sampler, normalMapDecode(clearcoatNormalScale));
         material->setParameterObject("clearcoatNormal", *sampler);
       }
     } else {

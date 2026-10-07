@@ -10,6 +10,7 @@
 // vsr
 #include "vsr/animation/AnimationManager.hpp"
 #include "vsr/io/exporters.hpp"
+#include "vsr/io/images/ImageCache.hpp"
 #include "vsr/io/importers.hpp"
 #include "vsr/scene/Scene.hpp"
 // miniScene
@@ -256,6 +257,48 @@ SCENARIO("Materials map the way hayStack renders them", "[MiniSceneImport]")
         REQUIRE(m->subtype() == tokens::material::physicallyBased);
         REQUIRE(value<float3>(*m, "baseColor") == float3(.5f));
         REQUIRE(value<float>(*m, "opacity") == 1.f);
+      }
+    }
+  }
+}
+
+// miniScene holds a normal map's texels as the file stored them and leaves the
+// decode to its renderer, as glTF does; ANARI's physicallyBased material wants
+// the decoded normal from the sampler.
+SCENARIO("Normal maps are decoded for ANARI", "[MiniSceneImport]")
+{
+  GIVEN("An ANARIMaterial with a normal map and a clearcoat normal map")
+  {
+    mini::Scene in;
+
+    auto tex = mini::Texture::create();
+    tex->format = mini::Texture::RGBA_UINT8;
+    tex->size = mini::vec2i(1, 1);
+    tex->data = {128, 128, 255, 255};
+
+    auto pbr = mini::ANARIMaterial::create();
+    pbr->normal_texture = tex;
+    pbr->clearcoatNormal_texture = tex;
+    in.instances.push_back(
+        mini::Instance::create(mini::Object::create({makeMesh(pbr)})));
+
+    WHEN("It is imported")
+    {
+      Scene scene;
+      saveAndImport(in, scene, "vsr_test_mini_import_normal_maps.mini");
+      auto surface = scene.getObject<Surface>(0);
+      REQUIRE(surface);
+      auto *m =
+          surface->parameterValueAsObject<Material>(tokens::surface::material);
+      REQUIRE(m);
+
+      THEN("Both samplers apply the ANARI normal decode")
+      {
+        for (const char *name : {"normal", "clearcoatNormal"}) {
+          auto *s = m->parameterValueAsObject<Sampler>(name);
+          REQUIRE(s);
+          REQUIRE(vsr::io::outputTransformOf(*s) == vsr::io::normalMapDecode());
+        }
       }
     }
   }

@@ -5,6 +5,7 @@
 #include "vsr/scene/Scene.hpp"
 #include "vsr/core/Logging.hpp"
 #include "vsr/io/exporters.hpp"
+#include "vsr/io/images/ImageCache.hpp"
 
 #if VSR_USE_MINISCENE
 
@@ -219,7 +220,8 @@ struct MiniSceneExporter : public LayerVisitor
   mini::Object::SP objectFor(std::vector<const Surface *> surfaces);
   mini::Mesh::SP meshFor(const Surface &s);
   mini::Material::SP materialFor(const Material *m);
-  mini::Texture::SP textureFor(const Sampler &s);
+  mini::Texture::SP textureFor(
+      const Sampler &s, const OutputTransform &implied = {});
   mini::Texture::SP convertImage(const Array &image, bool flipRows);
 
   void readParameter(const Material &m,
@@ -230,8 +232,10 @@ struct MiniSceneExporter : public LayerVisitor
       const char *name,
       mini::vec3f &value,
       mini::Texture::SP *texture = nullptr);
-  bool readSampledParameter(
-      const Material &m, const char *name, mini::Texture::SP *texture);
+  bool readSampledParameter(const Material &m,
+      const char *name,
+      mini::Texture::SP *texture,
+      const OutputTransform &implied = {});
 
   std::stack<mat4> xfms;
   std::stack<Group> groups;
@@ -520,8 +524,12 @@ mini::Mesh::SP MiniSceneExporter::meshFor(const Surface &s)
 
 // Materials //////////////////////////////////////////////////////////////////
 
-bool MiniSceneExporter::readSampledParameter(
-    const Material &m, const char *name, mini::Texture::SP *texture)
+// `implied` is the output transform the miniScene slot stands for already,
+// which a sampler carrying it loses nothing by dropping.
+bool MiniSceneExporter::readSampledParameter(const Material &m,
+    const char *name,
+    mini::Texture::SP *texture,
+    const OutputTransform &implied)
 {
   auto *p = enabledParameter(m, name);
   if (!p)
@@ -535,7 +543,7 @@ bool MiniSceneExporter::readSampledParameter(
   if (p->value().type() == ANARI_SAMPLER) {
     if (auto *s = m.parameterValueAsObject<Sampler>(name)) {
       if (texture)
-        *texture = textureFor(*s);
+        *texture = textureFor(*s, implied);
       else
         drop("textured material parameters with no miniScene texture slot");
     }
@@ -612,7 +620,9 @@ mini::Material::SP MiniSceneExporter::materialFor(const Material *m)
     readParameter(*m, "opacity", pbr->opacity, &pbr->opacity_texture);
     readParameter(*m, "metallic", pbr->metallic, &pbr->metallic_texture);
     readParameter(*m, "roughness", pbr->roughness, &pbr->roughness_texture);
-    readSampledParameter(*m, "normal", &pbr->normal_texture);
+    // miniScene stores normal maps encoded and its renderer decodes them, so
+    // the ANARI decode is what its normal slots mean.
+    readSampledParameter(*m, "normal", &pbr->normal_texture, normalMapDecode());
     readParameter(*m, "emissive", pbr->emissive, &pbr->emissive_texture);
     readSampledParameter(*m, "occlusion", &pbr->occlusion_texture);
     pbr->alphaMode = alphaMode();
@@ -625,7 +635,10 @@ mini::Material::SP MiniSceneExporter::materialFor(const Material *m)
         "clearcoatRoughness",
         pbr->clearcoatRoughness,
         &pbr->clearcoatRoughness_texture);
-    readSampledParameter(*m, "clearcoatNormal", &pbr->clearcoatNormal_texture);
+    readSampledParameter(*m,
+        "clearcoatNormal",
+        &pbr->clearcoatNormal_texture,
+        normalMapDecode());
     readParameter(
         *m, "transmission", pbr->transmission, &pbr->transmission_texture);
     readParameter(*m, "ior", pbr->ior, &pbr->ior_texture);
@@ -661,7 +674,8 @@ mini::Material::SP MiniSceneExporter::materialFor(const Material *m)
 
 // Textures ///////////////////////////////////////////////////////////////////
 
-mini::Texture::SP MiniSceneExporter::textureFor(const Sampler &s)
+mini::Texture::SP MiniSceneExporter::textureFor(
+    const Sampler &s, const OutputTransform &implied)
 {
   if (auto it = textures.find(&s); it != textures.end())
     return it->second;
@@ -683,9 +697,8 @@ mini::Texture::SP MiniSceneExporter::textureFor(const Sampler &s)
 
   const auto identity = vsr::math::IDENTITY_MAT4;
   if (valueOr<mat4>(s, "inTransform", identity) != identity
-      || valueOr<mat4>(s, "outTransform", identity) != identity
       || valueOr<float4>(s, "inOffset", float4(0.f)) != float4(0.f)
-      || valueOr<float4>(s, "outOffset", float4(0.f)) != float4(0.f)) {
+      || outputTransformOf(s) != implied) {
     drop("texture transforms ignored (miniScene has none)");
   }
 

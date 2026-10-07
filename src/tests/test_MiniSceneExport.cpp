@@ -7,8 +7,11 @@
 
 // catch
 #include "catch.hpp"
+// vsr_tests
+#include "LogCapture.h"
 // vsr
 #include "vsr/io/exporters.hpp"
+#include "vsr/io/images/ImageCache.hpp"
 #include "vsr/scene/Scene.hpp"
 // miniScene
 #include "miniScene/Scene.h"
@@ -332,7 +335,6 @@ SCENARIO("Lights map to miniScene's light kinds", "[MiniSceneExport]")
   }
 }
 
-
 SCENARIO("An hdri light becomes a top-row-first env map", "[MiniSceneExport]")
 {
   GIVEN("An hdri light with a 1x2 radiance image, held bottom row first")
@@ -366,6 +368,70 @@ SCENARIO("An hdri light becomes a top-row-first env map", "[MiniSceneExport]")
         auto &l = mini->envMapLight->transform.l;
         REQUIRE(l.vz.y == Approx(1.f)); // up = vz
         REQUIRE(-l.vx.x == Approx(1.f)); // direction = -vx
+      }
+    }
+  }
+}
+
+// miniScene stores normal maps as encoded texels and its renderer decodes
+// them, so the decode ANARI needs on the sampler is exactly what miniScene
+// already implies -- not a transform it lacks.
+SCENARIO("A normal map's ANARI decode exports without a dropped transform",
+    "[MiniSceneExport]")
+{
+  GIVEN(
+      "A physicallyBased material whose normal maps carry the decode, and"
+      " a base colour carrying some other transform")
+  {
+    Scene scene;
+    auto image = scene.createArray(ANARI_UFIXED8_VEC4, 1, 1);
+    image->setData(std::vector<uint8_t>{128, 128, 255, 255});
+
+    auto makeSampler = [&](const vsr::io::OutputTransform &output) {
+      auto sampler = scene.createObject<Sampler>(tokens::sampler::image2D);
+      sampler->setParameterObject("image", *image);
+      vsr::io::setOutputTransform(*sampler, output);
+      return sampler;
+    };
+
+    auto material =
+        scene.createObject<Material>(tokens::material::physicallyBased);
+    material->setParameterObject(
+        "normal", *makeSampler(vsr::io::normalMapDecode()));
+    material->setParameterObject(
+        "clearcoatNormal", *makeSampler(vsr::io::normalMapDecode()));
+    scene.insertChildObjectNode(scene.defaultLayer()->root(),
+        scene.createSurface("normal_mapped", makeTriangles(scene), material));
+
+    WHEN("The scene is exported and read back")
+    {
+      LogCapture log;
+      auto mini = exportAndLoad(scene, "vsr_test_mini_normal_maps.mini");
+      auto pbr = mini->instances.at(0)
+                     ->object->meshes.at(0)
+                     ->material->as<mini::ANARIMaterial>();
+
+      THEN("The encoded texels go out as stored, with nothing reported lost")
+      {
+        REQUIRE(pbr);
+        REQUIRE(pbr->normal_texture);
+        REQUIRE(pbr->normal_texture->data
+            == std::vector<uint8_t>{128, 128, 255, 255});
+        REQUIRE(pbr->clearcoatNormal_texture);
+        REQUIRE(!log.sawMessageContaining("texture transforms ignored"));
+      }
+    }
+
+    WHEN("A base colour carries the same transform")
+    {
+      material->setParameterObject(
+          "baseColor", *makeSampler(vsr::io::normalMapDecode()));
+      LogCapture log;
+      exportAndLoad(scene, "vsr_test_mini_decoded_base_color.mini");
+
+      THEN("There it is a transform miniScene cannot hold")
+      {
+        REQUIRE(log.sawMessageContaining("texture transforms ignored"));
       }
     }
   }

@@ -171,6 +171,42 @@ Image ImageCache::store(
   return image;
 }
 
+bool operator==(const OutputTransform &a, const OutputTransform &b)
+{
+  return a.transform == b.transform && a.offset == b.offset;
+}
+
+bool operator!=(const OutputTransform &a, const OutputTransform &b)
+{
+  return !(a == b);
+}
+
+OutputTransform outputTransformOf(const Sampler &sampler)
+{
+  OutputTransform retval;
+  retval.transform = sampler.parameterValueAs<math::mat4>("outTransform")
+                         .value_or(retval.transform);
+  retval.offset = sampler.parameterValueAs<math::float4>("outOffset")
+                      .value_or(retval.offset);
+  return retval;
+}
+
+void setOutputTransform(Sampler &sampler, const OutputTransform &output)
+{
+  sampler.setParameter("outTransform", output.transform);
+  sampler.setParameter("outOffset", output.offset);
+}
+
+OutputTransform normalMapDecode(float scale)
+{
+  OutputTransform retval;
+  retval.transform[0][0] = 2.f * scale;
+  retval.transform[1][1] = 2.f * scale;
+  retval.transform[2][2] = 2.f;
+  retval.offset = math::float4(-scale, -scale, -1.f, 0.f);
+  return retval;
+}
+
 SamplerRef makeImageSampler(ImageCache &cache,
     const Image &image,
     const std::string &displayName,

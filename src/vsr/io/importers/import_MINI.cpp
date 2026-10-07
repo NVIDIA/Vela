@@ -426,8 +426,12 @@ MaterialRef MiniSceneImporter::importANARIMaterial(const mini::ANARIMaterial &m)
   setParameter(*r, "opacity", m.opacity, m.opacity_texture);
   setParameter(*r, "metallic", m.metallic, m.metallic_texture);
   setParameter(*r, "roughness", m.roughness, m.roughness_texture);
-  if (auto s = samplerFor(m.normal_texture, "normal"))
+  // miniScene holds normal maps encoded and leaves the decode to its
+  // renderer; ANARI wants the decoded normal from the sampler.
+  if (auto s = samplerFor(m.normal_texture, "normal")) {
+    setOutputTransform(*s, normalMapDecode());
     r->setParameterObject("normal", *s);
+  }
   setParameter(*r, "emissive", m.emissive, m.emissive_texture);
   if (auto s = samplerFor(m.occlusion_texture, "occlusion"))
     r->setParameterObject("occlusion", *s);
@@ -453,8 +457,10 @@ MaterialRef MiniSceneImporter::importANARIMaterial(const mini::ANARIMaterial &m)
       "clearcoatRoughness",
       m.clearcoatRoughness,
       m.clearcoatRoughness_texture);
-  if (auto s = samplerFor(m.clearcoatNormal_texture, "clearcoatNormal"))
+  if (auto s = samplerFor(m.clearcoatNormal_texture, "clearcoatNormal")) {
+    setOutputTransform(*s, normalMapDecode());
     r->setParameterObject("clearcoatNormal", *s);
+  }
   setParameter(*r, "transmission", m.transmission, m.transmission_texture);
   setParameter(*r, "ior", m.ior, m.ior_texture);
   setParameter(*r, "thickness", m.thickness, m.thickness_texture);

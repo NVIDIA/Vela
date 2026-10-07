@@ -127,6 +127,30 @@ struct UvTransform
   vsr::math::float4 offset{0.f, 0.f, 0.f, 0.f};
 };
 
+// What a sampler does to a texel before handing it to the parameter it is
+// bound to: it returns `transform * texel + offset`, as ANARI's `outTransform`
+// and `outOffset`.
+struct OutputTransform
+{
+  vsr::math::mat4 transform{vsr::math::IDENTITY_MAT4};
+  vsr::math::float4 offset{0.f, 0.f, 0.f, 0.f};
+};
+
+bool operator==(const OutputTransform &a, const OutputTransform &b);
+bool operator!=(const OutputTransform &a, const OutputTransform &b);
+
+// A sampler's `outTransform`/`outOffset`, with ANARI's defaults for whichever
+// is unset.
+OutputTransform outputTransformOf(const vsr::scene::Sampler &sampler);
+void setOutputTransform(
+    vsr::scene::Sampler &sampler, const OutputTransform &output);
+
+// ANARI's physicallyBased `normal` and `clearcoatNormal` samplers return the
+// tangent-space normal itself -- x and y in [-1, 1], z in [0, 1] -- so the
+// sampler has to decode a normal map's texels, `2 * texel - 1`. `scale` is
+// glTF's normal scale, which multiplies x and y; formats without one pass 1.
+OutputTransform normalMapDecode(float scale = 1.f);
+
 // How a sampler reads the image it is bound to. Everything a binding can vary
 // lives here, including the importer's own uv transform: `makeImageSampler`
 // owns the sampler's `inTransform`/`inOffset` outright, because an image that
