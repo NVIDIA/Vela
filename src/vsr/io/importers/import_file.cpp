@@ -84,6 +84,8 @@ void import_file(Scene &scene,
     vsr::io::import_HDRI(scene, animMgr, file.c_str(), root);
   else if (f.first == ImporterType::HSMESH)
     vsr::io::import_HSMESH(scene, animMgr, file.c_str(), root);
+  else if (f.first == ImporterType::MINI)
+    vsr::io::import_MINI(scene, animMgr, file.c_str(), root);
   else if (f.first == ImporterType::NBODY)
     vsr::io::import_NBODY(scene, animMgr, file.c_str(), root);
   else if (f.first == ImporterType::OBJ)

@@ -33,6 +33,7 @@ project_add_executable(
   test_Material.cpp
   test_Math.cpp
   test_MiniSceneExport.cpp
+  test_MiniSceneImport.cpp
   test_Object.cpp
   test_ObjectArchive.cpp
   test_ObjectUsePtr.cpp

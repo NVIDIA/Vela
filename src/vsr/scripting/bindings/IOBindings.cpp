@@ -347,6 +347,19 @@ void registerIOBindings(sol::state &lua)
         VSR_LUA_IMPORT_WRAP(vsr::io::import_HSMESH(s, anim, f.c_str(), loc), f);
       });
 
+  io["importMINI"] = sol::overload(
+      [](scene::Scene &s,
+          animation::AnimationManager &anim,
+          const std::string &f) {
+        VSR_LUA_IMPORT_WRAP(vsr::io::import_MINI(s, anim, f.c_str()), f);
+      },
+      [](scene::Scene &s,
+          animation::AnimationManager &anim,
+          const std::string &f,
+          scene::LayerNodeRef loc) {
+        VSR_LUA_IMPORT_WRAP(vsr::io::import_MINI(s, anim, f.c_str(), loc), f);
+      });
+
   io["importNBODY"] = sol::overload(
       [](scene::Scene &s,
           animation::AnimationManager &anim,

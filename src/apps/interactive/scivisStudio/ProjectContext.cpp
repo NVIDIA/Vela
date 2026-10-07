@@ -2001,6 +2001,8 @@ const char *toString(vsr::io::ImporterType importerType)
     return "HDRI";
   case vsr::io::ImporterType::HSMESH:
     return "HSMESH";
+  case vsr::io::ImporterType::MINI:
+    return "MINI";
   case vsr::io::ImporterType::NBODY:
     return "NBODY";
   case vsr::io::ImporterType::OBJ:

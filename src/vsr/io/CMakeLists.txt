@@ -50,6 +50,7 @@ PRIVATE
   importers/import_HDRI.cpp
   importers/import_HSMESH.cpp
   importers/import_MHD.cpp
+  importers/import_MINI.cpp
   importers/import_NBODY.cpp
   importers/import_NVDB.cpp
   importers/import_OBJ.cpp

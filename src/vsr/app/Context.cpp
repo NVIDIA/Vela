@@ -101,6 +101,8 @@ void Context::parseCommandLine(std::vector<std::string> &args)
       importerType = vsr::io::ImporterType::HDRI;
     else if (arg == "-hsmesh")
       importerType = vsr::io::ImporterType::HSMESH;
+    else if (arg == "-mini")
+      importerType = vsr::io::ImporterType::MINI;
     else if (arg == "-nbody")
       importerType = vsr::io::ImporterType::NBODY;
     else if (arg == "-obj")

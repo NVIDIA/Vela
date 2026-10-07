@@ -36,6 +36,7 @@ constexpr ImporterChoice IMPORTERS[] = {
     {"GLTF", vsr::io::ImporterType::GLTF},
     {"HDRI", vsr::io::ImporterType::HDRI},
     {"HSMESH", vsr::io::ImporterType::HSMESH},
+    {"MINI", vsr::io::ImporterType::MINI},
     {"NBODY", vsr::io::ImporterType::NBODY},
     {"OBJ", vsr::io::ImporterType::OBJ},
     {"PDB", vsr::io::ImporterType::PDB},

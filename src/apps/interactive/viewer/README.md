@@ -66,6 +66,7 @@ Use one of these flags before filenames to select how those files are loaded:
 - `-gltf`
 - `-hdri`
 - `-hsmesh`
+- `-mini` (miniScene; needs `VSR_USE_MINISCENE=ON`)
 - `-nbody`
 - `-obj`
 - `-pdb`
