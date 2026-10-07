@@ -465,8 +465,11 @@ void Application::uiFrameStart()
       vsr::core::logStatus(
           "[export_miniScene] scene is animated; exporting the current frame");
     }
-    io::export_SceneToMiniScene(
-        m_ctx.vsr.scene, m_filenameToExportMiniSceneNextFrame.c_str());
+    showTaskModal(
+        [this, filename = std::move(m_filenameToExportMiniSceneNextFrame)]() {
+          io::export_SceneToMiniScene(m_ctx.vsr.scene, filename.c_str());
+        },
+        "Please Wait: Exporting miniScene...");
     m_filenameToExportMiniSceneNextFrame.clear();
   }
 
