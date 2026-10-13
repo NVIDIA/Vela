@@ -153,7 +153,9 @@ void Viewport::setLibrary(
           selectedLibName.c_str());
     }
 
-    if (!d) {
+    // "{none}" is an explicit request for an inactive viewport, not a load
+    // failure, so it must not fall back to a default device
+    if (!d && selectedLibName != "{none}") {
       const auto fallbackLibName = defaultLibraryName(adm);
       if (!fallbackLibName.empty() && fallbackLibName != selectedLibName) {
         selectedLibName = fallbackLibName;
@@ -771,7 +773,8 @@ void Viewport::ui_menubar_Device()
   if (ImGui::BeginMenu("Device")) {
     const auto &deviceList = appContext()->anari.deviceList();
     for (auto &libName : deviceList) {
-      const bool isThisLibrary = m_libName == libName;
+      const bool isThisLibrary =
+          m_libName == libName || (m_libName.empty() && libName == "{none}");
       if (ImGui::RadioButton(libName.c_str(), isThisLibrary))
         setLibrary(libName);
     }
