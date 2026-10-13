@@ -64,12 +64,10 @@ static viskores::cont::DataSet makeNoiseVolume_callback()
   return dataset;
 }
 
-static bool fieldSelectorSelection_callback(
-    void *_fs, int index, const char **out_text)
+static const char *fieldSelectorSelection_callback(void *_fs, int index)
 {
   const auto *fs = (const graph::FieldSelector *)_fs;
-  *out_text = fs->fieldName(index);
-  return true;
+  return fs->fieldName(index);
 }
 
 static int editor_GetPinShape(graph::PortType type)
@@ -283,11 +281,11 @@ NodeEditor::NodeEditor(vsr::ui::imgui::Application *app,
 void NodeEditor::buildUI()
 {
   ImNodes::PushStyleVar(
-      ImNodesStyleVar_PinCircleRadius, 4.f * ImGui::GetIO().FontGlobalScale);
+      ImNodesStyleVar_PinCircleRadius, 4.f * ImGui::GetStyle().FontScaleMain);
   ImNodes::PushStyleVar(
-      ImNodesStyleVar_PinQuadSideLength, 8.f * ImGui::GetIO().FontGlobalScale);
+      ImNodesStyleVar_PinQuadSideLength, 8.f * ImGui::GetStyle().FontScaleMain);
   ImNodes::PushStyleVar(ImNodesStyleVar_PinTriangleSideLength,
-      10.f * ImGui::GetIO().FontGlobalScale);
+      10.f * ImGui::GetStyle().FontScaleMain);
   ImNodes::BeginNodeEditor();
 
   updateNodeSummary();

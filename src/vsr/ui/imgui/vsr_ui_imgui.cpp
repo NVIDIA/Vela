@@ -15,11 +15,10 @@ static std::string s_newParameterName;
 
 // Helper functions ///////////////////////////////////////////////////////////
 
-static bool UI_stringList_callback(void *p, int index, const char **out_text)
+static const char *UI_stringList_callback(void *p, int index)
 {
   const auto &stringList = ((vsr::scene::Parameter *)p)->stringValues();
-  *out_text = stringList[index].c_str();
-  return true;
+  return stringList[index].c_str();
 }
 
 static void buildUI_array_info_tooltip_text(

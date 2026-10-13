@@ -359,10 +359,9 @@ void DistributedViewport::ui_menuBar()
 
 void DistributedViewport::ui_overlay()
 {
-  ImGuiIO &io = ImGui::GetIO();
   ImVec2 windowPos = ImGui::GetWindowPos();
   windowPos.x += 10;
-  windowPos.y += 63 * io.FontGlobalScale;
+  windowPos.y += 63 * ImGui::GetStyle().FontScaleMain;
 
   ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDecoration
       | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize

@@ -160,7 +160,7 @@ void HistogramPanel::buildEditorUI(const Project &)
         }
         ImGui::EndCombo();
       }
-      ImGui::SetNextItemWidth(180.f * ImGui::GetIO().FontGlobalScale);
+      ImGui::SetNextItemWidth(180.f * ImGui::GetStyle().FontScaleMain);
       if (ImGui::InputInt("Bins", &m_binCount, 1, 16))
         m_binCount = std::clamp(m_binCount, MIN_BINS, MAX_BINS);
       ImGui::SameLine();

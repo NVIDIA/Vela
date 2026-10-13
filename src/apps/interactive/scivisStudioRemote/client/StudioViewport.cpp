@@ -230,7 +230,7 @@ void StudioViewport::ui_overlay()
 
   ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.f, 0.f, 0.f, 0.7f));
 
-  const ImGuiChildFlags childFlags = ImGuiChildFlags_Border
+  const ImGuiChildFlags childFlags = ImGuiChildFlags_Borders
       | ImGuiChildFlags_AutoResizeX | ImGuiChildFlags_AutoResizeY;
   const ImGuiWindowFlags windowFlags =
       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;

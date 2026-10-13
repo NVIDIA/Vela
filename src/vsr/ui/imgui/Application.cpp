@@ -281,7 +281,7 @@ void Application::setupImGuiStyle()
   style.GrabRounding = 20.0f;
   style.TabRounding = 4.0f;
   style.TabBorderSize = 1.0f;
-  style.TabMinWidthForCloseButton = 0.0f;
+  style.TabCloseButtonMinWidthUnselected = 0.0f;
   style.ColorButtonPosition = ImGuiDir_Right;
   style.ButtonTextAlign = ImVec2(0.5f, 0.5f);
   style.SelectableTextAlign = ImVec2(0.0f, 0.0f);
@@ -318,6 +318,7 @@ void Application::setupImGuiStyle()
   style.Colors[ImGuiCol_ScrollbarGrabActive] =
       ImVec4(0.50980395f, 0.50980395f, 0.50980395f, 1.0f);
   style.Colors[ImGuiCol_CheckMark] = ImVec4(0.4627451f, 0.7254902f, 0.0f, 1.0f);
+  style.Colors[ImGuiCol_CheckboxSelectedBg] = style.Colors[ImGuiCol_FrameBg];
   style.Colors[ImGuiCol_SliderGrab] =
       ImVec4(0.8784314f, 0.8784314f, 0.8784314f, 1.0f);
   style.Colors[ImGuiCol_SliderGrabActive] =
@@ -350,11 +351,11 @@ void Application::setupImGuiStyle()
       ImVec4(0.22352941f, 0.22352941f, 0.22352941f, 0.8627451f);
   style.Colors[ImGuiCol_TabHovered] =
       ImVec4(0.32156864f, 0.32156864f, 0.32156864f, 0.8f);
-  style.Colors[ImGuiCol_TabActive] =
+  style.Colors[ImGuiCol_TabSelected] =
       ImVec4(0.27450982f, 0.27450982f, 0.27450982f, 1.0f);
-  style.Colors[ImGuiCol_TabUnfocused] =
+  style.Colors[ImGuiCol_TabDimmed] =
       ImVec4(0.14509805f, 0.14509805f, 0.14509805f, 0.972549f);
-  style.Colors[ImGuiCol_TabUnfocusedActive] =
+  style.Colors[ImGuiCol_TabDimmedSelected] =
       ImVec4(0.42352942f, 0.42352942f, 0.42352942f, 1.0f);
   style.Colors[ImGuiCol_PlotLines] =
       ImVec4(0.60784316f, 0.60784316f, 0.60784316f, 1.0f);
@@ -374,7 +375,7 @@ void Application::setupImGuiStyle()
   style.Colors[ImGuiCol_TextSelectedBg] =
       ImVec4(0.25882354f, 0.5882353f, 0.9764706f, 0.35f);
   style.Colors[ImGuiCol_DragDropTarget] = ImVec4(1.0f, 1.0f, 0.0f, 0.9f);
-  style.Colors[ImGuiCol_NavHighlight] =
+  style.Colors[ImGuiCol_NavCursor] =
       ImVec4(0.4627451f, 0.7254902f, 0.0f, 1.0f);
   style.Colors[ImGuiCol_NavWindowingHighlight] = ImVec4(1.0f, 1.0f, 1.0f, 0.7f);
   style.Colors[ImGuiCol_NavWindowingDimBg] = ImVec4(0.8f, 0.8f, 0.8f, 0.2f);
@@ -393,7 +394,6 @@ WindowArray Application::setupWindows()
   io.IniFilename = nullptr;
   auto *font = io.Fonts->AddFontFromMemoryCompressedTTF(
       vsr_font_compressed_data, vsr_font_compressed_size, 20.f);
-  io.Fonts->ConfigData[0].FontDataOwnedByAtlas = false;
   io.FontDefault = font;
 
   auto *window = sdlWindow();

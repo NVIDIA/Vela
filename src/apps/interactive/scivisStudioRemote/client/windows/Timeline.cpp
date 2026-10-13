@@ -169,7 +169,7 @@ void Timeline::buildEditorUI(const Project &project)
 
 void Timeline::buildUI_transport(const Shot &shot, int shownFrame)
 {
-  const float uiScale = ImGui::GetIO().FontGlobalScale;
+  const float uiScale = ImGui::GetStyle().FontScaleMain;
   ImGui::PushStyleVar(
       ImGuiStyleVar_CellPadding, ImVec2(16.f * uiScale, 2.f * uiScale));
 
@@ -235,7 +235,7 @@ void Timeline::buildUI_transport(const Shot &shot, int shownFrame)
 // it.
 void Timeline::buildUI_clock(const Shot &shot)
 {
-  const float uiScale = ImGui::GetIO().FontGlobalScale;
+  const float uiScale = ImGui::GetStyle().FontScaleMain;
   ImGui::TableNextColumn();
   int frameCount = 0;
   ImGui::SetNextItemWidth(120.f * uiScale);
@@ -257,7 +257,7 @@ void Timeline::buildUI_clock(const Shot &shot)
 
 void Timeline::buildUI_ruler(const Shot &shot, int shownFrame)
 {
-  const float uiScale = ImGui::GetIO().FontGlobalScale;
+  const float uiScale = ImGui::GetStyle().FontScaleMain;
   const float rulerHeight = 28.f * uiScale;
   const float width = std::max(ImGui::GetContentRegionAvail().x, 40.f);
   const int lastFrame = lastFrameOf(shot);

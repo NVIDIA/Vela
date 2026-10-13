@@ -92,7 +92,7 @@ void Timeline::buildUI_transport()
   auto *ctx = appContext();
   auto &scene = ctx->vsr.scene;
   auto &animMgr = ctx->vsr.animationMgr;
-  const float uiScale = ImGui::GetIO().FontGlobalScale;
+  const float uiScale = ImGui::GetStyle().FontScaleMain;
 
   ImGui::PushStyleVar(
       ImGuiStyleVar_CellPadding, ImVec2(16.f * uiScale, 2.f * uiScale));
@@ -162,7 +162,7 @@ void Timeline::buildUI_canvas()
   auto *ctx = appContext();
   auto &scene = ctx->vsr.scene;
   auto &animMgr = ctx->vsr.animationMgr;
-  const float uiScale = ImGui::GetIO().FontGlobalScale;
+  const float uiScale = ImGui::GetStyle().FontScaleMain;
   auto scaled = [uiScale](float value) { return value * uiScale; };
 
   const float rowHeight = scaled(28.f);

@@ -5,8 +5,8 @@ project(vela_ext_imgui_sdl LANGUAGES CXX)
 
 anari_sdk_fetch_project(
   NAME ${PROJECT_NAME}
-  URL https://github.com/ocornut/imgui/archive/refs/tags/v1.91.7-docking.zip
-  MD5 2cfbf7b7790076d6debe5060ec1fb47f
+  URL https://github.com/ocornut/imgui/archive/refs/tags/v1.92.9b-docking.zip
+  MD5 4957f94ed3a3ceae951b5cbdd92c3565
 )
 
 find_package(SDL3 QUIET)
@@ -43,6 +43,10 @@ PRIVATE
 )
 
 project_link_libraries(PUBLIC SDL3::SDL3)
+
+# Keep Vela off APIs Dear ImGui has already deprecated, so the next upgrade
+# breaks at compile time instead of at the version that removes them.
+project_compile_definitions(PUBLIC IMGUI_DISABLE_OBSOLETE_FUNCTIONS)
 
 project_include_directories(
 PUBLIC

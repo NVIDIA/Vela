@@ -28,11 +28,10 @@ void AppSettingsDialog::applySettings()
 {
   const auto *config = m_app->uiConfig();
 
-  ImGuiIO &io = ImGui::GetIO();
   auto scale = config->fontScale;
-  io.FontGlobalScale = scale;
 
   ImGuiStyle &style = ImGui::GetStyle();
+  style.FontScaleMain = scale;
   style.FramePadding = ImVec2(scale * 8.0f, scale * 4.0f);
   style.WindowRounding = config->rounding;
   style.ChildRounding = config->rounding;
@@ -218,10 +217,9 @@ void AppSettingsDialog::buildUI_offlineRenderSettings()
   if (ImGui::Combo(
           "Select",
           &currentSelection,
-          [](void *data, int idx, const char **out) {
+          [](void *data, int idx) {
             auto *names = (std::vector<std::string> *)data;
-            *out = (*names)[idx].c_str();
-            return true;
+            return (*names)[idx].c_str();
           },
           &cameraNames,
           static_cast<int>(cameraNames.size()))) {

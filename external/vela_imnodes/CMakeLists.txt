@@ -5,8 +5,8 @@ project(vela_ext_imnodes LANGUAGES CXX)
 
 anari_sdk_fetch_project(
   NAME ${PROJECT_NAME}
-  URL https://github.com/Nelarius/imnodes/archive/refs/tags/v0.5.zip
-  MD5 bebc93614fb55fc5924191b3c5320026
+  URL https://github.com/Nelarius/imnodes/archive/eb36902c892548ef94f88f51ad7e7c9c7058a71c.zip
+  MD5 65292c755ccba3b5c3686262637d8ef8
 )
 
 project_add_library(INTERFACE)

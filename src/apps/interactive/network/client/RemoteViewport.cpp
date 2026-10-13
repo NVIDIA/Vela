@@ -328,7 +328,7 @@ void RemoteViewport::ui_overlay()
 
   ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.0f, 0.0f, 0.0f, 0.7f));
 
-  ImGuiChildFlags childFlags = ImGuiChildFlags_Border
+  ImGuiChildFlags childFlags = ImGuiChildFlags_Borders
       | ImGuiChildFlags_AutoResizeX | ImGuiChildFlags_AutoResizeY;
   ImGuiWindowFlags childWindowFlags =
       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;

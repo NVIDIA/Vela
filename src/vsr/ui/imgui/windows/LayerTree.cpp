@@ -18,11 +18,10 @@ namespace vsr::ui::imgui {
 
 static std::string s_newLayerName;
 
-static bool UI_layerName_callback(void *l, int index, const char **out_text)
+static const char *UI_layerName_callback(void *l, int index)
 {
   const auto &layers = *(const vsr::scene::LayerMap *)l;
-  *out_text = layers.at_index(index).first.c_str();
-  return true;
+  return layers.at_index(index).first.c_str();
 }
 
 // LayerTree definitions //////////////////////////////////////////////////////
