@@ -2272,7 +2272,8 @@ static void convertCamera(
 void import_PBRT(Scene &scene,
     vsr::animation::AnimationManager &animMgr,
     const char *filename,
-    LayerNodeRef location)
+    LayerNodeRef location,
+    bool includeDefaultCamera)
 {
   (void)animMgr;
   logStatus("[import_PBRT] Parsing '%s'...", filename);
@@ -2393,7 +2394,8 @@ void import_PBRT(Scene &scene,
     convertLight(scene, light, root, basePath, exposureScale);
 
   // Camera
-  convertCamera(scene, file, pbrtScene);
+  if (pbrtScene.camera.authored || includeDefaultCamera)
+    convertCamera(scene, file, pbrtScene);
 
   scene.endLayerEditBatch();
 
