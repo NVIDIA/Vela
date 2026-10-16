@@ -97,6 +97,28 @@ bool AnimationManager::widenClock(int frames, float fps)
       && !(fps > 0.f && fps < m_animationFPS);
 }
 
+AnimationManager::RuntimeState AnimationManager::runtimeState() const
+{
+  return {m_time,
+      m_incrementSize,
+      m_animationFPS,
+      m_playbackAccumulator,
+      m_totalFrames,
+      m_playing,
+      m_loop};
+}
+
+void AnimationManager::restoreRuntimeState(const RuntimeState &state)
+{
+  m_incrementSize = state.increment;
+  m_animationFPS = state.fps;
+  m_playbackAccumulator = state.playbackAccumulator;
+  m_totalFrames = state.totalFrames;
+  m_playing = state.playing;
+  m_loop = state.loop;
+  setAnimationTimeInternal(state.time, false);
+}
+
 void AnimationManager::setAnimationTime(float time)
 {
   setAnimationTimeInternal(time, true);
