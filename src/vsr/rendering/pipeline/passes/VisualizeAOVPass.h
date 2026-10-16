@@ -22,6 +22,9 @@ enum class AOVType
 // The channels an Image Source must produce to visualize 'type'.
 ImageChannels requiredChannels(AOVType type);
 
+// Finite increasing bounds with a finite positive span for depth remapping.
+bool isValidDepthRange(float minDepth, float maxDepth);
+
 /*
  * ImagePass that remaps a selected AOV channel (depth, albedo, normals,
  * edge detection, or ID buffers) into the RGBA color buffer for debugging.
