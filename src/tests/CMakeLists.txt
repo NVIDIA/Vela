@@ -154,6 +154,36 @@ if (TARGET vsr_ui_imgui)
   target_compile_definitions(${PROJECT_NAME} PRIVATE VSR_TEST_UI)
   add_test(NAME vsr::OfflineRenderUI COMMAND ${PROJECT_NAME} "[OfflineRenderUI]")
 endif()
+if (TARGET vsrRender AND UNIX)
+  target_sources(${PROJECT_NAME} PRIVATE test_RenderCLI.cpp)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE
+    VSR_RENDER_EXECUTABLE="$<TARGET_FILE:vsrRender>")
+  add_dependencies(${PROJECT_NAME} vsrRender)
+  if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_library(vsr_test_render_exception SHARED RenderExceptionInjection.cpp)
+    target_link_libraries(vsr_test_render_exception PRIVATE
+      anari::anari ${CMAKE_DL_LIBS})
+    target_compile_definitions(${PROJECT_NAME} PRIVATE
+      VSR_RENDER_EXCEPTION_LIBRARY="$<TARGET_FILE:vsr_test_render_exception>")
+    add_dependencies(${PROJECT_NAME} vsr_test_render_exception)
+  endif()
+  add_test(NAME vsr::RenderCLI COMMAND ${PROJECT_NAME} "[RenderCLI]")
+  set_tests_properties(vsr::RenderCLI PROPERTIES TIMEOUT 180)
+  if(VSR_USE_MPI AND MPIEXEC_EXECUTABLE)
+    # The serial suite starts hundreds of singleton MPI runtimes. Keep each
+    # subprocess's 20s bound while allowing aggregate initialization overhead.
+    set_tests_properties(vsr::RenderCLI PROPERTIES TIMEOUT 600)
+    string(JOIN " " VSR_MPI_PREFLAGS ${MPIEXEC_PREFLAGS})
+    string(JOIN " " VSR_MPI_POSTFLAGS ${MPIEXEC_POSTFLAGS})
+    target_compile_definitions(${PROJECT_NAME} PRIVATE
+      VSR_MPI_EXECUTABLE="${MPIEXEC_EXECUTABLE}"
+      VSR_MPI_NUMPROC_FLAG="${MPIEXEC_NUMPROC_FLAG}"
+      VSR_MPI_PREFLAGS="${VSR_MPI_PREFLAGS}"
+      VSR_MPI_POSTFLAGS="${VSR_MPI_POSTFLAGS}")
+    add_test(NAME vsr::RenderMPI COMMAND ${PROJECT_NAME} "[RenderMPI]")
+    set_tests_properties(vsr::RenderMPI PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
+  endif()
+endif()
 add_test(NAME vsr::App COMMAND ${PROJECT_NAME} "[App]")
 add_test(NAME vsr::OfflineRender COMMAND ${PROJECT_NAME} "[OfflineRender]")
 add_test(NAME vsr::AnimationArchive COMMAND ${PROJECT_NAME} "[AnimationArchive]")

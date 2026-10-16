@@ -356,6 +356,31 @@ SCENARIO("Application Dumps remap animations to dense Scene Archive indices",
       == restoredTransform);
 }
 
+TEST_CASE("Legacy offline lens settings do not replace Scene Camera parameters",
+    "[App]")
+{
+  vsr::app::Context source;
+  auto camera = source.vsr.scene.defaultCamera();
+  camera->setParameter("apertureRadius", 0.25f);
+  camera->setParameter("focusDistance", 12.f);
+  vsr::core::DataTree tree;
+  REQUIRE(vsr::app::serialize_ApplicationDump(source, tree.root()));
+  tree.root()["offlineRendering"]["camera"]["apertureRadius"] = 0.f;
+  tree.root()["offlineRendering"]["camera"]["focusDistance"] = 1.f;
+
+  vsr::app::Context target;
+  REQUIRE(vsr::app::deserialize_ApplicationDump(target, tree.root()));
+  auto restored = target.vsr.scene.defaultCamera();
+  REQUIRE(restored->parameterValueAs<float>("apertureRadius") == Approx(0.25f));
+  REQUIRE(restored->parameterValueAs<float>("focusDistance") == Approx(12.f));
+  vsr::core::DataTree resaved;
+  REQUIRE(vsr::app::serialize_ApplicationDump(target, resaved.root()));
+  REQUIRE(resaved.root()["offlineRendering"]["camera"].child("apertureRadius")
+      == nullptr);
+  REQUIRE(resaved.root()["offlineRendering"]["camera"].child("focusDistance")
+      == nullptr);
+}
+
 SCENARIO("Application Dumps round-trip only stable Context settings", "[App]")
 {
   vsr::app::Context source;
@@ -369,8 +394,8 @@ SCENARIO("Application Dumps round-trip only stable Context settings", "[App]")
   source.offline.frame.startFrame = 3;
   source.offline.frame.endFrame = 33;
   source.offline.frame.frameIncrement = 3;
-  source.offline.camera.apertureRadius = 0.25f;
-  source.offline.camera.focusDistance = 12.f;
+  source.vsr.scene.defaultCamera()->setParameter("apertureRadius", 0.25f);
+  source.vsr.scene.defaultCamera()->setParameter("focusDistance", 12.f);
   source.offline.camera.cameraIndex = 4;
   source.offline.renderer.activeRenderer = 2;
   source.offline.renderer.libraryName = "archived_library";
@@ -419,8 +444,16 @@ SCENARIO("Application Dumps round-trip only stable Context settings", "[App]")
   REQUIRE(target.offline.frame.startFrame == 3);
   REQUIRE(target.offline.frame.endFrame == 33);
   REQUIRE(target.offline.frame.frameIncrement == 3);
-  REQUIRE(target.offline.camera.apertureRadius == Approx(0.25f));
-  REQUIRE(target.offline.camera.focusDistance == Approx(12.f));
+  REQUIRE(tree.root()["offlineRendering"]["camera"].child("apertureRadius")
+      == nullptr);
+  REQUIRE(tree.root()["offlineRendering"]["camera"].child("focusDistance")
+      == nullptr);
+  REQUIRE(target.vsr.scene.defaultCamera()->parameterValueAs<float>(
+              "apertureRadius")
+      == Approx(0.25f));
+  REQUIRE(
+      target.vsr.scene.defaultCamera()->parameterValueAs<float>("focusDistance")
+      == Approx(12.f));
   REQUIRE(target.offline.camera.cameraIndex == 4);
   REQUIRE(target.offline.renderer.activeRenderer == 2);
   REQUIRE(target.offline.renderer.libraryName == "archived_library");

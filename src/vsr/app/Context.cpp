@@ -668,8 +668,6 @@ void OfflineRenderSequenceConfig::saveSettings(vsr::core::DataNode &root) const
   frameRoot["frameIncrement"] = frame.frameIncrement;
 
   auto &cameraRoot = root["camera"];
-  cameraRoot["apertureRadius"] = camera.apertureRadius;
-  cameraRoot["focusDistance"] = camera.focusDistance;
   cameraRoot["cameraIndex"] = camera.cameraIndex;
 
   auto &rendererRoot = root["renderer"];
@@ -707,8 +705,6 @@ void OfflineRenderSequenceConfig::loadSettings(vsr::core::DataNode &root)
   frameRoot["frameIncrement"].getValue(ANARI_INT32, &frame.frameIncrement);
 
   auto &cameraRoot = root["camera"];
-  cameraRoot["apertureRadius"].getValue(ANARI_FLOAT32, &camera.apertureRadius);
-  cameraRoot["focusDistance"].getValue(ANARI_FLOAT32, &camera.focusDistance);
   cameraRoot["cameraIndex"].getValue(ANARI_UINT64, &camera.cameraIndex);
 
   auto &rendererRoot = root["renderer"];
