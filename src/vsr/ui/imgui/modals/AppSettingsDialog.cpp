@@ -186,16 +186,6 @@ void AppSettingsDialog::buildUI_offlineRenderSettings()
 
   ImGui::Separator();
   ImGui::Text("==== Camera ====");
-  ImGui::DragFloat("apertureRadius",
-      &ctx->offline.camera.apertureRadius,
-      1,
-      0.f,
-      std::numeric_limits<float>::max());
-  ImGui::DragFloat("focusDistance",
-      &ctx->offline.camera.focusDistance,
-      1,
-      0.f,
-      std::numeric_limits<float>::max());
 
   // Build camera list
   std::vector<std::string> cameraNames = {"<none>"};
@@ -230,6 +220,17 @@ void AppSettingsDialog::buildUI_offlineRenderSettings()
           m_menuCameraRefs[currentSelection].index();
     }
   }
+
+  const auto cameraIndex = ctx->offline.camera.cameraIndex == VSR_INVALID_INDEX
+      ? size_t(0)
+      : ctx->offline.camera.cameraIndex;
+  if (auto camera = ctx->vsr.scene.getObject<vsr::scene::Camera>(cameraIndex)) {
+    for (const auto *name : {"apertureRadius", "focusDistance"}) {
+      if (auto *parameter = camera->parameter(name))
+        buildUI_parameter(*camera, *parameter, ctx->vsr.scene, false);
+    }
+  }
+  ImGui::TextDisabled("Lens settings belong to the selected Scene Camera.");
 
   // Renderer //
 

@@ -18,15 +18,18 @@ project_add_executable(vsrAssemble.cpp)
 project_link_libraries(vsr_app vsr_scene vsr_io)
 
 project(vsrRender)
-project_add_executable(vsrRender.cpp)
+project_add_executable(vsrRender.cpp RenderDeviceConfig.cpp RenderRuntime.cpp)
 project_link_libraries(
   vsr_app
   vsr_scene
   vsr_io
   vsr_rendering
-  vela_ext_stb_image
-  vela_ext_tinyexr_impl
 )
+
+if(VSR_USE_MPI)
+  project_link_libraries(vsr_mpi)
+  project_compile_definitions(PRIVATE VSR_USE_MPI)
+endif()
 
 if(VSR_USE_USD)
   project(vsrUsdInfo)

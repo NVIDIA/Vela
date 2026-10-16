@@ -111,8 +111,6 @@ struct OfflineRenderSequenceConfig
 
   struct CameraSettings
   {
-    float apertureRadius{0.f};
-    float focusDistance{1.f};
     size_t cameraIndex{VSR_INVALID_INDEX};
   } camera;
 
