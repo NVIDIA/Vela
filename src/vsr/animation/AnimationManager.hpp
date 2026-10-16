@@ -65,6 +65,20 @@ struct AnimationManager
   void removeAnimation(size_t index);
   void removeAllAnimations();
 
+  // Transient clock state, including pending playback time. Not an Archive.
+  struct RuntimeState
+  {
+    float time;
+    float increment;
+    float fps;
+    float playbackAccumulator;
+    int totalFrames;
+    bool playing;
+    bool loop;
+  };
+  RuntimeState runtimeState() const;
+  void restoreRuntimeState(const RuntimeState &state);
+
   // Time control
   void setAnimationTime(float time);
   float getAnimationTime() const;

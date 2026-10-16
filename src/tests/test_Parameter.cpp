@@ -30,6 +30,52 @@ struct MockObject : public vsr::scene::ParameterObserver
 
 ///////////////////////////////////////////////////////////////////////////////
 
+TEST_CASE(
+    "Parameter state restoration preserves its current observer", "[Parameter]")
+{
+  MockObject originalOwner, currentOwner;
+  vsr::scene::Parameter saved(&originalOwner, "saved");
+  saved.setValue(std::string("second"))
+      .setDescription("saved metadata")
+      .setMin(1)
+      .setMax(9)
+      .setStringValues({"first", "second"})
+      .setStringSelection(0)
+      .setEnabled(false);
+  vsr::scene::Parameter current(&currentOwner, "current");
+  current.setValue(42);
+  originalOwner.notified = false;
+  currentOwner.notified = false;
+
+  current.restoreStateFrom(saved);
+
+  REQUIRE_FALSE(originalOwner.notified);
+  REQUIRE_FALSE(currentOwner.notified);
+  REQUIRE(current.name() == saved.name());
+  REQUIRE(current.value().get<std::string>() == "second");
+  REQUIRE(current.description() == "saved metadata");
+  REQUIRE(current.min().get<int>() == 1);
+  REQUIRE(current.max().get<int>() == 9);
+  REQUIRE(current.stringValues() == saved.stringValues());
+  REQUIRE(current.stringSelection() == 0);
+  REQUIRE_FALSE(current.isEnabled());
+
+  current.setValue(std::string("first"));
+  REQUIRE(currentOwner.notified);
+  REQUIRE_FALSE(originalOwner.notified);
+
+  SECTION("Self-restoration keeps the state and observer")
+  {
+    currentOwner.notified = false;
+    current.restoreStateFrom(current);
+    REQUIRE_FALSE(currentOwner.notified);
+    REQUIRE(current.value().get<std::string>() == "first");
+    current.setEnabled(true);
+    REQUIRE(currentOwner.notified);
+    REQUIRE_FALSE(originalOwner.notified);
+  }
+}
+
 SCENARIO("vsr::scene::Parameter interface", "[Parameter]")
 {
   GIVEN("A constructed Parameter with a value")

@@ -4,12 +4,21 @@
 #include "vsr/scene/Parameter.hpp"
 // vsr_core
 #include "vsr/core/Logging.hpp"
+// std
+#include <utility>
 
 namespace vsr::scene {
 
 Parameter::Parameter(ParameterObserver *object, Token name)
     : m_observer(object), m_name(name)
 {}
+
+void Parameter::restoreStateFrom(const Parameter &saved)
+{
+  Parameter restored(saved);
+  restored.m_observer = m_observer;
+  *this = std::move(restored);
+}
 
 void Parameter::remove()
 {

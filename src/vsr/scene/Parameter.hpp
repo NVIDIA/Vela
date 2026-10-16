@@ -58,6 +58,9 @@ struct Parameter
 {
   Parameter(ParameterObserver *object, Token name);
 
+  // Restore all saved state without notifying or replacing this observer.
+  void restoreStateFrom(const Parameter &saved);
+
   void remove(); // remove (and delete) parameter from parent object
 
   Token name() const;
