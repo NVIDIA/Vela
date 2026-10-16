@@ -79,7 +79,7 @@ void import_MINI(Scene &scene, vsr::animation::AnimationManager &animMgr, const 
 void import_NBODY(Scene &scene, vsr::animation::AnimationManager &animMgr, const char *filename, LayerNodeRef location = {}, bool useDefaultMaterial = false);
 void import_OBJ(Scene &scene, vsr::animation::AnimationManager &animMgr, const char *filename, LayerNodeRef location = {}, bool useDefaultMaterial = false);
 void import_PDB(Scene &scene, vsr::animation::AnimationManager &animMgr, const char *filename, LayerNodeRef location = {});
-void import_PBRT(Scene &scene, vsr::animation::AnimationManager &animMgr, const char *filename, LayerNodeRef location = {});
+void import_PBRT(Scene &scene, vsr::animation::AnimationManager &animMgr, const char *filename, LayerNodeRef location = {}, bool includeDefaultCamera = true);
 void import_PLY(Scene &scene, vsr::animation::AnimationManager &animMgr, const char *filename, LayerNodeRef location = {});
 void import_POINTSBIN(Scene &scene, vsr::animation::AnimationManager &animMgr, const std::vector<std::string> &filepaths, LayerNodeRef location = {});
 void import_PT(Scene &scene, vsr::animation::AnimationManager &animMgr, const char *filename, LayerNodeRef location = {});

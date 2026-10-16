@@ -102,6 +102,7 @@ struct LightDef
 
 struct CameraDef
 {
+  bool authored{false};
   std::string type = "perspective";
   ParamList params;
   Transform cameraToWorld;

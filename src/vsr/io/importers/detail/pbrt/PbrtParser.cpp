@@ -319,6 +319,7 @@ void Parser::parseFilm(Lexer &lex)
 
 void Parser::parseCamera(Lexer &lex)
 {
+  m_scene.camera.authored = true;
   m_scene.camera.type = parseQuotedString(lex);
   m_scene.camera.params = parseParamList(lex);
   m_scene.camera.cameraToWorld = currentState().ctm;
