@@ -43,6 +43,12 @@ anari::Camera RenderIndex::camera(size_t i)
   return (anari::Camera)m_cache.getHandle(ANARI_CAMERA, i, true);
 }
 
+void RenderIndex::updateAllANARIParameters(
+    const Object &object, anari::Object handle)
+{
+  object.updateAllANARIParameters(device(), handle, &m_cache);
+}
+
 vsr::math::box3 RenderIndex::worldBounds() const
 {
   vsr::math::box3 bounds;

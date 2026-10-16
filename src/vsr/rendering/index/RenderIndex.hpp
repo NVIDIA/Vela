@@ -50,6 +50,10 @@ struct RenderIndex : public BaseUpdateDelegate
   // This does not register the index as a Scene update delegate.
   void populate();
 
+  // Apply an external configuration Object using this index's live Scene
+  // handles, including referenced Arrays and other object-valued parameters.
+  void updateAllANARIParameters(const Object &object, anari::Object handle);
+
   virtual void setFilterFunction(RenderIndexFilterFcn f);
   virtual bool isFlat() const = 0;
 

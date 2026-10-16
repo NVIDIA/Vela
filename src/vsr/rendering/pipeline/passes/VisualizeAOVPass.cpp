@@ -7,8 +7,17 @@
 #ifdef VSR_ALGORITHMS_HAS_CUDA
 #include "vsr/algorithms/cuda/visualizeAOV.hpp"
 #endif
+// std
+#include <cmath>
 
 namespace vsr::rendering {
+
+bool isValidDepthRange(float minDepth, float maxDepth)
+{
+  const float span = maxDepth - minDepth;
+  return std::isfinite(minDepth) && std::isfinite(maxDepth)
+      && maxDepth > minDepth && std::isfinite(span) && span > 0.f;
+}
 
 // VisualizeAOVPass definitions ///////////////////////////////////////////////
 
