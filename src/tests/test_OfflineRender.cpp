@@ -6,7 +6,10 @@
 // vsr_app
 #include "vsr/app/Context.h"
 #include "vsr/app/renderAnimationSequence.h"
-
+#ifdef VSR_TEST_UI
+// vsr_ui
+#include "vsr/ui/imgui/Application.h"
+#endif
 // catch
 #include "catch.hpp"
 // stb_image
@@ -1285,6 +1288,217 @@ TEST_CASE("UI sequence adapter renders and restores its caller",
   REQUIRE_FALSE(std::filesystem::exists(fixture.directory / "ui_0002.png"));
   fixture.checkRestored();
 }
+
+#ifdef VSR_TEST_UI
+namespace {
+struct SmokeApplication : vsr::ui::imgui::Application
+{
+  const char *applicationIdentifier() const override;
+  const char *getDefaultLayout() const override;
+};
+const char *SmokeApplication::applicationIdentifier() const
+{
+  return "offline-modal-test";
+}
+const char *SmokeApplication::getDefaultLayout() const
+{
+  return "";
+}
+} // namespace
+
+TEST_CASE("Offline modal executes the UI rendering path",
+    "[App][OfflineRender][OfflineRenderUI]")
+{
+  RenderFixture fixture;
+  SmokeApplication app;
+  auto &ctx = *app.appContext();
+  auto camera = ctx.vsr.scene.createObject<vsr::scene::Camera>("perspective");
+  ctx.offline.camera.cameraIndex = camera->index();
+  ctx.offline.renderer.rendererObjects.emplace_back(ANARI_RENDERER, "default");
+  ctx.offline.renderer.activeRenderer = 0;
+  ctx.offline.renderer.libraryName = "helide";
+  ctx.offline.frame.width = 16;
+  ctx.offline.frame.height = 16;
+  ctx.offline.frame.samples = 1;
+  ctx.offline.frame.numFrames = 1;
+  ctx.offline.output.outputDirectory = fixture.directory.string();
+  ctx.offline.output.filePrefix = "modal_";
+  bool failed = false;
+  std::string exceptionDiagnostic;
+  SECTION("Actual helide completion") {}
+  SECTION("Failure remains visible for acknowledgement")
+  {
+    failed = true;
+    REQUIRE(std::filesystem::create_directory(
+        fixture.directory / "modal_0000.png"));
+  }
+  SECTION("Standard worker exception remains visible and permits retry")
+  {
+    failed = true;
+    exceptionDiagnostic = "UI animation failed";
+    ctx.vsr.animationMgr.addAnimation("throws").addCallbackBinding(
+        [](float) { throw std::runtime_error("UI animation failed"); });
+  }
+  SECTION("Nonstandard worker exception remains visible and permits retry")
+  {
+    failed = true;
+    exceptionDiagnostic = "Unknown exception";
+    ctx.vsr.animationMgr.addAnimation("throws").addCallbackBinding(
+        [](float) { throw 42; });
+  }
+  const auto viewportDevice = ctx.anari.loadDevice("helide");
+  REQUIRE(viewportDevice);
+  auto *viewportIndex =
+      ctx.anari.acquireRenderIndex(ctx.vsr.scene, "helide", viewportDevice);
+  REQUIRE(viewportIndex);
+  viewportIndex->populate();
+  const auto viewportWorld = viewportIndex->world();
+  const auto viewportCamera = viewportIndex->camera(camera->index());
+  REQUIRE(viewportWorld);
+  REQUIRE(viewportCamera);
+  const auto delegates = ctx.vsr.scene.updateDelegate().size();
+  const auto clock = ctx.vsr.animationMgr.runtimeState();
+  vsr::ui::imgui::OfflineRenderModal modal(&app);
+  modal.start();
+  REQUIRE(modal.visible());
+  // The application queue is single-worker; the sentinel completes after the
+  // job.
+  app.enqueueTask([] {}).wait();
+  REQUIRE(modal.result());
+  REQUIRE(modal.result()->status
+      == (failed ? vsr::app::OfflineRenderStatus::Failed
+                 : vsr::app::OfflineRenderStatus::Completed));
+  if (failed)
+    REQUIRE_FALSE(modal.result()->diagnostic.empty());
+  if (!exceptionDiagnostic.empty())
+    REQUIRE(modal.result()->diagnostic.find(exceptionDiagnostic)
+        != std::string::npos);
+  REQUIRE(ctx.vsr.scene.updateDelegate().size() == delegates);
+  REQUIRE(ctx.vsr.animationMgr.runtimeState().time == clock.time);
+  const auto cachedDevice = ctx.anari.loadDevice("helide");
+  REQUIRE(cachedDevice == viewportDevice);
+  anari::release(cachedDevice, cachedDevice);
+  REQUIRE(viewportIndex->world() == viewportWorld);
+  REQUIRE(viewportIndex->camera(camera->index()) == viewportCamera);
+  ctx.anari.releaseRenderIndex(ctx.vsr.scene, viewportDevice);
+  anari::release(viewportDevice, viewportDevice);
+  ImGui::CreateContext();
+  auto &io = ImGui::GetIO();
+  io.IniFilename = nullptr;
+  io.DisplaySize = ImVec2(640, 480);
+  // Exercise UI state without a renderer backend or texture uploads.
+  io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
+  int width = 0, height = 0;
+  ImGui::NewFrame();
+  ImGui::Begin("modal smoke");
+  modal.buildUI();
+  REQUIRE(modal.visible() == failed);
+  ImGui::End();
+  ImGui::EndFrame();
+  ImGui::DestroyContext();
+  if (failed) {
+    // A completed exceptional task must not strand the modal's next job.
+    ctx.vsr.animationMgr.removeAllAnimations();
+    std::filesystem::remove_all(fixture.directory / "modal_0000.png");
+    modal.start();
+    app.enqueueTask([] {}).wait();
+    REQUIRE(
+        std::filesystem::is_regular_file(fixture.directory / "modal_0000.png"));
+    REQUIRE(modal.result());
+    REQUIRE(modal.result()->status == vsr::app::OfflineRenderStatus::Completed);
+    REQUIRE(ctx.vsr.scene.updateDelegate().size() == delegates - 1);
+  }
+  if (!failed) {
+    int channels = 0;
+    const std::unique_ptr<unsigned char, decltype(&stbi_image_free)> image(
+        stbi_load((fixture.directory / "modal_0000.png").string().c_str(),
+            &width,
+            &height,
+            &channels,
+            4),
+        stbi_image_free);
+    REQUIRE(image);
+    REQUIRE(width == 16);
+    REQUIRE(height == 16);
+  }
+}
+
+TEST_CASE("Offline modal cancellation and destruction synchronize the worker",
+    "[App][OfflineRender][OfflineRenderUI]")
+{
+  RenderFixture fixture;
+  SmokeApplication app;
+  auto &ctx = *app.appContext();
+  auto camera = ctx.vsr.scene.createObject<vsr::scene::Camera>("perspective");
+  ctx.offline.camera.cameraIndex = camera->index();
+  ctx.offline.renderer.rendererObjects.emplace_back(ANARI_RENDERER, "default");
+  ctx.offline.renderer.activeRenderer = 0;
+  ctx.offline.renderer.libraryName = "helide";
+  ctx.offline.frame.width = 16;
+  ctx.offline.frame.height = 16;
+  ctx.offline.frame.samples = 1;
+  ctx.offline.frame.renderSubset = true;
+  ctx.offline.frame.startFrame = 0;
+  ctx.offline.frame.endFrame = 1;
+  ctx.offline.output.outputDirectory = fixture.directory.string();
+  ctx.offline.output.filePrefix = "lifetime_";
+  std::promise<void> entered, resume;
+  auto enteredFuture = entered.get_future();
+  const auto resumeFuture = resume.get_future().share();
+  std::atomic<bool> first{true};
+  ctx.vsr.animationMgr.addAnimation("worker barrier")
+      .addCallbackBinding([&](float) {
+        if (first.exchange(false)) {
+          entered.set_value();
+          resumeFuture.wait();
+        }
+      });
+  const auto delegates = ctx.vsr.scene.updateDelegate().size();
+  const auto clock = ctx.vsr.animationMgr.runtimeState();
+  auto modal = std::make_unique<vsr::ui::imgui::OfflineRenderModal>(&app);
+  modal->start();
+  const bool running = enteredFuture.wait_for(std::chrono::seconds(2))
+      == std::future_status::ready;
+  if (!running)
+    resume.set_value();
+  REQUIRE(running);
+  REQUIRE_FALSE(modal->result());
+  SECTION("Cancellation returns an actionable completed partial result")
+  {
+    modal->cancel();
+    resume.set_value();
+    app.enqueueTask([] {}).wait();
+    REQUIRE(modal->result());
+    REQUIRE(
+        modal->result()->status == vsr::app::OfflineRenderStatus::Cancelled);
+    REQUIRE(modal->result()->completedFrames == 1);
+    REQUIRE_FALSE(modal->result()->diagnostic.empty());
+    REQUIRE(std::filesystem::is_regular_file(
+        fixture.directory / "lifetime_0000.png"));
+    REQUIRE_FALSE(
+        std::filesystem::exists(fixture.directory / "lifetime_0001.png"));
+  }
+  SECTION("Destruction waits for a running callback before releasing the modal")
+  {
+    std::promise<void> destructing;
+    auto destructingFuture = destructing.get_future();
+    auto destroyed = std::async(std::launch::async, [&] {
+      destructing.set_value();
+      modal.reset();
+    });
+    destructingFuture.wait();
+    const bool waiting = destroyed.wait_for(std::chrono::milliseconds(50))
+        != std::future_status::ready;
+    resume.set_value();
+    destroyed.get();
+    REQUIRE(waiting);
+    app.enqueueTask([] {}).wait();
+  }
+  REQUIRE(ctx.vsr.scene.updateDelegate().size() == delegates);
+  REQUIRE(ctx.vsr.animationMgr.runtimeState().time == clock.time);
+  REQUIRE(ctx.vsr.animationMgr.runtimeState().playing == clock.playing);
+}
+#endif
 
 TEST_CASE("Resolved offline jobs validate finite increasing depth ranges",
     "[App][OfflineRender]")
