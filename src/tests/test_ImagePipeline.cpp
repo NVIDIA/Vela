@@ -581,5 +581,24 @@ TEST_CASE("saveImage writes the pipeline's color buffer as top-down PNG",
     stbi_image_free(pixels);
   }
 
+  SECTION("a directory is not a writable PNG destination")
+  {
+    std::vector<uint8_t> frame(2 * 2 * 4, 0x7f);
+    pipeline.setSource<rendering::ExternalFrameSource>()->setFrame(&frame);
+    pipeline.render();
+    REQUIRE_FALSE(rendering::saveImage(
+        pipeline, std::filesystem::temp_directory_path().string()));
+  }
+
+#ifdef __linux__
+  SECTION("a late filesystem failure is reported")
+  {
+    std::vector<uint8_t> frame(2 * 2 * 4, 0x7f);
+    pipeline.setSource<rendering::ExternalFrameSource>()->setFrame(&frame);
+    pipeline.render();
+    REQUIRE_FALSE(rendering::saveImage(pipeline, "/dev/full"));
+  }
+#endif
+
   std::filesystem::remove(path);
 }
