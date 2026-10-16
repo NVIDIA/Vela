@@ -16,9 +16,9 @@
 #include <string>
 #include <vector>
 
-// Assemble a scene from the same scene-loading command line the viewers and
-// vsrOffline take (-vsr, -gltf, -obj, -usd, -l, ...) and save it as a Scene
-// Archive instead of rendering it. No ANARI device is loaded.
+// Assemble a scene using the viewers' scene-loading flags (-vsr, -gltf, -obj,
+// -usd, -l, ...) and save it as a Scene Archive instead of rendering it.
+// No ANARI device is loaded.
 
 namespace {
 

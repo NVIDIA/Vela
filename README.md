@@ -105,8 +105,8 @@ definitive list of available options.
 ### Command-line tools
 
 [`src/apps/tools/`](src/apps/tools/) contains headless utilities, including
-`vsrOffline` and `vsrRender` for offline rendering, `vsrPrint` for inspecting
-serialized `.vsr` files, `vsrVolumeToNanoVDB` for volume conversion, and
+`vsrRender` for noninteractive stills and explicit animation, `vsrPrint` for
+inspecting serialized `.vsr` files, `vsrVolumeToNanoVDB` for volume conversion, and
 `vsrLua` for scripted workflows.
 
 ### anari_vsr

@@ -61,7 +61,8 @@ sampler supplies the texels — but it is noise that hides real failures.
 
 Setting that parameter was tried and is **blocked**, not merely undone. Measured
 on the reference asset, by setting `mdlResourceSearchPaths` on the device right
-after `anari::newDevice` in `vsrOffline`:
+after `anari::newDevice` in the historical standalone renderer (the current
+shared-engine device lifetime is in `renderOfflineJob()`):
 
 | value | resolve failures | distinct unresolved (UDIM) | render |
 |---|---|---|---|
@@ -108,18 +109,23 @@ asset's textures are TIFF), and a VisRTX build with both MDL and MaterialX
 enabled, installed where `anari::loadLibrary` finds `visrtx_mtlx`. A standalone
 VSR build is enough for VSR's own side; the device comes from the parent repo.
 
-`vsrOffline` defaults to `VSR_ANARI_LIBRARIES[0]`, then the environment, then
-`visrtx` -- in practice `visrtx`, which has no MaterialX shader generation and
-so reports none of the failures above -- pass `--lib visrtx_mtlx` explicitly. It
-also prompts for a camera:
+Select the MaterialX-capable device explicitly with `--device visrtx_mtlx`;
+otherwise saved settings/environment/default precedence may select a different
+device and hide the failures being measured. The noninteractive renderer never
+prompts: select the authored Camera by name (or use `--camera-index` with its
+actual object index). The reference asset includes `renderCam_CU_meetMATandTube`.
+See the [canonical CLI reference](../src/apps/tools/README.md#vsrrender) for
+selection, importer routing and output protection.
 
 ```bash
 F=.../ShdrPlygrnd/ShdrPlygrnd_OpenPBR.usda
-echo 8 | ./vsrOffline --lib visrtx_mtlx -usd_mtlx $F -o /tmp/out.png -s 1 -w 128 -h 96 > /tmp/run.log 2>&1
+./vsrRender --device visrtx_mtlx --importer usd-mtlx "$F" \
+  --camera renderCam_CU_meetMATandTube --output /tmp/out.png --overwrite \
+  --samples 1 --width 128 --height 96 > /tmp/run.log 2>&1
 ```
 
 Redirect with `> log 2>&1`, not `2>&1 > log`, or the ANARI errors miss the file.
-`-s 1 -w 128 -h 96` collects device errors without waiting on a real render.
+`--samples 1 --width 128 --height 96` collects device errors with a small render.
 Grep the log for `sampler not bound`, `failed to transcode`,
 `Failed to resolve texture resource`, and `texture load failed`.
 

@@ -167,6 +167,13 @@ if (TARGET vsrRender AND UNIX)
       VSR_RENDER_EXCEPTION_LIBRARY="$<TARGET_FILE:vsr_test_render_exception>")
     add_dependencies(${PROJECT_NAME} vsr_test_render_exception)
   endif()
+  add_test(NAME vsr::RenderTools
+    COMMAND ${CMAKE_COMMAND}
+      -DBUILD_DIR=${CMAKE_BINARY_DIR}
+      -DCONFIG=$<CONFIG>
+      -DEXECUTABLE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/test_RenderTools.cmake)
+  set_tests_properties(vsr::RenderTools PROPERTIES RUN_SERIAL TRUE TIMEOUT 60)
   add_test(NAME vsr::RenderCLI COMMAND ${PROJECT_NAME} "[RenderCLI]")
   set_tests_properties(vsr::RenderCLI PROPERTIES TIMEOUT 180)
   if(VSR_USE_MPI AND MPIEXEC_EXECUTABLE)
