@@ -1569,7 +1569,7 @@ Findings of the 2026-09-03 code-quality review of the whole branch against
   renders and waits before the common copy or starts the next frame after
   it. Against `main`, synchronous mode composites this call's own render and
   leaves no render in flight after composite (`main` composited the previous
-  call's frame and started another); `vsrRender`, `vsrOffline`,
+  call's frame and started another); `vsrRender`,
   `renderAnimationSequence`, `RenderShot` and the server's frame loop are
   the callers, and the branch already behaved so before this round. The
   first-frame fill, dead on `main` and here because `startFirstFrame`
