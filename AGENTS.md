@@ -58,7 +58,7 @@ vsr_core  ->  vsr_scene  ->  vsr_io  ->  vsr_rendering  ->  vsr_app
 - **`vsr_io`** (`src/vsr/io/`): 30+ file format importers (OBJ, GLTF, PLY, USD, VTK, ASSIMP, etc.), volume importers (RAW, NanoVDB, VTI), procedural generators, and VSR scene serialization.
 - **`vsr_rendering`** (`src/vsr/rendering/`): `RenderIndex` (VSR-to-ANARI sync), `ImagePipeline` (composable render passes), camera manipulators.
 - **`vsr_app`** (`src/vsr/app/`): `ANARIDeviceManager`, `Context` (bundles scene + render index + pipeline), CLI parsing, `renderAnimationSequence`.
-- **`anari_vsr`** (`src/anari_vsr/`): ANARI device implementation that mirrors ANARI state into a VSR scene; writes `live_capture.vsr` on each committed frame.
+- **`anari_vsr`** (`src/anari_vsr/`): ANARI device implementation that mirrors ANARI state into a VSR scene; writes `live_capture.vsr` every `captureInterval` frames (default 60) when commits changed.
 
 ### Key Design Patterns
 
@@ -109,4 +109,5 @@ and [docs/adr/0040](docs/adr/0040-keep-ui-state-per-application-not-per-document
 |---|---|
 | `VSR_ANARI_LIBRARIES` | Comma-separated Device Identifiers (`[subtype@]library`) shown in `vsrViewer` device selector |
 | `ANARI_VSR_LIBRARY` | Backend Device Identifier used by `anari_vsr` device (default: `helide`) |
+| `ANARI_VSR_CAPTURE_INTERVAL` | Rendered frames between `anari_vsr` writes of `live_capture.vsr` (default: `60`; `captureInterval` device parameter wins) |
 | `VSR_LUA_PACKAGE_PATHS` | Additional Lua module search paths |

@@ -33,6 +33,15 @@ struct DeviceGlobalState : public helium::BaseGlobalDeviceState
     vsr::core::ObjectVersion instancing{};
   } objectUpdates;
 
+  // Writing live_capture.vsr is throttled to once per 'frameInterval'
+  // rendered frames, and only when commits were finalized since the last write
+  struct LiveCapture
+  {
+    uint32_t frameInterval{60};
+    uint32_t framesSinceLastCapture{0};
+    helium::TimeStamp lastCapturedFinalization{0};
+  } liveCapture;
+
   int cameraCount{0};
   int surfaceCount{0};
   int geometryCount{0};

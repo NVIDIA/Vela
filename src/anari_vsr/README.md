@@ -11,8 +11,10 @@ offline inspection in `vsrViewer`.
 - Instancing (`Group` / `Instance` / `World`) is translated to VSR layers and
   layer nodes.
 - ANARI arrays are backed by VSR arrays, including shared-memory array data.
-- Each time frame rendering observes new finalized commits, the device saves
-  a Scene Archive to `live_capture.vsr`.
+- Every `captureInterval` rendered frames (default 60), if commits were
+  finalized since the last write, the device saves a Scene Archive to
+  `live_capture.vsr`. A pending capture is also written when the frame is
+  released.
 
 ### Why Use This Device
 
@@ -74,6 +76,17 @@ anari::setParameter(d, d, "scene", scenePtr);
 anari::commitParameters(d, d);
 ```
 
+Change how often `live_capture.vsr` is written (in rendered frames):
+
+```cpp
+anari::setParameter(d, d, "captureInterval", 1u); // capture every frame
+anari::commitParameters(d, d);
+```
+
+`captureInterval` accepts `ANARI_UINT32` or `ANARI_INT32`; values below 1 are
+clamped to 1. `vsrViewer` sets it to 1 because it only renders the VSR device
+when explicitly syncing the scene.
+
 ### Inspecting Captures in `vsrViewer`
 
 Once `live_capture.vsr` is generated:
@@ -88,6 +101,9 @@ You can also load the `.vsr` file from the viewer UI.
 
 - `ANARI_VSR_LIBRARY`: backend ANARI library used in internal-scene pass-through
   mode (default: `helide`).
+- `ANARI_VSR_CAPTURE_INTERVAL`: number of rendered frames between
+  `live_capture.vsr` writes (default: `60`). The `captureInterval` device
+  parameter takes precedence when set.
 
 ### Example in This Repository
 

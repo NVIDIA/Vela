@@ -1118,6 +1118,9 @@ void Application::setupVsrDevice()
       return;
     }
     anari::retain(d, d);
+    // each render is an explicit sync request, so capture on every frame
+    anari::setParameter(d, d, "captureInterval", 1u);
+    anari::commitParameters(d, d);
     m_vsrDevice.device = d;
   }
 

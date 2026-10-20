@@ -42,14 +42,15 @@ struct Frame : public helium::BaseFrame
   bool ready() const;
   void wait() const;
 
+  // Writes live_capture.vsr if commits were finalized since the last write
+  void saveLiveCapture();
+
  private:
   helium::IntrusivePtr<World> m_world;
   helium::IntrusivePtr<VSRObject> m_renderer;
   helium::IntrusivePtr<VSRObject> m_camera;
 
   anari::Frame m_anariFrame{nullptr};
-
-  helium::TimeStamp m_lastCommitFlushOccured{0};
 };
 
 } // namespace vsr_device

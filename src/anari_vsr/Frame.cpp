@@ -21,8 +21,12 @@ Frame::~Frame()
 {
   wait();
   auto *state = deviceState();
-  if (!state->usingExternalScene())
+  if (!state->usingExternalScene()) {
+    // don't drop changes from rendered frames that deferred their capture
+    if (state->liveCapture.framesSinceLastCapture > 0)
+      saveLiveCapture();
     anari::release(state->device, m_anariFrame);
+  }
 }
 
 bool Frame::isValid() const
@@ -124,18 +128,10 @@ void Frame::renderFrame()
   if (m_world)
     m_world->updateLayer();
 
-  if (m_lastCommitFlushOccured < state->commitBuffer.lastObjectFinalization()) {
-    m_lastCommitFlushOccured = state->commitBuffer.lastObjectFinalization();
-    if (!state->usingExternalScene()) {
-      const char *filename = "live_capture.vsr";
-      reportMessage(
-          ANARI_SEVERITY_INFO, "saving Scene Archive to '%s'", filename);
-      if (!vsr::io::save_SceneArchive(*state->scene, filename)) {
-        reportMessage(ANARI_SEVERITY_ERROR,
-            "failed to save Scene Archive to '%s'",
-            filename);
-      }
-    }
+  auto &capture = state->liveCapture;
+  if (++capture.framesSinceLastCapture >= capture.frameInterval
+      && !state->usingExternalScene()) {
+    saveLiveCapture();
   }
 
   if (isValid() && !state->usingExternalScene())
@@ -190,6 +186,25 @@ bool Frame::ready() const
   return state->usingExternalScene()
       ? true
       : anari::isReady(state->device, m_anariFrame);
+}
+
+void Frame::saveLiveCapture()
+{
+  auto *state = deviceState();
+  auto &capture = state->liveCapture;
+  const auto lastFinalization = state->commitBuffer.lastObjectFinalization();
+  if (capture.lastCapturedFinalization >= lastFinalization)
+    return;
+
+  capture.lastCapturedFinalization = lastFinalization;
+  capture.framesSinceLastCapture = 0;
+
+  const char *filename = "live_capture.vsr";
+  reportMessage(ANARI_SEVERITY_INFO, "saving Scene Archive to '%s'", filename);
+  if (!vsr::io::save_SceneArchive(*state->scene, filename)) {
+    reportMessage(
+        ANARI_SEVERITY_ERROR, "failed to save Scene Archive to '%s'", filename);
+  }
 }
 
 void Frame::wait() const

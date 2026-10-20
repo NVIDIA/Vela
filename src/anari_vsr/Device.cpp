@@ -8,6 +8,10 @@
 #include "Object.h"
 
 #include "vsr_device_queries.h"
+// std
+#include <algorithm>
+#include <cstdint>
+#include <cstdlib>
 
 namespace vsr_device {
 
@@ -253,6 +257,25 @@ void Device::deviceCommitParameters()
 {
   helium::BaseDevice::deviceCommitParameters();
   m_scene = (vsr::scene::Scene *)getParam<void *>("scene", nullptr);
+
+  // capture interval: device parameter > ANARI_VSR_CAPTURE_INTERVAL > 60
+  int64_t interval = 60;
+  if (auto *intervalEnv = getenv("ANARI_VSR_CAPTURE_INTERVAL"))
+    interval = std::strtoll(intervalEnv, nullptr, 10);
+  if (hasParam("captureInterval", ANARI_UINT32))
+    interval = getParam<uint32_t>("captureInterval", 60);
+  else if (hasParam("captureInterval", ANARI_INT32))
+    interval = getParam<int32_t>("captureInterval", 60);
+
+  if (interval < 1) {
+    reportMessage(ANARI_SEVERITY_WARNING,
+        "capture interval must be >= 1 frame (got %lld), using 1",
+        (long long)interval);
+    interval = 1;
+  }
+
+  deviceState()->liveCapture.frameInterval =
+      uint32_t(std::min<int64_t>(interval, UINT32_MAX));
 }
 
 int Device::deviceGetProperty(const char *name,
