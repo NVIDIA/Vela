@@ -169,7 +169,9 @@ _Avoid_: import config, import params
 **Image**:
 A decoded picture resident in a scene, held as an Array of texels. Identified
 by its content, not by the sampler built from it: two materials binding the
-same file at the same Color Space share one Image.
+same file at the same Color Space share one Image. An Image keeps the bit
+depth its file stored it at — see
+[ADR 0044](../../../docs/adr/0044-keep-decoded-texels-at-the-files-bit-depth.md).
 
 **Image Source**:
 What identifies an Image's content — a resolved absolute path for a

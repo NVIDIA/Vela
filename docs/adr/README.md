@@ -96,6 +96,7 @@ for the proposed source reorganization that follows from it.
 | ADR | Decision | Supersedes / revised by |
 | --- | --- | --- |
 | [0014](0014-store-images-in-anari-orientation.md) | Store images in ANARI orientation | |
+| [0044](0044-keep-decoded-texels-at-the-files-bit-depth.md) | Keep decoded texels at the file's bit depth | |
 
 Background and the full audit behind this decision:
 [`vsr-io-image-import.md`](../vsr-io-image-import.md).

@@ -11,6 +11,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace vsr::io {
 
@@ -115,9 +116,13 @@ class ImageCache
 
  private:
   Image store(const ImageSource &source, detail::DecodedImage &&decoded);
+  bool failedBefore(const ImageSource &source) const;
 
   vsr::scene::Scene *m_scene{nullptr};
   std::unordered_map<std::string, Image> m_images;
+  // Sources that did not decode, so a file a thousand materials bind is read
+  // -- and fails -- once rather than once per binding.
+  std::unordered_set<std::string> m_failures;
 };
 
 // An importer's own uv transform, in the form ANARI takes it.

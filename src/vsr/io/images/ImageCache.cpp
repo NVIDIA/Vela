@@ -82,6 +82,8 @@ Image ImageCache::acquire(const ImageSource &source)
 
   if (auto cached = find(resolved))
     return cached;
+  if (failedBefore(resolved))
+    return {};
 
   return store(
       resolved, detail::decodeImageFile(resolved.id, resolved.colorSpace));
@@ -98,6 +100,8 @@ Image ImageCache::acquire(const ImageSource &source,
 
   if (auto cached = find(resolved))
     return cached;
+  if (failedBefore(resolved))
+    return {};
 
   return store(resolved,
       detail::decodeImageFromMemory(
@@ -135,6 +139,7 @@ Image ImageCache::find(const ImageSource &source) const
 void ImageCache::clear()
 {
   m_images.clear();
+  m_failures.clear();
 }
 
 size_t ImageCache::size() const
@@ -142,11 +147,18 @@ size_t ImageCache::size() const
   return m_images.size();
 }
 
+bool ImageCache::failedBefore(const ImageSource &source) const
+{
+  return m_failures.count(keyOf(source)) != 0;
+}
+
 Image ImageCache::store(
     const ImageSource &source, detail::DecodedImage &&decoded)
 {
-  if (!decoded)
+  if (!decoded) {
+    m_failures.insert(keyOf(source));
     return {};
+  }
 
   if (!m_scene) {
     logError("[ImageCache] no scene to store image '%s' in", source.id.c_str());

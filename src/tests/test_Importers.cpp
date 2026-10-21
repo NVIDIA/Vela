@@ -446,7 +446,7 @@ struct TiffFixture
 
 } // namespace
 
-SCENARIO("TIFF textures decode into float texel arrays", "[Importers]")
+SCENARIO("TIFF textures decode at the file's own bit depth", "[Importers]")
 {
   GIVEN("A 1x1 RGB8 TIFF file")
   {
@@ -461,18 +461,18 @@ SCENARIO("TIFF textures decode into float texel arrays", "[Importers]")
           vsr::io::importTexture(cache, tiff.path(), /*isLinear=*/true);
 
 #if VSR_USE_OIIO
-      THEN("The sampler carries the file's texels untransformed")
+      THEN("The sampler carries the file's 8-bit texels untransformed")
       {
         REQUIRE(sampler);
         auto *image =
             sampler->parameterValueAsObject<vsr::scene::Array>("image");
         REQUIRE(image != nullptr);
-        REQUIRE(image->elementType() == ANARI_FLOAT32_VEC3);
+        REQUIRE(image->elementType() == ANARI_UFIXED8_VEC3);
         REQUIRE(image->size() == 1);
-        const auto *texels = image->dataAs<vsr::core::math::float3>();
-        REQUIRE(texels[0].x == Approx(0x60 / 255.f));
-        REQUIRE(texels[0].y == Approx(0x40 / 255.f));
-        REQUIRE(texels[0].z == Approx(0x20 / 255.f));
+        const auto *texels = image->dataAs<std::uint8_t>();
+        REQUIRE(texels[0] == 0x60);
+        REQUIRE(texels[1] == 0x40);
+        REQUIRE(texels[2] == 0x20);
       }
 #else
       THEN("No sampler is produced, because no decoder is available")
@@ -488,16 +488,17 @@ SCENARIO("TIFF textures decode into float texel arrays", "[Importers]")
       auto sampler =
           vsr::io::importTexture(cache, tiff.path(), /*isLinear=*/false);
 
-      THEN("The texels are decoded to linear, matching the stb-backed paths")
+      THEN("The texels keep their bytes and an sRGB format, as stb's do")
       {
         REQUIRE(sampler);
         auto *image =
             sampler->parameterValueAsObject<vsr::scene::Array>("image");
         REQUIRE(image != nullptr);
-        const auto *texels = image->dataAs<vsr::core::math::float3>();
-        REQUIRE(texels[0].x == Approx(std::pow(0x60 / 255.f, 2.2f)));
-        REQUIRE(texels[0].y == Approx(std::pow(0x40 / 255.f, 2.2f)));
-        REQUIRE(texels[0].z == Approx(std::pow(0x20 / 255.f, 2.2f)));
+        REQUIRE(image->elementType() == ANARI_UFIXED8_RGB_SRGB);
+        const auto *texels = image->dataAs<std::uint8_t>();
+        REQUIRE(texels[0] == 0x60);
+        REQUIRE(texels[1] == 0x40);
+        REQUIRE(texels[2] == 0x20);
       }
     }
 #endif
@@ -516,16 +517,16 @@ SCENARIO("TIFF textures decode into float texel arrays", "[Importers]")
       auto sampler =
           vsr::io::importTexture(cache, tiff.path(), /*isLinear=*/false);
 
-      THEN("Only the grey channel is gamma-decoded, leaving alpha linear")
+      THEN("The format decodes only the grey channel, leaving alpha linear")
       {
         REQUIRE(sampler);
         auto *image =
             sampler->parameterValueAsObject<vsr::scene::Array>("image");
         REQUIRE(image != nullptr);
-        REQUIRE(image->elementType() == ANARI_FLOAT32_VEC2);
-        const auto *texels = image->dataAs<vsr::core::math::float2>();
-        REQUIRE(texels[0].x == Approx(std::pow(0x60 / 255.f, 2.2f)));
-        REQUIRE(texels[0].y == Approx(0x40 / 255.f));
+        REQUIRE(image->elementType() == ANARI_UFIXED8_RA_SRGB);
+        const auto *texels = image->dataAs<std::uint8_t>();
+        REQUIRE(texels[0] == 0x60);
+        REQUIRE(texels[1] == 0x40);
       }
     }
   }
