@@ -168,6 +168,62 @@ std::string hdrFixtureContents()
   return hdr;
 }
 
+// A 1x1 16-bit RGB PNG holding (0xffff, 0x8000, 0x0000). PNG is the only
+// 16-bit format stb reads, so this is hand-assembled: one stored (uncompressed)
+// deflate block, with the CRCs and Adler checksum the format requires.
+std::string png16FixtureContents()
+{
+  auto crc32 = [](const std::string &bytes) {
+    std::uint32_t crc = 0xffffffffu;
+    for (unsigned char b : bytes) {
+      crc ^= b;
+      for (int k = 0; k < 8; ++k)
+        crc = (crc >> 1) ^ (0xedb88320u & (0u - (crc & 1u)));
+    }
+    return ~crc;
+  };
+  auto be32 = [](std::string &out, std::uint32_t v) {
+    for (int shift = 24; shift >= 0; shift -= 8)
+      out += char((v >> shift) & 0xff);
+  };
+  auto chunk =
+      [&](std::string &out, const char *type, const std::string &data) {
+        be32(out, std::uint32_t(data.size()));
+        const std::string typed = type + data;
+        out += typed;
+        be32(out, crc32(typed));
+      };
+
+  std::string ihdr;
+  be32(ihdr, 1); // width
+  be32(ihdr, 1); // height
+  ihdr += char(16); // bit depth
+  ihdr += char(2); // colour type: RGB
+  ihdr += std::string(3, '\0'); // deflate, adaptive filtering, no interlace
+
+  // One scanline: filter type 0, then big-endian 16-bit R, G, B.
+  const std::string raw("\x00\xff\xff\x80\x00\x00\x00", 7);
+  std::uint32_t a = 1, b = 0;
+  for (unsigned char c : raw) {
+    a = (a + c) % 65521u;
+    b = (b + a) % 65521u;
+  }
+  std::string idat("\x78\x01", 2); // zlib header
+  idat += char(1); // final stored block
+  idat += char(raw.size() & 0xff);
+  idat += char(raw.size() >> 8);
+  idat += char(~raw.size() & 0xff);
+  idat += char((~raw.size() >> 8) & 0xff);
+  idat += raw;
+  be32(idat, (b << 16) | a);
+
+  std::string png("\x89PNG\r\n\x1a\n", 8);
+  chunk(png, "IHDR", ihdr);
+  chunk(png, "IDAT", idat);
+  chunk(png, "IEND", {});
+  return png;
+}
+
 // Texel readers ///////////////////////////////////////////////////////////////
 
 // Importers do not agree on an element type -- the shared path expands to
@@ -668,4 +724,116 @@ SCENARIO("An imported quad's top corner addresses the image's top row",
     }
   }
 #endif
+}
+
+// An 8-bit texture expanded to float takes four times the memory, which on a
+// texture-heavy USD Stage is most of what an import holds. Texels therefore
+// keep the bit depth the file stored them at, and color ones take a format
+// that has the device apply the sRGB EOTF -- the contract glTF already used.
+SCENARIO("Decoded texels keep the file's own bit depth", "[ImageImport]")
+{
+  vsr::scene::Scene scene;
+  vsr::io::ImageCache cache(&scene);
+
+  auto imageOf = [](const vsr::scene::SamplerRef &sampler) {
+    REQUIRE(sampler);
+    auto *image = sampler->parameterValueAsObject<vsr::scene::Array>("image");
+    REQUIRE(image != nullptr);
+    return image;
+  };
+
+  GIVEN("An 8-bit RGB image")
+  {
+    TempFile texture("vsr_test_depth8.tga", tgaFixtureContents());
+
+    THEN("A linear import stores its bytes as they are")
+    {
+      auto *image =
+          imageOf(vsr::io::importTexture(cache, texture.path(), true));
+      REQUIRE(image->elementType() == ANARI_UFIXED8_VEC3);
+      const auto *texels = image->dataAs<std::uint8_t>();
+      REQUIRE(texels[0] == 0xff); // top row, red
+      REQUIRE(texels[2] == 0x00);
+    }
+
+    THEN("An sRGB import stores the same bytes in an sRGB format")
+    {
+      auto *image =
+          imageOf(vsr::io::importTexture(cache, texture.path(), false));
+      REQUIRE(image->elementType() == ANARI_UFIXED8_RGB_SRGB);
+      const auto *texels = image->dataAs<std::uint8_t>();
+      REQUIRE(texels[0] == 0xff);
+      REQUIRE(texels[2] == 0x00);
+    }
+  }
+
+  GIVEN("A 16-bit RGB image")
+  {
+    TempFile texture("vsr_test_depth16.png", png16FixtureContents());
+
+    THEN("A linear import stores its values as they are")
+    {
+      auto *image =
+          imageOf(vsr::io::importTexture(cache, texture.path(), true));
+      REQUIRE(image->elementType() == ANARI_UFIXED16_VEC3);
+      const auto *texels = image->dataAs<std::uint16_t>();
+      REQUIRE(texels[0] == 0xffff);
+      REQUIRE(texels[1] == 0x8000);
+      REQUIRE(texels[2] == 0x0000);
+    }
+
+    THEN("An sRGB import is linearized, since no 16-bit sRGB format exists")
+    {
+      auto *image =
+          imageOf(vsr::io::importTexture(cache, texture.path(), false));
+      REQUIRE(image->elementType() == ANARI_UFIXED16_VEC3);
+      const auto *texels = image->dataAs<std::uint16_t>();
+      REQUIRE(texels[0] == 0xffff);
+      REQUIRE(texels[1] / 65535.f == Approx(0.2140f).margin(1e-3f));
+      REQUIRE(texels[2] == 0x0000);
+    }
+  }
+
+  GIVEN("A Radiance HDR image")
+  {
+    TempFile texture("vsr_test_depth.hdr", hdrFixtureContents());
+
+    THEN("It stays float, whatever the color space asked for")
+    {
+      auto *image =
+          imageOf(vsr::io::importTexture(cache, texture.path(), false));
+      REQUIRE(image->elementType() == ANARI_FLOAT32_VEC3);
+    }
+  }
+}
+
+SCENARIO("An image that fails to decode is not read again", "[ImageImport]")
+{
+  vsr::scene::Scene scene;
+  vsr::io::ImageCache cache(&scene);
+  const auto path =
+      (std::filesystem::temp_directory_path() / "vsr_test_late.tga").string();
+
+  GIVEN("A path that names no file yet")
+  {
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+    REQUIRE(!vsr::io::importTexture(cache, path, true));
+
+    WHEN("The file appears afterwards")
+    {
+      TempFile texture("vsr_test_late.tga", tgaFixtureContents());
+
+      THEN("The cache still reports the failure it already saw")
+      {
+        REQUIRE(!vsr::io::importTexture(cache, path, true));
+      }
+
+      THEN("Clearing the cache lets the file be read")
+      {
+        cache.clear();
+        REQUIRE(vsr::io::importTexture(cache, path, true));
+      }
+    }
+  }
 }

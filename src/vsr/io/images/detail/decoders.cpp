@@ -20,10 +20,12 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <vector>
 
 namespace vsr::io::detail {
 
@@ -39,59 +41,106 @@ std::string lowered(std::string s)
   return s;
 }
 
-// Decoded texels are always float, so channel count alone picks the type.
-anari::DataType texelTypeForChannelCount(int numChannels)
+// Texels keep the bit depth the file stored them at: expanding an 8-bit
+// texture to float quadruples it, which on a texture-heavy USD Stage is most of
+// the import's memory. Only float files decode to float.
+//
+// 8-bit color texels take the *_SRGB formats, so the device applies the sRGB
+// EOTF on fetch -- the same contract import_GLTF has always used. Alpha stays
+// linear in those formats, as it does in every texture path here.
+anari::DataType float32Type(int numChannels)
 {
-  switch (numChannels) {
-  case 1:
-    return ANARI_FLOAT32;
-  case 2:
-    return ANARI_FLOAT32_VEC2;
-  case 3:
-    return ANARI_FLOAT32_VEC3;
-  default:
-    return ANARI_FLOAT32_VEC4;
+  return ANARI_FLOAT32 + (numChannels - 1);
+}
+
+anari::DataType ufixed8Type(int numChannels, ColorSpace colorSpace)
+{
+  return (colorSpace == ColorSpace::SRGB ? ANARI_UFIXED8_R_SRGB : ANARI_UFIXED8)
+      + (numChannels - 1);
+}
+
+// ANARI has no 16-bit sRGB format, so 16-bit color texels are taken through the
+// sRGB EOTF here instead and stored linear, still at 16 bits. stb takes an odd
+// channel count to be all-color and an even one to end in alpha (stb_image.h:
+// `if (comp & 1) n = comp; else n = comp-1`), which is what leaves alpha
+// linear.
+void linearizeSrgb16InPlace(
+    std::uint16_t *texels, size_t numTexels, int numChannels)
+{
+  std::vector<std::uint16_t> table(65536);
+  for (size_t i = 0; i < table.size(); i++) {
+    const float c = float(i) / 65535.f;
+    const float linear =
+        c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
+    table[i] = std::uint16_t(std::lround(linear * 65535.f));
+  }
+
+  const int numColorChannels =
+      (numChannels & 1) ? numChannels : numChannels - 1;
+  for (size_t t = 0; t < numTexels; t++) {
+    auto *texel = texels + t * numChannels;
+    for (int c = 0; c < numColorChannels; c++)
+      texel[c] = table[texel[c]];
   }
 }
 
 DecodedImage decodeStb(
     const void *data, size_t numBytes, ColorSpace colorSpace, const char *id)
 {
+  const auto *bytes = static_cast<const stbi_uc *>(data);
+  const int length = int(numBytes);
+
   int width = 0;
   int height = 0;
   int n = 0;
+  void *decoded = nullptr;
+  size_t bytesPerChannel = 0;
 
-  stbi_ldr_to_hdr_scale(1.0f);
-  stbi_ldr_to_hdr_gamma(colorSpace == ColorSpace::LINEAR ? 1.0f : 2.2f);
-
-  float *decoded = stbi_loadf_from_memory(static_cast<const stbi_uc *>(data),
-      int(numBytes),
-      &width,
-      &height,
-      &n,
-      0);
+  // Radiance HDR is the one float format stb reads; its values are linear.
+  const bool isHdr = stbi_is_hdr_from_memory(bytes, length);
+  const bool is16Bit = !isHdr && stbi_is_16_bit_from_memory(bytes, length);
+  if (isHdr) {
+    stbi_ldr_to_hdr_scale(1.0f);
+    stbi_ldr_to_hdr_gamma(1.0f);
+    decoded = stbi_loadf_from_memory(bytes, length, &width, &height, &n, 0);
+    bytesPerChannel = sizeof(float);
+  } else if (is16Bit) {
+    decoded = stbi_load_16_from_memory(bytes, length, &width, &height, &n, 0);
+    bytesPerChannel = sizeof(std::uint16_t);
+  } else {
+    decoded = stbi_load_from_memory(bytes, length, &width, &height, &n, 0);
+    bytesPerChannel = sizeof(std::uint8_t);
+  }
 
   if (!decoded) {
     logError("[decodeImage] failed to decode image '%s'", id);
     return {};
   }
-  if (n < 1) {
+  if (n < 1 || n > 4) {
     logWarning("[decodeImage] image '%s' with %i channels not imported", id, n);
     stbi_image_free(decoded);
     return {};
   }
 
+  const size_t numTexels = size_t(width) * size_t(height);
+  if (is16Bit && colorSpace == ColorSpace::SRGB) {
+    linearizeSrgb16InPlace(static_cast<std::uint16_t *>(decoded), numTexels, n);
+  }
+
   DecodedImage image;
-  image.elementType = texelTypeForChannelCount(n);
+  if (isHdr)
+    image.elementType = float32Type(n);
+  else if (is16Bit)
+    image.elementType = ANARI_UFIXED16 + (n - 1);
+  else
+    image.elementType = ufixed8Type(n, colorSpace);
   image.width = size_t(width);
   image.height = size_t(height);
   // stb hands back the picture's first row first, whatever the container's own
   // storage order was -- it undoes BMP's and TGA's bottom-up layouts itself.
   image.rowOrder = RowOrder::TOP_DOWN;
-  const size_t numBytesOut =
-      size_t(width) * size_t(height) * size_t(n) * sizeof(float);
-  image.texels.assign(reinterpret_cast<const char *>(decoded),
-      reinterpret_cast<const char *>(decoded) + numBytesOut);
+  const auto *texels = static_cast<const char *>(decoded);
+  image.texels.assign(texels, texels + numTexels * n * bytesPerChannel);
 
   stbi_image_free(decoded);
   return image;
@@ -241,24 +290,6 @@ DecodedImage decodeExr(const std::string &path)
 #endif
 
 #if VSR_USE_OIIO
-// stb decodes LDR files to float through stbi_ldr_to_hdr_gamma(), a plain
-// pow(x, 2.2) rather than the true sRGB EOTF; OpenImageIO hands back the raw
-// normalized values, so the same curve is applied here to keep every texture
-// path on one contract. stb takes an odd channel count to be all-color and an
-// even one to end in alpha (stb_image.h: `if (comp & 1) n = comp; else
-// n = comp-1`), which is what leaves alpha linear -- match that exactly, or a
-// 2-channel grey+alpha image gets its alpha gamma-corrected.
-void applyGamma22InPlace(float *texels, size_t numTexels, int numChannels)
-{
-  const int numColorChannels =
-      (numChannels & 1) ? numChannels : numChannels - 1;
-  for (size_t t = 0; t < numTexels; t++) {
-    float *texel = texels + t * numChannels;
-    for (int c = 0; c < numColorChannels; c++)
-      texel[c] = std::pow(texel[c], 2.2f);
-  }
-}
-
 // TIFF is the format the USD/MaterialX assets reach for that stb cannot decode.
 // OpenImageIO covers it (and everything else it has a reader for) without VSR
 // taking on a format-specific decoder.
@@ -289,29 +320,39 @@ DecodedImage decodeOiio(const std::string &path, ColorSpace colorSpace)
         numChannels);
     return {};
   }
-  // stb only ever gamma-decodes integer input; a float or half TIFF already
-  // carries linear values, so applying the curve to it would darken the image.
-  const bool fileIsIntegral = !spec.format.is_floating_point();
-
+  // The same bit-depth contract as decodeStb: 8-bit files stay 8-bit, wider
+  // integer files become 16-bit, and only a float or half file -- which
+  // already carries linear values -- decodes to float.
+  const size_t numTexels = size_t(width) * size_t(height);
+  OIIO::TypeDesc readAs = OIIO::TypeDesc::FLOAT;
   DecodedImage image;
-  image.elementType = texelTypeForChannelCount(numChannels);
+  if (spec.format == OIIO::TypeDesc::UINT8) {
+    readAs = OIIO::TypeDesc::UINT8;
+    image.elementType = ufixed8Type(numChannels, colorSpace);
+  } else if (!spec.format.is_floating_point()) {
+    readAs = OIIO::TypeDesc::UINT16;
+    image.elementType = ANARI_UFIXED16 + (numChannels - 1);
+  } else {
+    image.elementType = float32Type(numChannels);
+  }
   image.width = size_t(width);
   image.height = size_t(height);
   // OpenImageIO's scanline order runs from the picture's top.
   image.rowOrder = RowOrder::TOP_DOWN;
-  image.texels.resize(
-      size_t(width) * size_t(height) * size_t(numChannels) * sizeof(float));
+  image.texels.resize(numTexels * size_t(numChannels) * readAs.size());
 
-  auto *texels = reinterpret_cast<float *>(image.texels.data());
-  if (!input->read_image(0, 0, 0, numChannels, OIIO::TypeDesc::FLOAT, texels)) {
+  if (!input->read_image(0, 0, 0, numChannels, readAs, image.texels.data())) {
     logError("[decodeImage] failed to decode image '%s': %s",
         path.c_str(),
         input->geterror().c_str());
     return {};
   }
 
-  if (colorSpace == ColorSpace::SRGB && fileIsIntegral) {
-    applyGamma22InPlace(texels, size_t(width) * size_t(height), numChannels);
+  if (readAs == OIIO::TypeDesc::UINT16 && colorSpace == ColorSpace::SRGB) {
+    linearizeSrgb16InPlace(
+        reinterpret_cast<std::uint16_t *>(image.texels.data()),
+        numTexels,
+        numChannels);
   }
 
   return image;

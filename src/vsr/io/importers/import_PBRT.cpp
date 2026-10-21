@@ -1027,7 +1027,7 @@ static BakedTexture bakeTexture(ImageCache &texCache,
     // applyAffineToSampler composes on top.
     if (texDef.colorType != "float") {
       if (auto *image = sampler->parameterValueAsObject<Array>("image");
-          image && image->elementType() == ANARI_FLOAT32) {
+          image && anari::componentsOf(image->elementType()) == 1) {
         mat4 broadcast{float4(1.f, 1.f, 1.f, 0.f),
             float4(0.f, 0.f, 0.f, 0.f),
             float4(0.f, 0.f, 0.f, 0.f),
