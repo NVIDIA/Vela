@@ -15,6 +15,7 @@
 #include "vsr/io/animation/UsdFileBinding.hpp"
 #include "vsr/io/archives/AnimationManagerArchive.hpp"
 // std
+#include <set>
 #include <string>
 
 namespace {
@@ -167,6 +168,17 @@ SCENARIO("A Variant Selection decides which variant imports", "[UsdImport]")
       {
         REQUIRE(findNode(scene.layer("default"), "RedShape"));
         REQUIRE_FALSE(findNode(scene.layer("default"), "HighShape"));
+      }
+    }
+
+    WHEN("Its Variant Sets are listed without importing it")
+    {
+      const auto sets = vsr::io::usdVariantSets(asset.root.path());
+
+      THEN("The sets visible before any payload loads are listed")
+      {
+        REQUIRE(sets.size() == 1);
+        REQUIRE(sets.at("lod") == std::set<std::string>{"high", "low"});
       }
     }
 

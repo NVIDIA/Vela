@@ -10,6 +10,8 @@
 #include "vsr/io/importers.hpp"
 // vsr_core
 #include "vsr/core/Logging.hpp"
+// imgui
+#include <misc/cpp/imgui_stdlib.h>
 
 namespace vsr::ui::imgui {
 
@@ -59,6 +61,14 @@ constexpr ImporterChoice IMPORTERS[] = {
     {"VOLUME_ANIMATION", vsr::io::ImporterType::VOLUME_ANIMATION},
 };
 
+bool isUsdImporter(vsr::io::ImporterType type)
+{
+  return type == vsr::io::ImporterType::USD
+      || type == vsr::io::ImporterType::USD_MTLX;
+}
+
+constexpr const char *STAGE_DEFAULT = "(stage default)";
+
 } // namespace
 
 ImportFileDialog::ImportFileDialog(Application *app)
@@ -107,6 +117,9 @@ void ImportFileDialog::buildUI()
       text_cb,
       &m_filename);
 
+  if (isUsdImporter(IMPORTERS[m_selectedFileType].type))
+    buildUsdVariantUI();
+
   //////////
 
   ImGui::NewLine();
@@ -127,13 +140,81 @@ void ImportFileDialog::buildUI()
       auto importRoot = ctx->getFirstSelected();
       if (!importRoot.valid())
         importRoot = layer->root();
-      vsr::io::ImportFile file{IMPORTERS[m_selectedFileType].type, m_filename};
+      const auto type = IMPORTERS[m_selectedFileType].type;
+      // import_file reads Variant Selections from a third ';' field; the
+      // layer field between is unused when importing beneath a node.
+      auto fileField = m_filename;
+      const auto selections =
+          vsr::io::usdVariantSelectionsFromString(m_variantSelections);
+      if (isUsdImporter(type) && !selections.empty())
+        fileField += ";;" + vsr::io::toString(selections);
+      vsr::io::ImportFile file{type, fileField};
       vsr::io::import_file(scene, ctx->vsr.animationMgr, file, importRoot);
       scene.signalLayerStructureChanged(layer);
     };
 
     m_app->showTaskModal(doLoad, "Please Wait: Importing Data...");
   }
+}
+
+void ImportFileDialog::buildUsdVariantUI()
+{
+  ImGui::NewLine();
+  ImGui::TextUnformatted("variant selections");
+
+  ImGui::InputText("##variantSelections", &m_variantSelections);
+  tooltipForPreviousItem(
+      "set=variant,... chosen before the Stage loads, so a variant not "
+      "chosen is never read");
+
+  ImGui::SameLine();
+  ImGui::BeginDisabled(m_filename.empty());
+  if (ImGui::Button("scan stage")) {
+    m_scannedVariantSets = vsr::io::usdVariantSets(m_filename);
+    m_scannedFile = m_filename;
+  }
+  ImGui::EndDisabled();
+  tooltipForPreviousItem(
+      "List the Variant Sets the Stage offers, without loading its payloads");
+
+  // A scan describes one file; once the filename moves on it describes
+  // nothing the import will read.
+  if (m_scannedFile.empty() || m_scannedFile != m_filename)
+    return;
+
+  if (m_scannedVariantSets.empty()) {
+    ImGui::TextDisabled("no Variant Sets found");
+    return;
+  }
+
+  auto selections =
+      vsr::io::usdVariantSelectionsFromString(m_variantSelections);
+  bool changed = false;
+  for (const auto &[set, variants] : m_scannedVariantSets) {
+    auto found = selections.find(set);
+    const char *preview =
+        found == selections.end() ? STAGE_DEFAULT : found->second.c_str();
+    if (!ImGui::BeginCombo(set.c_str(), preview))
+      continue;
+    if (ImGui::Selectable(STAGE_DEFAULT, found == selections.end())) {
+      selections.erase(set);
+      changed = true;
+    }
+    for (const auto &variant : variants) {
+      // Looked up afresh: the "(stage default)" entry may have just erased
+      // the selection `found` pointed at.
+      const auto current = selections.find(set);
+      const bool isSelected =
+          current != selections.end() && current->second == variant;
+      if (ImGui::Selectable(variant.c_str(), isSelected)) {
+        selections[set] = variant;
+        changed = true;
+      }
+    }
+    ImGui::EndCombo();
+  }
+  if (changed)
+    m_variantSelections = vsr::io::toString(selections);
 }
 
 } // namespace vsr::ui::imgui

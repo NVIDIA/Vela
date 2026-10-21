@@ -19,6 +19,8 @@
 #include <pxr/imaging/hd/purposeSchema.h>
 #include <pxr/imaging/hd/tokens.h>
 #include <pxr/imaging/hd/visibilitySchema.h>
+#include <pxr/usd/usd/primRange.h>
+#include <pxr/usd/usd/variantSets.h>
 #include <pxr/usd/usdGeom/imageable.h>
 #include <pxr/usd/usdGeom/metrics.h>
 #include <pxr/usd/usdGeom/xformable.h>
@@ -378,7 +380,31 @@ UsdImportReport import_USD(Scene &scene,
   return report;
 }
 
+UsdVariantSetCatalog usdVariantSets(const std::string &filePath)
+{
+  UsdVariantSetCatalog retval;
+  auto stage = pxr::UsdStage::Open(filePath, pxr::UsdStage::LoadNone);
+  if (!stage)
+    return retval;
+
+  for (const auto &prim : stage->Traverse(pxr::UsdPrimAllPrimsPredicate)) {
+    auto variantSets = prim.GetVariantSets();
+    for (const auto &name : variantSets.GetNames()) {
+      auto &variants = retval[name];
+      for (const auto &variant :
+          variantSets.GetVariantSet(name).GetVariantNames())
+        variants.insert(variant);
+    }
+  }
+  return retval;
+}
+
 #else
+
+UsdVariantSetCatalog usdVariantSets(const std::string &)
+{
+  return {};
+}
 
 UsdImportReport import_USD(Scene &scene,
     vsr::animation::AnimationManager &animMgr,
