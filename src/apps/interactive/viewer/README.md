@@ -81,6 +81,9 @@ Use one of these flags before filenames to select how those files are loaded:
 - `-usd`
 - `-usd_mtlx` (USD, emitting native MaterialX materials rather than a portable
   mapping; falls back per material where no MaterialX network converts)
+- `-usd_variant <set>=<variant>` (not an importer: selects `<variant>` in every
+  prim's `<set>` Variant Set for the USD files named after it, before they
+  load; repeat it to select in several sets)
 - `-vtp`
 - `-vtu`
 - `-xyzdp`
@@ -101,6 +104,12 @@ Load geometry and an HDRI environment:
 
 ```bash
 ./vsrViewer -obj model.obj -hdri studio.exr
+```
+
+Load a USD Stage with its lower-resolution material variant:
+
+```bash
+./vsrViewer -usd_variant material=renderLow -usd shot.usda
 ```
 
 Load multiple files into explicit layers:

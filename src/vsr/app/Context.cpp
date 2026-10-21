@@ -142,7 +142,18 @@ void Context::parseCommandLine(std::vector<std::string> &args)
       importerType = vsr::io::ImporterType::VTU;
     else if (arg == "-vtu_property")
       this->commandLine.vtuProperty = args[++i];
-    else if (arg == "-xyzdp")
+    else if (arg == "-usd_variant") {
+      if (++i >= args.size())
+        throw std::runtime_error(
+            "-usd_variant must be followed by set=variant");
+      const auto selection = vsr::io::usdVariantSelectionsFromString(args[i]);
+      if (selection.size() != 1 || args[i].find(',') != std::string::npos) {
+        throw std::runtime_error(
+            "-usd_variant expects one set=variant, got '" + args[i] + "'");
+      }
+      this->commandLine.usdVariantSelections.insert_or_assign(
+          selection.begin()->first, selection.begin()->second);
+    } else if (arg == "-xyzdp")
       importerType = vsr::io::ImporterType::XYZDP;
     else if (arg == "-volume")
       importerType = vsr::io::ImporterType::VOLUME;
@@ -176,6 +187,12 @@ void Context::parseCommandLine(std::vector<std::string> &args)
           if (importerType == vsr::io::ImporterType::VTU
               && !this->commandLine.vtuProperty.empty())
             file += ';' + this->commandLine.vtuProperty;
+          if ((importerType == vsr::io::ImporterType::USD
+                  || importerType == vsr::io::ImporterType::USD_MTLX)
+              && !this->commandLine.usdVariantSelections.empty()) {
+            file +=
+                ';' + vsr::io::toString(this->commandLine.usdVariantSelections);
+          }
           this->commandLine.sceneInputs.push_back(
               ForeignSceneImport{{importerType, file}});
           this->commandLine.currentAnimationSequence = nullptr;

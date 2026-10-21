@@ -114,12 +114,13 @@ void import_file(Scene &scene,
     vsr::io::import_SWC_SDF(scene, animMgr, file.c_str(), root);
   else if (f.first == ImporterType::TRK)
     vsr::io::import_TRK(scene, animMgr, file.c_str(), root);
-  else if (f.first == ImporterType::USD) {
-    widenAnimationClock(
-        animMgr, vsr::io::import_USD(scene, animMgr, file.c_str(), root));
-  } else if (f.first == ImporterType::USD_MTLX) {
+  else if (f.first == ImporterType::USD || f.first == ImporterType::USD_MTLX) {
+    // A third field carries Variant Selections, "set=variant,...".
     UsdImportOptions options;
-    options.materialMode = UsdMaterialMode::MATERIALX;
+    if (f.first == ImporterType::USD_MTLX)
+      options.materialMode = UsdMaterialMode::MATERIALX;
+    if (files.size() > 2)
+      options.variantSelections = usdVariantSelectionsFromString(files[2]);
     widenAnimationClock(animMgr,
         vsr::io::import_USD(scene, animMgr, file.c_str(), root, options));
   } else if (f.first == ImporterType::VTP)

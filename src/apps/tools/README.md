@@ -111,7 +111,8 @@ Use `-vsr <file>` to load a Scene Archive. Foreign-format importer flags
 include `-gltf`, `-obj`, `-ply`, `-volume`, `-hdri`, `-silo`, `-usd`,
 `-usd_mtlx`,
 `-assimp`, `-axyz`, `-e57xyz`, `-pdb`, `-swc`, `-trk`, `-nbody`, and
-`-l`/`--layer`.
+`-l`/`--layer`. `-usd_variant <set>=<variant>` selects a USD variant for the
+USD files named after it.
 
 Example:
 

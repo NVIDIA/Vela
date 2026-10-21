@@ -34,6 +34,34 @@ UsdMaterialMode usdMaterialModeFromString(const std::string &name)
   return UsdMaterialMode::PHYSICALLY_BASED;
 }
 
+std::string toString(const UsdVariantSelections &selections)
+{
+  std::string retval;
+  for (const auto &[set, variant] : selections) {
+    if (!retval.empty())
+      retval += ',';
+    retval += set + '=' + variant;
+  }
+  return retval;
+}
+
+UsdVariantSelections usdVariantSelectionsFromString(const std::string &text)
+{
+  UsdVariantSelections retval;
+  size_t begin = 0;
+  while (begin <= text.size()) {
+    auto end = text.find(',', begin);
+    if (end == std::string::npos)
+      end = text.size();
+    const auto entry = text.substr(begin, end - begin);
+    const auto eq = entry.find('=');
+    if (eq != std::string::npos && eq > 0 && eq + 1 < entry.size())
+      retval[entry.substr(0, eq)] = entry.substr(eq + 1);
+    begin = end + 1;
+  }
+  return retval;
+}
+
 // UsdImportOptions definitions ///////////////////////////////////////////////
 
 void UsdImportOptions::toDataNode(core::DataNode &node) const

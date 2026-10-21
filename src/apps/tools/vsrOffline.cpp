@@ -159,6 +159,9 @@ static void printUsage(const char *programName)
   std::cout
       << "  -usd_mtlx <file...>        Import USD files as native MaterialX\n";
   std::cout
+      << "  -usd_variant <set>=<var>   Select a USD variant for the USD files\n";
+  std::cout << "                             that follow (repeatable)\n";
+  std::cout
       << "  -l, --layer <name>         Specify layer name for following imports\n";
   std::cout
       << "  -assimp <file...>          Import via ASSIMP (supports many formats)\n";

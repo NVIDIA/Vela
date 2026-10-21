@@ -51,6 +51,20 @@ SCENARIO("USD import options round-trip through a data tree", "[UsdImport]")
   }
 }
 
+SCENARIO("USD Variant Selections round-trip through a string", "[UsdImport]")
+{
+  const vsr::io::UsdVariantSelections selections{
+      {"material", "renderLow"}, {"lod", "proxy"}};
+
+  REQUIRE(vsr::io::toString(selections) == "lod=proxy,material=renderLow");
+  REQUIRE(
+      vsr::io::usdVariantSelectionsFromString("lod=proxy,material=renderLow")
+      == selections);
+  REQUIRE(vsr::io::usdVariantSelectionsFromString("").empty());
+  REQUIRE(vsr::io::usdVariantSelectionsFromString("lod=proxy,broken,=x,y=")
+      == vsr::io::UsdVariantSelections{{"lod", "proxy"}});
+}
+
 SCENARIO("Import report counts skipped prims by reason", "[UsdImport]")
 {
   vsr::io::UsdImportReport report;
