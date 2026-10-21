@@ -120,8 +120,9 @@ the resulting vocabulary.
 | [0018](0018-let-imported-scenes-retain-an-open-usd-stage.md) | Let imported scenes retain an open UsdStage | Amended by [0021](0021-share-one-usd-stage-session-across-import-and-animation.md) |
 | [0019](0019-report-udim-tile-sets-as-unsupported.md) | Report UDIM tile sets as unsupported rather than approximate them | |
 | [0020](0020-bind-mesh-attributes-per-surface.md) | Bind mesh attributes per Surface, not once per mesh | |
-| [0021](0021-share-one-usd-stage-session-across-import-and-animation.md) | Share one USD Stage Session across an import and its animations | Extends [0015](0015-import-usd-through-a-hydra-scene-index.md); amends [0018](0018-let-imported-scenes-retain-an-open-usd-stage.md) |
+| [0021](0021-share-one-usd-stage-session-across-import-and-animation.md) | Share one USD Stage Session across an import and its animations | Extends [0015](0015-import-usd-through-a-hydra-scene-index.md); amends [0018](0018-let-imported-scenes-retain-an-open-usd-stage.md); amended by [0045](0045-key-stage-sessions-by-file-and-variant-selections.md) |
 | [0022](0022-refill-captured-arrays-rather-than-re-running-conversion.md) | Re-fill captured Arrays rather than re-running conversion per frame | |
+| [0045](0045-key-stage-sessions-by-file-and-variant-selections.md) | Key Stage Sessions by file and Variant Selections | Amends [0021](0021-share-one-usd-stage-session-across-import-and-animation.md) |
 
 Known limitations of the USD/MaterialX path that are not decisions:
 [`usd-materialx-known-gaps.md`](../usd-materialx-known-gaps.md).

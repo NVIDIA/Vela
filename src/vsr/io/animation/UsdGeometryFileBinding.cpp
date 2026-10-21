@@ -203,12 +203,14 @@ UsdGeometryFileBinding *UsdGeometryFileBinding::addToAnimation(
     }
   }
 
-  return &anim.emplaceFileBinding<UsdGeometryFileBinding>(&scene,
+  auto &binding = anim.emplaceFileBinding<UsdGeometryFileBinding>(&scene,
       std::shared_ptr<usd::UsdStageSession>{},
       node["stageFile"].getValueOr<std::string>(""),
       primPath,
       std::move(parts),
       std::move(resolveOptions));
+  binding.readVariantSelectionsFromDataNode(node);
+  return &binding;
 }
 
 #if VSR_USE_USD

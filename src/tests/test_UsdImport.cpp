@@ -25,6 +25,7 @@ SCENARIO("USD import options round-trip through a data tree", "[UsdImport]")
     options.materialMode = vsr::io::UsdMaterialMode::MATERIALX;
     options.refinementLevel = 4;
     options.primPath = "/World/Asset";
+    options.variantSelections = {{"material", "renderLow"}, {"lod", "proxy"}};
 
     WHEN("They are written to a data tree and read back")
     {
@@ -44,6 +45,7 @@ SCENARIO("USD import options round-trip through a data tree", "[UsdImport]")
         REQUIRE(restored.materialMode == vsr::io::UsdMaterialMode::MATERIALX);
         REQUIRE(restored.refinementLevel == 4);
         REQUIRE(restored.primPath == "/World/Asset");
+        REQUIRE(restored.variantSelections == options.variantSelections);
       }
     }
   }

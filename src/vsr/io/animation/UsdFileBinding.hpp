@@ -4,6 +4,8 @@
 #pragma once
 
 #include "vsr/animation/FileBinding.hpp"
+// vsr_io
+#include "vsr/io/UsdImport.hpp"
 // std
 #include <memory>
 #include <string>
@@ -40,6 +42,9 @@ struct UsdFileBinding : public vsr::animation::FileBinding
 
   const std::string &stageFile() const;
   const std::string &primPath() const;
+  // The Variant Selections the Stage was opened with, which identify the
+  // Session as much as the file does (ADR 0045).
+  const UsdVariantSelections &variantSelections() const;
 
  protected:
   // Join the Session for this binding's file, or report why not. Retried at
@@ -48,8 +53,12 @@ struct UsdFileBinding : public vsr::animation::FileBinding
 
   usd::UsdStageSession *session() const;
 
-  // Write the file and prim paths every USD binding serializes.
+  // Write the file and prim paths every USD binding serializes, and the
+  // Variant Selections that complete the file's identity.
   void writePathsToDataNode(vsr::core::DataNode &node) const;
+  // Read back what writePathsToDataNode() wrote beyond the paths, which the
+  // constructor does not take. Must run before the first update.
+  void readVariantSelectionsFromDataNode(const vsr::core::DataNode &node);
 
   // Tell the Session about times authored on this binding's own prim, so a
   // Stage that carries samples without authoring a time-code range still maps
@@ -64,6 +73,7 @@ struct UsdFileBinding : public vsr::animation::FileBinding
   std::shared_ptr<usd::UsdStageSession> m_session;
   std::string m_stageFile;
   std::string m_primPath;
+  UsdVariantSelections m_variantSelections;
   bool m_sessionFailed{false};
 };
 

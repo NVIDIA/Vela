@@ -10,12 +10,16 @@
 #include <pxr/imaging/hdsi/nurbsApproximatingSceneIndex.h>
 #include <pxr/imaging/hdsi/pinnedCurveExpandingSceneIndex.h>
 #include <pxr/imaging/hdsi/tetMeshConversionSceneIndex.h>
+#include <pxr/usd/usd/editContext.h>
+#include <pxr/usd/usd/primRange.h>
+#include <pxr/usd/usd/variantSets.h>
 #include <pxr/usdImaging/usdImaging/sceneIndices.h>
 // std
 #include <algorithm>
 #include <filesystem>
 #include <map>
 #include <mutex>
+#include <set>
 
 namespace vsr::io::usd {
 
@@ -52,11 +56,18 @@ pxr::HdSceneIndexBaseRefPtr buildFilterChain(pxr::HdSceneIndexBaseRefPtr input)
 
 // The registry key. A Stage that cannot be resolved to an absolute path is
 // keyed by what the caller said, which is still stable within one process.
-std::string sessionKeyOf(const std::string &filePath)
+// Variant Selections are part of it because they change what the Stage
+// composes to: the same file opened with different selections is a different
+// Stage. The map is ordered, so equal selections always make equal keys.
+std::string sessionKeyOf(
+    const std::string &filePath, const UsdVariantSelections &variantSelections)
 {
   std::error_code ec;
   auto absolute = std::filesystem::weakly_canonical(filePath, ec);
-  return ec ? filePath : absolute.string();
+  auto retval = ec ? filePath : absolute.string();
+  for (const auto &[set, variant] : variantSelections)
+    retval += "\n" + set + "=" + variant;
+  return retval;
 }
 
 std::mutex &registryMutex()
@@ -73,12 +84,19 @@ std::map<std::string, std::weak_ptr<UsdStageSession>> &registry()
 
 } // namespace
 
-UsdStageSession::UsdStageSession(
-    std::string key, std::string filePath, pxr::UsdStageRefPtr stage)
+UsdStageSession::UsdStageSession(std::string key,
+    std::string filePath,
+    UsdVariantSelections variantSelections,
+    pxr::UsdStageRefPtr stage)
     : m_key(std::move(key)),
       m_filePath(std::move(filePath)),
+      m_variantSelections(std::move(variantSelections)),
       m_stage(std::move(stage))
 {
+  // Before the resolution chain is built on the Stage, so the chain never sees
+  // a variant that is about to be deselected.
+  selectVariants();
+
   pxr::UsdImagingCreateSceneIndicesInfo createInfo;
   createInfo.stage = m_stage;
   createInfo.addDrawModeSceneIndex = false;
@@ -117,9 +135,114 @@ const std::string &UsdStageSession::filePath() const
   return m_filePath;
 }
 
+const UsdVariantSelections &UsdStageSession::variantSelections() const
+{
+  return m_variantSelections;
+}
+
 const pxr::UsdStageRefPtr &UsdStageSession::stage() const
 {
   return m_stage;
+}
+
+size_t UsdStageSession::variantSelectedPrims() const
+{
+  return m_variantSelectedPrims;
+}
+
+const std::vector<std::string> &UsdStageSession::unavailableVariants() const
+{
+  return m_unavailableVariants;
+}
+
+// Make the requested selections in the Stage's session layer -- stronger than
+// any opinion in the files, and never written back to them -- and only then
+// load payloads, so a deselected variant's payload is never composed. Loading
+// can reveal Variant Sets the payloads themselves author, so payloads load one
+// level per pass, without their descendants, and selecting and loading
+// alternate until a pass does neither: a Variant Set a payload brings in is
+// selected before any payload inside its variants loads.
+//
+// Prims inside a native USD Instance are not visited: an instance proxy cannot
+// carry an opinion of its own. A Variant Set on the instanceable prim itself
+// is visited like any other.
+void UsdStageSession::selectVariants()
+{
+  if (m_variantSelections.empty())
+    return;
+
+  pxr::UsdEditContext editInSessionLayer(m_stage, m_stage->GetSessionLayer());
+
+  constexpr int MAX_PASSES = 32;
+  for (int pass = 0; pass < MAX_PASSES; ++pass) {
+    // Paths rather than prims: authoring a selection recomposes the prim's
+    // subtree, which would invalidate a traversal still walking it.
+    std::vector<
+        std::pair<pxr::SdfPath, const UsdVariantSelections::value_type *>>
+        pending;
+    for (const auto &prim : m_stage->Traverse(pxr::UsdPrimAllPrimsPredicate)) {
+      auto variantSets = prim.GetVariantSets();
+      for (const auto &selection : m_variantSelections) {
+        const auto &[set, variant] = selection;
+        if (!variantSets.HasVariantSet(set))
+          continue;
+        auto variantSet = variantSets.GetVariantSet(set);
+        if (variantSet.GetVariantSelection() != variant
+            && variantSet.HasAuthoredVariant(variant))
+          pending.emplace_back(prim.GetPath(), &selection);
+      }
+    }
+
+    for (const auto &[path, selection] : pending) {
+      // An earlier selection on an ancestor may have composed this prim away.
+      if (auto prim = m_stage->GetPrimAtPath(path)) {
+        prim.GetVariantSets()
+            .GetVariantSet(selection->first)
+            .SetVariantSelection(selection->second);
+      }
+    }
+
+    const auto loaded = m_stage->GetLoadSet();
+    pxr::SdfPathSet toLoad;
+    for (const auto &path : m_stage->FindLoadable()) {
+      if (loaded.count(path) == 0)
+        toLoad.insert(path);
+    }
+    if (pending.empty() && toLoad.empty())
+      break;
+    m_stage->LoadAndUnload(toLoad, {}, pxr::UsdLoadWithoutDescendants);
+  }
+
+  std::set<std::string> setsSeen;
+  for (const auto &prim : m_stage->Traverse(pxr::UsdPrimAllPrimsPredicate)) {
+    auto variantSets = prim.GetVariantSets();
+    bool selected = false;
+    for (const auto &[set, variant] : m_variantSelections) {
+      if (!variantSets.HasVariantSet(set))
+        continue;
+      setsSeen.insert(set);
+      auto variantSet = variantSets.GetVariantSet(set);
+      if (variantSet.GetVariantSelection() == variant)
+        selected = true;
+      else if (!variantSet.HasAuthoredVariant(variant)) {
+        m_unavailableVariants.push_back(
+            prim.GetPath().GetString() + " {" + set + "=" + variant + "}");
+      }
+    }
+    if (selected)
+      m_variantSelectedPrims++;
+  }
+
+  for (const auto &[set, variant] : m_variantSelections) {
+    if (setsSeen.count(set) == 0) {
+      core::logWarning(
+          "[UsdStageSession] %s: no prim has a Variant Set '%s';"
+          " selection '%s' had no effect",
+          m_filePath.c_str(),
+          set.c_str(),
+          variant.c_str());
+    }
+  }
 }
 
 const pxr::HdSceneIndexBaseRefPtr &UsdStageSession::sceneIndex() const
@@ -184,9 +307,10 @@ void UsdStageSession::setTime(pxr::UsdTimeCode time)
   m_stageSceneIndex->ApplyPendingUpdates();
 }
 
-std::shared_ptr<UsdStageSession> acquireUsdSession(const std::string &filePath)
+std::shared_ptr<UsdStageSession> acquireUsdSession(
+    const std::string &filePath, const UsdVariantSelections &variantSelections)
 {
-  const auto key = sessionKeyOf(filePath);
+  const auto key = sessionKeyOf(filePath, variantSelections);
 
   std::lock_guard<std::mutex> guard(registryMutex());
 
@@ -196,11 +320,16 @@ std::shared_ptr<UsdStageSession> acquireUsdSession(const std::string &filePath)
       return existing;
   }
 
-  auto stage = pxr::UsdStage::Open(filePath, pxr::UsdStage::LoadAll);
+  // With selections to make, nothing loads until they are made: the Session
+  // loads payloads itself once the deselected ones can no longer be reached.
+  auto stage = pxr::UsdStage::Open(filePath,
+      variantSelections.empty() ? pxr::UsdStage::LoadAll
+                                : pxr::UsdStage::LoadNone);
   if (!stage)
     return {};
 
-  auto session = std::make_shared<UsdStageSession>(key, filePath, stage);
+  auto session = std::make_shared<UsdStageSession>(
+      key, filePath, variantSelections, stage);
   sessions[key] = session;
   return session;
 }

@@ -304,12 +304,14 @@ UsdImportReport import_USD(Scene &scene,
   // binding this import creates joins the same one, so a scrub resolves
   // through exactly what was converted here. A fully static import lets go of
   // it on return.
-  auto session = usd::acquireUsdSession(filepath);
+  auto session = usd::acquireUsdSession(filepath, options.variantSelections);
   if (!session) {
     logError("[import_USD] failed to open stage '%s'", filepath);
     return report;
   }
   report.stageOpened = true;
+  report.variantSelectedPrims = session->variantSelectedPrims();
+  report.unavailableVariants = session->unavailableVariants();
 
   auto stage = session->stage();
   ImportContext ctx{&scene,

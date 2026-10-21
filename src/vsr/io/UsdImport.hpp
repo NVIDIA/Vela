@@ -5,6 +5,7 @@
 
 #include "vsr/core/DataTree.hpp"
 // std
+#include <map>
 #include <string>
 #include <vector>
 
@@ -52,6 +53,19 @@ const char *toString(UsdMaterialMode mode);
 UsdMaterialMode usdMaterialModeFromString(const std::string &name);
 
 /*
+ * Which variant to select in each named Variant Set, applied to every prim on
+ * the Stage that has that set and authors that variant. Keyed by Variant Set
+ * name. The selections are made before any payload loads, so the content of a
+ * variant that was not selected is never read -- which is the point: an asset
+ * offering `render`/`renderLow` texture variants imports at the lower
+ * resolution without the higher one ever reaching memory.
+ *
+ * Example:
+ *   UsdVariantSelections selections{{"material", "renderLow"}};
+ */
+using UsdVariantSelections = std::map<std::string, std::string>;
+
+/*
  * Typed settings for one USD Stage import. Every field has a default that
  * makes the common case need no configuration, and the whole value converts to
  * and from VSR's data-tree representation so applications can persist it and
@@ -80,6 +94,12 @@ struct UsdImportOptions
   // Import one subtree instead of everything beneath the pseudo-root. Empty
   // imports the whole Stage.
   std::string primPath;
+
+  // Variant selections to make before the Stage loads. Empty keeps whatever
+  // the Stage itself selects. Unlike every other option these change what the
+  // Stage composes to, so they are part of which Stage Session an Import joins
+  // (ADR 0045).
+  UsdVariantSelections variantSelections;
 
   void toDataNode(core::DataNode &node) const;
   void fromDataNode(const core::DataNode &node);
@@ -156,6 +176,13 @@ struct UsdImportReport
   // the Import found no animation.
   size_t sampleCount{0};
   float timeCodesPerSecond{0.f};
+
+  // What the requested Variant Selections did: how many prims ended up with a
+  // requested variant selected, and, for each prim whose Variant Set does not
+  // author the requested variant, "<prim path> {<set>=<variant>}". A set no
+  // prim has at all is logged rather than listed here.
+  size_t variantSelectedPrims{0};
+  std::vector<std::string> unavailableVariants;
 
   size_t countOf(UsdSkipReason reason) const;
   bool contains(UsdSkipReason reason) const;

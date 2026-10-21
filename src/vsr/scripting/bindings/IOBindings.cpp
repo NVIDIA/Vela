@@ -53,6 +53,15 @@ vsr::io::UsdImportOptions usdImportOptionsFromLuaTable(
   if (sol::optional<std::string> primPath = settings["primPath"])
     retval.primPath = *primPath;
 
+  if (sol::optional<sol::table> selections = settings["variantSelections"]) {
+    for (const auto &[set, variant] : *selections) {
+      if (set.is<std::string>() && variant.is<std::string>()) {
+        retval.variantSelections[set.as<std::string>()] =
+            variant.as<std::string>();
+      }
+    }
+  }
+
   return retval;
 }
 

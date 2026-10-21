@@ -94,11 +94,20 @@ _Avoid_: USD scene, USD file
 
 **Stage Session**:
 The retained open Stage and resolution chain shared by every animation binding
-from one Import, identified by the Stage's file. Its lifetime is the bindings',
+from one Import, identified by the Stage's file and its Variant Selections.
+Its lifetime is the bindings',
 not the Import's: an Import with no animation lets go of its Session on return.
 See
-[ADR 0021](../../../docs/adr/0021-share-one-usd-stage-session-across-import-and-animation.md).
+[ADR 0021](../../../docs/adr/0021-share-one-usd-stage-session-across-import-and-animation.md)
+and [ADR 0045](../../../docs/adr/0045-key-stage-sessions-by-file-and-variant-selections.md).
 _Avoid_: stage cache, open stage
+
+**Variant Selection**:
+The choice of one named variant from a Variant Set — a set of alternatives an
+asset authors, such as levels of detail — made for an Import before the Stage
+loads, so a variant not chosen is never read. Applies to every prim that has
+the set and authors the variant.
+_Avoid_: LOD switch, variant override
 
 **Time Code**:
 The Stage's own clock, distinct from VSR's normalized animation time. An Import
@@ -160,7 +169,8 @@ for each that did not, the reason.
 **Import Options**:
 The typed settings governing one Import — which Purposes to include, which
 Render Contexts to prefer, what to emit materials as, how far to refine
-subdivision surfaces, and which prim to import from. Converts to and from a
+subdivision surfaces, which prim to import from, and which Variant Selections
+to make. Converts to and from a
 DataTree so it can be persisted with a project and driven from scripting.
 _Avoid_: import config, import params
 

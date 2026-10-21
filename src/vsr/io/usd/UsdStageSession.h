@@ -5,6 +5,8 @@
 
 // vsr_core
 #include "vsr/core/TypeMacros.hpp"
+// vsr_io
+#include "vsr/io/UsdImport.hpp"
 // usd
 #include <pxr/imaging/hd/sceneIndex.h>
 #include <pxr/usd/usd/stage.h>
@@ -25,8 +27,9 @@ namespace vsr::io::usd {
  *
  * setTime() is the one place SetTime/ApplyPendingUpdates happen, and it does
  * them once per distinct Time Code no matter how many bindings ask for it.
- * Nothing here depends on Import Options: two Imports of one file with
- * different options still share one Session.
+ * The only Import Options a Session depends on are its Variant Selections,
+ * which change what the Stage composes to; two Imports of one file with the
+ * same selections share one Session whatever their other options (ADR 0045).
  *
  * Example:
  *   auto session = acquireUsdSession("/data/sim.usd");
@@ -41,12 +44,20 @@ struct UsdStageSession
   // Use acquireUsdSession(); this is public only so the registry can build a
   // Session with make_shared. `key` is what the registry filed it under, which
   // the Session needs in order to take itself back out again.
-  UsdStageSession(
-      std::string key, std::string filePath, pxr::UsdStageRefPtr stage);
+  UsdStageSession(std::string key,
+      std::string filePath,
+      UsdVariantSelections variantSelections,
+      pxr::UsdStageRefPtr stage);
   ~UsdStageSession();
 
   const std::string &filePath() const;
+  const UsdVariantSelections &variantSelections() const;
   const pxr::UsdStageRefPtr &stage() const;
+
+  // What making the Variant Selections did; see UsdImportReport's fields of
+  // the same names. Empty when the Session was opened without selections.
+  size_t variantSelectedPrims() const;
+  const std::vector<std::string> &unavailableVariants() const;
   const pxr::HdSceneIndexBaseRefPtr &sceneIndex() const;
 
   // The Stage's own clock.
@@ -72,8 +83,13 @@ struct UsdStageSession
   void setTime(pxr::UsdTimeCode time);
 
  private:
+  void selectVariants();
+
   std::string m_key;
   std::string m_filePath;
+  UsdVariantSelections m_variantSelections;
+  size_t m_variantSelectedPrims{0};
+  std::vector<std::string> m_unavailableVariants;
   pxr::UsdStageRefPtr m_stage;
   pxr::UsdImagingStageSceneIndexRefPtr m_stageSceneIndex;
   pxr::HdSceneIndexBaseRefPtr m_sceneIndex;
@@ -84,9 +100,11 @@ struct UsdStageSession
   bool m_sawSampleTimes{false};
 };
 
-// Open `filePath`, or join the Session already open on it. Sessions are keyed
-// by absolute path in a process-wide registry that holds them weakly: the last
-// holder to let go closes the Stage. Returns null if the Stage cannot open.
-std::shared_ptr<UsdStageSession> acquireUsdSession(const std::string &filePath);
+// Open `filePath` with `variantSelections` made, or join the Session already
+// open on that pair. Sessions are keyed by absolute path and selections in a
+// process-wide registry that holds them weakly: the last holder to let go
+// closes the Stage. Returns null if the Stage cannot open.
+std::shared_ptr<UsdStageSession> acquireUsdSession(const std::string &filePath,
+    const UsdVariantSelections &variantSelections = {});
 
 } // namespace vsr::io::usd

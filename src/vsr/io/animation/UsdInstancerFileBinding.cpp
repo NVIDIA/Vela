@@ -98,13 +98,15 @@ UsdInstancerFileBinding *UsdInstancerFileBinding::addToAnimation(
     return nullptr;
   }
 
-  return &anim.emplaceFileBinding<UsdInstancerFileBinding>(&scene,
+  auto &binding = anim.emplaceFileBinding<UsdInstancerFileBinding>(&scene,
       std::shared_ptr<usd::UsdStageSession>{},
       arrayNode,
       transforms->self(),
       node["stageFile"].getValueOr<std::string>(""),
       node["primPath"].getValueOr<std::string>(""),
       size_t(node["prototypeIndex"].getValueOr<uint64_t>(0)));
+  binding.readVariantSelectionsFromDataNode(node);
+  return &binding;
 }
 
 #if VSR_USE_USD
