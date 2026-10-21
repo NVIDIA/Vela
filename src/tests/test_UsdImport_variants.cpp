@@ -157,6 +157,19 @@ SCENARIO("A Variant Selection decides which variant imports", "[UsdImport]")
       }
     }
 
+    WHEN("It is imported as a file whose extra field names the selection")
+    {
+      vsr::io::import_file(scene,
+          animMgr,
+          {vsr::io::ImporterType::USD, asset.root.path() + ";default;lod=low"});
+
+      THEN("Only the low variant's content imports")
+      {
+        REQUIRE(findNode(scene.layer("default"), "RedShape"));
+        REQUIRE_FALSE(findNode(scene.layer("default"), "HighShape"));
+      }
+    }
+
     WHEN("It is imported selecting a variant the set does not author")
     {
       auto report =

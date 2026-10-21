@@ -58,6 +58,8 @@ struct CommandLineOptions
   std::string cameraFile;
   std::vector<std::string> ensightFields;
   std::string vtuProperty;
+  // Applied to every USD file named after the `-usd_variant` that set them.
+  vsr::io::UsdVariantSelections usdVariantSelections;
   // SciVis Studio: open the project with every dataset's initial residency
   // overridden to Unloaded.
   bool openUnloaded{false};

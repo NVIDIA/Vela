@@ -515,6 +515,45 @@ SCENARIO("The VSR CLI records replacement and additive Scene inputs", "[App]")
   REQUIRE(foreignImport.file.second == "mesh.obj;default");
 }
 
+SCENARIO(
+    "The VSR CLI carries USD Variant Selections to the USD files after them",
+    "[App]")
+{
+  vsr::app::Context context;
+  std::vector<std::string> args{"vsrViewer",
+      "-usd",
+      "before.usda",
+      "-usd_variant",
+      "material=renderLow",
+      "-usd_variant",
+      "lod=proxy",
+      "-usd",
+      "shot.usda",
+      "-obj",
+      "mesh.obj"};
+
+  context.parseCommandLine(args);
+
+  REQUIRE(context.commandLine.sceneInputs.size() == 3);
+  auto fileOf = [&](size_t i) {
+    return std::get<vsr::app::ForeignSceneImport>(
+        context.commandLine.sceneInputs[i])
+        .file.second;
+  };
+  REQUIRE(fileOf(0) == "before.usda;default");
+  REQUIRE(fileOf(1) == "shot.usda;default;lod=proxy,material=renderLow");
+  REQUIRE(fileOf(2) == "mesh.obj;default");
+}
+
+SCENARIO("The VSR CLI rejects a malformed USD Variant Selection", "[App]")
+{
+  vsr::app::Context context;
+  std::vector<std::string> args{"vsrViewer", "-usd_variant", "renderLow"};
+
+  REQUIRE_THROWS_WITH(context.parseCommandLine(args),
+      "-usd_variant expects one set=variant, got 'renderLow'");
+}
+
 SCENARIO("The VSR CLI rejects multiple replacement Scene Archives", "[App]")
 {
   vsr::app::Context context;

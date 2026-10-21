@@ -65,6 +65,13 @@ UsdMaterialMode usdMaterialModeFromString(const std::string &name);
  */
 using UsdVariantSelections = std::map<std::string, std::string>;
 
+// Variant Selections as one string, "set=variant,set=variant", the form the
+// command line and an ImportFile's extra field carry them in. USD Variant Set
+// and variant names cannot contain ',' or '=', so the form is unambiguous.
+// Parsing skips an entry missing either half rather than failing the rest.
+std::string toString(const UsdVariantSelections &selections);
+UsdVariantSelections usdVariantSelectionsFromString(const std::string &text);
+
 /*
  * Typed settings for one USD Stage import. Every field has a default that
  * makes the common case need no configuration, and the whole value converts to
