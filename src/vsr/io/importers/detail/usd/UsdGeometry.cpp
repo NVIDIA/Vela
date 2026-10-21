@@ -113,10 +113,14 @@ MaterialPlan planMaterials(ImportContext &ctx,
 
 // Turn resolved Parts into VSR objects. Attributes carrying a shared key are
 // built once and pointed at by every Part that names them, which is how a
-// subdivided mesh's Surfaces end up sharing one position Array.
+// subdivided mesh's Surfaces end up sharing one position Array. Unless the
+// gprim deforms, an Array whose content this Import already built is shared
+// rather than built again, which is how a Stage that repeats an asset by
+// reference holds its geometry once (ADR 0046).
 void buildParts(ImportContext &ctx,
     const ResolvedGeometry &resolved,
     const MaterialPlan &materials,
+    bool shareContent,
     ConvertedGeometry &out)
 {
   FlatMap<std::string, ArrayRef> sharedArrays;
@@ -132,12 +136,18 @@ void buildParts(ImportContext &ctx,
       ArrayRef array;
       if (auto *shared = sharedArrays.at(attribute.sharedKey))
         array = *shared;
+      if (!array && shareContent) {
+        array = ctx.geometryArrays.find(
+            attribute.type, attribute.count(), attribute.data());
+      }
       if (!array) {
         array = ctx.scene->createArray(attribute.type, attribute.count());
         array->setData(attribute.data());
-        if (!attribute.sharedKey.empty())
-          sharedArrays.set(attribute.sharedKey, array);
+        if (shareContent)
+          ctx.geometryArrays.insert(array);
       }
+      if (!attribute.sharedKey.empty())
+        sharedArrays.set(attribute.sharedKey, array);
       geometry->setParameterObject(attribute.parameter, *array);
     }
 
@@ -199,7 +209,8 @@ ConvertedGeometry convertGeometry(ImportContext &ctx,
   for (const auto &part : resolved.parts)
     retval.resolveOptions.slotPrimvarsByPart.set(part.name, part.slotPrimvars);
 
-  buildParts(ctx, resolved, materials, retval);
+  const bool deforms = geometryDeforms(ctx.stage->GetPrimAtPath(primPath));
+  buildParts(ctx, resolved, materials, !deforms, retval);
   return retval;
 }
 

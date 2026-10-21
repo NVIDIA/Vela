@@ -6,8 +6,12 @@
 #include "vsr/io/importers/detail/usd/UsdDialect.h"
 // usd
 #include <pxr/usd/usd/attribute.h>
+#include <pxr/usd/usdGeom/pointBased.h>
 // std
 #include <algorithm>
+#include <cstring>
+#include <functional>
+#include <string_view>
 #include <vector>
 
 namespace vsr::io::usd {
@@ -27,6 +31,41 @@ void ImportContext::reportAnimatedPrim(size_t sampleCount)
   report->sampleCount = std::max(report->sampleCount, sampleCount);
   if (session)
     report->timeCodesPerSecond = float(session->timeCodesPerSecond());
+}
+
+namespace {
+
+size_t contentHash(anari::DataType type, size_t count, const void *data)
+{
+  const auto numBytes = count * anari::sizeOf(type);
+  const auto bytes = std::hash<std::string_view>{}(
+      std::string_view(static_cast<const char *>(data), numBytes));
+  return bytes ^ (size_t(type) * 0x9e3779b97f4a7c15ull) ^ count;
+}
+
+} // namespace
+
+ArrayRef ArrayContentCache::find(
+    anari::DataType type, size_t count, const void *data) const
+{
+  auto found = m_arraysByHash.find(contentHash(type, count, data));
+  if (found == m_arraysByHash.end())
+    return {};
+
+  const auto numBytes = count * anari::sizeOf(type);
+  for (const auto &array : found->second) {
+    if (array->elementType() == type && array->size() == count
+        && std::memcmp(array->data(), data, numBytes) == 0)
+      return array;
+  }
+  return {};
+}
+
+void ArrayContentCache::insert(ArrayRef array)
+{
+  const auto hash =
+      contentHash(array->elementType(), array->size(), array->data());
+  m_arraysByHash[hash].push_back(array);
 }
 
 bool ImportContext::isClaimed(const pxr::SdfPath &path) const
@@ -60,6 +99,16 @@ bool attributeValueVaries(const pxr::UsdAttribute &attribute)
       return true;
   }
   return false;
+}
+
+bool geometryDeforms(const pxr::UsdPrim &prim)
+{
+  pxr::UsdGeomPointBased pointBased(prim);
+  if (!pointBased)
+    return false;
+  std::vector<double> sampleTimes;
+  pointBased.GetPointsAttr().GetTimeSamples(&sampleTimes);
+  return sampleTimes.size() >= 2;
 }
 
 } // namespace vsr::io::usd

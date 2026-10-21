@@ -20,6 +20,7 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace vsr::animation {
 struct Animation;
@@ -45,6 +46,33 @@ struct ResolvedMaterial
 {
   MaterialRef material;
   std::string uvPrimvarName;
+};
+
+/*
+ * Arrays one Import has already built, found by their content, so geometry a
+ * Stage repeats -- one asset referenced a thousand times without being marked
+ * instanceable -- is held once rather than once per placement (ADR 0046).
+ * A hit is confirmed byte for byte; the hash only narrows the search.
+ *
+ * Only Arrays nothing rewrites in place may go in: a deforming gprim's Arrays
+ * are re-filled every frame (ADR 0022), and sharing one would move every
+ * other prim that happened to match its first frame.
+ *
+ * Example:
+ *   auto array = cache.find(type, count, data);
+ *   if (!array) {
+ *     array = scene.createArray(type, count);
+ *     array->setData(data);
+ *     cache.insert(array);
+ *   }
+ */
+struct ArrayContentCache
+{
+  ArrayRef find(anari::DataType type, size_t count, const void *data) const;
+  void insert(ArrayRef array);
+
+ private:
+  std::unordered_map<size_t, std::vector<ArrayRef>> m_arraysByHash;
 };
 
 /*
@@ -121,6 +149,9 @@ struct ImportContext
   // Caches keyed by resolved prim path, so shared content converts once.
   ImageCache textureCache{scene};
   std::unordered_map<std::string, ResolvedMaterial> materialCache;
+  // Keyed by content instead, because a Stage that repeats an asset without
+  // instancing it names every copy by a different path.
+  ArrayContentCache geometryArrays;
 
   void reportSkip(const pxr::SdfPath &primPath,
       const std::string &primType,
@@ -142,6 +173,11 @@ vsr::math::mat4 toVsrMat4(const pxr::GfMatrix4d &m);
 // authored identically at every frame is still treated as animated, still gets
 // a binding, and is still re-pulled per frame.
 bool attributeValueVaries(const pxr::UsdAttribute &attribute);
+
+// Whether a gprim's points are authored at more than one time, which is what
+// gives it a deforming-geometry binding. Asked before its Arrays are built,
+// because a binding re-fills them in place and so they must not be shared.
+bool geometryDeforms(const pxr::UsdPrim &prim);
 
 // Inlined definitions ////////////////////////////////////////////////////////
 

@@ -189,17 +189,11 @@ void addDeformingGeometryAnimation(ImportContext &ctx,
     ConvertedGeometry &converted)
 {
   auto prim = ctx.stage->GetPrimAtPath(primPath);
-  if (!prim || converted.geometryByPart.empty())
-    return;
-
-  pxr::UsdGeomPointBased pointBased(prim);
-  if (!pointBased)
+  if (!prim || converted.geometryByPart.empty() || !geometryDeforms(prim))
     return;
 
   std::vector<double> sampleTimes;
-  pointBased.GetPointsAttr().GetTimeSamples(&sampleTimes);
-  if (sampleTimes.size() < 2)
-    return;
+  pxr::UsdGeomPointBased(prim).GetPointsAttr().GetTimeSamples(&sampleTimes);
 
   if (ctx.session)
     ctx.session->noteAuthoredSampleTimes(sampleTimes);
