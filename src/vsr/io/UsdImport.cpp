@@ -51,6 +51,10 @@ void UsdImportOptions::toDataNode(core::DataNode &node) const
   node["materialMode"] = std::string(toString(materialMode));
   node["refinementLevel"] = refinementLevel;
   node["primPath"] = primPath;
+
+  auto &selectionsNode = node["variantSelections"];
+  for (const auto &[set, variant] : variantSelections)
+    selectionsNode[set] = variant;
 }
 
 void UsdImportOptions::fromDataNode(const core::DataNode &node)
@@ -79,6 +83,13 @@ void UsdImportOptions::fromDataNode(const core::DataNode &node)
     refinementLevel = n->getValueOr<int>(refinementLevel);
   if (const auto *n = node.child("primPath"))
     primPath = n->getValueOr<std::string>(primPath);
+
+  if (const auto *selectionsNode = node.child("variantSelections")) {
+    variantSelections.clear();
+    selectionsNode->foreach_child_const([&](const core::DataNode &n) {
+      variantSelections[n.name()] = n.getValueOr<std::string>("");
+    });
+  }
 }
 
 // UsdImportReport definitions ////////////////////////////////////////////////
@@ -134,6 +145,15 @@ std::string UsdImportReport::summary() const
     retval += ", " + std::to_string(animatedPrims) + " animated prims bound ("
         + std::to_string(sampleCount) + " samples @ "
         + std::to_string(int(timeCodesPerSecond)) + " fps)";
+  }
+
+  if (variantSelectedPrims > 0) {
+    retval +=
+        ", " + std::to_string(variantSelectedPrims) + " prims variant-selected";
+  }
+  if (!unavailableVariants.empty()) {
+    retval += ", " + std::to_string(unavailableVariants.size())
+        + " requested variants unavailable";
   }
 
   // Counts by reason, in enum order, omitting reasons that did not occur.
