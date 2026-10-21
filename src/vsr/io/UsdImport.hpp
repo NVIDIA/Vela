@@ -6,6 +6,7 @@
 #include "vsr/core/DataTree.hpp"
 // std
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -71,6 +72,17 @@ using UsdVariantSelections = std::map<std::string, std::string>;
 // Parsing skips an entry missing either half rather than failing the rest.
 std::string toString(const UsdVariantSelections &selections);
 UsdVariantSelections usdVariantSelectionsFromString(const std::string &text);
+
+// Every Variant Set a Stage offers to Variant Selections, by name, with the
+// variants any prim's set of that name authors. Read with no payload loaded,
+// so it is cheap even for a large Stage, but it does not see a Variant Set
+// that only a payload authors -- a selection naming one still applies at
+// import. Empty when the Stage cannot open or the build has no USD.
+//
+// Example:
+//   auto sets = usdVariantSets("shot.usda"); // {"material": {"render", ...}}
+using UsdVariantSetCatalog = std::map<std::string, std::set<std::string>>;
+UsdVariantSetCatalog usdVariantSets(const std::string &filePath);
 
 /*
  * Typed settings for one USD Stage import. Every field has a default that
