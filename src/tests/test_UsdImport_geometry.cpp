@@ -441,4 +441,130 @@ def Mesh "Quad"
   }
 }
 
+// A Stage that repeats an asset by reference, without marking it instanceable,
+// names every copy by its own path, so only the content says they are one.
+SCENARIO("Geometry a Stage repeats is held once", "[UsdImport]")
+{
+  GIVEN("Two references to one quad asset, and a quad of its own")
+  {
+    ImportedStage stage("vsr_test_usd_repeated_geometry.usda",
+        std::string(R"(#usda 1.0
+
+class Xform "Asset"
+{
+    def Mesh "Quad"
+    {
+)") + QUAD_MESH_BODY
+            + R"(
+    }
+}
+
+def Xform "CopyA" (
+    references = </Asset>
+)
+{
+}
+
+def Xform "CopyB" (
+    references = </Asset>
+)
+{
+}
+
+def Xform "Other"
+{
+    def Mesh "Quad"
+    {
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        point3f[] points = [(0, 0, 0), (2, 0, 0), (2, 2, 0), (0, 2, 0)]
+    }
+}
+)");
+
+    auto positionOf = [&](const char *name) {
+      auto geometry = findGeometry(stage.scene, name);
+      REQUIRE(geometry);
+      auto *array = geometry->parameterValueAsObject<vsr::scene::Array>(
+          "vertex.position");
+      REQUIRE(array != nullptr);
+      return array;
+    };
+
+    WHEN("The Stage is imported")
+    {
+      THEN("Each copy keeps its own Geometry")
+      {
+        REQUIRE(stage.scene.numberOfObjects(ANARI_GEOMETRY) == 3);
+      }
+
+      THEN("The copies share their Arrays")
+      {
+        REQUIRE(positionOf("/CopyA/Quad") == positionOf("/CopyB/Quad"));
+        auto copyA = findGeometry(stage.scene, "/CopyA/Quad");
+        auto copyB = findGeometry(stage.scene, "/CopyB/Quad");
+        REQUIRE(
+            copyA->parameterValueAsObject<vsr::scene::Array>("primitive.index")
+            == copyB->parameterValueAsObject<vsr::scene::Array>(
+                "primitive.index"));
+      }
+
+      THEN("Different content is not shared")
+      {
+        REQUIRE(positionOf("/CopyA/Quad") != positionOf("/Other/Quad"));
+      }
+    }
+  }
+
+  GIVEN("Two references to one deforming quad asset")
+  {
+    ImportedStage stage("vsr_test_usd_repeated_deforming.usda", R"(#usda 1.0
+(
+    startTimeCode = 0
+    endTimeCode = 1
+)
+
+class Xform "Asset"
+{
+    def Mesh "Quad"
+    {
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        point3f[] points.timeSamples = {
+            0: [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)],
+            1: [(0, 0, 0), (2, 0, 0), (2, 2, 0), (0, 2, 0)],
+        }
+    }
+}
+
+def Xform "CopyA" (
+    references = </Asset>
+)
+{
+}
+
+def Xform "CopyB" (
+    references = </Asset>
+)
+{
+}
+)");
+
+    WHEN("The Stage is imported")
+    {
+      THEN("Each copy keeps Arrays of its own, since a scrub re-fills them")
+      {
+        auto copyA = findGeometry(stage.scene, "/CopyA/Quad");
+        auto copyB = findGeometry(stage.scene, "/CopyB/Quad");
+        REQUIRE(copyA);
+        REQUIRE(copyB);
+        REQUIRE(
+            copyA->parameterValueAsObject<vsr::scene::Array>("vertex.position")
+            != copyB->parameterValueAsObject<vsr::scene::Array>(
+                "vertex.position"));
+      }
+    }
+  }
+}
+
 #endif // VSR_USE_USD
