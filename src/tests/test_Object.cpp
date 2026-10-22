@@ -7,6 +7,7 @@
 #include "vsr/scene/Object.hpp"
 #include "vsr/scene/Scene.hpp"
 #include "vsr/scene/UpdateDelegate.hpp"
+#include "vsr/scene/algorithms/objectContent.hpp"
 // std
 #include <algorithm>
 #include <memory>
@@ -383,6 +384,123 @@ SCENARIO("vsr::Object metadata notification", "[Object]")
       THEN("No metadata batch is signaled")
       {
         REQUIRE(delegate.metadataBatches.empty());
+      }
+    }
+  }
+}
+
+SCENARIO("Objects compare by the content a device would see", "[Object]")
+{
+  using namespace vsr::scene;
+
+  GIVEN("Two materials built the same way, by different names")
+  {
+    Scene scene;
+    auto makeMaterial = [&](const char *name) {
+      auto material = scene.createObject<Material>(tokens::material::matte);
+      material->setName(name);
+      material->setParameter("color", vsr::math::float3(1.f, 0.5f, 0.f));
+      material->setParameter("alphaMode", std::string("blend"));
+      return material;
+    };
+    auto a = makeMaterial("/Looks/A");
+    auto b = makeMaterial("/Looks/B");
+
+    THEN("They have the same content, whatever they are called")
+    {
+      REQUIRE(sameContent(*a, *b));
+      REQUIRE(contentHash(*a) == contentHash(*b));
+    }
+
+    WHEN("One parameter's value differs")
+    {
+      b->setParameter("color", vsr::math::float3(1.f, 0.5f, 0.25f));
+      THEN("Their content differs")
+      {
+        REQUIRE(!sameContent(*a, *b));
+      }
+    }
+
+    WHEN("A string parameter differs")
+    {
+      b->setParameter("alphaMode", std::string("mask"));
+      THEN("Their content differs")
+      {
+        REQUIRE(!sameContent(*a, *b));
+      }
+    }
+
+    WHEN("One has a parameter the other lacks")
+    {
+      b->setParameter("opacity", 0.5f);
+      THEN("Their content differs")
+      {
+        REQUIRE(!sameContent(*a, *b));
+      }
+    }
+
+    WHEN("A parameter is disabled on one")
+    {
+      b->parameter("color")->setEnabled(false);
+      THEN("Their content differs, since a device no longer sees it")
+      {
+        REQUIRE(!sameContent(*a, *b));
+      }
+    }
+
+    WHEN("They were given the same parameters in a different order")
+    {
+      auto c = scene.createObject<Material>(tokens::material::matte);
+      c->setParameter("alphaMode", std::string("blend"));
+      c->setParameter("color", vsr::math::float3(1.f, 0.5f, 0.f));
+      THEN("They have the same content")
+      {
+        REQUIRE(sameContent(*a, *c));
+        REQUIRE(contentHash(*a) == contentHash(*c));
+      }
+    }
+
+    WHEN("They have different subtypes")
+    {
+      auto c = scene.createObject<Material>(tokens::material::physicallyBased);
+      c->setParameter("color", vsr::math::float3(1.f, 0.5f, 0.f));
+      c->setParameter("alphaMode", std::string("blend"));
+      THEN("Their content differs")
+      {
+        REQUIRE(!sameContent(*a, *c));
+      }
+    }
+  }
+
+  GIVEN("Two geometries referencing Arrays")
+  {
+    Scene scene;
+    const float values[] = {0.f, 1.f, 2.f};
+    auto first = scene.createArray(ANARI_FLOAT32, 3);
+    first->setData(values);
+    auto second = scene.createArray(ANARI_FLOAT32, 3);
+    second->setData(values);
+
+    auto a = scene.createObject<Geometry>(tokens::geometry::sphere);
+    auto b = scene.createObject<Geometry>(tokens::geometry::sphere);
+    a->setParameterObject("vertex.radius", *first);
+
+    WHEN("Both reference the same Array")
+    {
+      b->setParameterObject("vertex.radius", *first);
+      THEN("They have the same content")
+      {
+        REQUIRE(sameContent(*a, *b));
+        REQUIRE(contentHash(*a) == contentHash(*b));
+      }
+    }
+
+    WHEN("Each references its own Array, even with equal bytes")
+    {
+      b->setParameterObject("vertex.radius", *second);
+      THEN("Their content differs: objects are compared by identity")
+      {
+        REQUIRE(!sameContent(*a, *b));
       }
     }
   }

@@ -120,6 +120,12 @@ struct UsdImportOptions
   // (ADR 0045).
   UsdVariantSelections variantSelections;
 
+  // Hold Geometry, Material, Sampler and Surface objects a Stage repeats --
+  // by content, not by prim path -- once rather than once per copy. Editing
+  // a shared object then edits every copy, so an editing workflow that wants
+  // each copy on its own turns this off (ADR 0047).
+  bool shareRepeatedObjects{true};
+
   void toDataNode(core::DataNode &node) const;
   void fromDataNode(const core::DataNode &node);
 };

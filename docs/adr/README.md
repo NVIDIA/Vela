@@ -123,7 +123,8 @@ the resulting vocabulary.
 | [0021](0021-share-one-usd-stage-session-across-import-and-animation.md) | Share one USD Stage Session across an import and its animations | Extends [0015](0015-import-usd-through-a-hydra-scene-index.md); amends [0018](0018-let-imported-scenes-retain-an-open-usd-stage.md); amended by [0045](0045-key-stage-sessions-by-file-and-variant-selections.md) |
 | [0022](0022-refill-captured-arrays-rather-than-re-running-conversion.md) | Re-fill captured Arrays rather than re-running conversion per frame | |
 | [0045](0045-key-stage-sessions-by-file-and-variant-selections.md) | Key Stage Sessions by file and Variant Selections | Amends [0021](0021-share-one-usd-stage-session-across-import-and-animation.md) |
-| [0046](0046-share-geometry-arrays-by-content-within-an-import.md) | Share geometry Arrays by content within an import | |
+| [0046](0046-share-geometry-arrays-by-content-within-an-import.md) | Share geometry Arrays by content within an import | Extended by [0047](0047-share-repeated-usd-objects-by-content.md) |
+| [0047](0047-share-repeated-usd-objects-by-content.md) | Share repeated USD objects by content, by default | Extends [0046](0046-share-geometry-arrays-by-content-within-an-import.md) |
 
 Known limitations of the USD/MaterialX path that are not decisions:
 [`usd-materialx-known-gaps.md`](../usd-materialx-known-gaps.md).

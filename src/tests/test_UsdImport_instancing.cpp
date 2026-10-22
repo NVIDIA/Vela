@@ -74,7 +74,12 @@ SCENARIO("USD Instances share objects across placements", "[UsdImport]")
 {
   GIVEN("A Stage referencing one Prototype from two instanceable prims")
   {
-    ImportedStage stage("vsr_test_usd_native_instance.usda", R"(#usda 1.0
+    // Content sharing would also fold the Prototype's quad into the identical
+    // un-instanced source; what is under test is the instancing alone.
+    vsr::io::UsdImportOptions options;
+    options.shareRepeatedObjects = false;
+    ImportedStage stage("vsr_test_usd_native_instance.usda",
+        R"(#usda 1.0
 
 def Xform "Protos"
 {
@@ -106,7 +111,8 @@ def Xform "InstanceB" (
     double3 xformOp:translate = (9, 0, 0)
     uniform token[] xformOpOrder = ["xformOp:translate"]
 }
-)");
+)",
+        options);
 
     WHEN("The Stage is imported")
     {

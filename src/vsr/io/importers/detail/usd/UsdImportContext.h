@@ -10,6 +10,7 @@
 #include "vsr/io/usd/UsdDataSource.h"
 #include "vsr/io/usd/UsdStageSession.h"
 #include "vsr/scene/Scene.hpp"
+#include "vsr/scene/algorithms/objectContent.hpp"
 // usd
 #include <pxr/base/gf/matrix4d.h>
 #include <pxr/imaging/hd/dataSourceTypeDefs.h>
@@ -73,6 +74,36 @@ struct ArrayContentCache
 
  private:
   std::unordered_map<size_t, std::vector<ArrayRef>> m_arraysByHash;
+};
+
+/*
+ * Objects of one kind that one Import has already built, found by their
+ * content (ADR 0047): a Stage that repeats an asset by reference gives every
+ * copy's Geometry, Material, Sampler and Surface its own prim path, so only
+ * content can say the copies are one. A hit is confirmed with sameContent();
+ * the hash only narrows the search.
+ *
+ * Content is compared with object parameters by identity, so a kind's
+ * references must already be shared before it is looked up: Samplers before
+ * the Materials that read them, Geometry and Material before their Surface.
+ *
+ * Example:
+ *   if (auto existing = cache.find(*geometry)) {
+ *     scene.removeObject(geometry.data());
+ *     geometry = existing;
+ *   } else
+ *     cache.insert(geometry);
+ */
+template <typename T>
+struct ObjectContentCache
+{
+  using Ref = vsr::core::ObjectPoolRef<T>;
+
+  Ref find(const T &object) const;
+  void insert(Ref object);
+
+ private:
+  std::unordered_map<size_t, std::vector<Ref>> m_objectsByHash;
 };
 
 /*
@@ -152,6 +183,12 @@ struct ImportContext
   // Keyed by content instead, because a Stage that repeats an asset without
   // instancing it names every copy by a different path.
   ArrayContentCache geometryArrays;
+  // Shared only when the import options ask for it, since an edit to one
+  // copy's object then reaches every copy.
+  ObjectContentCache<Sampler> sharedSamplers;
+  ObjectContentCache<Material> sharedMaterials;
+  ObjectContentCache<Geometry> sharedGeometry;
+  ObjectContentCache<Surface> sharedSurfaces;
 
   void reportSkip(const pxr::SdfPath &primPath,
       const std::string &primType,
@@ -198,6 +235,27 @@ inline ImportContext::ImportContext(Scene *scene,
       filePath(std::move(filePath)),
       basePath(std::move(basePath))
 {}
+
+template <typename T>
+inline typename ObjectContentCache<T>::Ref ObjectContentCache<T>::find(
+    const T &object) const
+{
+  auto found = m_objectsByHash.find(contentHash(object));
+  if (found == m_objectsByHash.end())
+    return {};
+
+  for (const auto &candidate : found->second) {
+    if (sameContent(*candidate, object))
+      return candidate;
+  }
+  return {};
+}
+
+template <typename T>
+inline void ObjectContentCache<T>::insert(Ref object)
+{
+  m_objectsByHash[contentHash(*object)].push_back(object);
+}
 
 inline void ImportContext::reportSkip(const pxr::SdfPath &primPath,
     const std::string &primType,

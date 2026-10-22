@@ -23,6 +23,7 @@ set(VSR_CORE_CXX_SOURCES
   Scene.cpp
   UpdateDelegate.cpp
   algorithms/computeScalarRange.cpp
+  algorithms/objectContent.cpp
   objects/Array.cpp
   objects/Camera.cpp
   objects/Geometry.cpp

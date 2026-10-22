@@ -1096,6 +1096,42 @@ ResolvedMaterial convertPreviewSurface(ImportContext &ctx,
 
 } // namespace
 
+MaterialRef shareMaterial(ImportContext &ctx, MaterialRef material)
+{
+  if (!material || !ctx.options->shareRepeatedObjects)
+    return material;
+
+  auto &scene = *ctx.scene;
+
+  // Each binding made a Sampler of its own, so the Samplers are shared first:
+  // the Material's content names them by identity.
+  for (size_t i = 0; i < material->numParameters(); i++) {
+    const auto &value = material->parameterAt(i).value();
+    if (value.type() != ANARI_SAMPLER)
+      continue;
+    auto sampler = scene.getObject<Sampler>(value.getAsObjectIndex());
+    if (!sampler)
+      continue;
+    auto existing = ctx.sharedSamplers.find(*sampler);
+    if (!existing) {
+      ctx.sharedSamplers.insert(sampler);
+      continue;
+    }
+    if (existing.data() == sampler.data())
+      continue;
+    material->setParameterObject(material->parameterAt(i).name(), *existing);
+    if (sampler->useCount(Object::UseKind::PARAMETER) == 0)
+      scene.removeObject(sampler.data());
+  }
+
+  if (auto existing = ctx.sharedMaterials.find(*material)) {
+    scene.removeObject(material.data());
+    return existing;
+  }
+  ctx.sharedMaterials.insert(material);
+  return material;
+}
+
 ResolvedMaterial resolveMaterial(ImportContext &ctx,
     const pxr::HdSceneIndexBaseRefPtr &sceneIndex,
     const pxr::SdfPath &materialPath)
@@ -1115,6 +1151,7 @@ ResolvedMaterial resolveMaterial(ImportContext &ctx,
   // Every exit path caches, failures included: a material that cannot be
   // resolved is resolved -- and reported -- once, not once per binding.
   auto cache = [&](ResolvedMaterial resolved) {
+    resolved.material = shareMaterial(ctx, resolved.material);
     ctx.materialCache[key] = resolved;
     return resolved;
   };

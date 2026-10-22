@@ -952,6 +952,7 @@ function vsr.io.importHDRI(...) end
 --   refinementLevel = 2
 --   primPath        = "/World/Asset"
 --   variantSelections = { material = "renderLow" } -- set name = variant
+--   shareRepeatedObjects = true -- false gives every copy its own objects
 ---@overload fun(scene: vsr.Scene, filename: string)
 ---@overload fun(scene: vsr.Scene, filename: string, location: vsr.LayerNode)
 ---@overload fun(scene: vsr.Scene, filename: string, location: vsr.LayerNode, settings: table)

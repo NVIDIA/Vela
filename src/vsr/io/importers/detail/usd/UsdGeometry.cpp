@@ -43,7 +43,7 @@ MaterialRef displayColorMaterial(ImportContext &ctx,
     retval->setParameter("color", *display.color);
   if (display.opacity)
     retval->setParameter("opacity", *display.opacity);
-  return retval;
+  return shareMaterial(ctx, retval);
 }
 
 // The materials this gprim's Parts need, and with them the texture-coordinate
@@ -116,7 +116,9 @@ MaterialPlan planMaterials(ImportContext &ctx,
 // subdivided mesh's Surfaces end up sharing one position Array. Unless the
 // gprim deforms, an Array whose content this Import already built is shared
 // rather than built again, which is how a Stage that repeats an asset by
-// reference holds its geometry once (ADR 0046).
+// reference holds its geometry once (ADR 0046). When the import options
+// allow it, the Geometry and Surface objects themselves are shared the same
+// way (ADR 0047), and a later copy is left holding the first copy's.
 void buildParts(ImportContext &ctx,
     const ResolvedGeometry &resolved,
     const MaterialPlan &materials,
@@ -124,6 +126,7 @@ void buildParts(ImportContext &ctx,
     ConvertedGeometry &out)
 {
   FlatMap<std::string, ArrayRef> sharedArrays;
+  const bool shareObjects = shareContent && ctx.options->shareRepeatedObjects;
 
   for (const auto &part : resolved.parts) {
     auto geometry = ctx.scene->createObject<Geometry>(part.subtype);
@@ -154,12 +157,29 @@ void buildParts(ImportContext &ctx,
     for (const auto &[name, value] : part.scalars)
       geometry->setParameter(name, value);
 
+    if (shareObjects) {
+      if (auto existing = ctx.sharedGeometry.find(*geometry)) {
+        ctx.scene->removeObject(geometry.data());
+        geometry = existing;
+      } else
+        ctx.sharedGeometry.insert(geometry);
+    }
+
     auto *found = materials.byPart.at(part.name);
     auto material = found ? *found : materials.fallback;
 
+    auto surface =
+        ctx.scene->createSurface(part.name.c_str(), geometry, material);
+    if (shareObjects) {
+      if (auto existing = ctx.sharedSurfaces.find(*surface)) {
+        ctx.scene->removeObject(surface.data());
+        surface = existing;
+      } else
+        ctx.sharedSurfaces.insert(surface);
+    }
+
     out.geometryByPart.emplace_back(part.name, geometry);
-    out.surfaces.push_back(
-        ctx.scene->createSurface(part.name.c_str(), geometry, material));
+    out.surfaces.push_back(surface);
   }
 }
 

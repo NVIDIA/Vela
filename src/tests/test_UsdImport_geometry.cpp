@@ -12,6 +12,22 @@
 // std
 #include <cmath>
 
+// The first Surface placed beneath the node of this name.
+static vsr::scene::Surface *surfaceUnder(
+    ImportedStage &stage, const char *nodeName)
+{
+  auto *layer = stage.scene.defaultLayer();
+  auto node = findNode(layer, nodeName);
+  REQUIRE(node);
+  vsr::scene::Surface *found = nullptr;
+  layer->traverse(node, [&](auto &n, int) {
+    if (!found && n->type() == ANARI_SURFACE)
+      found = static_cast<vsr::scene::Surface *>(n->getObject());
+    return !found;
+  });
+  return found;
+}
+
 SCENARIO("A USD Stage's meshes arrive as surfaces", "[UsdImport]")
 {
   GIVEN("A Stage with a single quad mesh")
@@ -493,20 +509,24 @@ def Xform "Other"
 
     WHEN("The Stage is imported")
     {
-      THEN("Each copy keeps its own Geometry")
+      THEN("The copies share one Geometry and one Surface")
       {
-        REQUIRE(stage.scene.numberOfObjects(ANARI_GEOMETRY) == 3);
+        REQUIRE(stage.scene.numberOfObjects(ANARI_GEOMETRY) == 2);
+        REQUIRE(stage.scene.numberOfObjects(ANARI_SURFACE) == 2);
+        REQUIRE(surfaceUnder(stage, "CopyA") == surfaceUnder(stage, "CopyB"));
       }
 
-      THEN("The copies share their Arrays")
+      THEN("The shared Geometry is named for the copy that built it")
       {
-        REQUIRE(positionOf("/CopyA/Quad") == positionOf("/CopyB/Quad"));
-        auto copyA = findGeometry(stage.scene, "/CopyA/Quad");
-        auto copyB = findGeometry(stage.scene, "/CopyB/Quad");
-        REQUIRE(
-            copyA->parameterValueAsObject<vsr::scene::Array>("primitive.index")
-            == copyB->parameterValueAsObject<vsr::scene::Array>(
-                "primitive.index"));
+        REQUIRE(findGeometry(stage.scene, "/CopyA/Quad"));
+        REQUIRE(!findGeometry(stage.scene, "/CopyB/Quad"));
+      }
+
+      THEN("Each copy keeps its own placement")
+      {
+        REQUIRE(surfaceUnder(stage, "CopyA") != nullptr);
+        REQUIRE(surfaceUnder(stage, "Other") != nullptr);
+        REQUIRE(surfaceUnder(stage, "Other") != surfaceUnder(stage, "CopyA"));
       }
 
       THEN("Different content is not shared")
@@ -552,6 +572,13 @@ def Xform "CopyB" (
 
     WHEN("The Stage is imported")
     {
+      THEN("Each copy keeps its own Geometry and Surface")
+      {
+        REQUIRE(findGeometry(stage.scene, "/CopyA/Quad"));
+        REQUIRE(findGeometry(stage.scene, "/CopyB/Quad"));
+        REQUIRE(surfaceUnder(stage, "CopyA") != surfaceUnder(stage, "CopyB"));
+      }
+
       THEN("Each copy keeps Arrays of its own, since a scrub re-fills them")
       {
         auto copyA = findGeometry(stage.scene, "/CopyA/Quad");
@@ -562,6 +589,152 @@ def Xform "CopyB" (
             copyA->parameterValueAsObject<vsr::scene::Array>("vertex.position")
             != copyB->parameterValueAsObject<vsr::scene::Array>(
                 "vertex.position"));
+      }
+    }
+  }
+}
+
+// A copy's material lives under the copy's own path too, so only content says
+// two copies' materials -- and the Samplers they read -- are one.
+SCENARIO("Materials a Stage repeats are held once", "[UsdImport]")
+{
+  GIVEN("Two references to a textured asset, and a copy with its own colour")
+  {
+    TextureFixture texture("vsr_test_usd_repeated_material.tga");
+
+    auto stageText = [](const char *otherRoughness) {
+      return std::string(R"(#usda 1.0
+
+class Xform "Asset"
+{
+    def Material "Mat"
+    {
+        token outputs:surface.connect = </Asset/Mat/PBR.outputs:surface>
+
+        def Shader "PBR"
+        {
+            uniform token info:id = "UsdPreviewSurface"
+            color3f inputs:diffuseColor.connect = </Asset/Mat/Tex.outputs:rgb>
+            float inputs:roughness = 0.5
+            token outputs:surface
+        }
+
+        def Shader "Tex"
+        {
+            uniform token info:id = "UsdUVTexture"
+            asset inputs:file = @vsr_test_usd_repeated_material.tga@
+            float3 outputs:rgb
+        }
+    }
+
+    def Mesh "Quad" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+    )
+    {)") + QUAD_MESH_BODY
+          + R"(
+        rel material:binding = </Asset/Mat>
+    }
+}
+
+def Xform "CopyA" (
+    references = </Asset>
+)
+{
+}
+
+def Xform "CopyB" (
+    references = </Asset>
+)
+{
+}
+
+def Xform "Other" (
+    references = </Asset>
+)
+{
+    over "Mat"
+    {
+        over "PBR"
+        {
+            float inputs:roughness = )"
+          + otherRoughness + R"(
+        }
+    }
+}
+)";
+    };
+
+    auto materialOf = [](vsr::scene::Surface *surface) {
+      REQUIRE(surface != nullptr);
+      return surface->parameterValueAsObject<vsr::scene::Material>(
+          vsr::scene::tokens::surface::material);
+    };
+    auto samplerOf = [](vsr::scene::Material *material) {
+      REQUIRE(material != nullptr);
+      return material->parameterValueAsObject<vsr::scene::Sampler>("baseColor");
+    };
+
+    WHEN("The Stage is imported")
+    {
+      ImportedStage stage(
+          "vsr_test_usd_repeated_material.usda", stageText("0.9"));
+
+      THEN("The copies share one Material and one Sampler")
+      {
+        auto *a = materialOf(surfaceUnder(stage, "CopyA"));
+        auto *b = materialOf(surfaceUnder(stage, "CopyB"));
+        REQUIRE(a == b);
+        REQUIRE(samplerOf(a) != nullptr);
+        REQUIRE(stage.scene.numberOfObjects(ANARI_SAMPLER) == 1);
+      }
+
+      THEN("A copy whose material differs keeps its own")
+      {
+        auto *a = materialOf(surfaceUnder(stage, "CopyA"));
+        auto *other = materialOf(surfaceUnder(stage, "Other"));
+        REQUIRE(a != other);
+        REQUIRE(samplerOf(a) == samplerOf(other));
+      }
+
+      THEN("Its Surface differs too, though its Geometry is shared")
+      {
+        auto *a = surfaceUnder(stage, "CopyA");
+        auto *other = surfaceUnder(stage, "Other");
+        REQUIRE(a != other);
+        REQUIRE(a->parameterValueAsObject<vsr::scene::Geometry>(
+                    vsr::scene::tokens::surface::geometry)
+            == other->parameterValueAsObject<vsr::scene::Geometry>(
+                vsr::scene::tokens::surface::geometry));
+      }
+    }
+
+    WHEN("The Stage is imported with object sharing turned off")
+    {
+      vsr::io::UsdImportOptions options;
+      options.shareRepeatedObjects = false;
+      ImportedStage stage("vsr_test_usd_repeated_material_unshared.usda",
+          stageText("0.9"),
+          options);
+
+      THEN("Every copy keeps objects of its own")
+      {
+        auto *a = surfaceUnder(stage, "CopyA");
+        auto *b = surfaceUnder(stage, "CopyB");
+        REQUIRE(a != b);
+        REQUIRE(materialOf(a) != materialOf(b));
+        REQUIRE(samplerOf(materialOf(a)) != samplerOf(materialOf(b)));
+        REQUIRE(findGeometry(stage.scene, "/CopyA/Quad")
+            != findGeometry(stage.scene, "/CopyB/Quad"));
+      }
+
+      THEN("Their Arrays are still shared")
+      {
+        auto a = findGeometry(stage.scene, "/CopyA/Quad");
+        auto b = findGeometry(stage.scene, "/CopyB/Quad");
+        REQUIRE(a);
+        REQUIRE(b);
+        REQUIRE(a->parameterValueAsObject<vsr::scene::Array>("vertex.position")
+            == b->parameterValueAsObject<vsr::scene::Array>("vertex.position"));
       }
     }
   }
