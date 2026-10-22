@@ -24,6 +24,12 @@ project_link_libraries(
   vela_ext_tinyexr_impl
 )
 
+if(VSR_USE_USD)
+  project(vsrUsdInfo)
+  project_add_executable(vsrUsdInfo.cpp)
+  project_link_libraries(vsr_core vsr_io)
+endif()
+
 project(vsrVolumeToNanoVDB)
 project_add_executable(vsrVolumeToNanoVDB.cpp)
 project_link_libraries(vsr_scene vsr_io)
