@@ -196,7 +196,8 @@ The owner of every sampled Image for one scene. It holds the scene it caches
 for, so a cached Array can never reach a different one, and it must not
 outlive that scene. An image bound to a light's radiance rather than to a
 Sampler may be built without it — see ADR 0014 — so "every" is a claim about
-what a Sampler can read, not about every decode in the tree.
+what a Sampler can read, not about every decode in the tree. Sources whose
+decoded texels match share one Image, whatever their paths.
 _Avoid_: texture cache
 
 **Row Order**:

@@ -97,6 +97,7 @@ for the proposed source reorganization that follows from it.
 | --- | --- | --- |
 | [0014](0014-store-images-in-anari-orientation.md) | Store images in ANARI orientation | |
 | [0044](0044-keep-decoded-texels-at-the-files-bit-depth.md) | Keep decoded texels at the file's bit depth | |
+| [0049](0049-share-cached-images-by-decoded-content.md) | Share cached images by decoded content | Amends [0047](0047-share-repeated-usd-objects-by-content.md) |
 
 Background and the full audit behind this decision:
 [`vsr-io-image-import.md`](../vsr-io-image-import.md).
@@ -125,7 +126,7 @@ the resulting vocabulary.
 | [0022](0022-refill-captured-arrays-rather-than-re-running-conversion.md) | Re-fill captured Arrays rather than re-running conversion per frame | |
 | [0045](0045-key-stage-sessions-by-file-and-variant-selections.md) | Key Stage Sessions by file and Variant Selections | Amends [0021](0021-share-one-usd-stage-session-across-import-and-animation.md) |
 | [0046](0046-share-geometry-arrays-by-content-within-an-import.md) | Share geometry Arrays by content within an import | Extended by [0047](0047-share-repeated-usd-objects-by-content.md) |
-| [0047](0047-share-repeated-usd-objects-by-content.md) | Share repeated USD objects by content, by default | Extends [0046](0046-share-geometry-arrays-by-content-within-an-import.md) |
+| [0047](0047-share-repeated-usd-objects-by-content.md) | Share repeated USD objects by content, by default | Extends [0046](0046-share-geometry-arrays-by-content-within-an-import.md); amended by [0049](0049-share-cached-images-by-decoded-content.md) |
 
 Known limitations of the USD/MaterialX path that are not decisions:
 [`usd-materialx-known-gaps.md`](../usd-materialx-known-gaps.md).

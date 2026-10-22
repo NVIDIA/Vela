@@ -11,6 +11,8 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <functional>
+#include <string_view>
 #include <utility>
 
 namespace vsr::io {
@@ -25,6 +27,36 @@ std::string keyOf(const ImageSource &source)
   return source.id
       + (source.colorSpace == ColorSpace::LINEAR ? "_linear" : "_srgb")
       + (source.rowOrder == RowOrder::BOTTOM_UP ? "_up" : "_down");
+}
+
+size_t contentHashOf(const detail::DecodedImage &image)
+{
+  const auto bytes = std::hash<std::string_view>{}(
+      std::string_view(image.texels.data(), image.texels.size()));
+  return bytes ^ (size_t(image.elementType) * 0x9e3779b97f4a7c15ull)
+      ^ (image.width << 32) ^ image.height;
+}
+
+// Whether `held` is the image `decoded` would become: the same texels, read
+// the same way. `image` carries what store() has already derived for it.
+bool sameTexels(
+    const Image &held, const Image &image, const detail::DecodedImage &decoded)
+{
+  if (held.width != image.width || held.height != image.height
+      || held.compressedFormat != image.compressedFormat
+      || held.vFlipInSampler != image.vFlipInSampler)
+    return false;
+
+  const auto &texels = *held.texels;
+  const auto expectedType =
+      image.blockCompressed() ? ANARI_INT8 : decoded.elementType;
+  if (texels.elementType() != expectedType
+      || texels.size() * texels.elementSize() != decoded.texels.size())
+    return false;
+
+  return std::memcmp(
+             texels.data(), decoded.texels.data(), decoded.texels.size())
+      == 0;
 }
 
 // Reverse the image's rows in place so it lands in `target`, reporting whether
@@ -139,6 +171,7 @@ Image ImageCache::find(const ImageSource &source) const
 void ImageCache::clear()
 {
   m_images.clear();
+  m_imagesByContent.clear();
   m_failures.clear();
 }
 
@@ -170,6 +203,18 @@ Image ImageCache::store(
   image.width = decoded.width;
   image.height = decoded.height;
   image.compressedFormat = decoded.compressedFormat;
+
+  // Assets often ship their own copy of a texture another asset ships too, so
+  // a source that is new by name can still be an image already held.
+  const auto contentKey = contentHashOf(decoded);
+  auto &candidates = m_imagesByContent[contentKey];
+  for (const auto &candidate : candidates) {
+    if (sameTexels(candidate, image, decoded)) {
+      m_images[keyOf(source)] = candidate;
+      return candidate;
+    }
+  }
+
   if (image.blockCompressed()) {
     image.texels = m_scene->createArray(ANARI_INT8, decoded.texels.size());
     image.texels->setData(decoded.texels.data());
@@ -180,6 +225,7 @@ Image ImageCache::store(
   }
 
   m_images[keyOf(source)] = image;
+  candidates.push_back(image);
   return image;
 }
 

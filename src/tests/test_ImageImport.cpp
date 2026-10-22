@@ -837,3 +837,48 @@ SCENARIO("An image that fails to decode is not read again", "[ImageImport]")
     }
   }
 }
+
+// Assets often ship their own copy of a texture another asset also ships, so
+// two paths can hold the same bytes. The Image Cache keeps such an image once.
+SCENARIO("Files with identical texels share one Image", "[ImageImport]")
+{
+  GIVEN(
+      "Two copies of one image at different paths, and an image differing"
+      " in one texel")
+  {
+    auto differing = tgaFixtureContents();
+    differing.back() = char(differing.back() ^ 0x40);
+    TempFile copyA("vsr_test_copy_a.tga", tgaFixtureContents());
+    TempFile copyB("vsr_test_copy_b.tga", tgaFixtureContents());
+    TempFile other("vsr_test_copy_other.tga", differing);
+
+    vsr::scene::Scene scene;
+    vsr::io::ImageCache cache(&scene);
+
+    WHEN("Each is acquired")
+    {
+      auto a = cache.acquire({copyA.path()});
+      auto b = cache.acquire({copyB.path()});
+      auto c = cache.acquire({other.path()});
+      REQUIRE(a);
+      REQUIRE(b);
+      REQUIRE(c);
+
+      THEN("The copies share one texel Array")
+      {
+        REQUIRE(a.texels.data() == b.texels.data());
+        REQUIRE(scene.numberOfObjects(ANARI_ARRAY2D) == 2);
+      }
+
+      THEN("The differing image keeps its own")
+      {
+        REQUIRE(c.texels.data() != a.texels.data());
+      }
+
+      THEN("A copy acquired again is still found by its own path")
+      {
+        REQUIRE(cache.find({copyB.path()}).texels.data() == a.texels.data());
+      }
+    }
+  }
+}
