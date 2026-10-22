@@ -5,11 +5,13 @@
 #include "catch.hpp"
 // vsr
 #include "vsr/rendering/index/RenderIndexAllLayers.hpp"
+#include "vsr/rendering/index/RenderToAnariObjectsVisitor.hpp"
 #include "vsr/scene/Scene.hpp"
 // anari
 #include <anari/anari_cpp.hpp>
 // std
 #include <cmath>
+#include <vector>
 
 namespace {
 
@@ -147,6 +149,95 @@ SCENARIO("Rewriting a transform array moves its instances", "[RenderIndex]")
       THEN("The instance has moved by the time the batch ends")
       {
         REQUIRE(worldBoundsMax(anariDevice.device, *index).x == Approx(51.f));
+      }
+    }
+  }
+}
+
+// A Stage that repeats an asset places one Surface under many transforms. A
+// device builds its acceleration structure per Group, so each placement should
+// reuse one Group rather than bring its own copy of the same Surfaces.
+SCENARIO(
+    "Placements of the same Surfaces share one ANARI Group", "[RenderIndex]")
+{
+  TestDevice anariDevice;
+  if (!anariDevice) {
+    WARN("helide unavailable, skipping");
+    return;
+  }
+
+  GIVEN("One sphere Surface placed twice, and a second Surface placed once")
+  {
+    Scene scene;
+    auto makeSurface = [&](const char *name) {
+      auto geometry = scene.createObject<Geometry>(tokens::geometry::sphere);
+      auto positions = scene.createArray(ANARI_FLOAT32_VEC3, 1);
+      const vsr::math::float3 origin(0.f, 0.f, 0.f);
+      positions->setData(&origin, 1);
+      geometry->setParameterObject("vertex.position", *positions);
+      geometry->setParameter("radius", 1.f);
+      auto material = scene.createObject<Material>(tokens::material::matte);
+      return scene.createSurface(name, geometry, material);
+    };
+    auto shared = makeSurface("shared");
+    auto other = makeSurface("other");
+
+    auto root = scene.defaultLayer()->root();
+    auto place = [&](SurfaceRef surface, float x) {
+      auto node = scene.insertChildTransformNode(root, translation(x));
+      scene.insertChildObjectNode(node, surface);
+    };
+    place(shared, 0.f);
+    place(shared, 10.f);
+    place(other, -20.f);
+
+    WHEN("The layer is turned into ANARI instances")
+    {
+      // Sized the way RenderIndex::populate() sizes its own cache.
+      AnariHandleCache cache(scene, Token("helide"), anariDevice.device);
+      auto addSlots = [](const auto &objects, auto &handles) {
+        foreach_item_const(objects, [&](auto *) { handles.insert(nullptr); });
+        handles.sync_slots(objects);
+      };
+      const auto &db = scene.objectDB();
+      addSlots(db.array, cache.array);
+      addSlots(db.material, cache.material);
+      addSlots(db.geometry, cache.geometry);
+      addSlots(db.surface, cache.surface);
+      std::vector<anari::Instance> instances;
+      size_t groups = 0;
+      {
+        vsr::rendering::RenderToAnariObjectsVisitor visitor(
+            anariDevice.device, cache, &instances);
+        auto *layer = scene.defaultLayer();
+        layer->traverse_const(layer->root(), visitor);
+        groups = visitor.groupCount();
+      }
+
+      THEN("Each placement gets its own Instance")
+      {
+        REQUIRE(instances.size() == 3);
+      }
+
+      THEN("The two placements of one Surface share a Group")
+      {
+        REQUIRE(groups == 2);
+      }
+
+      for (auto i : instances)
+        anari::release(anariDevice.device, i);
+    }
+
+    WHEN("A render index draws the layer")
+    {
+      auto *index =
+          scene.updateDelegate().emplace<vsr::rendering::RenderIndexAllLayers>(
+              scene, Token("helide"), anariDevice.device);
+      index->populate();
+
+      THEN("The second placement still lands where its own transform puts it")
+      {
+        REQUIRE(worldBoundsMax(anariDevice.device, *index).x == Approx(11.f));
       }
     }
   }
