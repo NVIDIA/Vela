@@ -16,6 +16,18 @@ parameters and instance ids are unchanged. On the Davinci `rt_010` shot
 1,739, and the triangles that acceleration structures are built over fall
 from 1.07 billion to the 201 million that are distinct.
 
+Measured with helide on the shot, from populating the render index to the
+world's bounds being ready:
+
+| | populate + bounds | peak RSS (import is ~21.8 GiB) |
+| --- | --- | --- |
+| objects shared (ADR 0047) + Groups reused | 13.4 s | 33.9 GiB |
+| `shareRepeatedObjects = false` | 67.4 s | 83.0 GiB |
+
+The second row still reuses the 704 Groups that already held the same
+Surfaces, so the cost before both changes was somewhat higher still. That
+baseline was not measured.
+
 ## Considered options
 
 - **Key Groups by object content rather than handle.** Two Surfaces with
