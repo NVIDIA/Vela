@@ -12,7 +12,9 @@
 #include <anari/anari_cpp.hpp>
 #include <cstdint>
 #include <iterator>
+#include <map>
 #include <stack>
+#include <tuple>
 
 namespace vsr::rendering {
 
@@ -51,6 +53,10 @@ constexpr uint8_t objectMask_lights()
  * Volume, and Light handles into ANARI Instance objects, filtered by an
  * optional inclusion mask and a per-object filter function.
  *
+ * Transforms that place the very same objects share one ANARI Group, since a
+ * device builds its acceleration structure per Group (ADR 0048). Reuse spans
+ * one traversal: Groups are not shared between layers.
+ *
  * Example:
  *   std::vector<anari::Instance> instances;
  *   RenderToAnariObjectsVisitor v(device, cache, &instances, objectMask_all());
@@ -68,6 +74,9 @@ struct RenderToAnariObjectsVisitor : public vsr::scene::LayerVisitor
   bool preChildren_const(const vsr::scene::LayerNode &n, int level) override;
   void postChildren_const(const vsr::scene::LayerNode &n, int level) override;
 
+  // How many distinct Groups the traversal has made so far.
+  size_t groupCount() const;
+
  private:
   bool isIncludedAfterFiltering(const vsr::scene::LayerNode &n) const;
   anari::Instance createInstanceFromTop();
@@ -77,12 +86,21 @@ struct RenderToAnariObjectsVisitor : public vsr::scene::LayerVisitor
     std::vector<anari::Surface> surfaces;
     std::vector<anari::Volume> volumes;
     std::vector<anari::Light> lights;
+
+    bool operator<(const GroupedObjects &o) const
+    {
+      return std::tie(surfaces, volumes, lights)
+          < std::tie(o.surfaces, o.volumes, o.lights);
+    }
   };
+
+  anari::Group groupFor(const GroupedObjects &objects);
 
   anari::Device m_device{nullptr};
   vsr::scene::AnariHandleCache *m_cache{nullptr};
   std::vector<anari::Instance> *m_instances{nullptr};
   std::stack<GroupedObjects> m_objects;
+  std::map<GroupedObjects, anari::Group> m_groups;
   uint8_t m_mask{objectMask_none()};
   RenderIndexFilterFcn *m_filter{nullptr};
 };
@@ -106,7 +124,15 @@ inline RenderToAnariObjectsVisitor::RenderToAnariObjectsVisitor(anari::Device d,
 
 inline RenderToAnariObjectsVisitor::~RenderToAnariObjectsVisitor()
 {
+  // The Instances made from each Group hold it from here on.
+  for (auto &entry : m_groups)
+    anari::release(m_device, entry.second);
   anari::release(m_device, m_device);
+}
+
+inline size_t RenderToAnariObjectsVisitor::groupCount() const
+{
+  return m_groups.size();
 }
 
 inline bool RenderToAnariObjectsVisitor::preChildren_const(
@@ -210,43 +236,53 @@ inline anari::Instance RenderToAnariObjectsVisitor::createInstanceFromTop()
       && current.lights.empty())
     return {};
 
-  auto group = anari::newObject<anari::Group>(m_device);
-
-  if (!current.surfaces.empty()) {
-    anari::setParameterArray1D(m_device,
-        group,
-        "surface",
-        current.surfaces.data(),
-        current.surfaces.size());
-  }
-
-  if (!current.volumes.empty()) {
-    anari::setParameterArray1D(m_device,
-        group,
-        "volume",
-        current.volumes.data(),
-        current.volumes.size());
-  }
-
-  if (!current.lights.empty()) {
-    anari::setParameterArray1D(
-        m_device, group, "light", current.lights.data(), current.lights.size());
-  }
+  auto group = groupFor(current);
 
   current.surfaces.clear();
   current.volumes.clear();
   current.lights.clear();
-
-  anari::commitParameters(m_device, group);
 
   auto instance = anari::newObject<anari::Instance>(m_device, "transform");
   anari::setParameter(m_device, instance, "group", group);
   anari::commitParameters(m_device, instance);
   m_instances->push_back(instance);
 
-  anari::release(m_device, group);
-
   return instance;
+}
+
+inline anari::Group RenderToAnariObjectsVisitor::groupFor(
+    const GroupedObjects &objects)
+{
+  if (auto found = m_groups.find(objects); found != m_groups.end())
+    return found->second;
+
+  auto group = anari::newObject<anari::Group>(m_device);
+
+  if (!objects.surfaces.empty()) {
+    anari::setParameterArray1D(m_device,
+        group,
+        "surface",
+        objects.surfaces.data(),
+        objects.surfaces.size());
+  }
+
+  if (!objects.volumes.empty()) {
+    anari::setParameterArray1D(m_device,
+        group,
+        "volume",
+        objects.volumes.data(),
+        objects.volumes.size());
+  }
+
+  if (!objects.lights.empty()) {
+    anari::setParameterArray1D(
+        m_device, group, "light", objects.lights.data(), objects.lights.size());
+  }
+
+  anari::commitParameters(m_device, group);
+
+  m_groups.emplace(objects, group);
+  return group;
 }
 
 } // namespace vsr::rendering

@@ -45,6 +45,8 @@ where the objects came from.
   Instances already share their objects. An Import that needs every copy
   editable on its own sets `UsdImportOptions::shareRepeatedObjects` to false.
   Arrays are still shared then, as ADR 0046 decided.
+- Picking selects objects, so picking one copy selects the shared Surface,
+  and every copy shows the selection outline, as native Instances already do.
 - A shared object keeps the name of the first copy that built it: two copies
   of `/Asset/Quad` share one Geometry named `/CopyA/Quad`. Each placement
   still has its own layer nodes, named after its own prims, which is where
