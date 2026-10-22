@@ -12,6 +12,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace vsr::io {
 
@@ -120,6 +121,9 @@ class ImageCache
 
   vsr::scene::Scene *m_scene{nullptr};
   std::unordered_map<std::string, Image> m_images;
+  // The same images by a hash of their texels, so a source whose bytes
+  // another source already decoded to shares that Image (ADR 0049).
+  std::unordered_map<size_t, std::vector<Image>> m_imagesByContent;
   // Sources that did not decode, so a file a thousand materials bind is read
   // -- and fails -- once rather than once per binding.
   std::unordered_set<std::string> m_failures;
