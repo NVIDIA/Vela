@@ -26,6 +26,7 @@ SCENARIO("USD import options round-trip through a data tree", "[UsdImport]")
     options.refinementLevel = 4;
     options.primPath = "/World/Asset";
     options.variantSelections = {{"material", "renderLow"}, {"lod", "proxy"}};
+    options.shareRepeatedObjects = false;
 
     WHEN("They are written to a data tree and read back")
     {
@@ -46,6 +47,7 @@ SCENARIO("USD import options round-trip through a data tree", "[UsdImport]")
         REQUIRE(restored.refinementLevel == 4);
         REQUIRE(restored.primPath == "/World/Asset");
         REQUIRE(restored.variantSelections == options.variantSelections);
+        REQUIRE(restored.shareRepeatedObjects == false);
       }
     }
   }
@@ -199,7 +201,7 @@ def Xform "World"
 
       THEN("Only default and render Purpose content arrives")
       {
-        REQUIRE(stage.scene.numberOfObjects(ANARI_SURFACE) == 2);
+        REQUIRE(countSurfaceNodes(stage.scene) == 2);
       }
 
       THEN("Each excluded prim is reported")
@@ -226,7 +228,7 @@ def Xform "World"
 
       THEN("Proxy content arrives too")
       {
-        REQUIRE(stage.scene.numberOfObjects(ANARI_SURFACE) == 3);
+        REQUIRE(countSurfaceNodes(stage.scene) == 3);
         REQUIRE(stage.report.countOf(vsr::io::UsdSkipReason::PURPOSE_EXCLUDED)
             == 1);
       }

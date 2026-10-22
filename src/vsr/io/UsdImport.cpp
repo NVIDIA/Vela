@@ -79,6 +79,7 @@ void UsdImportOptions::toDataNode(core::DataNode &node) const
   node["materialMode"] = std::string(toString(materialMode));
   node["refinementLevel"] = refinementLevel;
   node["primPath"] = primPath;
+  node["shareRepeatedObjects"] = shareRepeatedObjects;
 
   auto &selectionsNode = node["variantSelections"];
   for (const auto &[set, variant] : variantSelections)
@@ -111,6 +112,8 @@ void UsdImportOptions::fromDataNode(const core::DataNode &node)
     refinementLevel = n->getValueOr<int>(refinementLevel);
   if (const auto *n = node.child("primPath"))
     primPath = n->getValueOr<std::string>(primPath);
+  if (const auto *n = node.child("shareRepeatedObjects"))
+    shareRepeatedObjects = n->getValueOr<bool>(shareRepeatedObjects);
 
   if (const auto *selectionsNode = node.child("variantSelections")) {
     variantSelections.clear();

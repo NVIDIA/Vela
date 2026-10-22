@@ -93,6 +93,21 @@ inline vsr::scene::LayerNodeRef findNode(
   return found;
 }
 
+// How many Surfaces the default layer places. Repeated content can share one
+// Surface object between placements (ADR 0047), so this, not the size of the
+// Surface pool, is what counts the prims that arrived.
+inline size_t countSurfaceNodes(vsr::scene::Scene &scene)
+{
+  size_t retval = 0;
+  auto *layer = scene.defaultLayer();
+  layer->traverse(layer->root(), [&](auto &node, int) {
+    if (node->type() == ANARI_SURFACE)
+      retval++;
+    return true;
+  });
+  return retval;
+}
+
 // The converted object a prim produced, found by the prim path the importer
 // names it after.
 template <typename T>

@@ -52,6 +52,8 @@ vsr::io::UsdImportOptions usdImportOptionsFromLuaTable(
     retval.refinementLevel = *level;
   if (sol::optional<std::string> primPath = settings["primPath"])
     retval.primPath = *primPath;
+  if (sol::optional<bool> share = settings["shareRepeatedObjects"])
+    retval.shareRepeatedObjects = *share;
 
   if (sol::optional<sol::table> selections = settings["variantSelections"]) {
     for (const auto &[set, variant] : *selections) {
