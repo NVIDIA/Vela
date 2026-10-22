@@ -12,10 +12,12 @@ headless rendering, and scripting.
 | `vsrConvert` | Convert a `.vsr` file between the Binary and Text Encodings. | `./vsrConvert [--text\|--binary] <input.vsr> <output.vsr>` |
 | `vsrRender` | Offline render from a saved `.vsr` state file (including render settings and camera/animation data). | `./vsrRender <state_file.vsr>` |
 | `vsrOffline` | Headless renderer with direct CLI control over imports, camera, lights, renderer, and output. | `./vsrOffline [options]` |
+| `vsrUsdInfo` | List the Variant Sets a USD Stage offers and their variants. | `./vsrUsdInfo <stage.usd>` |
 | `vsrVolumeToNanoVDB` | Convert supported structured volume files to NanoVDB (`.vdb`) with optional quantization settings. | `./vsrVolumeToNanoVDB [options] <input_volume> <output.vdb>` |
 | `vsrLua` | Lua scripting and REPL tool for scene import, manipulation, and rendering workflows. | `./vsrLua <script.lua> [args...]`, `./vsrLua -e "<lua code>"`, `./vsrLua -i` |
 
-`vsrLua` is only built when `VSR_USE_LUA=ON`.
+`vsrLua` is only built when `VSR_USE_LUA=ON`, and `vsrUsdInfo` only when
+`VSR_USE_USD=ON`.
 
 ## `obj2header`
 
@@ -129,6 +131,23 @@ for what the export keeps.
 
 ```bash
 ./vsrOffline -obj model.obj --export-mini model.mini
+```
+
+## `vsrUsdInfo`
+
+Lists the Variant Sets a USD Stage offers and the variants each one authors,
+which are the names `-usd_variant <set>=<variant>` accepts in `vsrViewer` and
+`vsrOffline`. The Stage opens with no payload loaded, so this is quick even
+for a large Stage, but a Variant Set that only a payload authors is not
+listed. Built only when `VSR_USE_USD=ON`.
+
+Usage:
+
+```bash
+./vsrUsdInfo shot.usda
+# geometry: off render
+# material: anim off render renderLow renderXLow
+# rig: off skel
 ```
 
 ## `vsrVolumeToNanoVDB`
