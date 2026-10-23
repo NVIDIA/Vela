@@ -769,7 +769,7 @@ static pxr::SdfPath vsrSurfaceToUSD(
               primvarsAPI.CreatePrimvar(pxr::TfToken(primvarNames[i]),
                   pxr::SdfValueTypeNames->Color3fArray,
                   interpolation);
-          auto srcData = array->dataAs<uint8_t>();
+          auto srcData = static_cast<const uint8_t *>(array->data());
           pxr::VtArray<pxr::GfVec3f> colorData(elementCount);
           for (size_t j = 0; j < elementCount; ++j) {
             colorData[j] = pxr::GfVec3f(srcData[j * 3 + 0] / 255.0f,
@@ -784,7 +784,7 @@ static pxr::SdfPath vsrSurfaceToUSD(
               primvarsAPI.CreatePrimvar(pxr::TfToken(primvarNames[i]),
                   pxr::SdfValueTypeNames->Color4fArray,
                   interpolation);
-          auto srcData = array->dataAs<uint8_t>();
+          auto srcData = static_cast<const uint8_t *>(array->data());
           pxr::VtArray<pxr::GfVec4f> colorData(elementCount);
           for (size_t j = 0; j < elementCount; ++j) {
             colorData[j] = pxr::GfVec4f(srcData[j * 4 + 0] / 255.0f,
