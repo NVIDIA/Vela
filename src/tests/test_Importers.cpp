@@ -469,7 +469,8 @@ SCENARIO("TIFF textures decode at the file's own bit depth", "[Importers]")
         REQUIRE(image != nullptr);
         REQUIRE(image->elementType() == ANARI_UFIXED8_VEC3);
         REQUIRE(image->size() == 1);
-        const auto *texels = image->dataAs<std::uint8_t>();
+        const auto *texels =
+            static_cast<const std::uint8_t *>(image->data());
         REQUIRE(texels[0] == 0x60);
         REQUIRE(texels[1] == 0x40);
         REQUIRE(texels[2] == 0x20);
@@ -495,7 +496,8 @@ SCENARIO("TIFF textures decode at the file's own bit depth", "[Importers]")
             sampler->parameterValueAsObject<vsr::scene::Array>("image");
         REQUIRE(image != nullptr);
         REQUIRE(image->elementType() == ANARI_UFIXED8_RGB_SRGB);
-        const auto *texels = image->dataAs<std::uint8_t>();
+        const auto *texels =
+            static_cast<const std::uint8_t *>(image->data());
         REQUIRE(texels[0] == 0x60);
         REQUIRE(texels[1] == 0x40);
         REQUIRE(texels[2] == 0x20);
@@ -524,7 +526,8 @@ SCENARIO("TIFF textures decode at the file's own bit depth", "[Importers]")
             sampler->parameterValueAsObject<vsr::scene::Array>("image");
         REQUIRE(image != nullptr);
         REQUIRE(image->elementType() == ANARI_UFIXED8_RA_SRGB);
-        const auto *texels = image->dataAs<std::uint8_t>();
+        const auto *texels =
+            static_cast<const std::uint8_t *>(image->data());
         REQUIRE(texels[0] == 0x60);
         REQUIRE(texels[1] == 0x40);
       }

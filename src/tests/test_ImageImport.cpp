@@ -751,7 +751,8 @@ SCENARIO("Decoded texels keep the file's own bit depth", "[ImageImport]")
       auto *image =
           imageOf(vsr::io::importTexture(cache, texture.path(), true));
       REQUIRE(image->elementType() == ANARI_UFIXED8_VEC3);
-      const auto *texels = image->dataAs<std::uint8_t>();
+      const auto *texels =
+          static_cast<const std::uint8_t *>(image->data());
       REQUIRE(texels[0] == 0xff); // top row, red
       REQUIRE(texels[2] == 0x00);
     }
@@ -761,7 +762,8 @@ SCENARIO("Decoded texels keep the file's own bit depth", "[ImageImport]")
       auto *image =
           imageOf(vsr::io::importTexture(cache, texture.path(), false));
       REQUIRE(image->elementType() == ANARI_UFIXED8_RGB_SRGB);
-      const auto *texels = image->dataAs<std::uint8_t>();
+      const auto *texels =
+          static_cast<const std::uint8_t *>(image->data());
       REQUIRE(texels[0] == 0xff);
       REQUIRE(texels[2] == 0x00);
     }
@@ -776,7 +778,8 @@ SCENARIO("Decoded texels keep the file's own bit depth", "[ImageImport]")
       auto *image =
           imageOf(vsr::io::importTexture(cache, texture.path(), true));
       REQUIRE(image->elementType() == ANARI_UFIXED16_VEC3);
-      const auto *texels = image->dataAs<std::uint16_t>();
+      const auto *texels =
+          static_cast<const std::uint16_t *>(image->data());
       REQUIRE(texels[0] == 0xffff);
       REQUIRE(texels[1] == 0x8000);
       REQUIRE(texels[2] == 0x0000);
@@ -787,7 +790,8 @@ SCENARIO("Decoded texels keep the file's own bit depth", "[ImageImport]")
       auto *image =
           imageOf(vsr::io::importTexture(cache, texture.path(), false));
       REQUIRE(image->elementType() == ANARI_UFIXED16_VEC3);
-      const auto *texels = image->dataAs<std::uint16_t>();
+      const auto *texels =
+          static_cast<const std::uint16_t *>(image->data());
       REQUIRE(texels[0] == 0xffff);
       REQUIRE(texels[1] / 65535.f == Approx(0.2140f).margin(1e-3f));
       REQUIRE(texels[2] == 0x0000);
