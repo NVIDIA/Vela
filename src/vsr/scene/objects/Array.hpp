@@ -21,9 +21,17 @@ namespace vsr::scene {
  *   auto *ptr = arr->mapAs<float3>();
  *   // fill ptr[0..1023] ...
  *   arr->unmap();
+ *
+ * HOST memory starts on a HOST_DATA_ALIGNMENT boundary and is followed by at
+ * least HOST_DATA_PADDING readable bytes past the last element, so devices
+ * can hand it straight to Embree (which reads the last vertex with a 16-byte
+ * SSE load) without copying. See docs/adr/0051.
  */
 struct Array : public Object
 {
+  static constexpr size_t HOST_DATA_ALIGNMENT = 64;
+  static constexpr size_t HOST_DATA_PADDING = 16;
+
   // clang-format off
   enum class MemoryKind {
     HOST, // Memory allocated on the host (main memory)

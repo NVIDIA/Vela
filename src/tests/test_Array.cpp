@@ -13,8 +13,11 @@
 #include "vsr/scene/algorithms/computeScalarRange.hpp"
 #include "vsr/scene/objects/Array.hpp"
 // std
+#include <cstdint>
+#include <cstring>
 #include <memory>
 #include <numeric>
+#include <string>
 
 SCENARIO("vsr::scene::Array interface", "[Array]")
 {
@@ -73,6 +76,64 @@ SCENARIO("vsr::scene::Array interface", "[Array]")
       auto range = vsr::scene::computeScalarRange(arr);
       REQUIRE(range.x == 0.f);
       REQUIRE(range.y == 1.f);
+    }
+  }
+}
+
+SCENARIO("vsr::scene::Array host memory alignment", "[Array]")
+{
+  using vsr::scene::Array;
+
+  auto isAligned = [](const void *p) {
+    return reinterpret_cast<uintptr_t>(p) % Array::HOST_DATA_ALIGNMENT == 0;
+  };
+
+  // Read the padding bytes past the last element, as Embree does with a
+  // 16-byte SSE load; an ASan build reports this if the padding is missing.
+  auto paddingIsReadable = [](const Array &arr) {
+    auto *bytes = static_cast<const uint8_t *>(arr.data());
+    auto *tail = bytes + arr.size() * arr.elementSize();
+    uint8_t padding[Array::HOST_DATA_PADDING];
+    std::memcpy(padding, tail, sizeof(padding));
+    return true;
+  };
+
+  GIVEN("Host arrays of float3 with sizes that are not a multiple of 16 bytes")
+  {
+    for (size_t n : {1, 3, 5, 1000, 1001}) {
+      auto arr = Array(ANARI_FLOAT32_VEC3, n);
+
+      THEN("The data is aligned and padded for size " + std::to_string(n))
+      {
+        REQUIRE(isAligned(arr.data()));
+        REQUIRE(paddingIsReadable(arr));
+      }
+    }
+  }
+
+  GIVEN("Host 2D and 3D arrays")
+  {
+    auto arr2 = Array(ANARI_UFIXED8_VEC3, 7, 3);
+    auto arr3 = Array(ANARI_FLOAT32, 3, 3, 3);
+
+    THEN("The data is aligned and padded")
+    {
+      REQUIRE(isAligned(arr2.data()));
+      REQUIRE(paddingIsReadable(arr2));
+      REQUIRE(isAligned(arr3.data()));
+      REQUIRE(paddingIsReadable(arr3));
+    }
+  }
+
+  GIVEN("A PROXY array converted to host memory")
+  {
+    auto arr = Array(ANARI_FLOAT32_VEC3, 5, Array::MemoryKind::PROXY);
+    arr.convertProxyToHost();
+
+    THEN("The data is aligned and padded")
+    {
+      REQUIRE(isAligned(arr.data()));
+      REQUIRE(paddingIsReadable(arr));
     }
   }
 }

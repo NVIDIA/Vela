@@ -7,6 +7,7 @@
 
 #include "vsr/scene/objects/Array.hpp"
 
+#include "vsr/core/AlignedAlloc.hpp"
 #include "vsr/core/Logging.hpp"
 #include "vsr/scene/Scene.hpp"
 // std
@@ -44,6 +45,12 @@ static bool isDevicePointer(const void *ptr)
 #endif
 }
 
+static void *allocateHostData(size_t bytes)
+{
+  return core::alignedAlloc(
+      Array::HOST_DATA_ALIGNMENT, bytes + Array::HOST_DATA_PADDING);
+}
+
 static void vsrDeleter(const void *_usrPtr, const void *_mem)
 {
   if (!_mem || !_usrPtr)
@@ -61,7 +68,7 @@ static void vsrDeleter(const void *_usrPtr, const void *_mem)
       cudaFree(mem);
     else
 #endif
-      std::free(mem);
+      core::alignedFree(mem);
 
     delete descriptor;
   }
@@ -152,7 +159,7 @@ void Array::convertProxyToHost()
   }
 
   m_kind = MemoryKind::HOST;
-  m_data = std::malloc(size() * elementSize());
+  m_data = allocateHostData(size() * elementSize());
 }
 
 void *Array::map()
@@ -347,7 +354,7 @@ Array::Array(anari::DataType arrayType,
     throw std::runtime_error("CUDA support not enabled!");
 #endif
   } else { // MemoryKind::HOST
-    m_data = std::malloc(size() * elementSize());
+    m_data = allocateHostData(size() * elementSize());
   }
 
   if (kind != MemoryKind::PROXY)
