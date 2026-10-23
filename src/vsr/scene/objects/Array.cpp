@@ -160,6 +160,7 @@ void Array::convertProxyToHost()
 
   m_kind = MemoryKind::HOST;
   m_data = allocateHostData(size() * elementSize());
+  m_dataUsageDescriptor = new ArrayUsageDescriptor();
 }
 
 void *Array::map()
