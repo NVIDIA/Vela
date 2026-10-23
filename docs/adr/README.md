@@ -109,6 +109,7 @@ Background and the full audit behind this decision:
 | --- | --- | --- |
 | [0028](0028-give-image-pipelines-a-single-source-and-pick-outside-them.md) | Give Image Pipelines a single source, and pick outside them | |
 | [0048](0048-reuse-anari-groups-for-identical-placements.md) | Reuse one ANARI Group for placements of the same objects | |
+| [0051](0051-align-and-pad-host-array-memory.md) | Align and pad host Array memory so devices can share it | |
 
 See [`src/vsr/rendering/CONTEXT.md`](../../src/vsr/rendering/CONTEXT.md) for
 the resulting vocabulary.
