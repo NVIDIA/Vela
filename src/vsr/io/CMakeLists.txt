@@ -32,6 +32,7 @@ PRIVATE
   exporters/StructuredVolumeToNanoVDB.cpp
   images/ImageCache.cpp
   images/detail/decoders.cpp
+  images/detail/udim.cpp
   importers/detail/ensight_io.cpp
   importers/detail/HDRImage.cpp
   importers/detail/importer_common.cpp

@@ -611,4 +611,80 @@ def Xform "World"
   }
 }
 
+
+// A path naming a UDIM tile set names no file, so USD's resolver leaves it
+// unresolved; it has to be anchored to the layer that authored it, which for a
+// referenced asset is not the Stage's own directory (ADR 0050).
+SCENARIO("An OmniPBR tile set beside a referenced asset is found",
+    "[UsdImport]")
+{
+  GIVEN("An asset in a subdirectory whose OmniPBR diffuse names a tile set")
+  {
+    std::filesystem::create_directories(
+        fixtureDirectory() / "vsr_test_udim_asset" / "texture");
+    TextureFixture tile1001("vsr_test_udim_asset/texture/wood.1001.tga");
+    TextureFixture tile1002("vsr_test_udim_asset/texture/wood.1002.tga");
+    StageFixture asset("vsr_test_udim_asset/asset.usda", R"(#usda 1.0
+(
+    defaultPrim = "Asset"
+)
+
+def Xform "Asset"
+{
+    def Material "OmniPBR"
+    {
+        token outputs:mdl:surface.connect = </Asset/OmniPBR/Shader.outputs:out>
+        def Shader "Shader"
+        {
+            uniform token info:implementationSource = "sourceAsset"
+            uniform asset info:mdl:sourceAsset = @OmniPBR.mdl@
+            uniform token info:mdl:sourceAsset:subIdentifier = "OmniPBR"
+            asset inputs:diffuse_texture = @./texture/wood.<UDIM>.tga@
+            token outputs:out
+        }
+    }
+
+    def Mesh "Quad" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+    )
+    {
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
+        rel material:binding = </Asset/OmniPBR>
+    }
+}
+)");
+
+    WHEN("A Stage beside the subdirectory references it")
+    {
+      ImportedStage stage("vsr_test_udim_shot.usda", R"(#usda 1.0
+
+def Xform "World"
+{
+    def "Prop" (
+        prepend references = @./vsr_test_udim_asset/asset.usda@
+    )
+    {
+    }
+}
+)");
+
+      THEN("The packed tile set is bound as the base color")
+      {
+        REQUIRE(!stage.report.contains(
+            vsr::io::UsdSkipReason::TEXTURE_LOAD_FAILED));
+        auto *sampler =
+            boundMaterial(stage.scene)
+                ->parameterValueAsObject<vsr::scene::Sampler>("baseColor");
+        REQUIRE(sampler != nullptr);
+        auto *image = sampler->parameterValueAsObject<vsr::scene::Array>("image");
+        REQUIRE(image != nullptr);
+        REQUIRE(image->dim(0) == 2);
+        REQUIRE(image->dim(1) == 1);
+      }
+    }
+  }
+}
+
 #endif // VSR_USE_USD

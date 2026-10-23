@@ -200,6 +200,14 @@ what a Sampler can read, not about every decode in the tree. Sources whose
 decoded texels match share one Image, whatever their paths.
 _Avoid_: texture cache
 
+**UDIM Tile Set**:
+The images one texture path names through a `<UDIM>` token, tile
+`1001 + u + 10 * v` covering texture coordinates `[u, u + 1] x [v, v + 1]`.
+The Image Cache packs a set into one Image on a grid, and the Sampler built
+from it maps the set's coordinates onto that grid. See
+[ADR 0050](../../../docs/adr/0050-pack-udim-tile-sets-into-one-image.md).
+_Avoid_: UDIM texture, tiled texture, atlas
+
 **Row Order**:
 Which row of a picture a texel array stores first. Decoders declare the Row
 Order their library produced and an Image Source asks for the one its consumer

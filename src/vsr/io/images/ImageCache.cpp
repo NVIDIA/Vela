@@ -44,7 +44,9 @@ bool sameTexels(
 {
   if (held.width != image.width || held.height != image.height
       || held.compressedFormat != image.compressedFormat
-      || held.vFlipInSampler != image.vFlipInSampler)
+      || held.vFlipInSampler != image.vFlipInSampler
+      || held.tileColumns != image.tileColumns
+      || held.tileRows != image.tileRows)
     return false;
 
   const auto &texels = *held.texels;
@@ -98,6 +100,27 @@ void composeVFlip(vsr::math::mat4 &transform, vsr::math::float4 &offset)
   offset = vsr::math::mul(flip, offset) + vsr::math::float4(0.f, 1.f, 0.f, 0.f);
 }
 
+// Compose the mapping from a UDIM set's uv range onto the grid its tiles were
+// packed into, applied after whatever the importer authored. The importer has
+// already reversed v, so tile row `t` spans v in [-t, 1 - t]; it sits `t`
+// cells above the grid's bottom cell, which makes the whole mapping affine:
+// u / columns, and (v + rows - 1) / rows.
+void composeTileGrid(vsr::math::mat4 &transform,
+    vsr::math::float4 &offset,
+    size_t columns,
+    size_t rows)
+{
+  const float sx = 1.f / float(columns);
+  const float sy = 1.f / float(rows);
+  const vsr::math::mat4 grid{vsr::math::float4(sx, 0.f, 0.f, 0.f),
+      vsr::math::float4(0.f, sy, 0.f, 0.f),
+      vsr::math::float4(0.f, 0.f, 1.f, 0.f),
+      vsr::math::float4(0.f, 0.f, 0.f, 1.f)};
+  transform = vsr::math::mul(grid, transform);
+  offset = vsr::math::mul(grid, offset)
+      + vsr::math::float4(0.f, float(rows - 1) * sy, 0.f, 0.f);
+}
+
 } // namespace
 
 ImageCache::ImageCache(Scene *scene) : m_scene(scene) {}
@@ -117,8 +140,10 @@ Image ImageCache::acquire(const ImageSource &source)
   if (failedBefore(resolved))
     return {};
 
-  return store(
-      resolved, detail::decodeImageFile(resolved.id, resolved.colorSpace));
+  return store(resolved,
+      detail::isUdimPattern(resolved.id)
+          ? detail::decodeUdimTileSet(resolved.id, resolved.colorSpace)
+          : detail::decodeImageFile(resolved.id, resolved.colorSpace));
 }
 
 Image ImageCache::acquire(const ImageSource &source,
@@ -203,6 +228,8 @@ Image ImageCache::store(
   image.width = decoded.width;
   image.height = decoded.height;
   image.compressedFormat = decoded.compressedFormat;
+  image.tileColumns = decoded.tileColumns;
+  image.tileRows = decoded.tileRows;
 
   // Assets often ship their own copy of a texture another asset ships too, so
   // a source that is new by name can still be an image already held.
@@ -295,8 +322,12 @@ SamplerRef makeImageSampler(ImageCache &cache,
   // file authored, against the coordinates the importer hands ANARI. Undo that
   // here, composed onto the caller's own transform rather than replacing it,
   // which is why makeImageSampler owns inTransform/inOffset outright.
-  if (settings.uvTransform || image.vFlipInSampler) {
+  // A packed tile set likewise needs its grid mapping composed on.
+  const bool tiled = image.tileColumns > 1 || image.tileRows > 1;
+  if (settings.uvTransform || image.vFlipInSampler || tiled) {
     auto uv = settings.uvTransform.value_or(UvTransform{});
+    if (tiled)
+      composeTileGrid(uv.transform, uv.offset, image.tileColumns, image.tileRows);
     if (image.vFlipInSampler)
       composeVFlip(uv.transform, uv.offset);
     sampler->setParameter("inTransform", uv.transform);

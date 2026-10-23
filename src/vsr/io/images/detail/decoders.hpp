@@ -29,6 +29,12 @@ struct DecodedImage
   bool blockCompressed{false};
   vsr::core::Token compressedFormat;
 
+  // The grid of UDIM tiles packed into this image, one cell per tile: tile
+  // `1001 + u + 10 * v` sits in column `u` and, counting from the bottom, row
+  // `v`. A plain image is the 1x1 grid. See decodeUdimTileSet().
+  size_t tileColumns{1};
+  size_t tileRows{1};
+
   explicit operator bool() const;
 };
 
@@ -49,6 +55,17 @@ ColorSpace colorSpaceForFormatHint(
 
 // `id` names the image in diagnostics only.
 DecodedImage decodeImageFile(const std::string &path, ColorSpace colorSpace);
+// Whether a path names a UDIM tile set rather than a file.
+bool isUdimPattern(const std::string &path);
+
+// Decode every tile a UDIM path names -- `<UDIM>` standing for the tile number
+// -- and pack them into one image on the grid DecodedImage describes, so that
+// an ordinary image sampler with an affine uv transform reads the set. Tiles
+// are brought to the largest tile's size and channel count; a set whose tiles
+// differ in component type, or that holds a block-compressed tile, does not
+// decode. See docs/adr/0050-pack-udim-tile-sets-into-one-image.md.
+DecodedImage decodeUdimTileSet(const std::string &pattern, ColorSpace colorSpace);
+
 DecodedImage decodeImageFromMemory(const void *data,
     size_t numBytes,
     ColorSpace colorSpace,

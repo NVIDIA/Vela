@@ -98,6 +98,7 @@ for the proposed source reorganization that follows from it.
 | [0014](0014-store-images-in-anari-orientation.md) | Store images in ANARI orientation | |
 | [0044](0044-keep-decoded-texels-at-the-files-bit-depth.md) | Keep decoded texels at the file's bit depth | |
 | [0049](0049-share-cached-images-by-decoded-content.md) | Share cached images by decoded content | Amends [0047](0047-share-repeated-usd-objects-by-content.md) |
+| [0050](0050-pack-udim-tile-sets-into-one-image.md) | Pack UDIM tile sets into one image | Amends [0019](0019-report-udim-tile-sets-as-unsupported.md) |
 
 Background and the full audit behind this decision:
 [`vsr-io-image-import.md`](../vsr-io-image-import.md).
@@ -120,7 +121,7 @@ the resulting vocabulary.
 | [0016](0016-bake-prototype-internal-transforms.md) | Bake prototype-internal transforms when importing instanced USD content | |
 | [0017](0017-deviate-from-usdview-defaults-for-purpose-and-subdivision.md) | Deviate from usdview defaults for purpose and subdivision | |
 | [0018](0018-let-imported-scenes-retain-an-open-usd-stage.md) | Let imported scenes retain an open UsdStage | Amended by [0021](0021-share-one-usd-stage-session-across-import-and-animation.md) |
-| [0019](0019-report-udim-tile-sets-as-unsupported.md) | Report UDIM tile sets as unsupported rather than approximate them | |
+| [0019](0019-report-udim-tile-sets-as-unsupported.md) | Report UDIM tile sets as unsupported rather than approximate them | Amended by [0050](0050-pack-udim-tile-sets-into-one-image.md) for image samplers |
 | [0020](0020-bind-mesh-attributes-per-surface.md) | Bind mesh attributes per Surface, not once per mesh | |
 | [0021](0021-share-one-usd-stage-session-across-import-and-animation.md) | Share one USD Stage Session across an import and its animations | Extends [0015](0015-import-usd-through-a-hydra-scene-index.md); amends [0018](0018-let-imported-scenes-retain-an-open-usd-stage.md); amended by [0045](0045-key-stage-sessions-by-file-and-variant-selections.md) |
 | [0022](0022-refill-captured-arrays-rather-than-re-running-conversion.md) | Re-fill captured Arrays rather than re-running conversion per frame | |
