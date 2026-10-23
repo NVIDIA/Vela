@@ -13,6 +13,7 @@
 #include <pxr/usd/usdShade/connectableAPI.h>
 #include <pxr/usd/usdShade/material.h>
 #include <pxr/usd/usdShade/shader.h>
+#include <pxr/usd/usdShade/udimUtils.h>
 #if VSR_USD_HAS_MATERIALX
 #include <MaterialXCore/Document.h>
 #include <MaterialXCore/Node.h>
@@ -375,6 +376,47 @@ std::optional<T> shaderInputValue(
   return {};
 }
 
+// The layer whose opinion gives `attribute` its value, which is what a path
+// in that value is relative to.
+pxr::SdfLayerHandle authoringLayer(
+    const pxr::UsdAttribute &attribute, pxr::UsdTimeCode time)
+{
+  for (const auto &spec : attribute.GetPropertyStack(time)) {
+    if (spec->HasDefaultValue()
+        || spec->GetLayer()->GetNumTimeSamplesForPath(spec->GetPath()) > 0)
+      return spec->GetLayer();
+  }
+  return {};
+}
+
+// A texture input's asset path, with a UDIM tile set's path resolved against
+// the layer that authored it. USD's resolver resolves a path naming a file
+// but not one naming a tile set, and anchoredAssetPath() would then anchor
+// it to the Stage's own directory -- wrong for every asset whose textures
+// sit beside a referenced layer rather than beside the Stage.
+std::optional<pxr::SdfAssetPath> textureAssetValue(
+    const pxr::UsdShadeShader &shader, const char *name, pxr::UsdTimeCode time)
+{
+  auto input = shader.GetInput(pxr::TfToken(name));
+  if (!input)
+    return {};
+  const auto sources = input.GetValueProducingAttributes();
+  const auto attribute = sources.empty() ? input.GetAttr() : sources.front();
+  pxr::SdfAssetPath value;
+  if (!attribute || !attribute.Get(&value, time))
+    return {};
+
+  const auto &authored = value.GetAssetPath();
+  if (value.GetResolvedPath().empty()
+      && pxr::UsdShadeUdimUtils::IsUdimIdentifier(authored)) {
+    const auto resolved = pxr::UsdShadeUdimUtils::ResolveUdimPath(
+        authored, authoringLayer(attribute, time));
+    if (!resolved.empty())
+      return pxr::SdfAssetPath(authored, resolved);
+  }
+  return value;
+}
+
 // The file an OmniPBR texture input names. OmniPBR usually names it on the
 // input directly, but an asset authored through a Material Graph reaches it
 // through a texture-reader node instead, whose own `file` input is where the
@@ -382,7 +424,7 @@ std::optional<T> shaderInputValue(
 std::optional<pxr::SdfAssetPath> omniPbrTextureAsset(
     const pxr::UsdShadeShader &shader, const char *name, pxr::UsdTimeCode time)
 {
-  if (auto asset = shaderInputValue<pxr::SdfAssetPath>(shader, name, time))
+  if (auto asset = textureAssetValue(shader, name, time))
     return asset;
 
   auto input = shader.GetInput(pxr::TfToken(name));
@@ -398,7 +440,7 @@ std::optional<pxr::SdfAssetPath> omniPbrTextureAsset(
   pxr::UsdShadeShader reader(source.GetPrim());
   if (!reader)
     return {};
-  return shaderInputValue<pxr::SdfAssetPath>(reader, "file", time);
+  return textureAssetValue(reader, "file", time);
 }
 
 // The OmniPBR shader driving a material's MDL surface, or an invalid shader

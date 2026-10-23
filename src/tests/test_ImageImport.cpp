@@ -12,6 +12,7 @@
 #include "vsr/io/importers/detail/importer_common.hpp"
 #include "vsr/scene/Scene.hpp"
 // std
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -751,7 +752,7 @@ SCENARIO("Decoded texels keep the file's own bit depth", "[ImageImport]")
       auto *image =
           imageOf(vsr::io::importTexture(cache, texture.path(), true));
       REQUIRE(image->elementType() == ANARI_UFIXED8_VEC3);
-      const auto *texels =
+      const auto *texels = 
           static_cast<const std::uint8_t *>(image->data());
       REQUIRE(texels[0] == 0xff); // top row, red
       REQUIRE(texels[2] == 0x00);
@@ -762,7 +763,7 @@ SCENARIO("Decoded texels keep the file's own bit depth", "[ImageImport]")
       auto *image =
           imageOf(vsr::io::importTexture(cache, texture.path(), false));
       REQUIRE(image->elementType() == ANARI_UFIXED8_RGB_SRGB);
-      const auto *texels =
+      const auto *texels = 
           static_cast<const std::uint8_t *>(image->data());
       REQUIRE(texels[0] == 0xff);
       REQUIRE(texels[2] == 0x00);
@@ -778,7 +779,7 @@ SCENARIO("Decoded texels keep the file's own bit depth", "[ImageImport]")
       auto *image =
           imageOf(vsr::io::importTexture(cache, texture.path(), true));
       REQUIRE(image->elementType() == ANARI_UFIXED16_VEC3);
-      const auto *texels =
+      const auto *texels = 
           static_cast<const std::uint16_t *>(image->data());
       REQUIRE(texels[0] == 0xffff);
       REQUIRE(texels[1] == 0x8000);
@@ -790,7 +791,7 @@ SCENARIO("Decoded texels keep the file's own bit depth", "[ImageImport]")
       auto *image =
           imageOf(vsr::io::importTexture(cache, texture.path(), false));
       REQUIRE(image->elementType() == ANARI_UFIXED16_VEC3);
-      const auto *texels =
+      const auto *texels = 
           static_cast<const std::uint16_t *>(image->data());
       REQUIRE(texels[0] == 0xffff);
       REQUIRE(texels[1] / 65535.f == Approx(0.2140f).margin(1e-3f));
@@ -885,4 +886,186 @@ SCENARIO("Files with identical texels share one Image", "[ImageImport]")
       }
     }
   }
+}
+
+// UDIM tile sets //////////////////////////////////////////////////////////////
+
+namespace {
+
+// A `width` x `height` TGA filled with one texel: grey when `texel` has one
+// channel, otherwise RGB. Rows are stored top-down.
+std::string solidTga(size_t width, size_t height, std::vector<std::uint8_t> texel)
+{
+  const bool grey = texel.size() == 1;
+  std::string tga;
+  const unsigned char header[] = {0,
+      0,
+      (unsigned char)(grey ? 3 : 2), // uncompressed greyscale or true-colour
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      (unsigned char)width,
+      0,
+      (unsigned char)height,
+      0,
+      (unsigned char)(grey ? 8 : 24),
+      0x20}; // origin upper-left
+  tga.append(reinterpret_cast<const char *>(header), sizeof(header));
+  if (!grey)
+    std::swap(texel[0], texel[2]); // TGA stores BGR
+  for (size_t i = 0; i < width * height; ++i)
+    tga.append(reinterpret_cast<const char *>(texel.data()), texel.size());
+  return tga;
+}
+
+std::string tempPath(const char *name)
+{
+  return (std::filesystem::temp_directory_path() / name).string();
+}
+
+// Where a sampler sends a USD texture coordinate, which the importer hands
+// over with v already reversed.
+float2 samplerFetch(const vsr::scene::Sampler &sampler, const float2 &usdUv)
+{
+  const auto transform = sampler.parameterValueAs<mat4>("inTransform")
+                             .value_or(vsr::core::math::IDENTITY_MAT4);
+  const auto offset = sampler.parameterValueAs<float4>("inOffset")
+                          .value_or(float4(0.f));
+  const auto uv = mul(transform, float4(usdUv.x, 1.f - usdUv.y, 0.f, 1.f))
+      + offset;
+  return float2(uv.x, uv.y);
+}
+
+float3 texelAt(const vsr::scene::Array *image, const float2 &uv)
+{
+  const auto x = std::min(size_t(uv.x * float(image->dim(0))), image->dim(0) - 1);
+  const auto y = std::min(size_t(uv.y * float(image->dim(1))), image->dim(1) - 1);
+  return texelAsFloat3(image, y * image->dim(0) + x);
+}
+
+} // namespace
+
+// ANARI samplers hold one image, so a UDIM set is packed onto a grid and the
+// sampler's uv transform maps the set's uv range onto it (ADR 0050).
+SCENARIO("A UDIM tile set is packed into one image", "[ImageImport]")
+{
+  vsr::scene::Scene scene;
+  vsr::io::ImageCache cache(&scene);
+  const float3 red(1.f, 0.f, 0.f);
+  const float3 green(0.f, 1.f, 0.f);
+  const float3 blue(0.f, 0.f, 1.f);
+
+  GIVEN("Tiles 1001 (red), 1002 (green) and 1011 (blue)")
+  {
+    TempFile t1001("vsr_test_udim.1001.tga", solidTga(2, 2, {255, 0, 0}));
+    TempFile t1002("vsr_test_udim.1002.tga", solidTga(2, 2, {0, 255, 0}));
+    TempFile t1011("vsr_test_udim.1011.tga", solidTga(2, 2, {0, 0, 255}));
+    const auto pattern = tempPath("vsr_test_udim.<UDIM>.tga");
+
+    WHEN("The set is acquired")
+    {
+      auto image = cache.acquire({pattern, vsr::io::ColorSpace::LINEAR});
+      REQUIRE(image);
+
+      THEN("The tiles fill a two-by-two grid with v counting up")
+      {
+        REQUIRE(image.tileColumns == 2);
+        REQUIRE(image.tileRows == 2);
+        REQUIRE(image.width == 4);
+        REQUIRE(image.height == 4);
+        const auto *texels = image.texels.data();
+        REQUIRE(texelAt(texels, float2(0.1f, 0.1f)) == blue);
+        REQUIRE(texelAt(texels, float2(0.1f, 0.9f)) == red);
+        REQUIRE(texelAt(texels, float2(0.9f, 0.9f)) == green);
+        REQUIRE(texelAt(texels, float2(0.9f, 0.1f)) == float3(0.f));
+      }
+
+      THEN("Its sampler reads each tile at that tile's uv range")
+      {
+        auto sampler = vsr::io::makeImageSampler(cache, image, pattern);
+        REQUIRE(sampler);
+        const auto *texels = image.texels.data();
+        REQUIRE(texelAt(texels, samplerFetch(*sampler, float2(0.5f, 0.5f)))
+            == red);
+        REQUIRE(texelAt(texels, samplerFetch(*sampler, float2(1.5f, 0.5f)))
+            == green);
+        REQUIRE(texelAt(texels, samplerFetch(*sampler, float2(0.5f, 1.5f)))
+            == blue);
+      }
+    }
+  }
+
+  GIVEN("A 1x1 grey tile beside a 2x2 RGB one")
+  {
+    TempFile grey("vsr_test_udim_mixed.1001.tga", solidTga(1, 1, {128}));
+    TempFile rgb("vsr_test_udim_mixed.1002.tga", solidTga(2, 2, {0, 255, 0}));
+
+    THEN("Both are packed at the larger size and channel count")
+    {
+      auto image = cache.acquire(
+          {tempPath("vsr_test_udim_mixed.<UDIM>.tga"), vsr::io::ColorSpace::LINEAR});
+      REQUIRE(image);
+      REQUIRE(image.width == 4);
+      REQUIRE(image.height == 2);
+      REQUIRE(image.texels->elementType() == ANARI_UFIXED8_VEC3);
+      const auto *texels = 
+          static_cast<const std::uint8_t *>(image.texels->data());
+      for (size_t y = 0; y < 2; ++y) {
+        for (size_t x = 0; x < 2; ++x) {
+          for (size_t c = 0; c < 3; ++c)
+            REQUIRE(texels[(y * 4 + x) * 3 + c] == 128);
+        }
+      }
+    }
+  }
+
+  GIVEN("A UDIM path with no tiles beside it")
+  {
+    THEN("Nothing is acquired")
+    {
+      REQUIRE_FALSE(cache.acquire({tempPath("vsr_test_udim_none.<UDIM>.tga")}));
+    }
+  }
+
+#if VSR_USE_USD
+  GIVEN("A USD quad whose texture names a tile set")
+  {
+    TempFile t1001("vsr_test_udim_usd.1001.tga", solidTga(2, 2, {255, 0, 0}));
+    TempFile t1002("vsr_test_udim_usd.1002.tga", solidTga(2, 2, {0, 255, 0}));
+    TempFile stage(
+        "vsr_test_udim_usd.usda", usdContents("vsr_test_udim_usd.<UDIM>.tga"));
+
+    WHEN("It is imported")
+    {
+      vsr::animation::AnimationManager animMgr(&scene);
+      const auto report =
+          vsr::io::import_USD(scene, animMgr, stage.path().c_str());
+
+      THEN("The material samples the packed set")
+      {
+        bool found = false;
+        for (size_t i = 0; i < scene.numberOfObjects(ANARI_SAMPLER); ++i) {
+          auto sampler = scene.getObject<vsr::scene::Sampler>(i);
+          auto *image = sampler
+              ? sampler->parameterValueAsObject<vsr::scene::Array>("image")
+              : nullptr;
+          if (image && image->dim(0) == 4 && image->dim(1) == 2) {
+            found = true;
+            REQUIRE(texelAt(image, samplerFetch(*sampler, float2(1.5f, 0.5f)))
+                == green);
+          }
+        }
+        REQUIRE(found);
+        for (const auto &skip : report.skipped)
+          REQUIRE(skip.reason != vsr::io::UsdSkipReason::TEXTURE_LOAD_FAILED);
+      }
+    }
+  }
+#endif
 }

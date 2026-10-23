@@ -70,6 +70,10 @@ struct Image
   // decoding and re-encoding -- so makeImageSampler compensates in the
   // sampler's uv transform instead.
   bool vFlipInSampler{false};
+  // The grid of UDIM tiles packed into the texels, 1x1 for a plain image.
+  // makeImageSampler maps the set's uv range onto the grid (ADR 0050).
+  size_t tileColumns{1};
+  size_t tileRows{1};
 
   bool blockCompressed() const;
 
@@ -91,7 +95,8 @@ class ImageCache
 
   vsr::scene::Scene *scene() const;
 
-  // Decode `source.id` as a file path.
+  // Decode `source.id` as a file path, or as the tiles of a UDIM set when it
+  // holds a `<UDIM>` token.
   Image acquire(const ImageSource &source);
   // Decode an encoded image already in memory. `formatHint` names the
   // container ("dds", "png", ...) when the caller knows it; when it is empty
