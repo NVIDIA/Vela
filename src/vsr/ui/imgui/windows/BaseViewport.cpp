@@ -555,11 +555,13 @@ void BaseViewport::ui_menubar_Camera()
       auto azel = m_camera.arcball->azel();
       auto dist = m_camera.arcball->distance();
       auto fixedDist = m_camera.arcball->fixedDistance();
+      auto &speedScale = m_input.speedScale;
 
       bool update = ImGui::SliderFloat("Azimuth", &azel.x, 0.f, 360.f);
       update |= ImGui::SliderFloat("Elevation", &azel.y, 0.f, 360.f);
       update |= ImGui::DragFloat("Distance", &dist);
       update |= ImGui::DragFloat3("At", &at.x);
+      update |= ImGui::SliderFloat("Speed", &speedScale, 0.1f, 5.f);
       ImGui::BeginDisabled(
           m_camera.current->subtype() != scene::tokens::camera::orthographic);
       update |= ImGui::DragFloat("Near", &fixedDist);
@@ -567,7 +569,7 @@ void BaseViewport::ui_menubar_Camera()
       ImGui::EndDisabled();
 
       if (update) {
-        m_camera.arcball->setConfig(at, dist, azel);
+        m_camera.arcball->setConfig(at, dist, azel, speedScale);
         m_camera.arcball->setFixedDistance(fixedDist);
       }
 

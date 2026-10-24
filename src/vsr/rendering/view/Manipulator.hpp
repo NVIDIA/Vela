@@ -74,7 +74,8 @@ class Manipulator
   void setConfig(const CameraPose &p);
   void setConfig(anari::math::float3 center,
       float dist,
-      anari::math::float2 azel = anari::math::float2(0.f));
+      anari::math::float2 azel = anari::math::float2(0.f),
+      float speedScale = 1.f);
   // Adopts a camera pose given as eye, viewing direction and up vector: the
   // center moves to the current distance along the direction and the up axis
   // becomes the one the up vector points along. For following a camera whose
