@@ -33,12 +33,14 @@ void Manipulator::setConfig(const CameraPose &p)
 }
 
 void Manipulator::setConfig(
-    anari::math::float3 center, float dist, anari::math::float2 azel)
+    anari::math::float3 center, float dist, anari::math::float2 azel, float speedScale)
 {
   m_at = center;
   m_distance = dist;
   m_azel = azel;
   m_speed = dist;
+  if (fabsf(speedScale) > 1e-6f)
+    m_speed *= speedScale;
   if (m_fixedDistance == vsr::math::inf)
     m_fixedDistance = dist;
   update();

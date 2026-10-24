@@ -115,6 +115,7 @@ struct BaseViewport : public Window
     vsr::math::float2 previousMouse{-1.f, -1.f};
     bool mouseRotating{false};
     bool manipulating{false};
+    float speedScale{1.f};
   } m_input;
 
   struct GizmoState
