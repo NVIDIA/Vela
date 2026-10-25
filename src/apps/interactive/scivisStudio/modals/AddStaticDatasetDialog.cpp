@@ -25,7 +25,7 @@ struct DatasetSourceChoice
 };
 
 // The user picks the importer explicitly; nothing is inferred.
-constexpr std::array<DatasetSourceChoice, 29> SOURCES = {{
+constexpr std::array<DatasetSourceChoice, 30> SOURCES = {{
     {"AGX", vsr::io::ImporterType::AGX},
     {"ASSIMP", vsr::io::ImporterType::ASSIMP},
     {"ASSIMP_FLAT", vsr::io::ImporterType::ASSIMP_FLAT},
@@ -49,6 +49,7 @@ constexpr std::array<DatasetSourceChoice, 29> SOURCES = {{
     {"TRK", vsr::io::ImporterType::TRK},
     {"USD", vsr::io::ImporterType::USD},
     {"USD_MTLX", vsr::io::ImporterType::USD_MTLX},
+    {"USD_MDL", vsr::io::ImporterType::USD_MDL},
     {"VTP", vsr::io::ImporterType::VTP},
     {"VTU", vsr::io::ImporterType::VTU},
     {"XYZDP", vsr::io::ImporterType::XYZDP},

@@ -123,6 +123,11 @@ void import_file(Scene &scene,
       options.variantSelections = usdVariantSelectionsFromString(files[2]);
     widenAnimationClock(animMgr,
         vsr::io::import_USD(scene, animMgr, file.c_str(), root, options));
+  } else if (f.first == ImporterType::USD_MDL) {
+    UsdImportOptions options;
+    options.materialMode = UsdMaterialMode::MDL;
+    widenAnimationClock(animMgr,
+        vsr::io::import_USD(scene, animMgr, file.c_str(), root, options));
   } else if (f.first == ImporterType::VTP)
     vsr::io::import_VTP(scene, animMgr, file.c_str(), root);
   else if (f.first == ImporterType::VTU) {

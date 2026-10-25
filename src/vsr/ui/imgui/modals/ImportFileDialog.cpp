@@ -54,6 +54,7 @@ constexpr ImporterChoice IMPORTERS[] = {
     {"TRK", vsr::io::ImporterType::TRK},
     {"USD", vsr::io::ImporterType::USD},
     {"USD_MTLX", vsr::io::ImporterType::USD_MTLX},
+    {"USD_MDL", vsr::io::ImporterType::USD_MDL},
     {"VTP", vsr::io::ImporterType::VTP},
     {"VTU", vsr::io::ImporterType::VTU},
     {"XYZDP", vsr::io::ImporterType::XYZDP},

@@ -136,6 +136,8 @@ void Context::parseCommandLine(std::vector<std::string> &args)
       importerType = vsr::io::ImporterType::USD;
     else if (arg == "-usd_mtlx")
       importerType = vsr::io::ImporterType::USD_MTLX;
+    else if (arg == "-usd_mdl")
+      importerType = vsr::io::ImporterType::USD_MDL;
     else if (arg == "-vtp")
       importerType = vsr::io::ImporterType::VTP;
     else if (arg == "-vtu")

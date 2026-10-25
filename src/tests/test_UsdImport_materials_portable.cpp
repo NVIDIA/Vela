@@ -229,6 +229,24 @@ def Xform "World"
             == vsr::scene::tokens::material::mdl);
       }
     }
+
+    // The importer's MDL mode is only reachable from an application through
+    // an Importer Type, so the dispatch is worth pinning separately from the
+    // option it sets.
+    WHEN("The file is imported through the USD_MDL Importer Type")
+    {
+      StageFixture stage("vsr_test_usd_omnipbr.usda", omniPbrStage);
+      vsr::scene::Scene scene;
+      vsr::animation::AnimationManager animMgr(&scene);
+      vsr::io::import_file(
+          scene, animMgr, {vsr::io::ImporterType::USD_MDL, stage.path()});
+
+      THEN("MDL materials arrive without asking for options")
+      {
+        REQUIRE(boundMaterial(scene)->subtype()
+            == vsr::scene::tokens::material::mdl);
+      }
+    }
   }
 
   GIVEN("An OmniPBR material reading textures and cutting out on opacity")

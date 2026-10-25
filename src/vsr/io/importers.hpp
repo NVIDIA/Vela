@@ -168,6 +168,7 @@ enum class ImporterType
   TRK,
   USD,
   USD_MTLX, // native MaterialX materials instead of a portable mapping
+  USD_MDL, // native MDL materials instead of a portable mapping
   VTP,
   VTU,
   XYZDP,
