@@ -2035,6 +2035,8 @@ const char *toString(vsr::io::ImporterType importerType)
     return "USD";
   case vsr::io::ImporterType::USD_MTLX:
     return "USD_MTLX";
+  case vsr::io::ImporterType::USD_MDL:
+    return "USD_MDL";
   case vsr::io::ImporterType::VTP:
     return "VTP";
   case vsr::io::ImporterType::VTU:
