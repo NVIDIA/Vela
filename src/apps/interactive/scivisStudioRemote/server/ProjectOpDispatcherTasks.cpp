@@ -106,6 +106,15 @@ TaskResult ProjectOpDispatcher::runTaskBody(
   return result;
 }
 
+TaskResult ProjectOpDispatcher::runStaticImportBody(
+    const std::function<TaskResult()> &body)
+{
+  return runTaskBody([&] {
+    return m_host.withRenderIndexVacated ? m_host.withRenderIndexVacated(body)
+                                         : body();
+  });
+}
+
 // Project /////////////////////////////////////////////////////////////////////
 
 void ProjectOpDispatcher::handle(const OpenProject &req)
@@ -178,7 +187,7 @@ void ProjectOpDispatcher::handle(const ImportStaticDataset &req)
   startTask(req.requestId,
       "import '" + source->string() + "'",
       [this, req, source = *source](const TaskControl &progress) {
-        return runTaskBody([&] {
+        return runStaticImportBody([&] {
           progress("importing");
           return importResult(context().addStaticDataset(req.name,
               source,
@@ -197,7 +206,7 @@ void ProjectOpDispatcher::handle(const ImportSubtreeDataset &req)
   startTask(req.requestId,
       "import subtree '" + source->string() + "'",
       [this, req, source = *source](const TaskControl &progress) {
-        return runTaskBody([&] {
+        return runStaticImportBody([&] {
           progress("importing");
           return importResult(
               context().addStaticDatasetFromSubtree(req.name, source));
@@ -238,7 +247,7 @@ void ProjectOpDispatcher::handle(const ReimportDataset &req)
   startTask(req.requestId,
       "reimport dataset '" + req.datasetId + "'",
       [this, id = req.datasetId](const TaskControl &progress) {
-        return runTaskBody([&] {
+        return runStaticImportBody([&] {
           if (!project::findDataset(project(), id))
             return datasetNotFound();
           progress("reimporting");

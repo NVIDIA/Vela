@@ -181,6 +181,11 @@ struct ProjectOpDispatcher
     std::function<void(vsr::network::Message &&)> send;
     // Sends one TransferScene iff this op changed the scene.
     std::function<void()> flushSceneSnapshot;
+    // Runs a static import's body with the live RenderIndex vacated, so the
+    // import fires no ANARI work; the index is rebuilt once the body
+    // returns. Unset, the body runs as is.
+    std::function<TaskResult(const std::function<TaskResult()> &)>
+        withRenderIndexVacated;
   };
 
   explicit ProjectOpDispatcher(Host host);
@@ -278,6 +283,9 @@ struct ProjectOpDispatcher
   // Runs `body`, then -- however it ended -- flushes scene pushes so the
   // completion report follows them.
   TaskResult runTaskBody(const std::function<TaskResult()> &body);
+  // runTaskBody() for a static import: the body runs inside the host's
+  // withRenderIndexVacated, and the flush follows the rebuilt index.
+  TaskResult runStaticImportBody(const std::function<TaskResult()> &body);
 
   ProjectContext &context();
   Project &project();
