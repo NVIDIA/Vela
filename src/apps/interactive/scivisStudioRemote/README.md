@@ -60,7 +60,9 @@ scivisStudioServer --data-root /data/sims [--data-root ...] \
 
 Configuration is argv only; the server reads no config file. It keeps running
 across client disconnects and exits on `Ctrl-C`/`SIGTERM` or when a client
-chooses *Server > Shutdown Server*.
+chooses *Server > Shutdown Server*. A signal shuts down cleanly once the
+running Server Task returns (imports cannot be cancelled); a second signal
+exits immediately.
 
 ## Run the client
 

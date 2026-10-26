@@ -6,19 +6,40 @@
 // vsr_core
 #include "vsr/core/Logging.hpp"
 // std
+#include <atomic>
 #include <csignal>
 #include <cstdio>
 #include <iostream>
 #include <string>
 #include <vector>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 namespace {
 
 vsr::scivis_studio::server::StudioServer *g_server{nullptr};
 
-// Only an atomic store happens here; the loop notices at its next iteration.
-void onSignal(int)
+std::atomic<bool> g_shutdownSignalled{false};
+
+// Only async-signal-safe calls here. The first signal asks for a clean
+// shutdown, which the loop notices once the running Server Task returns: an
+// import is not cancellable and can take minutes. A second signal restores
+// the default disposition and re-raises it, ending the process at once.
+void onSignal(int sig)
 {
+  if (g_shutdownSignalled.exchange(true)) {
+    std::signal(sig, SIG_DFL);
+    std::raise(sig);
+    return;
+  }
+#ifndef _WIN32
+  static constexpr char message[] =
+      "[StudioServer] shutdown requested; waiting for the running task "
+      "(signal again to exit immediately)\n";
+  [[maybe_unused]] const auto written =
+      ::write(STDOUT_FILENO, message, sizeof(message) - 1);
+#endif
   if (g_server)
     g_server->requestShutdown();
 }
