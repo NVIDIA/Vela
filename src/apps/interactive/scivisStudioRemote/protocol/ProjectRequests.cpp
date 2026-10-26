@@ -30,8 +30,9 @@ const char *toString(vsr::io::ImporterType importerType)
 std::optional<vsr::io::ImporterType> importerTypeFromString(
     const std::string &name)
 {
+  // The whole enum, from its first value (_3DGSPLY), through NONE.
   return enumFromName(name,
-      vsr::io::ImporterType::AGX,
+      vsr::io::ImporterType::_3DGSPLY,
       vsr::io::ImporterType::NONE,
       vsr::scivis_studio::toString);
 }
