@@ -91,6 +91,9 @@ ProjectOpDispatcher::Host StudioServer::makeDispatcherHost()
   host.tasks = &m_tasks;
   host.send = [this](Message &&msg) { send(std::move(msg)); };
   host.flushSceneSnapshot = [this] { flushSceneSnapshot(); };
+  host.withRenderIndexVacated = [this](const auto &body) {
+    return withRenderIndexVacated(body);
+  };
   return host;
 }
 
@@ -290,6 +293,62 @@ void StudioServer::unbindRendering()
     m_scenePass->setRenderer(nullptr);
     m_scenePass->setCamera(nullptr);
   }
+}
+
+TaskResult StudioServer::withRenderIndexVacated(
+    const std::function<TaskResult()> &body)
+{
+  vacateRenderIndex();
+  TaskResult result;
+  try {
+    result = body();
+  } catch (...) {
+    restoreRenderIndex();
+    throw;
+  }
+  restoreRenderIndex();
+  return result;
+}
+
+void StudioServer::vacateRenderIndex()
+{
+  if (!m_renderIndex)
+    return;
+  // The pass retains the index's world, renderer and camera; let go of them
+  // before the index releases its own handles.
+  if (m_scenePass) {
+    m_scenePass->setWorld(nullptr);
+    m_scenePass->setRenderer(nullptr);
+    m_scenePass->setCamera(nullptr);
+  }
+  m_ctx.anari.releaseRenderIndex(m_ctx.vsr.scene, m_device);
+  m_renderIndex = nullptr;
+  vsr::core::logStatus("[StudioServer] render index vacated for the import");
+}
+
+void StudioServer::restoreRenderIndex()
+{
+  if (m_renderIndex || !m_device)
+    return;
+  const auto start = std::chrono::steady_clock::now();
+  m_renderIndex =
+      m_ctx.anari.acquireRenderIndex(m_ctx.vsr.scene, m_libraryName, m_device);
+  if (!m_renderIndex) {
+    vsr::core::logError(
+        "[StudioServer] failed to recreate the render index after an import");
+    unbindRendering();
+    return;
+  }
+  if (m_scenePass)
+    m_scenePass->setWorld(m_renderIndex->world());
+  std::string error;
+  if (!bindActiveShotRendering(&error)) {
+    vsr::core::logWarning(
+        "[StudioServer] rebinding after an import failed: %s", error.c_str());
+  }
+  vsr::core::logStatus("[StudioServer] render index repopulated in %.3fs",
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - start)
+          .count());
 }
 
 bool StudioServer::setupRendering(std::string *error)

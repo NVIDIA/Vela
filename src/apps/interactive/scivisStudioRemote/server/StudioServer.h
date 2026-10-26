@@ -266,6 +266,13 @@ struct StudioServer
   // Forgets the pipeline's renderer and camera: after a project reset the
   // objects they named are gone, so until a bind succeeds no frame renders.
   void unbindRendering();
+  // Runs `body` (a static import) with the RenderIndex released, so the
+  // Scene mutations it makes reach no ANARI device, then acquires and
+  // populates a fresh one and rebinds the pipeline to it, however the body
+  // ended. Frames are paused for a task anyway; the cost is the repopulate.
+  TaskResult withRenderIndexVacated(const std::function<TaskResult()> &body);
+  void vacateRenderIndex();
+  void restoreRenderIndex();
 
   // IO thread
   void onConnected();
