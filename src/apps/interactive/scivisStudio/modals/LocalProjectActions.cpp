@@ -58,8 +58,10 @@ void LocalStaticDatasetAction::submit(
         if (!ctx)
           return;
         if (request.importer) {
-          ctx->addStaticDataset(
-              request.name, request.sourcePath, *request.importer);
+          ctx->addStaticDataset(request.name,
+              request.sourcePath,
+              *request.importer,
+              request.variantSelections);
         } else if (request.subtree) {
           auto *dataset = ctx->addStaticDatasetFromSubtree(
               request.name, request.sourcePath);
@@ -88,6 +90,18 @@ void LocalStaticDatasetAction::submit(
   // The task modal owns the rest: whatever it fails at is logged, not shown
   // back in a dialog that is already gone.
   done(true, {});
+}
+
+void LocalStaticDatasetAction::scanVariantSets(
+    const std::filesystem::path &sourcePath,
+    modals::AddStaticDatasetDialog::VariantSetsResult done)
+{
+  std::error_code ec;
+  if (!std::filesystem::is_regular_file(sourcePath, ec) || ec) {
+    done(false, {}, "no file at '" + sourcePath.string() + "'");
+    return;
+  }
+  done(true, vsr::io::usdVariantSets(sourcePath.string()), {});
 }
 
 // LocalFileAnimationAction ///////////////////////////////////////////////////

@@ -4523,6 +4523,52 @@ SCENARIO("SciVis Studio CLI parses noun-verb command lines", "[SciVisStudio]")
       error));
   REQUIRE(commandLine.command == StudioCommand::DatasetCreateStatic);
   REQUIRE(commandLine.paths == std::vector<std::string>{"mesh.obj"});
+  REQUIRE(commandLine.usdVariantSelections.empty());
+
+  REQUIRE(parseStudioCommandLine({"scivisStudioCLI",
+                                     "dataset",
+                                     "create",
+                                     "static",
+                                     "/tmp/project",
+                                     "--importer",
+                                     "USD",
+                                     "--usd-variant",
+                                     "lod=high",
+                                     "--usd-variant",
+                                     "color=red",
+                                     "--usd-variant",
+                                     "lod=low",
+                                     "asset.usda"},
+      commandLine,
+      error));
+  REQUIRE(commandLine.usdVariantSelections
+      == vsr::io::UsdVariantSelections{{"color", "red"}, {"lod", "low"}});
+  REQUIRE_FALSE(parseStudioCommandLine({"scivisStudioCLI",
+                                           "dataset",
+                                           "create",
+                                           "static",
+                                           "/tmp/project",
+                                           "--importer",
+                                           "USD",
+                                           "--usd-variant",
+                                           "lod",
+                                           "asset.usda"},
+      commandLine,
+      error));
+  REQUIRE(error.find("--usd-variant") != std::string::npos);
+  REQUIRE_FALSE(parseStudioCommandLine({"scivisStudioCLI",
+                                           "dataset",
+                                           "create",
+                                           "file-animation",
+                                           "/tmp/project",
+                                           "--importer",
+                                           "VOLUME_ANIMATION",
+                                           "--usd-variant",
+                                           "lod=low",
+                                           "a.raw"},
+      commandLine,
+      error));
+  REQUIRE(error.find("--usd-variant only applies") != std::string::npos);
 
   REQUIRE(parseStudioCommandLine({"scivisStudioCLI",
                                      "dataset",

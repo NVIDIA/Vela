@@ -62,6 +62,14 @@ struct RemoteStaticDatasetAction
 
   void submit(const modals::AddStaticDatasetDialog::Request &request,
       modals::ActionResult done) override;
+  // ScanUsdVariantSets: the Stage is the server's file. A scan has its own
+  // request in flight, so it neither greys the dialog nor blocks a submit.
+  void scanVariantSets(const std::filesystem::path &sourcePath,
+      modals::AddStaticDatasetDialog::VariantSetsResult done) override;
+  void reset() override;
+
+ private:
+  InFlight m_pendingScan;
 };
 
 struct RemoteFileAnimationAction

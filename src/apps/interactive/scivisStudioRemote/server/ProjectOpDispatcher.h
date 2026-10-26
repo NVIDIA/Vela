@@ -30,7 +30,7 @@ namespace vsr::scivis_studio::server {
 
 // Every client->server project request the dispatcher serves: Project Ops
 // (SetPlaying and RequestArrayHistogram among them), Remote Browse,
-// RenderShot and CancelTask (types 20..61, 63), decoded on the IO thread and
+// RenderShot and CancelTask (types 20..65), decoded on the IO thread and
 // queued for the loop thread in arrival order.
 using ProjectRequest = std::variant<protocol::NewProject,
     protocol::OpenProject,
@@ -74,6 +74,7 @@ using ProjectRequest = std::variant<protocol::NewProject,
     protocol::ListDirectory,
     protocol::RequestArrayHistogram,
     protocol::RequestArrayData,
+    protocol::ScanUsdVariantSets,
     protocol::RenderShot,
     protocol::CancelTask>;
 
@@ -253,6 +254,7 @@ struct ProjectOpDispatcher
   // Viewport
   void handle(const protocol::RequestArrayHistogram &);
   void handle(const protocol::RequestArrayData &);
+  void handle(const protocol::ScanUsdVariantSets &);
 
   // Sends `reply` after flushing scene pushes.
   void finish(const protocol::ProjectOpReply &reply);

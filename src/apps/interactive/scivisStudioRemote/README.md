@@ -1807,6 +1807,7 @@ decisions, `M7-n`).
 | Viewport: `Pick`, `SetOutline`, `ViewportSettings` | implemented | `protocol/ViewportMessages.h` | |
 | On-demand: `RequestArrayHistogram` | implemented | `server/ArrayHistogram.cpp` | |
 | On-demand: `RequestArrayData` | implemented | `server/ProjectOpDispatcher.cpp` | v12; answers with `ArrayDataResult` so a client can hydrate a mirror proxy it means to edit |
+| On-demand: `ScanUsdVariantSets` | implemented | `server/ProjectOpDispatcher.cpp` | v13; answers with `UsdVariantSetsResult` so Add Static Dataset can offer a server-side Stage's Variant Sets, as vsrViewer's import dialog does; `ImportStaticDataset.variantSelections` carries the choice |
 | Rendering/frames: frame config, start/stop, header, encoding negotiation | implemented | `protocol/FrameMessages.h`, `FrameCodec.h` | |
 | Reserved, not implemented: subtree expansion, typed channels, NVENC | implemented (reserved) | `FrameMessages.h` comment | no value defined for any of the three |
 | **File access** | | | |

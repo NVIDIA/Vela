@@ -7,6 +7,7 @@
 #include "ProjectPersistence.h"
 
 #include "vsr/app/Context.h"
+#include "vsr/io/UsdImport.hpp"
 #include "vsr/io/importers.hpp"
 #include "vsr/scene/objects/Array.hpp"
 
@@ -99,9 +100,12 @@ struct ProjectContext
   // its caller commits it (markRevised).
   bool setPlaying(const ShotID &id, bool playing, std::string *error = nullptr);
   void setActiveShotFrame(int frame);
+  // Variant Selections apply only to a USD importer (vsr::io::isUsdImporter)
+  // and are kept in the dataset's importer settings for reimport.
   Dataset *addStaticDataset(const std::string &name,
       const std::filesystem::path &sourcePath,
-      vsr::io::ImporterType importerType);
+      vsr::io::ImporterType importerType,
+      const vsr::io::UsdVariantSelections &variantSelections = {});
   // Load a VSR Layer Subtree Archive (as saved from vsrViewer's LayerTree) as
   // a Static Dataset. The subtree becomes embedded dataset content; the next
   // save writes it into the project as a Dataset Archive.

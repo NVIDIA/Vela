@@ -45,7 +45,10 @@ bool parsePort(const std::string &text, uint16_t &port);
 //     samples (ArrayDataResult) because the mirror holds only proxies, and
 //     SetArrayData streams an edited array back on the optimistic lane.
 //     SetObjectMetadata also carries array-valued entries, which it skipped.
-constexpr int PROTOCOL_VERSION = 12;
+// 13: ImportStaticDataset carries the USD Variant Selections to import with,
+//     and ScanUsdVariantSets lists the Variant Sets a server-side Stage
+//     offers, so the client can choose variants as vsrViewer does.
+constexpr int PROTOCOL_VERSION = 13;
 
 /*
  * Complete v1 message set of the SciVis Studio client-server protocol, as one
@@ -123,6 +126,7 @@ constexpr int PROTOCOL_VERSION = 12;
   X(Pick,                         62, ClientToServer)            \
   X(ImportSubtreeDataset,         63, ClientToServer)            \
   X(RequestArrayData,             64, ClientToServer)            \
+  X(ScanUsdVariantSets,           65, ClientToServer)            \
   /* Project/task replies (100..) */                             \
   X(ProjectOpReply,              100, ServerToClient)            \
   X(ProjectSnapshot,             101, ServerToClient)            \

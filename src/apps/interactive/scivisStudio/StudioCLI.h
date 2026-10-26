@@ -4,6 +4,8 @@
 #pragma once
 
 #include "Project.h"
+// vsr_io
+#include "vsr/io/UsdImport.hpp"
 
 #include <filesystem>
 #include <iosfwd>
@@ -45,6 +47,8 @@ struct StudioCommandLine
   std::string dataset;
   std::string name; // --name, or the rename target
   std::string importerType; // --importer
+  // --usd-variant set=variant, repeatable; a later choice for a set wins.
+  vsr::io::UsdVariantSelections usdVariantSelections;
   bool declare{false}; // --declare: create a Declared Dataset (ADR 0014)
   bool keepAsset{false}; // --keep-asset on remove
   // Mirrors FileAnimationDatasetOptions::setActiveShotFrameCount; opt out

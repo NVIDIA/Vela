@@ -40,6 +40,9 @@ struct LocalStaticDatasetAction : public modals::AddStaticDatasetDialog::Action
 
   void submit(const modals::AddStaticDatasetDialog::Request &request,
       modals::ActionResult done) override;
+  // Reads the Stage here, on the submitting frame: a scan loads no payloads.
+  void scanVariantSets(const std::filesystem::path &sourcePath,
+      modals::AddStaticDatasetDialog::VariantSetsResult done) override;
 
  private:
   vsr::ui::imgui::Application *m_app{nullptr};

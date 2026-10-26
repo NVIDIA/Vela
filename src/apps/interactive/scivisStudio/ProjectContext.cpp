@@ -1029,9 +1029,24 @@ static DatasetSourceFile sourceFileFromMetadata(
   return {metadata.sourcePath};
 }
 
+// The ImportFile a static dataset's source reads as: the source path, plus
+// any Variant Selections in the third ';' field import_file reads them from.
+static vsr::io::ImportFile importFileFor(
+    vsr::io::ImporterType importerType, const DatasetSourceMetadata &source)
+{
+  auto field = source.sourcePath;
+  const auto *selections =
+      source.importerSettings.at(dataset::USD_VARIANT_SELECTIONS_SETTING);
+  if (vsr::io::isUsdImporter(importerType) && selections
+      && !selections->empty())
+    field += ";;" + *selections;
+  return {importerType, field};
+}
+
 Dataset *ProjectContext::addStaticDataset(const std::string &name,
     const std::filesystem::path &sourcePath,
-    vsr::io::ImporterType importerType)
+    vsr::io::ImporterType importerType,
+    const vsr::io::UsdVariantSelections &variantSelections)
 {
   if (!m_ctx)
     return nullptr;
@@ -1043,6 +1058,11 @@ Dataset *ProjectContext::addStaticDataset(const std::string &name,
   dataset.sourceKind = DatasetSourceKind::Static;
   dataset.importerType = toString(importerType);
   dataset.source = collectSourceMetadata(sourcePath);
+  if (vsr::io::isUsdImporter(importerType) && !variantSelections.empty()) {
+    dataset.source.importerSettings.set(
+        dataset::USD_VARIANT_SELECTIONS_SETTING,
+        vsr::io::toString(variantSelections));
+  }
   dataset.status = DatasetStatus::Importing;
 
   auto datasetRoot = ensureChild(ensureDatasetsRoot(), dataset.id.c_str());
@@ -1056,7 +1076,7 @@ Dataset *ProjectContext::addStaticDataset(const std::string &name,
   try {
     vsr::io::import_file(m_ctx->vsr.scene,
         m_ctx->vsr.animationMgr,
-        {importerType, sourcePath.string()},
+        importFileFor(importerType, record.source),
         datasetRoot);
     if (hasFileBindingAnimations(
             m_ctx->vsr.animationMgr, firstImportedAnimation)) {
@@ -1706,8 +1726,8 @@ bool ProjectContext::reimportStaticDataset(
     } else {
       vsr::io::import_file(stagedScene,
           stagedAnimations,
-          {importerTypeFromString(dataset->importerType),
-              dataset->source.sourcePath},
+          importFileFor(importerTypeFromString(dataset->importerType),
+              dataset->source),
           stagedRoot);
     }
   } catch (const std::exception &e) {

@@ -165,6 +165,17 @@ bool parseStudioCommandLine(const std::vector<std::string> &args,
     } else if (arg == "--importer") {
       if (!valueFor("--importer", commandLine.importerType))
         return false;
+    } else if (arg == "--usd-variant") {
+      std::string value;
+      if (!valueFor("--usd-variant", value))
+        return false;
+      const auto selection = vsr::io::usdVariantSelectionsFromString(value);
+      if (selection.size() != 1) {
+        error = "--usd-variant expects one set=variant, got '" + value + "'";
+        return false;
+      }
+      commandLine.usdVariantSelections.insert_or_assign(
+          selection.begin()->first, selection.begin()->second);
     } else if (arg == "--declare") {
       commandLine.declare = true;
     } else if (arg == "--keep-asset") {
@@ -356,6 +367,11 @@ bool parseStudioCommandLine(const std::vector<std::string> &args,
     error = "--importer only applies to dataset create";
     return false;
   }
+  if (!commandLine.usdVariantSelections.empty()
+      && commandLine.command != StudioCommand::DatasetCreateStatic) {
+    error = "--usd-variant only applies to dataset create static";
+    return false;
+  }
   if (commandLine.pathsFrom && !takesEntries) {
     error = "--paths-from only applies to commands that take source-list "
             "entries";
@@ -394,7 +410,8 @@ std::string studioCLIUsage(const std::string &programName)
       << "\n"
       << "mutate (open -> mutate -> save -> exit; exit 0 means persisted):\n"
       << "  project init <project-dir> [--name NAME]\n"
-      << "  dataset create static <project-dir> --importer TYPE [--name NAME] <path>\n"
+      << "  dataset create static <project-dir> --importer TYPE [--name NAME]\n"
+      << "      [--usd-variant SET=VARIANT ...] <path>\n"
       << "  dataset create file-animation <project-dir> --importer TYPE [--name NAME]\n"
       << "      [--declare] [--no-shot-frame-count] [--paths-from FILE] [entry...]\n"
       << "  dataset sources set <project-dir> <dataset> [--paths-from FILE] [entry...]\n"
@@ -410,7 +427,8 @@ std::string studioCLIUsage(const std::string &programName)
       << "arguments, --paths-from FILE, or stdin (one per line); entries are\n"
       << "opaque and never validated. --declare creates a Declared Dataset\n"
       << "without reading any source file; the first successful 'dataset load'\n"
-      << "materializes it.\n";
+      << "materializes it. --usd-variant selects a variant before a USD\n"
+      << "Stage loads (repeat it for more sets); reimport selects it again.\n";
   return out.str();
 }
 
@@ -799,6 +817,9 @@ int runDatasetCreateStatic(
   vsr::io::ImporterType importerType{vsr::io::ImporterType::NONE};
   if (!parseImporterType(commandLine.importerType, importerType, error))
     return commandFailed(error);
+  if (!commandLine.usdVariantSelections.empty()
+      && !vsr::io::isUsdImporter(importerType))
+    return commandFailed("--usd-variant needs a USD importer");
 
   BookkeepingSession session;
   if (!session.open(commandLine.projectDirectory, error))
@@ -809,7 +830,8 @@ int runDatasetCreateStatic(
   auto *dataset = context.addStaticDataset(
       defaultDatasetName(commandLine.name, sourcePath),
       sourcePath,
-      importerType);
+      importerType,
+      commandLine.usdVariantSelections);
   if (!dataset || dataset->status != DatasetStatus::Available) {
     return commandFailed("static dataset import failed for '" + sourcePath
         + "' (see log for details); project untouched");

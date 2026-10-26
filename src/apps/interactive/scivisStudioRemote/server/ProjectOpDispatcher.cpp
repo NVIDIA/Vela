@@ -8,6 +8,8 @@
 #include "StudioCodec.h"
 // vsr_scene
 #include "vsr/scene/Scene.hpp"
+// vsr_io
+#include "vsr/io/UsdImport.hpp"
 // vsr_core
 #include "vsr/core/Logging.hpp"
 // std
@@ -152,6 +154,7 @@ VSR_REQUEST_KIND(ListRoots,                      Independent)
 VSR_REQUEST_KIND(ListDirectory,                  Independent)
 VSR_REQUEST_KIND(RequestArrayHistogram,          SyncReadOnly)
 VSR_REQUEST_KIND(RequestArrayData,               SyncReadOnly)
+VSR_REQUEST_KIND(ScanUsdVariantSets,             Independent)
 VSR_REQUEST_KIND(RenderShot,                     RenderShot)
 VSR_REQUEST_KIND(CancelTask,                     Independent)
 // clang-format on
@@ -583,6 +586,18 @@ void ProjectOpDispatcher::handle(const ListDirectory &req)
     return;
   }
   ok(req, listing);
+}
+
+void ProjectOpDispatcher::handle(const ScanUsdVariantSets &req)
+{
+  const auto source = resolveOrFail(req, req.sourcePath);
+  if (!source)
+    return;
+
+  UsdVariantSetsResult result;
+  for (const auto &[set, variants] : vsr::io::usdVariantSets(source->string()))
+    result.sets.push_back({set, {variants.begin(), variants.end()}});
+  ok(req, result);
 }
 
 void ProjectOpDispatcher::handle(const CancelTask &req)

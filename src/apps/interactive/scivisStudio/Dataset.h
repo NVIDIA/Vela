@@ -115,6 +115,11 @@ struct Dataset
 
 namespace dataset {
 
+// The importer setting a USD dataset's Variant Selections persist under, as
+// "set=variant,..." (vsr::io::toString(UsdVariantSelections)). Reimport
+// reads it back, so a reimport selects the variants the import did.
+constexpr const char *USD_VARIANT_SELECTIONS_SETTING = "usdVariantSelections";
+
 const char *toString(DatasetSourceKind kind);
 const char *toString(DatasetStatus status);
 const char *toString(DatasetResidency residency);

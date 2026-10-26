@@ -6,6 +6,7 @@
 #include "catch.hpp"
 // vsr_scivis_studio_protocol
 #include "PayloadCommon.h"
+#include "ProjectOpReply.h"
 #include "ProjectRequests.h"
 #include "StudioCodec.h"
 // std
@@ -155,6 +156,13 @@ SCENARIO("Dataset creation request payloads", "[StudioProtocol]")
       REQUIRE(out.importerType == ImporterType::OBJ);
     }
 
+    THEN("Variant Selections round-trip, and are empty when absent")
+    {
+      REQUIRE(roundTrip(req).variantSelections.empty());
+      req.variantSelections = "color=blue,lod=low";
+      REQUIRE(roundTrip(req).variantSelections == "color=blue,lod=low");
+    }
+
     THEN("the default importer type NONE round-trips")
     {
       req.importerType = ImporterType::NONE;
@@ -216,6 +224,42 @@ SCENARIO("Dataset creation request payloads", "[StudioProtocol]")
       tree.root().remove("name");
       writePath(tree.root(), "sourcePath", NON_ASCII_PATH);
       REQUIRE_FALSE(fromNode(tree.root(), out));
+    }
+  }
+
+  GIVEN("ScanUsdVariantSets")
+  {
+    ScanUsdVariantSets req;
+    req.requestId = 52;
+    req.sourcePath = NON_ASCII_PATH;
+    const auto out = roundTrip(req);
+    REQUIRE(out.requestId == 52);
+    REQUIRE(out.sourcePath == NON_ASCII_PATH);
+
+    THEN("its result round-trips in a reply, sets and variants in order")
+    {
+      UsdVariantSetsResult result;
+      result.sets.push_back({"color", {"blue", "red"}});
+      result.sets.push_back({"lod", {"high", "low"}});
+      auto reply = makeOkReply(52);
+      setResults(reply, result);
+      const auto sets = results<UsdVariantSetsResult>(roundTrip(reply));
+      REQUIRE(sets);
+      REQUIRE(sets->sets.size() == 2);
+      REQUIRE(sets->sets[0].name == "color");
+      REQUIRE(sets->sets[0].variants
+          == std::vector<std::string>{"blue", "red"});
+      REQUIRE(sets->sets[1].name == "lod");
+      REQUIRE(sets->sets[1].variants
+          == std::vector<std::string>{"high", "low"});
+    }
+
+    THEN("a missing sourcePath is rejected")
+    {
+      vsr::core::DataTree tree;
+      writeChild(tree.root(), "requestId", uint64_t(1));
+      ScanUsdVariantSets bad;
+      REQUIRE_FALSE(fromNode(tree.root(), bad));
     }
   }
 

@@ -184,6 +184,10 @@ enum class ImporterType
 using ImportFile = std::pair<ImporterType, std::string>;
 using ImportAnimationFiles = std::pair<ImporterType, std::vector<std::string>>;
 
+// USD, USD_MTLX and USD_MDL: the importers that read a Stage, and so the ones
+// an ImportFile's third ';' field carries Variant Selections to.
+bool isUsdImporter(ImporterType type);
+
 struct UserColorMap
 {
   std::string name;

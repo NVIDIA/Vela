@@ -189,8 +189,7 @@ void Context::parseCommandLine(std::vector<std::string> &args)
           if (importerType == vsr::io::ImporterType::VTU
               && !this->commandLine.vtuProperty.empty())
             file += ';' + this->commandLine.vtuProperty;
-          if ((importerType == vsr::io::ImporterType::USD
-                  || importerType == vsr::io::ImporterType::USD_MTLX)
+          if (vsr::io::isUsdImporter(importerType)
               && !this->commandLine.usdVariantSelections.empty()) {
             file +=
                 ';' + vsr::io::toString(this->commandLine.usdVariantSelections);

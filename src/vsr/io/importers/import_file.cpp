@@ -32,6 +32,12 @@ void ensureDefaultTransferFunction(vsr::core::TransferFunction &tf)
 
 } // namespace
 
+bool isUsdImporter(ImporterType type)
+{
+  return type == ImporterType::USD || type == ImporterType::USD_MTLX
+      || type == ImporterType::USD_MDL;
+}
+
 void import_file(Scene &scene,
     vsr::animation::AnimationManager &animMgr,
     const ImportFile &f,
@@ -114,18 +120,15 @@ void import_file(Scene &scene,
     vsr::io::import_SWC_SDF(scene, animMgr, file.c_str(), root);
   else if (f.first == ImporterType::TRK)
     vsr::io::import_TRK(scene, animMgr, file.c_str(), root);
-  else if (f.first == ImporterType::USD || f.first == ImporterType::USD_MTLX) {
+  else if (isUsdImporter(f.first)) {
     // A third field carries Variant Selections, "set=variant,...".
     UsdImportOptions options;
     if (f.first == ImporterType::USD_MTLX)
       options.materialMode = UsdMaterialMode::MATERIALX;
+    else if (f.first == ImporterType::USD_MDL)
+      options.materialMode = UsdMaterialMode::MDL;
     if (files.size() > 2)
       options.variantSelections = usdVariantSelectionsFromString(files[2]);
-    widenAnimationClock(animMgr,
-        vsr::io::import_USD(scene, animMgr, file.c_str(), root, options));
-  } else if (f.first == ImporterType::USD_MDL) {
-    UsdImportOptions options;
-    options.materialMode = UsdMaterialMode::MDL;
     widenAnimationClock(animMgr,
         vsr::io::import_USD(scene, animMgr, file.c_str(), root, options));
   } else if (f.first == ImporterType::VTP)

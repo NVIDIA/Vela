@@ -171,6 +171,20 @@ SCENARIO("A Variant Selection decides which variant imports", "[UsdImport]")
       }
     }
 
+    WHEN("It is imported with native MDL materials, naming the selection")
+    {
+      vsr::io::import_file(scene,
+          animMgr,
+          {vsr::io::ImporterType::USD_MDL,
+              asset.root.path() + ";default;lod=low"});
+
+      THEN("The selection still applies")
+      {
+        REQUIRE(findNode(scene.layer("default"), "RedShape"));
+        REQUIRE_FALSE(findNode(scene.layer("default"), "HighShape"));
+      }
+    }
+
     WHEN("Its Variant Sets are listed without importing it")
     {
       const auto sets = vsr::io::usdVariantSets(asset.root.path());

@@ -249,6 +249,10 @@ void DatasetEditor::buildUI()
   ImGui::Text("Status: %s", dataset::displayStatus(dataset));
   ImGui::Text("Source kind: %s", dataset::toString(dataset.sourceKind));
   ImGui::Text("Importer: %s", dataset.importerType.c_str());
+  for (const auto &setting : dataset.source.importerSettings) {
+    ImGui::TextWrapped(
+        "  %s: %s", setting.first.c_str(), setting.second.c_str());
+  }
   ImGui::TextWrapped("Source: %s", dataset.source.sourcePath.c_str());
   if (dataset.sourceKind == DatasetSourceKind::FileAnimation) {
     ImGui::Text("Frames: %zu", dataset.sourceFiles.size());

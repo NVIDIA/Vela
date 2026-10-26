@@ -180,8 +180,10 @@ void ProjectOpDispatcher::handle(const ImportStaticDataset &req)
       [this, req, source = *source](const TaskControl &progress) {
         return runTaskBody([&] {
           progress("importing");
-          return importResult(
-              context().addStaticDataset(req.name, source, req.importerType));
+          return importResult(context().addStaticDataset(req.name,
+              source,
+              req.importerType,
+              vsr::io::usdVariantSelectionsFromString(req.variantSelections)));
         });
       });
 }

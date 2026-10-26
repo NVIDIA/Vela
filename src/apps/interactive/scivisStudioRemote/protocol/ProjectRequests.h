@@ -79,6 +79,33 @@ struct ImportStaticDataset
   std::string name;
   std::filesystem::path sourcePath;
   vsr::io::ImporterType importerType{vsr::io::ImporterType::NONE};
+  // USD importers only: "set=variant,..." (vsr::io::toString of
+  // UsdVariantSelections). Empty keeps the Stage's own selections.
+  std::string variantSelections;
+};
+
+// Sync, read-only: the Variant Sets a USD source offers
+// (vsr::io::usdVariantSets), so the client can offer them before importing.
+// The source is a server path under the Data Roots.
+struct ScanUsdVariantSets
+{
+  static constexpr StudioMessageType MESSAGE_TYPE =
+      StudioMessageType::ScanUsdVariantSets;
+  uint64_t requestId{0};
+  std::filesystem::path sourcePath;
+};
+
+struct UsdVariantSet
+{
+  std::string name;
+  std::vector<std::string> variants;
+};
+
+// Carried in a ProjectOpReply's `results` subtree; sets in name order, each
+// set's variants in name order. Empty when the Stage offers none.
+struct UsdVariantSetsResult
+{
+  std::vector<UsdVariantSet> sets;
 };
 
 // Task: addStaticDatasetFromSubtree(): a VSR Layer Subtree Archive (as
@@ -295,6 +322,27 @@ void fields(V &v, ImportStaticDataset &r)
   v.required("sourcePath", r.sourcePath);
   v.requiredEnum(
       "importerType", r.importerType, toString, importerTypeFromString);
+  v.optional("variantSelections", r.variantSelections);
+}
+
+template <typename V>
+void fields(V &v, ScanUsdVariantSets &r)
+{
+  v.required("requestId", r.requestId);
+  v.required("sourcePath", r.sourcePath);
+}
+
+template <typename V>
+void fields(V &v, UsdVariantSet &s)
+{
+  v.required("name", s.name);
+  v.list("variants", s.variants);
+}
+
+template <typename V>
+void fields(V &v, UsdVariantSetsResult &r)
+{
+  v.list("sets", r.sets);
 }
 
 template <typename V>

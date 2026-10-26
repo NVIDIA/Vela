@@ -62,12 +62,6 @@ constexpr ImporterChoice IMPORTERS[] = {
     {"VOLUME_ANIMATION", vsr::io::ImporterType::VOLUME_ANIMATION},
 };
 
-bool isUsdImporter(vsr::io::ImporterType type)
-{
-  return type == vsr::io::ImporterType::USD
-      || type == vsr::io::ImporterType::USD_MTLX;
-}
-
 constexpr const char *STAGE_DEFAULT = "(stage default)";
 
 } // namespace
@@ -118,7 +112,7 @@ void ImportFileDialog::buildUI()
       text_cb,
       &m_filename);
 
-  if (isUsdImporter(IMPORTERS[m_selectedFileType].type))
+  if (vsr::io::isUsdImporter(IMPORTERS[m_selectedFileType].type))
     buildUsdVariantUI();
 
   //////////
@@ -147,7 +141,7 @@ void ImportFileDialog::buildUI()
       auto fileField = m_filename;
       const auto selections =
           vsr::io::usdVariantSelectionsFromString(m_variantSelections);
-      if (isUsdImporter(type) && !selections.empty())
+      if (vsr::io::isUsdImporter(type) && !selections.empty())
         fileField += ";;" + vsr::io::toString(selections);
       vsr::io::ImportFile file{type, fileField};
       vsr::io::import_file(scene, ctx->vsr.animationMgr, file, importRoot);

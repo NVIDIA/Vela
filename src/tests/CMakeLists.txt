@@ -63,6 +63,7 @@ if (TARGET vsr_scivis_studio_model)
   target_sources(${PROJECT_NAME} PRIVATE
     test_ProjectAssetTransaction.cpp
     test_SciVisStudio.cpp
+    test_SciVisStudio_usdVariants.cpp
   )
 endif()
 if (TARGET vsr_network)
