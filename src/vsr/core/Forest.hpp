@@ -870,6 +870,11 @@ inline void forall_children_const(ForestNodeRef<T> node, FCN &&fcn)
 template <typename T, typename PREDICATE>
 inline ForestNodeRef<T> find_first_child(ForestNodeRef<T> n, PREDICATE &&p)
 {
+  // A leaf's next() is its thread onward (a sibling, or the parent once it
+  // is the last child), not a first child: walking it would offer nodes that
+  // are not children at all.
+  if (n->isLeaf())
+    return {};
   for (auto s = n->next(); s && s != n; s = s->sibling()) {
     if (p(**s))
       return s;

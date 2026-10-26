@@ -261,6 +261,38 @@ SCENARIO("vsr::core::DataTree interface", "[DataTree]")
   }
 }
 
+SCENARIO("An empty DataNode's lookups never reach its relatives",
+    "[DataTree]")
+{
+  GIVEN("A list whose item \"0\" holds an empty list of its own")
+  {
+    vsr::core::DataTree tree;
+    auto &item = tree.root()["items"]["0"];
+    item["name"] = std::string("a");
+    auto &inner = item["inner"];
+
+    THEN("The empty list has no child named like its parent")
+    {
+      REQUIRE(inner.child("0") == nullptr);
+      REQUIRE(inner.child("name") == nullptr);
+    }
+
+    WHEN("Strings are written into the inner list by index")
+    {
+      inner["0"] = std::string("x");
+      inner["1"] = std::string("y");
+
+      THEN("They land in the inner list and the item survives")
+      {
+        REQUIRE(inner.numChildren() == 2);
+        REQUIRE(item.numChildren() == 2);
+        REQUIRE(item["name"].getValueAs<std::string>() == "a");
+        REQUIRE(inner["1"].getValueAs<std::string>() == "y");
+      }
+    }
+  }
+}
+
 SCENARIO("DataTree values round trip through a byte buffer", "[DataTree]")
 {
   vsr::core::DataTree source;

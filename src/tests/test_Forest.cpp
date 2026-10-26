@@ -297,6 +297,32 @@ SCENARIO("vsr::core::Forest<> reparent operations", "[Forest]")
   }
 }
 
+SCENARIO("vsr::core::find_first_child() sees only children", "[Forest]")
+{
+  GIVEN("A leaf with a later sibling and a parent, all matching")
+  {
+    vsr::core::Forest<int> f{7};
+    auto parent = f.insert_last_child(f.root(), 7);
+    auto leaf = f.insert_last_child(parent, 1);
+    f.insert_last_child(parent, 7);
+    auto lastLeaf = f.insert_last_child(parent, 2);
+    const auto isSeven = [](int v) { return v == 7; };
+
+    THEN("Neither leaf finds a child, whatever follows it")
+    {
+      REQUIRE_FALSE(vsr::core::find_first_child(leaf, isSeven));
+      REQUIRE_FALSE(vsr::core::find_first_child(lastLeaf, isSeven));
+    }
+
+    THEN("Their parent finds its own matching child")
+    {
+      auto found = vsr::core::find_first_child(parent, isSeven);
+      REQUIRE(found);
+      REQUIRE(found->parent() == parent);
+    }
+  }
+}
+
 SCENARIO("vsr::core::Forest<> rebuild with chosen node indices", "[Forest]")
 {
   GIVEN("A forest whose node slots are sparse")
