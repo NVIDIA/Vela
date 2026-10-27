@@ -73,26 +73,44 @@ static bool fail(const std::string &message, std::string *error)
   return false;
 }
 
+// A value that names other objects: setting or removing it can move objects
+// into or out of a dataset's archive closure.
+static bool referencesObjects(const vsr::scene::Parameter *p)
+{
+  return p && anari::isObject(p->value().type());
+}
+
 struct DatasetDirtyDelegate : vsr::scene::EmptyUpdateDelegate
 {
   explicit DatasetDirtyDelegate(ProjectContext *context) : context(context) {}
 
-  void signalParameterUpdated(
-      const vsr::scene::Object *object, const vsr::scene::Parameter *) override
+  void signalObjectAdded(const vsr::scene::Object *) override
+  {
+    context->invalidateDatasetMembership();
+  }
+
+  void signalParameterUpdated(const vsr::scene::Object *object,
+      const vsr::scene::Parameter *p) override
   {
     context->markDatasetDirtyForObject(object);
+    if (referencesObjects(p))
+      context->invalidateDatasetMembership();
   }
 
   void signalParameterRemoved(
       const vsr::scene::Object *object, const vsr::scene::Parameter *) override
   {
     context->markDatasetDirtyForObject(object);
+    // The value is gone already; whether it named an object is unknowable.
+    context->invalidateDatasetMembership();
   }
 
   void signalParameterBatchUpdated(const vsr::scene::Object *object,
-      const std::vector<const vsr::scene::Parameter *> &) override
+      const std::vector<const vsr::scene::Parameter *> &ps) override
   {
     context->markDatasetDirtyForObject(object);
+    if (std::any_of(ps.begin(), ps.end(), referencesObjects))
+      context->invalidateDatasetMembership();
   }
 
   void signalArrayMapped(const vsr::scene::Array *array) override
@@ -103,6 +121,8 @@ struct DatasetDirtyDelegate : vsr::scene::EmptyUpdateDelegate
   void signalArrayUnmapped(const vsr::scene::Array *array) override
   {
     context->markDatasetDirtyForObject(array);
+    if (anari::isObject(array->elementType()))
+      context->invalidateDatasetMembership();
   }
 
   // Metadata dirties its dataset on its own merits. A volume's
@@ -126,9 +146,49 @@ struct DatasetDirtyDelegate : vsr::scene::EmptyUpdateDelegate
   void signalObjectRemoved(const vsr::scene::Object *object) override
   {
     context->markDatasetDirtyForObject(object);
+    context->invalidateDatasetMembership();
+  }
+
+  void signalRemoveAllObjects() override
+  {
+    context->invalidateDatasetMembership();
+  }
+
+  void signalLayerAdded(const vsr::scene::Layer *) override
+  {
+    context->invalidateDatasetMembership();
+  }
+
+  void signalLayerStructureUpdated(const vsr::scene::Layer *) override
+  {
+    context->invalidateDatasetMembership();
+  }
+
+  void signalLayerRemoved(const vsr::scene::Layer *) override
+  {
+    context->invalidateDatasetMembership();
   }
 
   ProjectContext *context{nullptr};
+};
+
+// Holds per-object dirty tracking off while a whole dataset runtime is built
+// into the scene: the dataset is dirty (or clean) as a whole, and checking
+// each parameter the importer sets against every dataset's closure is
+// quadratic in the size of the import.
+struct DatasetRuntimeMutation
+{
+  explicit DatasetRuntimeMutation(bool &flag) : flag(flag), previous(flag)
+  {
+    flag = true;
+  }
+  ~DatasetRuntimeMutation()
+  {
+    flag = previous;
+  }
+
+  bool &flag;
+  bool previous;
 };
 
 // Managed asset names are compared case-insensitively because they map to
@@ -257,6 +317,8 @@ uint64_t ProjectContext::activeShotRevision() const
 void ProjectContext::markRevised()
 {
   ++m_revision;
+  // An op may have added, removed or re-rooted a dataset record.
+  invalidateDatasetMembership();
 }
 
 void ProjectContext::markProjectDirty()
@@ -313,13 +375,35 @@ void ProjectContext::markDatasetDirtyForObject(const vsr::scene::Object *object)
   if (!m_ctx || !object || m_syncingAnimationManager || m_mutatingDatasetRuntime
       || m_ctx->vsr.animationMgr.isApplyingAnimations())
     return;
+  if (!m_datasetMembershipValid)
+    rebuildDatasetMembership();
+  auto found = m_datasetMembership.find(object);
+  if (found == m_datasetMembership.end())
+    return;
+  for (const auto &id : found->second) {
+    if (auto *dataset = project::findDataset(m_project, id)) {
+      dataset->dirty = true;
+      m_project.markDirty(); // no revision: a scene edit, not a whole op
+    }
+  }
+}
+
+void ProjectContext::invalidateDatasetMembership()
+{
+  m_datasetMembershipValid = false;
+}
+
+void ProjectContext::rebuildDatasetMembership()
+{
+  m_datasetMembership.clear();
   for (auto &dataset : m_project.datasets) {
     auto root = resolveDatasetRoot(dataset);
-    if (!root || !datasetRuntimeContainsObject(m_ctx->vsr.scene, root, object))
+    if (!root)
       continue;
-    dataset.dirty = true;
-    m_project.markDirty(); // no revision: a scene edit, not a whole op
+    for (const auto *object : datasetRuntimeObjects(m_ctx->vsr.scene, root))
+      m_datasetMembership[object].push_back(dataset.id);
   }
+  m_datasetMembershipValid = true;
 }
 
 vsr::scene::LayerNodeRef ProjectContext::ensureChild(
@@ -1074,6 +1158,7 @@ Dataset *ProjectContext::addStaticDataset(const std::string &name,
       m_ctx->vsr.animationMgr.animations().size();
 
   try {
+    DatasetRuntimeMutation mutation(m_mutatingDatasetRuntime);
     vsr::io::import_file(m_ctx->vsr.scene,
         m_ctx->vsr.animationMgr,
         importFileFor(importerType, record.source),
@@ -1138,6 +1223,7 @@ Dataset *ProjectContext::addStaticDatasetFromSubtree(
   auto &record = m_project.datasets.back();
 
   try {
+    DatasetRuntimeMutation mutation(m_mutatingDatasetRuntime);
     // A Layer Subtree Archive deserializes its subtree as a child of the
     // dataset root, mirroring how vsrViewer's LayerTree loads one.
     auto subtreeRoot = vsr::io::load_LayerSubtreeArchive(
@@ -1204,6 +1290,7 @@ Dataset *ProjectContext::addFileAnimationDataset(const std::string &name,
   auto &record = m_project.datasets.back();
 
   try {
+    DatasetRuntimeMutation mutation(m_mutatingDatasetRuntime);
     vsr::core::logStatus(
         "[SciVisStudio] Importing file animation dataset '%s' with %zu frames",
         record.name.c_str(),
@@ -1619,13 +1706,18 @@ Dataset *ProjectContext::loadDatasetArchiveImpl(
 
   Dataset loaded;
   vsr::scene::LayerNodeRef root;
-  if (!loadDatasetArchiveFile(m_ctx->vsr.scene,
-          m_ctx->vsr.animationMgr,
-          file,
-          ensureDatasetsRoot(),
-          loaded,
-          root,
-          error))
+  bool archiveLoaded = false;
+  {
+    DatasetRuntimeMutation mutation(m_mutatingDatasetRuntime);
+    archiveLoaded = loadDatasetArchiveFile(m_ctx->vsr.scene,
+        m_ctx->vsr.animationMgr,
+        file,
+        ensureDatasetsRoot(),
+        loaded,
+        root,
+        error);
+  }
+  if (!archiveLoaded)
     return nullptr;
 
   loaded.id = project::nextDatasetId(m_project);
@@ -1765,13 +1857,18 @@ bool ProjectContext::reimportStaticDataset(
       dataset->name.c_str());
   Dataset replacement;
   vsr::scene::LayerNodeRef replacementRoot;
-  if (!loadDatasetArchiveFile(m_ctx->vsr.scene,
-          m_ctx->vsr.animationMgr,
-          stageFile,
-          ensureDatasetsRoot(),
-          replacement,
-          replacementRoot,
-          &stageError)) {
+  bool replacementLoaded = false;
+  {
+    DatasetRuntimeMutation mutation(m_mutatingDatasetRuntime);
+    replacementLoaded = loadDatasetArchiveFile(m_ctx->vsr.scene,
+        m_ctx->vsr.animationMgr,
+        stageFile,
+        ensureDatasetsRoot(),
+        replacement,
+        replacementRoot,
+        &stageError);
+  }
+  if (!replacementLoaded) {
     std::error_code ec;
     std::filesystem::remove(stageFile, ec);
     return fail("dataset reimport staging failed: " + stageError, error);

@@ -752,14 +752,19 @@ bool removeDatasetRuntime(vsr::scene::Scene &scene,
   return true;
 }
 
-bool datasetRuntimeContainsObject(vsr::scene::Scene &scene,
-    vsr::scene::LayerNodeRef root,
-    const vsr::scene::Object *object)
+std::vector<const vsr::scene::Object *> datasetRuntimeObjects(
+    vsr::scene::Scene &scene, vsr::scene::LayerNodeRef root)
 {
-  if (!root || !object)
-    return false;
+  std::vector<const vsr::scene::Object *> retval;
+  if (!root)
+    return retval;
   const auto result = vsr::io::plan_SubtreeArchive(scene, root);
-  return result.accepted() && result.plan.containsObject(object);
+  if (!result.accepted())
+    return retval;
+  retval.reserve(result.plan.objects.size());
+  for (const auto &entry : result.plan.objects)
+    retval.push_back(entry.source);
+  return retval;
 }
 
 } // namespace vsr::scivis_studio

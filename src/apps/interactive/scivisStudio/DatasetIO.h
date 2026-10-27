@@ -125,8 +125,10 @@ bool removeDatasetRuntime(vsr::scene::Scene &scene,
     vsr::animation::AnimationManager &animationManager,
     vsr::scene::LayerNodeRef root);
 
-bool datasetRuntimeContainsObject(vsr::scene::Scene &scene,
-    vsr::scene::LayerNodeRef root,
-    const vsr::scene::Object *object);
+// Every object in a dataset subtree's archive closure: what an edit must
+// touch to change what the dataset saves. Empty when the subtree cannot be
+// planned.
+std::vector<const vsr::scene::Object *> datasetRuntimeObjects(
+    vsr::scene::Scene &scene, vsr::scene::LayerNodeRef root);
 
 } // namespace vsr::scivis_studio
