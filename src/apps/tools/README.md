@@ -70,7 +70,8 @@ Assembles a scene from the same scene-loading command line as `vsrOffline` and
 the viewers (`-vsr`, `-gltf`, `-obj`, `-usd`, `-usd_variant`, `-l`/`--layer`,
 ...) and saves it as a Scene Archive instead of rendering it. No ANARI device
 is loaded. The archive is written to `scene.vsr` unless `-o`/`--output`
-names another file.
+names another file. If any input file does not exist, the tool lists every
+missing one and exits without writing an archive.
 
 A Scene Archive holds no animation-manager state, so an animated scene is
 saved at its current frame without its animations.

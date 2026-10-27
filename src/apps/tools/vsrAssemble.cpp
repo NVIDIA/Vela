@@ -10,6 +10,7 @@
 #include <vsr/io/archives.hpp>
 // std
 #include <cstdio>
+#include <filesystem>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -92,6 +93,39 @@ bool parseOptions(int argc,
   return true;
 }
 
+// Report every scene input that names a file which does not exist. The
+// importers only log a missing file, so without this check a typo would save
+// an archive silently lacking that content.
+bool allInputFilesExist(const vsr::app::CommandLineOptions &commandLine)
+{
+  std::vector<std::string> files;
+  for (const auto &input : commandLine.sceneInputs) {
+    if (const auto *archive = std::get_if<vsr::app::SceneArchiveLoad>(&input))
+      files.push_back(archive->filename);
+    else {
+      // "<file>;<layer>[;<importer option>]"
+      const auto &importFile =
+          std::get<vsr::app::ForeignSceneImport>(input).file.second;
+      files.push_back(importFile.substr(0, importFile.find(';')));
+    }
+  }
+  for (const auto &sequence : commandLine.animationFilenames) {
+    // "<file>[;<importer option>]"
+    for (const auto &file : sequence.second)
+      files.push_back(file.substr(0, file.find(';')));
+  }
+
+  bool allExist = true;
+  for (const auto &file : files) {
+    std::error_code ec;
+    if (!std::filesystem::exists(file, ec)) {
+      fprintf(stderr, "Error: input file '%s' does not exist\n", file.c_str());
+      allExist = false;
+    }
+  }
+  return allExist;
+}
+
 } // namespace
 
 int main(int argc, const char *argv[])
@@ -126,6 +160,8 @@ int main(int argc, const char *argv[])
     printUsage(argv[0]);
     return 1;
   }
+  if (!allInputFilesExist(commandLine))
+    return 1;
 
   vsr::core::Timer timer;
 
