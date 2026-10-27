@@ -181,6 +181,8 @@ inline Any::~Any()
 
 inline Any &Any::operator=(const Any &rhs)
 {
+  if (this == &rhs)
+    return *this;
   reset();
   std::memcpy(m_storage.data(), rhs.m_storage.data(), m_storage.size());
   m_string = rhs.m_string;
@@ -190,6 +192,8 @@ inline Any &Any::operator=(const Any &rhs)
 
 inline Any &Any::operator=(Any &&rhs)
 {
+  if (this == &rhs)
+    return *this;
   reset();
   std::memcpy(m_storage.data(), rhs.m_storage.data(), m_storage.size());
   m_string = std::move(rhs.m_string);
