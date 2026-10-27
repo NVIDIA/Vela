@@ -30,7 +30,9 @@
 #include <algorithm>
 #include <chrono>
 #include <iterator>
+#include <set>
 #include <thread>
+#include <tuple>
 
 namespace vsr::scivis_studio::server {
 
@@ -49,6 +51,8 @@ constexpr std::chrono::milliseconds PAUSED_SLEEP{1};
 // How often the loop stats the Unloaded datasets' asset files while a
 // session is up (the monolith's Dataset Editor checked once a second too).
 constexpr std::chrono::seconds AVAILABILITY_CHECK_PERIOD{1};
+// One iteration's scene-edit drain slower than this is logged.
+constexpr float SLOW_EDIT_DRAIN_MS = 20.f;
 // Guards the pipeline against a hostile or confused SetFrameConfig.
 constexpr uint32_t MAX_FRAME_DIMENSION = 16384;
 
@@ -609,8 +613,24 @@ void StudioServer::applyControlState()
     // pushed back at it.
     const bool wasRecording = m_sceneRecorder && m_sceneRecorder->enabled();
     setRecordingEnabled(false);
+    const auto start = std::chrono::steady_clock::now();
+    // An orbit sends a whole pose per client UI frame; only the last one of
+    // a backlog is worth applying.
+    const auto dropped = coalesceEdits(control.edits);
     for (const auto &edit : control.edits)
       std::visit([this](const auto &e) { applyEdit(e); }, edit);
+    const auto ms = std::chrono::duration<float, std::milli>(
+        std::chrono::steady_clock::now() - start)
+                        .count();
+    // Frames wait on this drain; a slow one is what an orbit stalls on.
+    if (ms > SLOW_EDIT_DRAIN_MS) {
+      vsr::core::logWarning(
+          "[StudioServer] applying %zu scene edit(s) (%zu superseded) took"
+          " %.1f ms",
+          control.edits.size(),
+          dropped,
+          ms);
+    }
     setRecordingEnabled(wasRecording);
   }
 
@@ -626,6 +646,48 @@ void StudioServer::applyControlState()
 
   if (control.rendering)
     setStreaming(*control.rendering);
+}
+
+size_t StudioServer::coalesceEdits(std::vector<SceneEdit> &edits)
+{
+  using Key = std::tuple<anari::DataType, size_t, std::string>;
+  auto keyOf = [](const SceneObjectRef &object,
+                   const std::string &name) {
+    return Key{object.type, object.objectIndex, name};
+  };
+
+  // Walk backwards, remembering what a later edit already decides.
+  std::set<Key> laterParameters;
+  std::set<Key> laterMetadata;
+  std::vector<bool> keep(edits.size(), true);
+  for (size_t i = edits.size(); i-- > 0;) {
+    if (const auto *set = std::get_if<protocol::SetObjectParameter>(&edits[i])) {
+      keep[i] = laterParameters.insert(keyOf(set->object, set->name)).second;
+    } else if (const auto *removal =
+                   std::get_if<protocol::RemoveObjectParameter>(&edits[i])) {
+      laterParameters.insert(keyOf(removal->object, removal->name));
+    } else if (const auto *metadata =
+                   std::get_if<protocol::SetObjectMetadata>(&edits[i])) {
+      bool superseded = !metadata->entries.empty();
+      for (const auto &entry : metadata->entries) {
+        superseded = superseded
+            && laterMetadata.count(keyOf(metadata->object, entry.name)) != 0;
+      }
+      for (const auto &entry : metadata->entries)
+        laterMetadata.insert(keyOf(metadata->object, entry.name));
+      keep[i] = !superseded;
+    }
+  }
+
+  std::vector<SceneEdit> kept;
+  kept.reserve(edits.size());
+  for (size_t i = 0; i < edits.size(); ++i) {
+    if (keep[i])
+      kept.push_back(std::move(edits[i]));
+  }
+  const size_t dropped = edits.size() - kept.size();
+  edits = std::move(kept);
+  return dropped;
 }
 
 bool StudioServer::ControlState::hasInput() const

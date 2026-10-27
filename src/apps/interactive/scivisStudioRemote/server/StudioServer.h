@@ -183,6 +183,12 @@ struct StudioServer
       protocol::SetNodeTransform,
       ArrayDataEdit>;
 
+  // Latest-wins within one drain: drops each SetObjectParameter a later edit
+  // in `edits` sets again or removes, and each SetObjectMetadata whose every
+  // key a later one sets again. What survives keeps its order. Returns how
+  // many were dropped.
+  static size_t coalesceEdits(std::vector<SceneEdit> &edits);
+
   // Something that happened to a connection on the IO thread, tagged with
   // that connection's serial (see m_connectionSerial) so the loop can tell a
   // loss of the old client from a loss of the one accepted since.

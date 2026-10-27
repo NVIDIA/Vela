@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace vsr::scivis_studio {
@@ -239,6 +240,11 @@ struct ProjectContext
       const FileAnimationDatasetOptions &options);
   void installDatasetDirtyDelegate();
   void markDatasetDirtyForObject(const vsr::scene::Object *object);
+  // The object -> datasets map markDatasetDirtyForObject() reads is rebuilt
+  // on its next use: a structural scene change or a Project op may have
+  // moved an object into or out of a dataset's closure.
+  void invalidateDatasetMembership();
+  void rebuildDatasetMembership();
   // An op changed the Project: dirty for the save, revised for the mirror.
   void markProjectDirty();
   void markActiveShotRevised();
@@ -276,6 +282,12 @@ struct ProjectContext
   // per-object dirty tracking is meaningless (and O(n^2)) while they run.
   bool m_mutatingDatasetRuntime{false};
   vsr::scene::BaseUpdateDelegate *m_datasetDirtyDelegate{nullptr};
+  // Which datasets' archive closures hold each object: one plan per dataset
+  // when rebuilt, so a camera orbit's stream of parameter edits costs a
+  // lookup each rather than a plan of every dataset each.
+  std::unordered_map<const vsr::scene::Object *, std::vector<DatasetID>>
+      m_datasetMembership;
+  bool m_datasetMembershipValid{false};
   uint64_t m_revision{0};
   uint64_t m_activeShotRevision{0};
 };
