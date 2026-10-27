@@ -10,6 +10,7 @@ headless rendering, and scripting.
 | `obj2header` | Convert a Wavefront OBJ mesh into a generated C/C++ header with packed vertex arrays. | `./obj2header <file.obj> <outfile.h>` |
 | `vsrPrint` | Print a `.vsr` file as the Data Tree Text Encoding. | `./vsrPrint <file.vsr>` |
 | `vsrConvert` | Convert a `.vsr` file between the Binary and Text Encodings. | `./vsrConvert [--text\|--binary] <input.vsr> <output.vsr>` |
+| `vsrAssemble` | Load scene inputs with the same importer flags as `vsrOffline` and save them as a Scene Archive. | `./vsrAssemble [-o <file.vsr>] <scene inputs...>` |
 | `vsrRender` | Offline render from a saved `.vsr` state file (including render settings and camera/animation data). | `./vsrRender <state_file.vsr>` |
 | `vsrOffline` | Headless renderer with direct CLI control over imports, camera, lights, renderer, and output. | `./vsrOffline [options]` |
 | `vsrUsdInfo` | List the Variant Sets a USD Stage offers and their variants. | `./vsrUsdInfo <stage.usd>` |
@@ -61,6 +62,23 @@ Usage:
 ./vsrConvert cameras.vsr cameras_text.vsr      # binary -> text, ready to edit
 ./vsrConvert cameras_text.vsr cameras.vsr      # text -> binary
 ./vsrConvert --text edited.vsr canonical.vsr   # text -> canonical text
+```
+
+## `vsrAssemble`
+
+Assembles a scene from the same scene-loading command line as `vsrOffline` and
+the viewers (`-vsr`, `-gltf`, `-obj`, `-usd`, `-usd_variant`, `-l`/`--layer`,
+...) and saves it as a Scene Archive instead of rendering it. No ANARI device
+is loaded. The archive is written to `scene.vsr` unless `-o`/`--output`
+names another file.
+
+A Scene Archive holds no animation-manager state, so an animated scene is
+saved at its current frame without its animations.
+
+Usage:
+
+```bash
+./vsrAssemble -l geometry -gltf model.glb -hdri env.hdr -o scene.vsr
 ```
 
 ## `vsrRender`
