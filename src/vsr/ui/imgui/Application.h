@@ -101,6 +101,10 @@ class Application
   // Enqueue a cancellable task, then show a modal until task is complete
   template <class FUNCTION>
   void showTaskModalWithCancel(FUNCTION &&f, const char *text = "Please Wait");
+
+  // True while a task modal's task runs on a background thread. Windows still
+  // build every frame meanwhile, so one that would mutate the Scene must wait.
+  bool blockingTaskRunning() const;
   void showImportFileDialog();
   void showExportNanoVDBFileDialog();
   void showLoadObjectArchiveDialog(vsr::scene::LayerNodeRef destination);

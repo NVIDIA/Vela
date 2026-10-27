@@ -1071,6 +1071,11 @@ void Application::setupUsdDevice()
       d, m_usdDevice.frame, "world", m_usdDevice.renderIndex->world());
 }
 
+bool Application::blockingTaskRunning() const
+{
+  return m_taskModal && m_taskModal->visible();
+}
+
 bool Application::usdDeviceIsSetup() const
 {
   return m_usdDevice.device != nullptr && m_usdDevice.renderIndex != nullptr;
