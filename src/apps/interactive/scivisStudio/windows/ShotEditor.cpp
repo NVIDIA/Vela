@@ -7,6 +7,7 @@
 #include "vsr/app/Context.h"
 #include "vsr/core/Logging.hpp"
 #include "vsr/scene/objects/Renderer.hpp"
+#include "vsr/ui/imgui/Application.h"
 
 #include <algorithm>
 #include <cstring>
@@ -108,7 +109,10 @@ bool ShotEditor::buildUI_rendererSelector(Shot &shot)
   std::vector<vsr::scene::RendererAppRef> renderers;
   vsr::scene::RendererAppRef currentRenderer;
 
-  if (ctx && ctx->anari.isLoadableDevice(settings.rendererLibrary)) {
+  // A device load in progress (the Viewport's, typically) creates renderers
+  // on its own thread; binding now would race it in the same Scene.
+  if (ctx && !m_app->blockingTaskRunning()
+      && ctx->anari.isLoadableDevice(settings.rendererLibrary)) {
     auto &scene = ctx->vsr.scene;
     // A library the scene has no renderers for gets its device loaded once,
     // so the bind can create the standard set; a library that fails to load
