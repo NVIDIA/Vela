@@ -15,6 +15,7 @@ project_add_executable(
   test_CameraRendererArchive.cpp
   test_Algorithms.cpp
   test_AutoExposure.cpp
+  test_Any.cpp
   test_AnyArray.cpp
   test_Array.cpp
   test_ComponentSerialization.cpp
@@ -156,6 +157,7 @@ add_test(NAME vsr::ArchiveCompatibility
 add_test(NAME vsr::CameraArchive COMMAND ${PROJECT_NAME} "[CameraArchive]")
 add_test(NAME vsr::RendererArchive COMMAND ${PROJECT_NAME} "[RendererArchive]")
 add_test(NAME vsr::Algorithms    COMMAND ${PROJECT_NAME} "[Algorithms]"   )
+add_test(NAME vsr::Any           COMMAND ${PROJECT_NAME} "[Any]"          )
 add_test(NAME vsr::AnyArray      COMMAND ${PROJECT_NAME} "[AnyArray]"     )
 add_test(NAME vsr::Array         COMMAND ${PROJECT_NAME} "[Array]"        )
 add_test(NAME vsr::ComponentSerialization
