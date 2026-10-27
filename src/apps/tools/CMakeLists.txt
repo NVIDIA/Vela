@@ -13,6 +13,10 @@ project(vsrConvert)
 project_add_executable(vsrConvert.cpp)
 project_link_libraries(vsr_core)
 
+project(vsrAssemble)
+project_add_executable(vsrAssemble.cpp)
+project_link_libraries(vsr_app vsr_scene vsr_io)
+
 project(vsrRender)
 project_add_executable(vsrRender.cpp)
 project_link_libraries(
