@@ -53,7 +53,11 @@ void TaskPanel::buildUI()
   ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthStretch, 1.f);
   ImGui::TableSetupColumn("Progress", ImGuiTableColumnFlags_WidthStretch, 2.f);
   ImGui::TableSetupColumn("Message", ImGuiTableColumnFlags_WidthStretch, 3.f);
-  ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 70.f);
+  // Size the Cancel column from the button itself so it follows font and UI
+  // scaling; SmallButton pads only horizontally.
+  const float cancelWidth =
+      ImGui::CalcTextSize("Cancel").x + 2.f * ImGui::GetStyle().FramePadding.x;
+  ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, cancelWidth);
   ImGui::TableHeadersRow();
 
   const bool canCancel = m_context->canSend();
@@ -62,9 +66,12 @@ void TaskPanel::buildUI()
     ImGui::TableNextRow();
 
     ImGui::TableNextColumn();
-    ImGui::TextUnformatted(task.label.empty() ? "<task>" : task.label.c_str());
+    const char *label = task.label.empty() ? "<task>" : task.label.c_str();
+    ImGui::TextUnformatted(label);
+    // The column clips long labels, so the tooltip carries the full text.
     vsr::ui::tooltipForPreviousItem(
-        ("task id " + std::to_string(task.taskId)).c_str());
+        (std::string(label) + "\ntask id " + std::to_string(task.taskId))
+            .c_str());
 
     ImGui::TableNextColumn();
     if (task.state == TaskState::Failed)
@@ -107,12 +114,18 @@ void TaskPanel::buildUI()
         ImGui::SameLine();
       }
       ImGui::TextColored(ui::ERROR_TEXT_COLOR, "%s", task.error.c_str());
+      if (!task.error.empty())
+        vsr::ui::tooltipForPreviousItem(task.error.c_str());
     } else if (task.framesCompleted != 0) {
       ImGui::TextWrapped("%llu frames  %s",
           static_cast<unsigned long long>(task.framesCompleted),
           progress.message.c_str());
+      if (!progress.message.empty())
+        vsr::ui::tooltipForPreviousItem(progress.message.c_str());
     } else {
       ImGui::TextWrapped("%s", progress.message.c_str());
+      if (!progress.message.empty())
+        vsr::ui::tooltipForPreviousItem(progress.message.c_str());
     }
 
     ImGui::TableNextColumn();
