@@ -55,9 +55,24 @@ jobs:
         ${{ github.workspace }}
     - name: Build
       run: cmake --build ${{ github.workspace }}/build --config ${{ matrix.config }}
-    - name: Unit Tests
+    # ANARI is installed in the dependency prefix, not the build tree, and
+    # installed binaries carry no RPATH. Put its runtime on the loader search
+    # path so device modules such as helide load and the staged vsrRender of
+    # the install check can start.
+    - name: Unit Tests (Windows)
+      if: runner.os == 'Windows'
       working-directory: ${{ github.workspace }}/build
-      run: ctest -C ${{ matrix.config }} --output-on-failure
+      shell: pwsh
+      run: |
+        $env:PATH = "${{ github.workspace }}\deps\bin;${{ github.workspace }}\deps\lib;$env:PATH"
+        ctest -C ${{ matrix.config }} --output-on-failure
+    - name: Unit Tests
+      if: runner.os != 'Windows'
+      working-directory: ${{ github.workspace }}/build
+      shell: bash
+      run: |
+        export LD_LIBRARY_PATH="${{ github.workspace }}/deps/lib:$LD_LIBRARY_PATH"
+        ctest -C ${{ matrix.config }} --output-on-failure
 
   build-cuda:
     runs-on: ${{ matrix.runs-on }}

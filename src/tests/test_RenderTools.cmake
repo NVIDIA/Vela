@@ -31,6 +31,8 @@ endif()
 if(EXISTS "${stage}/bin/vsrOffline${EXECUTABLE_SUFFIX}")
   message(FATAL_ERROR "Clean install contains the retired renderer: ${stage}")
 endif()
+# Installing clears the build-tree RPATH, so the ANARI runtime must be on the
+# loader search path, as it must be for any installed Vela binary.
 execute_process(
   COMMAND "${stage}/bin/vsrRender${EXECUTABLE_SUFFIX}" --help
   TIMEOUT 20 RESULT_VARIABLE result OUTPUT_VARIABLE help ERROR_VARIABLE error)
