@@ -48,7 +48,9 @@ void renderAnimationSequence(Context &ctx,
 
   // Create a fresh isolated device (not shared with viewport) //
 
-  auto library = anari::loadLibrary(libName.c_str(), anariStatusFunc, nullptr);
+  auto library = anari::loadLibrary(libName.c_str(),
+      ctx.anari.statusCallback(),
+      ctx.anari.statusCallbackUserData());
   if (!library) {
     vsr::core::logError(
         "[renderAnimationSequence] Failed to load ANARI library '%s'",
@@ -146,7 +148,7 @@ void renderAnimationSequence(Context &ctx,
       outputDir.c_str());
 
   for (int frameIndex = frameStart; frameIndex <= frameEnd;
-      frameIndex += increment) {
+       frameIndex += increment) {
     if (preFrameCallback) {
       if (!preFrameCallback(frameIndex, numFrames)) {
         vsr::core::logStatus(

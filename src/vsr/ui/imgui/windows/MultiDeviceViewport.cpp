@@ -96,8 +96,8 @@ void MultiDeviceViewport::setLibrary(const std::string &libName)
   auto &adm = ctx->anari;
   auto &scene = ctx->vsr.scene;
 
-  auto library =
-      anari::loadLibrary(libName.c_str(), vsr::app::anariStatusFunc, ctx);
+  auto library = anari::loadLibrary(
+      libName.c_str(), adm.statusCallback(), adm.statusCallbackUserData());
   if (!library) {
     vsr::core::logError(
         "[multi-viewport] failed to load ANARI library '%s'", libName.c_str());

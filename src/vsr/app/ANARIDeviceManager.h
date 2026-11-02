@@ -50,8 +50,13 @@ struct DeviceIdentifier
  * (`[subtype@]library`, see DeviceIdentifier); subtypes of the same library
  * share one loaded anari::Library.
  *
+ * ANARI status messages go to anariStatusFunc unless the caller installs its
+ * own callback with setStatusCallback(); embedders do that to handle a fatal
+ * device error themselves instead of having the process exit.
+ *
  * Example:
  *   ANARIDeviceManager mgr;
+ *   mgr.setStatusCallback(myStatusFunc, myAppState); // optional
  *   auto device = mgr.loadDevice("visrtx");
  *   auto other = mgr.loadDevice("gpu@visrtx");
  *   auto *idx = mgr.acquireRenderIndex(scene, deviceToken, device);
@@ -66,6 +71,20 @@ struct ANARIDeviceManager
   const std::vector<std::string> &deviceList() const;
   void setDeviceList(const std::vector<std::string> &deviceIds);
   bool isLoadableDevice(const std::string &deviceId) const;
+
+  // Status callback (and its user data) every library loaded from now on
+  // reports to. ANARI binds it when a library loads, so libraries that are
+  // already loaded keep the one they were loaded with: set it before the
+  // first loadDevice(). A null callback restores the default, anariStatusFunc
+  // with this manager's verbose flag, which exits the process on a fatal
+  // error.
+  void setStatusCallback(
+      ANARIStatusCallback callback, const void *userData = nullptr);
+  // The callback and user data in effect; the default when none was set.
+  // Code that loads ANARI libraries on its own passes these to
+  // anari::loadLibrary() so it reports the same way.
+  ANARIStatusCallback statusCallback() const;
+  const void *statusCallbackUserData() const;
 
   anari::Device loadDevice(const std::string &deviceId,
       const std::vector<DeviceInitParam> &initialDeviceParams = {});
@@ -90,6 +109,8 @@ struct ANARIDeviceManager
   void unloadAllLibraries();
 
   const bool *m_verboseFlag{nullptr};
+  ANARIStatusCallback m_statusCallback{nullptr};
+  const void *m_statusCallbackUserData{nullptr};
   struct LiveAnariIndex
   {
     vsr::scene::Scene *scene{nullptr};
@@ -112,7 +133,9 @@ struct ANARIDeviceManager
   } m_settings;
 };
 
-void anariStatusFunc(const void *_core,
+// The default status callback. `userData` is a `const bool *` verbose flag
+// (or null); a fatal error is printed and exits the process.
+void anariStatusFunc(const void *userData,
     ANARIDevice device,
     ANARIObject source,
     anari::DataType sourceType,

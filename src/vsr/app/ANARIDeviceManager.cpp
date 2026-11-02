@@ -8,6 +8,7 @@
 #include "vsr/rendering/index/RenderIndexAllLayers.hpp"
 #include "vsr/rendering/index/RenderIndexFlatRegistry.hpp"
 // std
+#include <algorithm>
 #include <cassert>
 
 namespace vsr::app {
@@ -151,6 +152,31 @@ bool ANARIDeviceManager::isLoadableDevice(const std::string &deviceId) const
   return DeviceIdentifier::parse(deviceId).has_value();
 }
 
+void ANARIDeviceManager::setStatusCallback(
+    ANARIStatusCallback callback, const void *userData)
+{
+  const bool anyLibraryLoaded = std::any_of(m_loadedLibraries.begin(),
+      m_loadedLibraries.end(),
+      [](const auto &lib) { return lib.second != nullptr; });
+  if (anyLibraryLoaded) {
+    vsr::core::logWarning(
+        "[ANARIDeviceManager] status callback changed after ANARI libraries"
+        " were loaded; only libraries loaded from now on will use it");
+  }
+  m_statusCallback = callback;
+  m_statusCallbackUserData = callback ? userData : nullptr;
+}
+
+ANARIStatusCallback ANARIDeviceManager::statusCallback() const
+{
+  return m_statusCallback ? m_statusCallback : anariStatusFunc;
+}
+
+const void *ANARIDeviceManager::statusCallbackUserData() const
+{
+  return m_statusCallback ? m_statusCallbackUserData : m_verboseFlag;
+}
+
 anari::Device ANARIDeviceManager::loadDevice(const std::string &deviceId,
     const std::vector<DeviceInitParam> &initialDeviceParams)
 {
@@ -167,8 +193,9 @@ anari::Device ANARIDeviceManager::loadDevice(const std::string &deviceId,
 
   anari::Library library = m_loadedLibraries[id->library];
   if (!library) {
-    library =
-        anari::loadLibrary(id->library.c_str(), anariStatusFunc, m_verboseFlag);
+    library = anari::loadLibrary(
+        id->library.c_str(), statusCallback(), statusCallbackUserData());
+    // anari::loadLibrary() reports why it failed to the status callback.
     if (!library)
       return nullptr;
     m_loadedLibraries[id->library] = library;
