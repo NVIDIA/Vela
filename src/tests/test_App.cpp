@@ -76,6 +76,86 @@ SCENARIO(
   }
 }
 
+namespace {
+
+struct StatusRecord
+{
+  int calls{0};
+  ANARIStatusSeverity severity{ANARI_SEVERITY_DEBUG};
+  std::string message;
+};
+
+void recordStatus(const void *userData,
+    ANARIDevice,
+    ANARIObject,
+    ANARIDataType,
+    ANARIStatusSeverity severity,
+    ANARIStatusCode,
+    const char *message)
+{
+  auto *record = static_cast<StatusRecord *>(const_cast<void *>(userData));
+  record->calls++;
+  record->severity = severity;
+  record->message = message ? message : "";
+}
+
+} // namespace
+
+SCENARIO(
+    "The ANARI device manager reports ANARI status to the caller's"
+    " callback",
+    "[App]")
+{
+  bool verbose = false;
+  vsr::app::ANARIDeviceManager manager(&verbose);
+
+  GIVEN("no callback has been set")
+  {
+    THEN("the default callback and the verbose flag are in effect")
+    {
+      REQUIRE(manager.statusCallback() == vsr::app::anariStatusFunc);
+      REQUIRE(manager.statusCallbackUserData() == &verbose);
+    }
+  }
+
+  GIVEN("a caller-supplied callback")
+  {
+    StatusRecord record;
+    manager.setStatusCallback(recordStatus, &record);
+
+    THEN("it and its user data are in effect")
+    {
+      REQUIRE(manager.statusCallback() == recordStatus);
+      REQUIRE(manager.statusCallbackUserData() == &record);
+    }
+
+    WHEN("a library that does not exist is loaded")
+    {
+      auto device = manager.loadDevice("no_such_anari_library");
+
+      THEN("the callback receives why it failed")
+      {
+        REQUIRE(device == nullptr);
+        REQUIRE(record.calls > 0);
+        REQUIRE(record.severity == ANARI_SEVERITY_ERROR);
+        REQUIRE(
+            record.message.find("no_such_anari_library") != std::string::npos);
+      }
+    }
+
+    WHEN("the callback is cleared")
+    {
+      manager.setStatusCallback(nullptr, &record);
+
+      THEN("the default callback and the verbose flag are back")
+      {
+        REQUIRE(manager.statusCallback() == vsr::app::anariStatusFunc);
+        REQUIRE(manager.statusCallbackUserData() == &verbose);
+      }
+    }
+  }
+}
+
 SCENARIO("Device Identifiers name a subtype of an ANARI library", "[App]")
 {
   using vsr::app::DeviceIdentifier;
