@@ -5,6 +5,11 @@ if (NOT BUILD_TESTING)
   return()
 endif()
 
+# Most suites skip at runtime when no ANARI device loads, but the offline
+# render and render CLI suites assert on real pixels and cannot. They are
+# registered only with VSR_TEST_WITH_HELIDE (see the top-level CMakeLists,
+# which validates that helide exists), so a run's test list is a property of
+# the build, not of the host.
 project(vsrTests LANGUAGES CXX)
 project_add_executable(
   test_App.cpp
@@ -74,7 +79,9 @@ endif()
 if (TARGET vsr_lua)
   target_sources(${PROJECT_NAME} PRIVATE test_LuaRenderer.cpp)
   target_link_libraries(${PROJECT_NAME} PRIVATE vsr_lua)
-  add_test(NAME vsr::LuaRenderer COMMAND ${PROJECT_NAME} "[LuaRenderer]")
+  if (VSR_TEST_WITH_HELIDE)
+    add_test(NAME vsr::LuaRenderer COMMAND ${PROJECT_NAME} "[LuaRenderer]")
+  endif()
 endif()
 if (TARGET vsr_scivis_studio_client_core)
   target_sources(${PROJECT_NAME} PRIVATE
@@ -152,7 +159,10 @@ add_test(NAME vsr::AutoExposure   COMMAND ${PROJECT_NAME} "[AutoExposure]" )
 if (TARGET vsr_ui_imgui)
   target_link_libraries(${PROJECT_NAME} PRIVATE vsr_ui_imgui)
   target_compile_definitions(${PROJECT_NAME} PRIVATE VSR_TEST_UI)
-  add_test(NAME vsr::OfflineRenderUI COMMAND ${PROJECT_NAME} "[OfflineRenderUI]")
+  if (VSR_TEST_WITH_HELIDE)
+    add_test(NAME vsr::OfflineRenderUI
+      COMMAND ${PROJECT_NAME} "[OfflineRenderUI]")
+  endif()
 endif()
 if (TARGET vsrRender AND UNIX)
   target_sources(${PROJECT_NAME} PRIVATE test_RenderCLI.cpp)
@@ -174,12 +184,7 @@ if (TARGET vsrRender AND UNIX)
       -DEXECUTABLE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}
       -P ${CMAKE_CURRENT_SOURCE_DIR}/test_RenderTools.cmake)
   set_tests_properties(vsr::RenderTools PROPERTIES RUN_SERIAL TRUE TIMEOUT 60)
-  add_test(NAME vsr::RenderCLI COMMAND ${PROJECT_NAME} "[RenderCLI]")
-  set_tests_properties(vsr::RenderCLI PROPERTIES TIMEOUT 180)
   if(VSR_USE_MPI AND MPIEXEC_EXECUTABLE)
-    # The serial suite starts hundreds of singleton MPI runtimes. Keep each
-    # subprocess's 20s bound while allowing aggregate initialization overhead.
-    set_tests_properties(vsr::RenderCLI PROPERTIES TIMEOUT 600)
     string(JOIN " " VSR_MPI_PREFLAGS ${MPIEXEC_PREFLAGS})
     string(JOIN " " VSR_MPI_POSTFLAGS ${MPIEXEC_POSTFLAGS})
     target_compile_definitions(${PROJECT_NAME} PRIVATE
@@ -187,12 +192,28 @@ if (TARGET vsrRender AND UNIX)
       VSR_MPI_NUMPROC_FLAG="${MPIEXEC_NUMPROC_FLAG}"
       VSR_MPI_PREFLAGS="${VSR_MPI_PREFLAGS}"
       VSR_MPI_POSTFLAGS="${VSR_MPI_POSTFLAGS}")
-    add_test(NAME vsr::RenderMPI COMMAND ${PROJECT_NAME} "[RenderMPI]")
-    set_tests_properties(vsr::RenderMPI PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
+  endif()
+  if (VSR_TEST_WITH_HELIDE)
+    add_test(NAME vsr::RenderCLI COMMAND ${PROJECT_NAME} "[RenderCLI]")
+    set_tests_properties(vsr::RenderCLI PROPERTIES TIMEOUT 180)
+    if(VSR_USE_MPI AND MPIEXEC_EXECUTABLE)
+      # The serial suite starts hundreds of singleton MPI runtimes. Keep each
+      # subprocess's 20s bound while allowing aggregate initialization
+      # overhead.
+      set_tests_properties(vsr::RenderCLI PROPERTIES TIMEOUT 600)
+      add_test(NAME vsr::RenderMPI COMMAND ${PROJECT_NAME} "[RenderMPI]")
+      set_tests_properties(vsr::RenderMPI PROPERTIES
+        TIMEOUT 180 RUN_SERIAL TRUE)
+    endif()
   endif()
 endif()
-add_test(NAME vsr::App COMMAND ${PROJECT_NAME} "[App]")
-add_test(NAME vsr::OfflineRender COMMAND ${PROJECT_NAME} "[OfflineRender]")
+if (VSR_TEST_WITH_HELIDE)
+  add_test(NAME vsr::App COMMAND ${PROJECT_NAME} "[App]")
+  add_test(NAME vsr::OfflineRender COMMAND ${PROJECT_NAME} "[OfflineRender]")
+else()
+  # The non-render App cases still run; the offline render ones need a device.
+  add_test(NAME vsr::App COMMAND ${PROJECT_NAME} "[App]~[OfflineRender]")
+endif()
 add_test(NAME vsr::AnimationArchive COMMAND ${PROJECT_NAME} "[AnimationArchive]")
 add_test(NAME vsr::AnimationManagerArchive
   COMMAND ${PROJECT_NAME} "[AnimationManagerArchive]")

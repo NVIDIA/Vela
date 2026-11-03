@@ -118,6 +118,31 @@ if (BUILD_TESTING)
   enable_testing()
 endif()
 
+# Some suites render real pixels and assert on them, so they need a working
+# ANARI device rather than a skip. helide is the portable one, but it is not
+# part of every ANARI-SDK build, so whether those tests run is a build
+# decision, never a property of the host: turn this on where helide is
+# available. On, a missing helide is a configuration error.
+cmake_dependent_option(VSR_TEST_WITH_HELIDE
+  "Register the tests that require a working helide ANARI device" OFF
+  "BUILD_TESTING" OFF)
+if (VSR_TEST_WITH_HELIDE)
+  find_library(VSR_HELIDE_LIBRARY
+    NAMES anari_library_helide
+    HINTS ENV LD_LIBRARY_PATH ENV DYLD_LIBRARY_PATH ENV PATH
+    PATH_SUFFIXES lib bin)
+  mark_as_advanced(VSR_HELIDE_LIBRARY)
+  if (NOT VSR_HELIDE_LIBRARY)
+    message(FATAL_ERROR
+      "VSR_TEST_WITH_HELIDE is ON but no helide ANARI device was found. "
+      "Build ANARI-SDK with -DBUILD_HELIDE_DEVICE=ON, point "
+      "VSR_HELIDE_LIBRARY at libanari_library_helide, or configure with "
+      "-DVSR_TEST_WITH_HELIDE=OFF to skip the device-dependent tests.")
+  endif()
+  message(STATUS "Device-dependent tests enabled, using helide: "
+    "${VSR_HELIDE_LIBRARY}")
+endif()
+
 ## Build Libraries ##
 
 add_subdirectory(external)
