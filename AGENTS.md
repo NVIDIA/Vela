@@ -43,6 +43,13 @@ Key optional CMake flags: `VSR_BUILD_APPS`, `VSR_BUILD_INTERACTIVE_APPS`,
 
 Test sources: `src/tests/` (one `test_*.cpp` per suite). Run via ctest from the build directory, e.g. `ctest -C Release -R test_Forest`.
 
+Suites that assert on rendered pixels need a working ANARI device and are
+registered only with `-DVSR_TEST_WITH_HELIDE=ON`; configuring then fails if no
+`libanari_library_helide` is found. It defaults to `OFF`, which drops
+`vsr::OfflineRender`, `vsr::OfflineRenderUI`, `vsr::RenderCLI`,
+`vsr::RenderMPI`, `vsr::LuaRenderer` and the `[OfflineRender]` cases of
+`vsr::App`, so enable it in local builds whose ANARI-SDK has helide.
+
 ## Architecture
 
 ### Library Dependency Layers
