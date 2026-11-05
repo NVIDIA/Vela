@@ -5,6 +5,7 @@
 
 #include "vsr/core/ColorMapUtil.hpp"
 #include "vsr/core/FlatMap.hpp"
+#include "vsr/io/AnariCaptureImport.hpp"
 #include "vsr/io/UsdImport.hpp"
 #include "vsr/scene/Scene.hpp"
 // std
@@ -32,6 +33,7 @@ using namespace vsr::scene;
 
 void import_3DGSPLY(Scene &scene, vsr::animation::AnimationManager &animMgr, const char *filename, LayerNodeRef location = {});
 void import_AGX(Scene &scene, vsr::animation::AnimationManager &animMgr, const char *filename, LayerNodeRef location = {});
+AnariCaptureImportReport import_ANARI_CAPTURE(Scene &scene, vsr::animation::AnimationManager &animMgr, const char *filename, LayerNodeRef location = {});
 void import_ASSIMP(Scene &scene, vsr::animation::AnimationManager &animMgr, const char *filename, LayerNodeRef location = {}, bool flatten = false);
 void import_AXYZ(Scene &scene, vsr::animation::AnimationManager &animMgr, const char *filename, LayerNodeRef location = {});
 void import_DLAF(Scene &scene, vsr::animation::AnimationManager &animMgr, const char *filename, LayerNodeRef location = {}, bool useDefaultMaterial = false);
@@ -143,6 +145,7 @@ enum class ImporterType
 {
   _3DGSPLY,
   AGX,
+  ANARI_CAPTURE,
   ASSIMP,
   ASSIMP_FLAT,
   AXYZ,

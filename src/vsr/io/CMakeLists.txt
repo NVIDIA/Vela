@@ -7,6 +7,7 @@ project_add_library(STATIC)
 
 project_sources(
 PRIVATE
+  AnariCaptureImport.cpp
   UsdImport.cpp
   archives/SceneArchive.cpp
   archives/ObjectArchive.cpp
@@ -35,12 +36,14 @@ PRIVATE
   images/detail/udim.cpp
   importers/detail/ensight_io.cpp
   importers/detail/HDRImage.cpp
+  importers/detail/AnariCaptureText.cpp
   importers/detail/importer_common.cpp
   importers/detail/pbrt/PbrtLexer.cpp
   importers/detail/pbrt/PbrtParser.cpp
   importers/detail/pbrt/PbrtScene.cpp
   importers/import_3DGSPLY.cpp
   importers/import_AGX.cpp
+  importers/import_ANARI_CAPTURE.cpp
   importers/import_ASSIMP.cpp
   importers/import_AXYZ.cpp
   importers/import_DLAF.cpp

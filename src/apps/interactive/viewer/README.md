@@ -57,6 +57,8 @@ CLI parsing is split into two layers:
 Use one of these flags before filenames to select how those files are loaded:
 
 - `-agx`
+- `-anari_capture` (an ANARI Capture written by the ANARI-SDK `capture`
+  device; its `blobs/` directory must sit beside it)
 - `-assimp`
 - `-assimp_flat`
 - `-axyz`

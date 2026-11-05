@@ -83,6 +83,8 @@ void Context::parseCommandLine(std::vector<std::string> &args)
       importerType = vsr::io::ImporterType::_3DGSPLY;
     else if (arg == "-agx")
       importerType = vsr::io::ImporterType::AGX;
+    else if (arg == "-anari_capture")
+      importerType = vsr::io::ImporterType::ANARI_CAPTURE;
     else if (arg == "-assimp")
       importerType = vsr::io::ImporterType::ASSIMP;
     else if (arg == "-assimp_flat")

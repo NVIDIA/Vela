@@ -87,6 +87,18 @@ _Avoid_: Save, serialize
 
 ### Foreign-Format Import
 
+**ANARI Capture**:
+A text record, written by the ANARI-SDK `capture` device at one render, of the
+committed state of every object that frame could reach, with its larger arrays
+held in Blobs beside it. Importing one adds its world, instances and camera to
+a scene; what VSR cannot hold is reported, not applied. Unrelated to the Scene
+Archive the `anari_vsr` device writes.
+_Avoid_: capture (unqualified), live capture, capture file
+
+**Blob**:
+The raw elements of one captured array, stored in a file named by its content
+beside the ANARI Capture that refers to it.
+
 **Stage**:
 The composed scene an import reads a foreign representation from, identified by
 the file that was opened.

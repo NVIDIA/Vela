@@ -86,6 +86,7 @@ resulting vocabulary.
 | --- | --- | --- |
 | [0011](0011-distinguish-archives-imports-and-dumps.md) | Distinguish Archives, foreign conversion, and application dumps | |
 | [0024](0024-read-pre-rename-tsd-file-identifiers.md) | Read pre-rename TSD file identifiers, but never write them | |
+| [0052](0052-import-anari-captures-directly-with-vela-s-own-reader.md) | Import ANARI Captures directly, with Vela's own reader | |
 
 See [`src/vsr/io/CONTEXT.md`](../../src/vsr/io/CONTEXT.md) for the resulting
 vocabulary and [`vsr-io-archive-refactor.md`](../vsr-io-archive-refactor.md)
