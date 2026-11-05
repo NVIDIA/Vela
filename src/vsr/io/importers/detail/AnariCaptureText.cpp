@@ -59,6 +59,39 @@ bool isArrayLabel(std::string_view label)
   return label == "array1d" || label == "array2d" || label == "array3d";
 }
 
+// Whether `id` is `<label>@<n>` with a label the format defines.
+bool isObjectId(std::string_view id)
+{
+  static constexpr std::string_view LABELS[] = {"frame",
+      "camera",
+      "renderer",
+      "world",
+      "instance",
+      "group",
+      "light",
+      "surface",
+      "geometry",
+      "material",
+      "sampler",
+      "spatialField",
+      "volume",
+      "array1d",
+      "array2d",
+      "array3d"};
+  const auto at = id.find('@');
+  if (at == std::string_view::npos || at + 1 == id.size())
+    return false;
+  const auto label = id.substr(0, at);
+  const auto number = id.substr(at + 1);
+  if (number.find_first_not_of("0123456789") != std::string_view::npos)
+    return false;
+  for (auto l : LABELS) {
+    if (label == l)
+      return true;
+  }
+  return false;
+}
+
 // Component decoding /////////////////////////////////////////////////////////
 
 template <typename T>
@@ -199,7 +232,7 @@ bool readStringList(
   return true;
 }
 
-bool readDevice(LineReader &in, Capture &capture, std::string &error)
+bool readDevice(LineReader &in, CaptureText &capture, std::string &error)
 {
   std::string_view line;
   while (in.nextContent(line)) {
@@ -220,7 +253,7 @@ bool readDevice(LineReader &in, Capture &capture, std::string &error)
 }
 
 // The `calls` block: "total <n>", then "<function> <n>" lines.
-bool readCalls(LineReader &in, Capture &capture, std::string &error)
+bool readCalls(LineReader &in, CaptureText &capture, std::string &error)
 {
   std::string_view line;
   while (in.nextContent(line)) {
@@ -242,7 +275,7 @@ bool readCalls(LineReader &in, Capture &capture, std::string &error)
   return false;
 }
 
-bool readWarnings(LineReader &in, Capture &capture, std::string &error)
+bool readWarnings(LineReader &in, CaptureText &capture, std::string &error)
 {
   std::string_view line;
   while (in.nextContent(line)) {
@@ -326,10 +359,11 @@ const Entry *Block::find(std::string_view name) const
 
 // Free functions /////////////////////////////////////////////////////////////
 
-std::optional<Capture> parseCapture(std::string_view text, std::string &error)
+std::optional<CaptureText> parseCaptureText(
+    std::string_view text, std::string &error)
 {
   LineReader in{text};
-  Capture capture;
+  CaptureText capture;
 
   std::string_view line;
   if (!in.nextContent(line)) {
@@ -338,20 +372,20 @@ std::optional<Capture> parseCapture(std::string_view text, std::string &error)
   }
   std::string_view versionText;
   if (firstWord(line, versionText) != "anari-capture") {
-    error = "not an ANARI Capture (no 'anari-capture' header)";
+    error = "not an ANARI CaptureText (no 'anari-capture' header)";
     return {};
   }
   const auto r = std::from_chars(versionText.data(),
       versionText.data() + versionText.size(),
       capture.version);
   if (r.ec != std::errc() || r.ptr != versionText.data() + versionText.size()) {
-    error =
-        "unreadable ANARI Capture version '" + std::string(versionText) + "'";
+    error = "unreadable ANARI CaptureText version '" + std::string(versionText)
+        + "'";
     return {};
   }
   if (capture.version < OLDEST_SUPPORTED_VERSION
       || capture.version > NEWEST_SUPPORTED_VERSION) {
-    error = "ANARI Capture version " + std::to_string(capture.version)
+    error = "ANARI CaptureText version " + std::to_string(capture.version)
         + " is not supported (this reader knows versions "
         + std::to_string(OLDEST_SUPPORTED_VERSION) + " to "
         + std::to_string(NEWEST_SUPPORTED_VERSION) + ")";
@@ -384,12 +418,11 @@ std::optional<Capture> parseCapture(std::string_view text, std::string &error)
     Block block;
     std::string_view subtype;
     block.id = std::string(firstWord(head, subtype));
-    const auto at = block.id.find('@');
-    if (at == std::string::npos || at == 0) {
+    if (!isObjectId(block.id)) {
       error = in.where() + "malformed object ID '" + block.id + "'";
       return {};
     }
-    block.label = block.id.substr(0, at);
+    block.label = block.id.substr(0, block.id.find('@'));
     if (!subtype.empty()) {
       block.subtype = unquote(subtype);
       if (!block.subtype) {
@@ -409,7 +442,7 @@ std::optional<Capture> parseCapture(std::string_view text, std::string &error)
   }
 
   if (capture.frameId.empty()) {
-    error = "the ANARI Capture has no frame block";
+    error = "the ANARI CaptureText has no frame block";
     return {};
   }
 
