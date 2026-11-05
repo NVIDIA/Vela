@@ -43,7 +43,11 @@ Context::~Context()
 
 void Context::parseCommandLine(int argc, const char **argv)
 {
-  std::vector<std::string> args(argv, argv + argc);
+  // Callers may consume arguments by nulling them out; they read as empty,
+  // which parseCommandLine(args) skips.
+  std::vector<std::string> args;
+  for (int i = 0; i < argc; i++)
+    args.emplace_back(argv[i] ? argv[i] : "");
   parseCommandLine(args);
 }
 
