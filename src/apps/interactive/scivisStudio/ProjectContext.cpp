@@ -2102,6 +2102,8 @@ const char *toString(vsr::io::ImporterType importerType)
     return "3DGSPLY";
   case vsr::io::ImporterType::AGX:
     return "AGX";
+  case vsr::io::ImporterType::ANARI_CAPTURE:
+    return "ANARI_CAPTURE";
   case vsr::io::ImporterType::ASSIMP:
     return "ASSIMP";
   case vsr::io::ImporterType::ASSIMP_FLAT:

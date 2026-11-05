@@ -74,6 +74,9 @@ void import_file(Scene &scene,
     vsr::io::import_3DGSPLY(scene, animMgr, file.c_str(), root);
   else if (f.first == ImporterType::AGX)
     vsr::io::import_AGX(scene, animMgr, file.c_str(), root);
+  else if (f.first == ImporterType::ANARI_CAPTURE)
+    logAnariCaptureImportReport(file.c_str(),
+        vsr::io::import_ANARI_CAPTURE(scene, animMgr, file.c_str(), root));
   else if (f.first == ImporterType::ASSIMP)
     vsr::io::import_ASSIMP(scene, animMgr, file.c_str(), root, false);
   else if (f.first == ImporterType::ASSIMP_FLAT)

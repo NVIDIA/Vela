@@ -20,6 +20,7 @@ project_add_executable(
   test_ArchiveCompatibility.cpp
   test_CameraRendererArchive.cpp
   test_Algorithms.cpp
+  test_AnariCaptureImport.cpp
   test_AutoExposure.cpp
   test_Any.cpp
   test_AnyArray.cpp
@@ -227,6 +228,8 @@ add_test(NAME vsr::AnyArray      COMMAND ${PROJECT_NAME} "[AnyArray]"     )
 add_test(NAME vsr::Array         COMMAND ${PROJECT_NAME} "[Array]"        )
 add_test(NAME vsr::ComponentSerialization
   COMMAND ${PROJECT_NAME} "[ComponentSerialization]")
+add_test(NAME vsr::AnariCaptureImport
+  COMMAND ${PROJECT_NAME} "[AnariCaptureImport]")
 add_test(NAME vsr::DataPath      COMMAND ${PROJECT_NAME} "[DataPath]"     )
 add_test(NAME vsr::DataTree      COMMAND ${PROJECT_NAME} "[DataTree]"     )
 add_test(NAME vsr::FlatMap       COMMAND ${PROJECT_NAME} "[FlatMap]"      )

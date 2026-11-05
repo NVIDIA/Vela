@@ -353,10 +353,11 @@ void printHelp()
       "saved poses, implicit sequences, demo scenes or implicit lights.\n\n"
       "  --importer NAME Select importer for subsequent foreign inputs; auto resets\n"
       "                  to extension detection. Native content always loads.\n"
-      "                  agx, assimp, assimp-flat, axyz, dlaf, e57xyz, ensight,\n"
-      "                  gltf, hdri, hsmesh, nbody, obj, pdb, pbrt, ply, pointsbin,\n"
-      "                  pt, silo, smesh, smesh-animation, swc, swc-sdf, trk,\n"
-      "                  usd, usd-mtlx, vtp, vtu, xyzdp, volume, volume-animation, xf\n"
+      "                  agx, anari-capture, assimp, assimp-flat, axyz, dlaf,\n"
+      "                  e57xyz, ensight, gltf, hdri, hsmesh, nbody, obj, pdb,\n"
+      "                  pbrt, ply, pointsbin, pt, silo, smesh, smesh-animation,\n"
+      "                  swc, swc-sdf, trk, usd, usd-mtlx, vtp, vtu, xyzdp,\n"
+      "                  volume, volume-animation, xf\n"
       "                  pointsbin/volume-animation group subsequent files into\n"
       "                  one sequence until routing changes; bindings are retained.\n"
       "  --layer NAME    Assign subsequent imports to this layer (default: default)\n"
@@ -869,6 +870,7 @@ vsr::io::ImporterType importerType(const Input &input)
 {
   using T = vsr::io::ImporterType;
   const std::pair<const char *, T> names[] = {{"agx", T::AGX},
+      {"anari-capture", T::ANARI_CAPTURE},
       {"assimp", T::ASSIMP},
       {"assimp-flat", T::ASSIMP_FLAT},
       {"axyz", T::AXYZ},
@@ -915,6 +917,8 @@ vsr::io::ImporterType importerType(const Input &input)
       name = "hdri";
     else if (name == "sil")
       name = "silo";
+    else if (name == "capture")
+      name = "anari-capture";
   }
   for (const auto &[key, type] : names)
     if (name == key)

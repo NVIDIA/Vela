@@ -29,6 +29,7 @@ struct ImporterChoice
 
 constexpr ImporterChoice IMPORTERS[] = {
     {"AGX", vsr::io::ImporterType::AGX},
+    {"ANARI_CAPTURE", vsr::io::ImporterType::ANARI_CAPTURE},
     {"ASSIMP", vsr::io::ImporterType::ASSIMP},
     {"ASSIMP_FLAT", vsr::io::ImporterType::ASSIMP_FLAT},
     {"AXYZ", vsr::io::ImporterType::AXYZ},
