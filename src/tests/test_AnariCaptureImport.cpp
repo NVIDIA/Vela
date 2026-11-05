@@ -353,6 +353,8 @@ SCENARIO("Input that is not a usable capture imports nothing",
       {"anari-capture 1\n\ndevice {\n  extensions ANARI_STRING_LIST []\n}\n",
           "no frame"},
       {"anari-capture 1\n\narray1d@0 {\n  bogus 1\n}\n", "unknown array field"},
+      {"anari-capture 1\n\nbogus@0 {\n}\n", "malformed object ID"},
+      {"anari-capture 1\n\ncamera@x {\n}\n", "malformed object ID"},
   };
   for (auto &c : cases) {
     GIVEN(std::string("The text: ") + c[0])
@@ -730,11 +732,15 @@ array1d@2 {
       REQUIRE(a->dataAs<uint16_t>()[1] == 32768);
     }
 
-    THEN("Opaque values and null elements are reported")
+    THEN("Opaque values are reported")
     {
       REQUIRE(light->parameter("callback") == nullptr);
       REQUIRE(hasDropped(report, "world.light[0].callback", "not recorded"));
-      REQUIRE(hasDropped(report, "world.light[1]", "null"));
+    }
+
+    THEN("A null element is an empty slot, not something dropped")
+    {
+      REQUIRE_FALSE(hasDropped(report, "world.light[1]"));
     }
   }
 }
@@ -831,6 +837,75 @@ frame@0 {
     THEN("It is rejected")
     {
       REQUIRE_FALSE(report.read);
+    }
+  }
+}
+
+SCENARIO(
+    "An object array keeps the elements VSR can hold", "[AnariCaptureImport]")
+{
+  GIVEN("A material whose sampler array also names the frame's renderer")
+  {
+    CaptureFixture f;
+    auto report = f.import(R"(anari-capture 1
+
+frame@0 {
+  renderer ANARI_RENDERER renderer@0
+  world ANARI_WORLD world@0
+}
+renderer@0 "default" {
+}
+world@0 {
+  surface ANARI_ARRAY1D array1d@0
+}
+array1d@0 {
+  elementType ANARI_SURFACE
+  dimensions (1)
+  data [
+    surface@0
+  ]
+}
+surface@0 {
+  material ANARI_MATERIAL material@0
+}
+material@0 "matte" {
+  layers ANARI_ARRAY1D array1d@1
+}
+array1d@1 {
+  elementType ANARI_SAMPLER
+  dimensions (3)
+  data [
+    sampler@0
+    renderer@0
+    null
+  ]
+}
+sampler@0 "image1D" {
+}
+)");
+
+    THEN("The array keeps its shape, with an empty slot for the element")
+    {
+      REQUIRE(report.read);
+      auto *m = objectNamed<Material>(f.scene, ANARI_MATERIAL, "material@0");
+      REQUIRE(m);
+      auto *a = m->parameterValueAsObject<Array>("layers");
+      REQUIRE(a);
+      REQUIRE(a->size() == 3);
+      auto *s = objectNamed<Sampler>(f.scene, ANARI_SAMPLER, "sampler@0");
+      REQUIRE(s);
+      REQUIRE(a->dataAs<size_t>()[0] == s->index());
+      REQUIRE(a->dataAs<size_t>()[1] == vsr::core::INVALID_INDEX);
+      REQUIRE(a->dataAs<size_t>()[2] == vsr::core::INVALID_INDEX);
+    }
+
+    THEN("Only the element that could not be held is reported")
+    {
+      REQUIRE(hasDropped(report,
+          "world.surface[0].material.layers[1]",
+          "cannot be a parameter"));
+      REQUIRE_FALSE(hasDropped(report, "world.surface[0].material.layers"));
+      REQUIRE_FALSE(hasDropped(report, "world.surface[0].material.layers[2]"));
     }
   }
 }

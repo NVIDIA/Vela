@@ -48,7 +48,7 @@ struct Block
   std::vector<Entry> entries; // in file order
 };
 
-struct Capture
+struct CaptureText
 {
   int version{0};
   std::vector<std::string> extensions;
@@ -61,7 +61,8 @@ struct Capture
 // Reads a capture's text. Returns an empty optional, and says why in `error`,
 // for text that is not a capture, has a version this reader does not know, has
 // no frame, or has a line the grammar does not allow.
-std::optional<Capture> parseCapture(std::string_view text, std::string &error);
+std::optional<CaptureText> parseCaptureText(
+    std::string_view text, std::string &error);
 
 // The ANARI type a name like "ANARI_FLOAT32_VEC3" spells, or ANARI_UNKNOWN.
 anari::DataType dataTypeFromName(std::string_view name);

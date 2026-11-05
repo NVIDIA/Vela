@@ -134,7 +134,7 @@ struct ArrayContents
 struct CaptureImporter
 {
   CaptureImporter(Scene *scene,
-      const cap::Capture *capture,
+      const cap::CaptureText *capture,
       std::filesystem::path blobDir,
       AnariCaptureImportReport *report);
 
@@ -180,7 +180,7 @@ struct CaptureImporter
   void reportRenderer(const std::string &id);
 
   Scene *m_scene{nullptr};
-  const cap::Capture *m_capture{nullptr};
+  const cap::CaptureText *m_capture{nullptr};
   std::filesystem::path m_blobDir;
   AnariCaptureImportReport *m_report{nullptr};
 
@@ -192,7 +192,7 @@ struct CaptureImporter
 };
 
 CaptureImporter::CaptureImporter(Scene *scene,
-    const cap::Capture *capture,
+    const cap::CaptureText *capture,
     std::filesystem::path blobDir,
     AnariCaptureImportReport *report)
     : m_scene(scene),
@@ -338,14 +338,10 @@ Array *CaptureImporter::importArray(
       indices.push_back(INVALID_INDEX);
       continue;
     }
+    // An element VSR cannot hold is reported at its own path and leaves an
+    // empty slot, so the array keeps its shape and the rest of it.
     auto *o = importObject(elementId, indexed(path, i));
-    if (!o) {
-      return static_cast<Array *>(fail(id,
-          path,
-          "element " + std::to_string(i) + " (" + elementId
-              + ") cannot be represented"));
-    }
-    indices.push_back(o->index());
+    indices.push_back(o ? o->index() : INVALID_INDEX);
   }
 
   auto array = m_scene->createArray(contents->elementType,
@@ -476,10 +472,8 @@ void CaptureImporter::placeContent(
   }
   for (size_t i = 0; i < contents->ids.size(); i++) {
     const auto &id = contents->ids[i];
-    if (id == NULL_ID) {
-      drop(indexed(path, i), "null element");
-      continue;
-    }
+    if (id == NULL_ID)
+      continue; // an empty slot, which the format allows
     if (auto *o = importObject(id, indexed(path, i)))
       m_scene->insertChildObjectNode(node, o->type(), o->index());
   }
@@ -514,10 +508,11 @@ void CaptureImporter::importInstances(
   }
   for (size_t i = 0; i < contents->ids.size(); i++) {
     const auto &id = contents->ids[i];
+    if (id == NULL_ID)
+      continue; // an empty slot, which the format allows
     auto *inst = block(id);
     if (!inst || inst->label != "instance") {
-      drop(
-          indexed(path, i), id == NULL_ID ? "null element" : "not an instance");
+      drop(indexed(path, i), "refers to " + id + ", not an instance");
       continue;
     }
     importInstance(*inst, fileNode, indexed(path, i));
@@ -713,7 +708,7 @@ AnariCaptureImportReport import_ANARI_CAPTURE(Scene &scene,
     return report;
   }
 
-  auto capture = cap::parseCapture(*text, report.error);
+  auto capture = cap::parseCaptureText(*text, report.error);
   if (!capture)
     return report;
 
