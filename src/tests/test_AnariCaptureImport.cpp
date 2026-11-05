@@ -909,3 +909,58 @@ sampler@0 "image1D" {
     }
   }
 }
+
+SCENARIO("References survive the scene's pools growing", "[AnariCaptureImport]")
+{
+  GIVEN("Thousands of arrays, the last geometry sharing the first's array")
+  {
+    // Enough objects that every pool reallocates during the import, so a
+    // second reference to an early capture ID must not hold a stale pointer.
+    constexpr int N = 3000;
+    std::string text = withWorld(
+        "world@0 {\n  surface ANARI_ARRAY1D array1d@0\n}\n"
+        "array1d@0 {\n  elementType ANARI_SURFACE\n"
+        "  dimensions ("
+        + std::to_string(N) + ")\n  data [\n");
+    for (int i = 0; i < N; i++)
+      text += "    surface@" + std::to_string(i) + "\n";
+    text += "  ]\n}\n";
+    for (int i = 0; i < N; i++) {
+      const auto s = std::to_string(i);
+      // Geometry i's positions are array1d@(i+1); the last one reuses the
+      // first geometry's array, which by then has moved.
+      const auto a = std::to_string(i + 1 == N ? 1 : i + 1);
+      text += "surface@" + s + " {\n  geometry ANARI_GEOMETRY geometry@" + s
+          + "\n}\ngeometry@" + s
+          + " \"sphere\" {\n  vertex.position ANARI_ARRAY1D array1d@" + a
+          + "\n}\n";
+      if (i + 1 != N) {
+        text += "array1d@" + std::to_string(i + 1)
+            + " {\n  elementType ANARI_FLOAT32_VEC3\n  dimensions (1)\n"
+              "  data [\n    ("
+            + s + ", 0, 0)\n  ]\n}\n";
+      }
+    }
+
+    CaptureFixture f;
+    auto report = f.import(text);
+
+    THEN("The last geometry refers to the first geometry's array")
+    {
+      REQUIRE(report.read);
+      REQUIRE(report.dropped.empty());
+      auto *first =
+          objectNamed<Geometry>(f.scene, ANARI_GEOMETRY, "geometry@0");
+      auto *last = objectNamed<Geometry>(f.scene,
+          ANARI_GEOMETRY,
+          ("geometry@" + std::to_string(N - 1)).c_str());
+      REQUIRE(first);
+      REQUIRE(last);
+      auto *a = first->parameterValueAsObject<Array>("vertex.position");
+      auto *b = last->parameterValueAsObject<Array>("vertex.position");
+      REQUIRE(a);
+      REQUIRE(a == b);
+      REQUIRE(a->name() == "array1d@1");
+    }
+  }
+}

@@ -149,14 +149,17 @@ struct CaptureImporter
       const cap::Block &b, std::string &reason) const;
   std::optional<ArrayContents> readArrayAt(
       const std::string &id, std::string &reason) const;
-  Array *importArray(const std::string &id, const std::string &path);
+  ArrayRef importArray(const std::string &id, const std::string &path);
 
   // Scene objects //
   Object *fail(
       const std::string &id, const std::string &path, std::string reason);
   Object *importObject(const std::string &id, const std::string &path);
-  void setParameters(Object &o, const cap::Block &b, const std::string &path);
-  bool setParameter(Object &o, const cap::Entry &e, const std::string &path);
+  Object *resolve(const Any &handle) const;
+  void setParameters(
+      const Any &handle, const cap::Block &b, const std::string &path);
+  bool setParameter(
+      const Any &handle, const cap::Entry &e, const std::string &path);
 
   // Instancing //
   void placeContent(
@@ -184,11 +187,15 @@ struct CaptureImporter
   std::filesystem::path m_blobDir;
   AnariCaptureImportReport *m_report{nullptr};
 
-  // Every scene object and array made so far, by capture ID; an ID that
-  // failed maps to the reason, so a second reference reports it again.
-  std::unordered_map<std::string, Object *> m_objects;
+  // Every scene object and array made so far, by capture ID. Pools store
+  // objects by value and move them as they grow, so these are pool refs and
+  // handles, never pointers. Scene objects are type-erased, so they are held
+  // as the type and index a Parameter would hold. An ID that failed maps to
+  // the reason, so a second reference reports it again.
+  std::unordered_map<std::string, ArrayRef> m_arrays;
+  std::unordered_map<std::string, ArrayRef> m_arraysByBlob;
+  std::unordered_map<std::string, Any> m_objects;
   std::unordered_map<std::string, std::string> m_failures;
-  std::unordered_map<std::string, Array *> m_arraysByBlob;
 };
 
 CaptureImporter::CaptureImporter(Scene *scene,
@@ -304,14 +311,14 @@ std::optional<ArrayContents> CaptureImporter::readArrayAt(
 
 // The scene Array for a captured array, or nullptr after reporting `path`
 // as dropped.
-Array *CaptureImporter::importArray(
+ArrayRef CaptureImporter::importArray(
     const std::string &id, const std::string &path)
 {
-  if (auto it = m_objects.find(id); it != m_objects.end())
-    return static_cast<Array *>(it->second);
+  if (auto it = m_arrays.find(id); it != m_arrays.end())
+    return it->second;
   if (auto it = m_failures.find(id); it != m_failures.end()) {
     drop(path, it->second);
-    return nullptr;
+    return {};
   }
 
   // Arrays whose blob names match hold the same type, shape and bytes, so
@@ -321,15 +328,17 @@ Array *CaptureImporter::importArray(
   if (blob) {
     if (auto it = m_arraysByBlob.find(blob->value);
         it != m_arraysByBlob.end()) {
-      m_objects[id] = it->second;
+      m_arrays[id] = it->second;
       return it->second;
     }
   }
 
   std::string reason;
   auto contents = readArrayAt(id, reason);
-  if (!contents)
-    return static_cast<Array *>(fail(id, path, reason));
+  if (!contents) {
+    fail(id, path, reason);
+    return {};
+  }
 
   std::vector<size_t> indices;
   for (size_t i = 0; i < contents->ids.size(); i++) {
@@ -354,10 +363,10 @@ Array *CaptureImporter::importArray(
   else if (!contents->bytes.empty())
     array->setData(contents->bytes.data());
 
-  m_objects[id] = array.data();
+  m_arrays[id] = array;
   if (blob)
-    m_arraysByBlob[blob->value] = array.data();
-  return array.data();
+    m_arraysByBlob[blob->value] = array;
+  return array;
 }
 
 // Scene objects //
@@ -374,7 +383,7 @@ Object *CaptureImporter::importObject(
     const std::string &id, const std::string &path)
 {
   if (auto it = m_objects.find(id); it != m_objects.end())
-    return it->second;
+    return resolve(it->second);
   if (auto it = m_failures.find(id); it != m_failures.end()) {
     drop(path, it->second);
     return nullptr;
@@ -385,8 +394,10 @@ Object *CaptureImporter::importObject(
     return fail(
         id, path, "refers to " + id + ", which the capture does not hold");
   }
-  if (b->isArray())
-    return importArray(id, path);
+  if (b->isArray()) {
+    auto array = importArray(id, path);
+    return array ? array.data() : nullptr;
+  }
 
   const auto type = sceneObjectType(b->label);
   if (type == ANARI_UNKNOWN)
@@ -398,22 +409,31 @@ Object *CaptureImporter::importObject(
     return fail(id, path, "VSR could not create a " + b->label);
   o->setName(id);
   // Registered before its parameters, so a reference back to it resolves.
-  m_objects[id] = o;
-  setParameters(*o, *b, path);
-  return o;
+  const Any handle(o->type(), o->index());
+  m_objects[id] = handle;
+  setParameters(handle, *b, path);
+  return resolve(handle);
+}
+
+// The object a handle names, as it is now: valid only until the next object
+// is created.
+Object *CaptureImporter::resolve(const Any &handle) const
+{
+  return m_scene->getObject(handle);
 }
 
 // Sets the captured parameters and disables the rest: VSR's seeded defaults
 // stay visible in an editor, but only what the application committed is
 // passed on to a device.
 void CaptureImporter::setParameters(
-    Object &o, const cap::Block &b, const std::string &path)
+    const Any &handle, const cap::Block &b, const std::string &path)
 {
   std::set<std::string> captured;
   for (auto &e : b.entries) {
-    if (setParameter(o, e, join(path, e.name)))
+    if (setParameter(handle, e, join(path, e.name)))
       captured.insert(e.name);
   }
+  auto &o = *resolve(handle);
   for (size_t i = 0; i < o.numParameters(); i++) {
     auto &p = o.parameterAt(i);
     if (!captured.count(p.name().str()))
@@ -421,9 +441,9 @@ void CaptureImporter::setParameters(
   }
 }
 
-// Returns whether `e` became a parameter of `o`.
+// Returns whether `e` became a parameter of the object `handle` names.
 bool CaptureImporter::setParameter(
-    Object &o, const cap::Entry &e, const std::string &path)
+    const Any &handle, const cap::Entry &e, const std::string &path)
 {
   const auto type = cap::dataTypeFromName(e.type);
   if (type == ANARI_UNKNOWN) {
@@ -432,12 +452,16 @@ bool CaptureImporter::setParameter(
   }
 
   if (anari::isObject(type) && e.value != "<opaque>") {
+    // Importing the referenced object can grow any pool, this object's
+    // included, so the object is looked up only afterwards.
     auto *ref = importObject(e.value, path);
     if (!ref)
       return false;
-    o.setParameterObject(vsr::core::Token(e.name), *ref);
+    resolve(handle)->setParameterObject(vsr::core::Token(e.name), *ref);
     return true;
   }
+
+  auto &o = *resolve(handle);
 
   std::string reason;
   auto v = decodeParameterValue(type, e, reason);
@@ -553,10 +577,10 @@ LayerNodeRef CaptureImporter::placeInstance(const cap::Block &inst,
       return {};
     const auto type = cap::dataTypeFromName(xfm->type);
     if (type == ANARI_ARRAY1D) {
-      auto *a = importArray(xfm->value, join(path, "transform"));
-      return a
-          ? m_scene->insertChildTransformArrayNode(fileNode, a, name.c_str())
-          : LayerNodeRef{};
+      auto a = importArray(xfm->value, join(path, "transform"));
+      return a ? m_scene->insertChildTransformArrayNode(
+                     fileNode, a.data(), name.c_str())
+               : LayerNodeRef{};
     }
     math::mat4 m = math::IDENTITY_MAT4;
     if (type == ANARI_FLOAT32_MAT4
