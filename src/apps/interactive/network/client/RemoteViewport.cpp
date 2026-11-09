@@ -191,6 +191,12 @@ void RemoteViewport::renderer_resetParameterDefaults()
       "Renderer parameter reset is not currently supported in RemoteViewport.");
 }
 
+void RemoteViewport::renderer_reloadDefaults()
+{
+  vsr::core::logWarning(
+      "Renderer reload is not currently supported in RemoteViewport.");
+}
+
 void RemoteViewport::viewport_reshape(vsr::math::int2 _newSize)
 {
   if (_newSize.x <= 0 || _newSize.y <= 0)

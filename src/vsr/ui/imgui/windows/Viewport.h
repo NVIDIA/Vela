@@ -72,12 +72,15 @@ struct Viewport : public BaseViewport
 
   void renderer_clone() override;
   void renderer_resetParameterDefaults() override;
+  void renderer_reloadDefaults() override;
 
   void teardownDevice();
   // 'pixel' in render-image pixels, row 0 at the bottom.
   void pick(vsr::math::uint2 pixel, bool selectObject);
   void setSelectionVisibilityFilterEnabled(bool enabled);
 
+  void releaseRenderer(const vsr::scene::Object *o);
+  void syncRendererList();
   void updateFrame();
   void updateImage();
   void updateWorldBoundsOverlay();
@@ -98,6 +101,8 @@ struct Viewport : public BaseViewport
   // Data /////////////////////////////////////////////////////////////////////
 
   size_t m_defragToken{0};
+  // Drops this viewport's renderer refs before the scene removes the objects.
+  vsr::scene::BaseUpdateDelegate *m_rendererRemovalDelegate{nullptr};
 
   ViewportDeviceChangeCb m_deviceChangeCb;
   float m_timeToLoadDevice{0.f};

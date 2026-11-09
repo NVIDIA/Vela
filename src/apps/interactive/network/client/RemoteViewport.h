@@ -41,6 +41,7 @@ struct RemoteViewport : public BaseViewport
 
   void renderer_clone() override;
   void renderer_resetParameterDefaults() override;
+  void renderer_reloadDefaults() override;
 
   void viewport_reshape(vsr::math::int2 newWindowSize) override;
 

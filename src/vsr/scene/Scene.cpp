@@ -683,9 +683,18 @@ std::vector<RendererAppRef> Scene::renderersOfDevice(Token deviceName) const
 
 void Scene::removeRenderersForDevice(Token deviceName)
 {
-  auto renderers = renderersOfDevice(deviceName);
-  for (auto &r : renderers)
-    removeObject(r.get());
+  // Raw pointers, not RendererAppRefs: an APP ref outliving the removal would
+  // decrement the use count of an erased (or reused) pool slot.
+  std::vector<const Renderer *> renderers;
+  foreach_item_const(m_db.renderer, [&](auto *r) {
+    if (r && r->rendererDeviceName() == deviceName)
+      renderers.push_back(r);
+  });
+  // In reverse: the pool reuses freed slots last-in-first-out, so renderers
+  // created next (e.g. a reload's standard set) take these slots in their
+  // original order, and renderersOfDevice() keeps listing them in that order.
+  for (auto it = renderers.rbegin(); it != renderers.rend(); ++it)
+    removeObject(*it);
 }
 
 MultiUpdateDelegate &Scene::updateDelegate()

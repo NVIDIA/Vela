@@ -15,6 +15,7 @@
 // vsr_rendering
 #include "vsr/rendering/view/ManipulatorToVSR.hpp"
 // std
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
@@ -40,6 +41,31 @@ std::string defaultLibraryName(const vsr::app::ANARIDeviceManager &adm)
   return {};
 }
 
+// Forwards renderer removals to the owning Viewport. Scene signals both of
+// these before erasing the objects, so the Viewport can still release its
+// use-counted refs to them.
+struct RendererRemovalDelegate : public vsr::scene::EmptyUpdateDelegate
+{
+  explicit RendererRemovalDelegate(
+      std::function<void(const vsr::scene::Object *)> cb)
+      : m_cb(std::move(cb))
+  {}
+
+  void signalObjectRemoved(const vsr::scene::Object *o) override
+  {
+    if (o && o->type() == ANARI_RENDERER)
+      m_cb(o);
+  }
+
+  void signalRemoveAllObjects() override
+  {
+    m_cb(nullptr);
+  }
+
+ private:
+  std::function<void(const vsr::scene::Object *)> m_cb;
+};
+
 } // namespace
 
 Viewport::Viewport(
@@ -50,12 +76,17 @@ Viewport::Viewport(
   BaseViewport::setManipulator(m);
   m_defragToken = appContext()->vsr.scene.addDefragCallback(
       [this](const auto &) { refreshCurrentDevice(); });
+  m_rendererRemovalDelegate =
+      appContext()->vsr.scene.updateDelegate().emplace<RendererRemovalDelegate>(
+          [this](const vsr::scene::Object *o) { releaseRenderer(o); });
 }
 
 Viewport::~Viewport()
 {
   teardownDevice();
-  appContext()->vsr.scene.removeDefragCallback(m_defragToken);
+  auto &scene = appContext()->vsr.scene;
+  scene.updateDelegate().erase(m_rendererRemovalDelegate);
+  scene.removeDefragCallback(m_defragToken);
 }
 
 void Viewport::buildUI()
@@ -522,6 +553,59 @@ void Viewport::renderer_resetParameterDefaults()
       m_renderers.current->subtype().c_str());
 }
 
+void Viewport::renderer_reloadDefaults()
+{
+  if (!m_device)
+    return;
+
+  auto &scene = appContext()->vsr.scene;
+  const vsr::core::Token prevSubtype =
+      m_renderers.current ? m_renderers.current->subtype() : vsr::core::Token{};
+
+  // Our refs to the old renderers are dropped by releaseRenderer() as each one
+  // is removed.
+  scene.removeRenderersForDevice(m_libName);
+  m_renderers.objects = scene.createStandardRenderers(m_libName, m_device);
+
+  for (auto &r : m_renderers.objects) {
+    if (r->subtype() == prevSubtype) {
+      m_renderers.current = r;
+      break;
+    }
+  }
+  if (!m_renderers.current && !m_renderers.objects.empty())
+    m_renderers.current = m_renderers.objects[0];
+}
+
+// Called just before the scene removes renderer 'o' (nullptr: every object).
+void Viewport::releaseRenderer(const vsr::scene::Object *o)
+{
+  auto matches = [&](const vsr::scene::RendererAppRef &r) {
+    return r && (!o || r->index() == o->index());
+  };
+
+  auto &objs = m_renderers.objects;
+  objs.erase(std::remove_if(objs.begin(), objs.end(), matches), objs.end());
+  if (matches(m_renderers.current))
+    m_renderers.current.reset();
+  if (matches(m_prevRenderer))
+    m_prevRenderer.reset();
+}
+
+// Another viewport on the same device can add (clone) or replace (reload) the
+// device's renderers, so the list is checked against the scene every frame.
+void Viewport::syncRendererList()
+{
+  auto live = appContext()->vsr.scene.renderersOfDevice(m_libName);
+  if (live == m_renderers.objects)
+    return;
+
+  m_renderers.objects = std::move(live);
+  auto &objs = m_renderers.objects;
+  if (std::find(objs.begin(), objs.end(), m_renderers.current) == objs.end())
+    m_renderers.current = objs.empty() ? vsr::scene::RendererAppRef{} : objs[0];
+}
+
 void Viewport::teardownDevice()
 {
   const bool pipelineSetup = BaseViewport::imagePipeline_isSetup();
@@ -629,6 +713,8 @@ void Viewport::camera_setUseImplicitAspectRatio(bool on)
 
 void Viewport::updateFrame()
 {
+  syncRendererList();
+
   if (m_prevRenderer == m_renderers.current && m_prevCamera == m_camera.current)
     return;
 

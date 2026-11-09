@@ -644,7 +644,7 @@ void StudioViewport::camera_centerView()
 }
 
 // Required by BaseViewport, but unreachable: the Renderer menu is built
-// without renderer selection, so it offers neither.
+// without renderer selection, so it offers none of these.
 void StudioViewport::renderer_clone()
 {
   vsr::core::logWarning(
@@ -656,6 +656,12 @@ void StudioViewport::renderer_resetParameterDefaults()
   vsr::core::logWarning(
       "[StudioViewport] renderer parameter reset is not available in the"
       " client yet");
+}
+
+void StudioViewport::renderer_reloadDefaults()
+{
+  vsr::core::logWarning(
+      "[StudioViewport] renderer reload is not available in the client yet");
 }
 
 } // namespace vsr::scivis_studio::client

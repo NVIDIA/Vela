@@ -58,6 +58,9 @@ struct BaseViewport : public Window
 
   virtual void renderer_clone() = 0;
   virtual void renderer_resetParameterDefaults() = 0;
+  // Replace every renderer object of the current device with the standard
+  // set queried from the device, as a device with none gets on load.
+  virtual void renderer_reloadDefaults() = 0;
 
   bool gizmo_canShow() const;
 
@@ -69,7 +72,7 @@ struct BaseViewport : public Window
   // renderer's parameters. Pass false when the viewport does not own which
   // renderer is active -- a thin client whose server picks it, say -- and the
   // menu leaves out everything that changes that choice (the subtype list,
-  // cloning, and the reset to the device's defaults), showing the current
+  // cloning, and the resets to the device's defaults), showing the current
   // renderer's parameters alone.
   void ui_menubar_Renderer(bool selectableRenderers = true);
   void ui_menubar_Camera();

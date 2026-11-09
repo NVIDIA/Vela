@@ -114,6 +114,7 @@ struct StudioViewport : public vsr::ui::imgui::BaseViewport
   void camera_centerView() override;
   void renderer_clone() override;
   void renderer_resetParameterDefaults() override;
+  void renderer_reloadDefaults() override;
 
   void takeLatestFrame();
   void syncPipelineToFrame();

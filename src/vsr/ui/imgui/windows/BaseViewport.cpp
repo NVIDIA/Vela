@@ -500,6 +500,15 @@ void BaseViewport::ui_menubar_Renderer(bool selectableRenderers)
       if (ImGui::MenuItem("Clone Current Renderer"))
         renderer_clone();
 
+      if (ImGui::BeginMenu("Reload Default Renderers?")) {
+        if (ImGui::MenuItem("Yes"))
+          renderer_reloadDefaults();
+        ImGui::EndMenu();
+      }
+      tooltipForPreviousItem(
+          "replace all of this device's renderers (including clones and "
+          "parameter edits) with the device's standard set");
+
       ImGui::Separator();
     }
 
