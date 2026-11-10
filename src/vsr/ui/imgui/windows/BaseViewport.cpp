@@ -519,8 +519,9 @@ void BaseViewport::ui_menubar_Renderer(bool selectableRenderers)
         ImGui::EndMenu();
       }
       tooltipForPreviousItem(
-          "replace all of this device's renderers (including clones and "
-          "parameter edits) with the device's standard set");
+          "reset every standard renderer's parameters to the device's "
+          "defaults, add renderers the device now offers, and remove clones "
+          "and renderers it no longer offers");
 
       ImGui::Separator();
     }

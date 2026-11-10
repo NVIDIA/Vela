@@ -567,19 +567,11 @@ void Viewport::renderer_reloadDefaults()
   const vsr::core::Token prevSubtype =
       m_renderers.current ? m_renderers.current->subtype() : vsr::core::Token{};
 
-  // Our refs to the old renderers are dropped by releaseRenderer() as each one
-  // is removed.
-  scene.removeRenderersForDevice(m_libName);
-  m_renderers.objects = scene.createStandardRenderers(m_libName, m_device);
-
-  for (auto &r : m_renderers.objects) {
-    if (r->subtype() == prevSubtype) {
-      m_renderers.current = r;
-      break;
-    }
-  }
-  if (!m_renderers.current && !m_renderers.objects.empty())
-    m_renderers.current = m_renderers.objects[0];
+  // Our refs to removed clones are dropped by releaseRenderer() as each one is
+  // removed; the standard renderers stay in place.
+  scene.reloadStandardRenderers(m_libName, m_device);
+  m_renderers.objects = scene.renderersOfDevice(m_libName);
+  m_renderers.current = scene.rendererForDevice(m_libName, prevSubtype);
 }
 
 // Called just before the scene removes renderer 'o' (nullptr: every object).
@@ -597,7 +589,7 @@ void Viewport::releaseRenderer(const vsr::scene::Object *o)
     m_prevRenderer.reset();
 }
 
-// Another viewport on the same device can add (clone) or replace (reload) the
+// Another viewport on the same device can add (clone) or remove (reload) the
 // device's renderers, so the list is checked against the scene every frame.
 void Viewport::syncRendererList()
 {

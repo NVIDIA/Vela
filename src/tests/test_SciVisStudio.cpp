@@ -4093,13 +4093,30 @@ SCENARIO("SciVis Studio binds a shot's renderer to a library", "[SciVisStudio]")
       settings.rendererObjectIndex = 9999;
       auto renderer = projectContext.bindShotRenderer(*shot, "helide", device);
 
-      THEN("the first renderer replaces it; the dirty flag is the caller's")
+      THEN(
+          "the renderer of its subtype replaces it; the dirty flag is the"
+          " caller's")
+      {
+        REQUIRE(renderer);
+        REQUIRE(renderer->index() == pick->index());
+        REQUIRE(settings.rendererObjectIndex == renderer->index());
+        REQUIRE(settings.rendererSubtype == renderer->subtype().str());
+        REQUIRE_FALSE(project.dirty);
+      }
+    }
+
+    WHEN("its pick names no helide renderer, nor a subtype helide offers")
+    {
+      settings.rendererObjectIndex = 9999;
+      settings.rendererSubtype = "noSuchSubtype";
+      auto renderer = projectContext.bindShotRenderer(*shot, "helide", device);
+
+      THEN("the first renderer replaces it")
       {
         REQUIRE(renderer);
         REQUIRE(renderer->index() == renderers.front()->index());
         REQUIRE(settings.rendererObjectIndex == renderer->index());
         REQUIRE(settings.rendererSubtype == renderer->subtype().str());
-        REQUIRE_FALSE(project.dirty);
       }
     }
   }

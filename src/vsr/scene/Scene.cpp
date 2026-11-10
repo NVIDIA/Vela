@@ -661,13 +661,18 @@ std::vector<RendererAppRef> Scene::createStandardRenderers(
   std::vector<RendererAppRef> retval;
   retval.reserve(subtypes.size());
 
-  for (auto &subtype : subtypes) {
-    auto r = createObjectImpl(m_db.renderer, deviceName, subtype);
-    vsr::scene::parseANARIObjectInfo(*r, d, ANARI_RENDERER, subtype.c_str());
-    retval.push_back(r);
-  }
+  for (auto &subtype : subtypes)
+    retval.push_back(createStandardRenderer(deviceName, d, subtype));
 
   return retval;
+}
+
+RendererAppRef Scene::createStandardRenderer(
+    Token deviceName, anari::Device d, Token subtype)
+{
+  auto r = createObjectImpl(m_db.renderer, deviceName, subtype);
+  vsr::scene::parseANARIObjectInfo(*r, d, ANARI_RENDERER, subtype.c_str());
+  return r;
 }
 
 std::vector<RendererAppRef> Scene::renderersOfDevice(Token deviceName) const
@@ -681,20 +686,67 @@ std::vector<RendererAppRef> Scene::renderersOfDevice(Token deviceName) const
   return renderers;
 }
 
-void Scene::removeRenderersForDevice(Token deviceName)
+void Scene::reloadStandardRenderers(Token deviceName, anari::Device d)
 {
-  // Raw pointers, not RendererAppRefs: an APP ref outliving the removal would
-  // decrement the use count of an erased (or reused) pool slot.
-  std::vector<const Renderer *> renderers;
-  foreach_item_const(m_db.renderer, [&](auto *r) {
-    if (r && r->rendererDeviceName() == deviceName)
-      renderers.push_back(r);
+  if (!d)
+    return;
+
+  const auto subtypes = vsr::scene::getANARIObjectSubtypes(d, ANARI_RENDERER);
+  auto offered = [&](Token subtype) {
+    return std::find(subtypes.begin(), subtypes.end(), subtype.str())
+        != subtypes.end();
+  };
+
+  // Keep the lowest-index renderer of each offered subtype and reset only its
+  // parameters. Slot indices, not pointers (creating renderers can grow the
+  // pool) nor RendererAppRefs (an APP ref outliving the removal below would
+  // decrement the use count of an erased pool slot).
+  std::vector<Token> keptSubtypes;
+  std::vector<size_t> leftovers;
+  foreach_item(m_db.renderer, [&](Renderer *r) {
+    if (!r || r->rendererDeviceName() != deviceName)
+      return;
+    const Token subtype = r->subtype();
+    const bool alreadyKept =
+        std::find(keptSubtypes.begin(), keptSubtypes.end(), subtype)
+        != keptSubtypes.end();
+    if (alreadyKept || !offered(subtype)) {
+      leftovers.push_back(r->index());
+      return;
+    }
+    keptSubtypes.push_back(subtype);
+    r->removeAllParameters();
+    r->setCommonParameterDefaults();
+    vsr::scene::parseANARIObjectInfo(*r, d, ANARI_RENDERER, subtype.c_str());
   });
-  // In reverse: the pool reuses freed slots last-in-first-out, so renderers
-  // created next (e.g. a reload's standard set) take these slots in their
-  // original order, and renderersOfDevice() keeps listing them in that order.
-  for (auto it = renderers.rbegin(); it != renderers.rend(); ++it)
-    removeObject(*it);
+
+  // Create missing subtypes before removing leftovers, so they don't reuse a
+  // removed renderer's slot: a stale index then stays detectably dead instead
+  // of naming a different renderer.
+  for (auto &subtype : subtypes) {
+    if (std::find(keptSubtypes.begin(), keptSubtypes.end(), Token(subtype))
+        != keptSubtypes.end())
+      continue;
+    createStandardRenderer(deviceName, d, subtype);
+  }
+
+  for (size_t i : leftovers)
+    removeObject(getObject(ANARI_RENDERER, i));
+}
+
+RendererAppRef Scene::rendererForDevice(Token deviceName, Token subtype) const
+{
+  RendererAppRef first;
+  RendererAppRef match;
+  foreach_item_const(m_db.renderer, [&](const Renderer *r) {
+    if (match || !r || r->rendererDeviceName() != deviceName)
+      return;
+    if (!first)
+      first = getObject<Renderer>(r->index());
+    if (r->subtype() == subtype)
+      match = getObject<Renderer>(r->index());
+  });
+  return match ? match : first;
 }
 
 MultiUpdateDelegate &Scene::updateDelegate()
