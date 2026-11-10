@@ -35,6 +35,8 @@ class Application : public VSRApplication
     if (setupDefaultLight) {
       vsr::core::logStatus("...setting up default light");
       vsr::io::generate_default_lights(scene);
+    } else if (!ctx->commandLine.loadedFromStateFile) {
+      vsr::core::logStatus("...scene has lights, skipping default light");
     }
 
     ctx->vsr.sceneLoadComplete = true;
