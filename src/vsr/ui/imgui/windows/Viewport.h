@@ -80,8 +80,6 @@ struct Viewport : public BaseViewport
   void pick(vsr::math::uint2 pixel, bool selectObject);
   void setSelectionVisibilityFilterEnabled(bool enabled);
 
-  void releaseRenderer(const vsr::scene::Object *o);
-  void syncRendererList();
   void updateFrame();
   void updateImage();
   void updateWorldBoundsOverlay();
@@ -102,8 +100,6 @@ struct Viewport : public BaseViewport
   // Data /////////////////////////////////////////////////////////////////////
 
   size_t m_defragToken{0};
-  // Drops this viewport's renderer refs before the scene removes the objects.
-  vsr::scene::BaseUpdateDelegate *m_rendererRemovalDelegate{nullptr};
 
   ViewportDeviceChangeCb m_deviceChangeCb;
   float m_timeToLoadDevice{0.f};
@@ -142,7 +138,8 @@ struct Viewport : public BaseViewport
   // ANARI objects //
 
   anari::Device m_device{nullptr};
-  vsr::scene::RendererAppRef m_prevRenderer;
+  // The renderer handle last given to m_anariPass, to detect a change.
+  anari::Renderer m_boundRenderer{nullptr};
   vsr::scene::CameraAppRef m_prevCamera;
   vsr::core::ObjectVersion m_lastCameraChange{};
 

@@ -489,17 +489,18 @@ void BaseViewport::ui_animationSlider()
 void BaseViewport::ui_menubar_Renderer(bool selectableRenderers)
 {
   if (ImGui::BeginMenu("Renderer")) {
-    if (selectableRenderers && m_renderers.objects.size() > 1) {
+    const auto &renderers = m_renderers.objects();
+    if (selectableRenderers && renderers.size() > 1) {
       ImGui::Text("Subtype:");
       ImGui::Indent(INDENT_AMOUNT);
-      for (int i = 0; i < m_renderers.objects.size(); i++) {
+      for (int i = 0; i < renderers.size(); i++) {
         ImGui::PushID(i);
-        auto ro = m_renderers.objects[i];
+        auto ro = renderers[i];
         const std::string &oName = ro->name();
         const char *rName =
             oName.empty() ? ro->subtype().c_str() : oName.c_str();
-        if (ImGui::RadioButton(rName, m_renderers.current == ro))
-          m_renderers.current = ro;
+        if (ImGui::RadioButton(rName, m_renderers.current() == ro))
+          m_renderers.select(ro->index());
         ImGui::PopID();
       }
       ImGui::Unindent(INDENT_AMOUNT);
@@ -526,11 +527,11 @@ void BaseViewport::ui_menubar_Renderer(bool selectableRenderers)
       ImGui::Separator();
     }
 
-    if (!m_renderers.objects.empty()) {
+    if (!m_renderers.empty()) {
       ImGui::Text("Parameters:");
       ImGui::Indent(INDENT_AMOUNT);
 
-      vsr::ui::buildUI_object(*m_renderers.current,
+      vsr::ui::buildUI_object(*m_renderers.current(),
           appContext()->vsr.scene,
           true,
           0,

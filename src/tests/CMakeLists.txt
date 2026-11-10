@@ -160,6 +160,8 @@ add_test(NAME vsr::AutoExposure   COMMAND ${PROJECT_NAME} "[AutoExposure]" )
 if (TARGET vsr_ui_imgui)
   target_link_libraries(${PROJECT_NAME} PRIVATE vsr_ui_imgui)
   target_compile_definitions(${PROJECT_NAME} PRIVATE VSR_TEST_UI)
+  target_sources(${PROJECT_NAME} PRIVATE test_RendererList.cpp)
+  add_test(NAME vsr::RendererList COMMAND ${PROJECT_NAME} "[RendererList]")
   if (VSR_TEST_WITH_HELIDE)
     add_test(NAME vsr::OfflineRenderUI
       COMMAND ${PROJECT_NAME} "[OfflineRenderUI]")

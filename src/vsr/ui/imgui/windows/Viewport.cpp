@@ -41,31 +41,6 @@ std::string defaultLibraryName(const vsr::app::ANARIDeviceManager &adm)
   return {};
 }
 
-// Forwards renderer removals to the owning Viewport. Scene signals both of
-// these before erasing the objects, so the Viewport can still release its
-// use-counted refs to them.
-struct RendererRemovalDelegate : public vsr::scene::EmptyUpdateDelegate
-{
-  explicit RendererRemovalDelegate(
-      std::function<void(const vsr::scene::Object *)> cb)
-      : m_cb(std::move(cb))
-  {}
-
-  void signalObjectRemoved(const vsr::scene::Object *o) override
-  {
-    if (o && o->type() == ANARI_RENDERER)
-      m_cb(o);
-  }
-
-  void signalRemoveAllObjects() override
-  {
-    m_cb(nullptr);
-  }
-
- private:
-  std::function<void(const vsr::scene::Object *)> m_cb;
-};
-
 } // namespace
 
 Viewport::Viewport(
@@ -76,17 +51,12 @@ Viewport::Viewport(
   BaseViewport::setManipulator(m);
   m_defragToken = appContext()->vsr.scene.addDefragCallback(
       [this](const auto &) { refreshCurrentDevice(); });
-  m_rendererRemovalDelegate =
-      appContext()->vsr.scene.updateDelegate().emplace<RendererRemovalDelegate>(
-          [this](const vsr::scene::Object *o) { releaseRenderer(o); });
 }
 
 Viewport::~Viewport()
 {
   teardownDevice();
-  auto &scene = appContext()->vsr.scene;
-  scene.updateDelegate().erase(m_rendererRemovalDelegate);
-  scene.removeDefragCallback(m_defragToken);
+  appContext()->vsr.scene.removeDefragCallback(m_defragToken);
 }
 
 void Viewport::buildUI()
@@ -205,25 +175,18 @@ void Viewport::setLibrary(
 
       vsr::core::logStatus("[viewport] setting up renderer objects...");
 
-      m_renderers.objects = scene.renderersOfDevice(selectedLibName);
-      if (m_renderers.objects.empty())
-        m_renderers.objects = scene.createStandardRenderers(selectedLibName, d);
+      m_renderers.bind(scene, selectedLibName);
+      if (m_renderers.empty())
+        scene.createStandardRenderers(selectedLibName, d);
 
-      if (rendererIndex != VSR_INVALID_INDEX) {
-        auto renderer = scene.getObject<vsr::scene::Renderer>(rendererIndex);
-        if (renderer && renderer->rendererDeviceName() == selectedLibName)
-          m_renderers.current = renderer;
-        else {
-          vsr::core::logWarning(
-              "[viewport] renderer object index %zu is unavailable for ANARI "
-              "device '%s'; using the default renderer",
-              rendererIndex,
-              selectedLibName.c_str());
-        }
+      if (rendererIndex != VSR_INVALID_INDEX
+          && !m_renderers.select(rendererIndex)) {
+        vsr::core::logWarning(
+            "[viewport] renderer object index %zu is unavailable for ANARI "
+            "device '%s'; using the default renderer",
+            rendererIndex,
+            selectedLibName.c_str());
       }
-
-      if (!m_renderers.current && !m_renderers.objects.empty())
-        m_renderers.current = m_renderers.objects[0];
 
       vsr::core::logStatus("[viewport] populating render index...");
 
@@ -296,7 +259,8 @@ const std::string &Viewport::libraryName() const
 
 size_t Viewport::currentRendererObjectIndex() const
 {
-  return m_renderers.current ? m_renderers.current->index() : VSR_INVALID_INDEX;
+  const auto current = m_renderers.current();
+  return current ? current->index() : VSR_INVALID_INDEX;
 }
 
 void Viewport::setDeviceChangeCb(ViewportDeviceChangeCb cb)
@@ -529,78 +493,28 @@ bool Viewport::renderer_hasActions() const
 
 void Viewport::renderer_clone()
 {
-  if (!m_renderers.current)
-    return;
-
-  auto *clone = vsr::scene::cloneObject(m_renderers.current.get());
-  if (!clone || clone->type() != ANARI_RENDERER)
-    return;
-
-  auto cloneRef =
-      appContext()->vsr.scene.getObject<vsr::scene::Renderer>(clone->index());
-  if (!cloneRef)
-    return;
-
-  m_renderers.objects.push_back(cloneRef);
-  m_renderers.current = cloneRef;
+  const auto current = m_renderers.current();
+  if (auto *clone = current ? vsr::scene::cloneObject(current.get()) : nullptr)
+    m_renderers.select(clone->index()); // the list added it as it was created
 }
 
 void Viewport::renderer_resetParameterDefaults()
 {
-  if (!m_device || !m_renderers.current)
+  auto current = m_renderers.current();
+  if (!m_device || !current)
     return;
 
-  m_renderers.current->removeAllParameters();
-  m_renderers.current->setCommonParameterDefaults();
-  vsr::scene::parseANARIObjectInfo(*m_renderers.current,
-      m_device,
-      ANARI_RENDERER,
-      m_renderers.current->subtype().c_str());
+  current->removeAllParameters();
+  current->setCommonParameterDefaults();
+  vsr::scene::parseANARIObjectInfo(
+      *current, m_device, ANARI_RENDERER, current->subtype().c_str());
 }
 
 void Viewport::renderer_reloadDefaults()
 {
-  if (!m_device)
-    return;
-
-  auto &scene = appContext()->vsr.scene;
-  const vsr::core::Token prevSubtype =
-      m_renderers.current ? m_renderers.current->subtype() : vsr::core::Token{};
-
-  // Our refs to removed clones are dropped by releaseRenderer() as each one is
-  // removed; the standard renderers stay in place.
-  scene.reloadStandardRenderers(m_libName, m_device);
-  m_renderers.objects = scene.renderersOfDevice(m_libName);
-  m_renderers.current = scene.rendererOfSubtypeOrFirst(m_libName, prevSubtype);
-}
-
-// Called just before the scene removes renderer 'o' (nullptr: every object).
-void Viewport::releaseRenderer(const vsr::scene::Object *o)
-{
-  auto matches = [&](const vsr::scene::RendererAppRef &r) {
-    return r && (!o || r->index() == o->index());
-  };
-
-  auto &objs = m_renderers.objects;
-  objs.erase(std::remove_if(objs.begin(), objs.end(), matches), objs.end());
-  if (matches(m_renderers.current))
-    m_renderers.current.reset();
-  if (matches(m_prevRenderer))
-    m_prevRenderer.reset();
-}
-
-// Another viewport on the same device can add (clone) or remove (reload) the
-// device's renderers, so the list is checked against the scene every frame.
-void Viewport::syncRendererList()
-{
-  auto live = appContext()->vsr.scene.renderersOfDevice(m_libName);
-  if (live == m_renderers.objects)
-    return;
-
-  m_renderers.objects = std::move(live);
-  auto &objs = m_renderers.objects;
-  if (std::find(objs.begin(), objs.end(), m_renderers.current) == objs.end())
-    m_renderers.current = objs.empty() ? vsr::scene::RendererAppRef{} : objs[0];
+  // m_renderers drops the removed renderers and reselects as they go.
+  if (m_device)
+    appContext()->vsr.scene.reloadStandardRenderers(m_libName, m_device);
 }
 
 void Viewport::teardownDevice()
@@ -635,9 +549,8 @@ void Viewport::teardownDevice()
   if (m_device)
     anari::release(m_device, m_device);
 
-  m_renderers.objects.clear();
-  m_renderers.current = nullptr;
-  m_prevRenderer = {};
+  m_renderers.unbind();
+  m_boundRenderer = nullptr;
 
   m_device = nullptr;
 }
@@ -710,9 +623,10 @@ void Viewport::camera_setUseImplicitAspectRatio(bool on)
 
 void Viewport::updateFrame()
 {
-  syncRendererList();
-
-  if (m_prevRenderer == m_renderers.current && m_prevCamera == m_camera.current)
+  const auto current = m_renderers.current();
+  const anari::Renderer renderer =
+      current ? m_rIdx->renderer(current->index()) : nullptr;
+  if (renderer == m_boundRenderer && m_prevCamera == m_camera.current)
     return;
 
   if (!m_camera.current)
@@ -722,9 +636,9 @@ void Viewport::updateFrame()
     m_anariPass->setCamera(m_rIdx->camera(m_camera.current->index()));
     m_prevCamera = m_camera.current;
   }
-  if (m_renderers.current) {
-    m_anariPass->setRenderer(m_rIdx->renderer(m_renderers.current->index()));
-    m_prevRenderer = m_renderers.current;
+  if (renderer) {
+    m_anariPass->setRenderer(renderer);
+    m_boundRenderer = renderer;
   }
 }
 
@@ -1208,7 +1122,8 @@ void Viewport::ui_overlay()
     ImGui::Text("  device: %s", m_libName.c_str());
     ImGui::TextColored(ImVec4(0.0f, 1.0f, 1.0f, 1.f),
         "renderer: %s",
-        m_renderers.current ? m_renderers.current->subtype().c_str() : "---");
+        m_renderers.current() ? m_renderers.current()->subtype().c_str()
+                              : "---");
 
     // Camera indicator
     ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),

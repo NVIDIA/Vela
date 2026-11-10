@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "RendererList.h"
 #include "Window.h"
 // vsr_rendering
 #include "vsr/rendering/pipeline/ImagePipeline.h"
@@ -102,11 +103,7 @@ struct BaseViewport : public Window
     float resolutionScale{1.f};
   } m_viewport;
 
-  struct RendererState
-  {
-    std::vector<vsr::scene::RendererAppRef> objects;
-    vsr::scene::RendererAppRef current;
-  } m_renderers;
+  RendererList m_renderers;
 
   bool m_showOrientationWidget{true};
   bool m_showAnimationSlider{true};

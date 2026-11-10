@@ -144,9 +144,9 @@ void RemoteViewport::setNetworkChannel(vsr::network::NetworkChannel *c)
 void RemoteViewport::disconnect()
 {
   m_receivedRendererIdx = VSR_INVALID_INDEX;
-  m_renderers.current = {};
-  m_renderers.objects.clear();
-  m_prevRenderer = {};
+  m_sentRendererIdx = VSR_INVALID_INDEX;
+  m_rendererFromServer = false;
+  m_renderers.unbind();
   m_receivedCameraIdx = VSR_INVALID_INDEX;
   m_camera.current = {};
   m_prevCamera = {};
@@ -221,32 +221,30 @@ void RemoteViewport::updateRenderer()
   if (!m_channel || !m_channel->isConnected())
     return;
 
-  auto *ctx = appContext();
-  auto &scene = ctx->vsr.scene;
-  if (m_renderers.objects.empty()
-      && scene.numberOfObjects(ANARI_RENDERER) != 0) {
-    auto fr = scene.getObject<vsr::scene::Renderer>(0);
-    m_renderers.objects = scene.renderersOfDevice(fr->rendererDeviceName());
-  } else if (m_renderers.objects.empty()) {
-    // We only update when we have the list of renderers from the server
+  // The list follows the device of the first renderer the server sends.
+  auto &scene = appContext()->vsr.scene;
+  if (m_renderers.empty()) {
+    auto first = scene.getObject<vsr::scene::Renderer>(0);
+    if (!first)
+      return;
+    m_renderers.bind(scene, first->rendererDeviceName());
+  }
+
+  // Take the server's current renderer first, once the list has it.
+  const auto &renderers = m_renderers.objects();
+  if (!m_rendererFromServer) {
+    if (m_receivedRendererIdx >= renderers.size())
+      return;
+    m_renderers.select(renderers[m_receivedRendererIdx]->index());
+    m_sentRendererIdx = m_renderers.current()->index();
+    m_rendererFromServer = true;
     return;
   }
 
-  const bool rendererFromServer =
-      !m_renderers.current && m_receivedRendererIdx != VSR_INVALID_INDEX;
-  const bool rendererChanged = m_renderers.current != m_prevRenderer;
-
-  if (rendererFromServer) {
-    m_renderers.current = m_receivedRendererIdx >= m_renderers.objects.size()
-        ? vsr::scene::RendererAppRef{}
-        : m_renderers.objects[m_receivedRendererIdx];
-    m_prevRenderer = m_renderers.current;
-  } else if (rendererChanged) {
-    auto currentIdx =
-        m_renderers.current ? m_renderers.current->index() : VSR_INVALID_INDEX;
-    m_receivedRendererIdx = currentIdx;
+  size_t currentIdx = m_renderers.current()->index();
+  if (currentIdx != m_sentRendererIdx) {
     m_channel->send(MessageType::SERVER_SET_CURRENT_RENDERER, &currentIdx);
-    m_prevRenderer = m_renderers.current;
+    m_sentRendererIdx = currentIdx;
   }
 }
 
