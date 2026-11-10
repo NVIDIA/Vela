@@ -522,6 +522,11 @@ void Viewport::camera_centerView()
   m_camera.arcballToken = 0;
 }
 
+bool Viewport::renderer_hasActions() const
+{
+  return true;
+}
+
 void Viewport::renderer_clone()
 {
   if (!m_renderers.current)

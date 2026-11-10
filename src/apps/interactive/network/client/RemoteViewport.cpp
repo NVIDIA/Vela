@@ -176,27 +176,6 @@ void RemoteViewport::camera_centerView()
       "Camera center view is not currently supported in RemoteViewport.");
 }
 
-void RemoteViewport::renderer_clone()
-{
-  vsr::core::logWarning(
-      "Renderer cloning is not currently supported in RemoteViewport.");
-}
-
-void RemoteViewport::renderer_resetParameterDefaults()
-{
-  if (!m_renderers.current)
-    return;
-
-  vsr::core::logWarning(
-      "Renderer parameter reset is not currently supported in RemoteViewport.");
-}
-
-void RemoteViewport::renderer_reloadDefaults()
-{
-  vsr::core::logWarning(
-      "Renderer reload is not currently supported in RemoteViewport.");
-}
-
 void RemoteViewport::viewport_reshape(vsr::math::int2 _newSize)
 {
   if (_newSize.x <= 0 || _newSize.y <= 0)

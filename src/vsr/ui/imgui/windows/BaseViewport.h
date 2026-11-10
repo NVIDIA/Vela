@@ -56,11 +56,15 @@ struct BaseViewport : public Window
   virtual void camera_resetView(bool resetAzEl = true) = 0;
   virtual void camera_centerView() = 0;
 
-  virtual void renderer_clone() = 0;
-  virtual void renderer_resetParameterDefaults() = 0;
+  // The renderer actions are optional and go together: a viewport that
+  // implements all three returns true from renderer_hasActions(), and only
+  // then does the Renderer menu offer them. The defaults do nothing.
+  virtual bool renderer_hasActions() const;
+  virtual void renderer_clone();
+  virtual void renderer_resetParameterDefaults();
   // Replace every renderer object of the current device with the standard
   // set queried from the device, as a device with none gets on load.
-  virtual void renderer_reloadDefaults() = 0;
+  virtual void renderer_reloadDefaults();
 
   bool gizmo_canShow() const;
 
@@ -72,8 +76,9 @@ struct BaseViewport : public Window
   // renderer's parameters. Pass false when the viewport does not own which
   // renderer is active -- a thin client whose server picks it, say -- and the
   // menu leaves out everything that changes that choice (the subtype list,
-  // cloning, and the resets to the device's defaults), showing the current
-  // renderer's parameters alone.
+  // and the renderer actions), showing the current renderer's parameters
+  // alone. The renderer actions (cloning, and the resets to the device's
+  // defaults) also need renderer_hasActions().
   void ui_menubar_Renderer(bool selectableRenderers = true);
   void ui_menubar_Camera();
   void ui_menubar_TransformManipulator();

@@ -164,6 +164,17 @@ void BaseViewport::camera_setUseImplicitAspectRatio(bool on)
   m_camera.useImplicitAspectRatio = on;
 }
 
+bool BaseViewport::renderer_hasActions() const
+{
+  return false;
+}
+
+void BaseViewport::renderer_clone() {}
+
+void BaseViewport::renderer_resetParameterDefaults() {}
+
+void BaseViewport::renderer_reloadDefaults() {}
+
 bool BaseViewport::gizmo_canShow() const
 {
   if (!m_gizmo.active || !viewport_isActive())
@@ -494,7 +505,9 @@ void BaseViewport::ui_menubar_Renderer(bool selectableRenderers)
       ImGui::Unindent(INDENT_AMOUNT);
     }
 
-    if (selectableRenderers) {
+    const bool showActions = selectableRenderers && renderer_hasActions();
+
+    if (showActions) {
       ImGui::Separator();
 
       if (ImGui::MenuItem("Clone Current Renderer"))
@@ -524,7 +537,7 @@ void BaseViewport::ui_menubar_Renderer(bool selectableRenderers)
 
       ImGui::Unindent(INDENT_AMOUNT);
 
-      if (selectableRenderers) {
+      if (showActions) {
         ImGui::Separator();
         ImGui::Separator();
         ImGui::Indent(INDENT_AMOUNT);

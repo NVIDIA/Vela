@@ -39,10 +39,6 @@ struct RemoteViewport : public BaseViewport
   void camera_resetView(bool resetAzEl = true) override;
   void camera_centerView() override;
 
-  void renderer_clone() override;
-  void renderer_resetParameterDefaults() override;
-  void renderer_reloadDefaults() override;
-
   void viewport_reshape(vsr::math::int2 newWindowSize) override;
 
   void updateRenderer();

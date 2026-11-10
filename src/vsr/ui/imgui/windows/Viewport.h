@@ -70,6 +70,7 @@ struct Viewport : public BaseViewport
   void camera_resetView(bool resetAzEl = true) override;
   void camera_centerView() override;
 
+  bool renderer_hasActions() const override;
   void renderer_clone() override;
   void renderer_resetParameterDefaults() override;
   void renderer_reloadDefaults() override;
