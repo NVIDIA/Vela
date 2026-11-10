@@ -538,7 +538,8 @@ vsr::scene::RendererAppRef ProjectContext::bindShotRenderer(
       renderer = candidate;
   }
   if (!renderer)
-    renderer = scene.rendererForDevice(library, settings.rendererSubtype);
+    renderer =
+        scene.rendererOfSubtypeOrFirst(library, settings.rendererSubtype);
 
   settings.rendererLibrary = library;
   settings.rendererObjectIndex = renderer->index();

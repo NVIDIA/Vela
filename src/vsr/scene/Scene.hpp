@@ -147,7 +147,8 @@ struct Scene
   void reloadStandardRenderers(Token deviceName, anari::Device device);
   // The device's lowest-index renderer of 'subtype', otherwise its first
   // renderer, otherwise empty.
-  RendererAppRef rendererForDevice(Token deviceName, Token subtype) const;
+  RendererAppRef rendererOfSubtypeOrFirst(
+      Token deviceName, Token subtype) const;
 
   MultiUpdateDelegate &updateDelegate();
   const MultiUpdateDelegate &updateDelegate() const;

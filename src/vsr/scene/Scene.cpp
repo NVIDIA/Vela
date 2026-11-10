@@ -734,7 +734,8 @@ void Scene::reloadStandardRenderers(Token deviceName, anari::Device d)
     removeObject(getObject(ANARI_RENDERER, i));
 }
 
-RendererAppRef Scene::rendererForDevice(Token deviceName, Token subtype) const
+RendererAppRef Scene::rendererOfSubtypeOrFirst(
+    Token deviceName, Token subtype) const
 {
   RendererAppRef first;
   RendererAppRef match;

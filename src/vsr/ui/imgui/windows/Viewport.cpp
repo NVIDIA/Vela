@@ -571,7 +571,7 @@ void Viewport::renderer_reloadDefaults()
   // removed; the standard renderers stay in place.
   scene.reloadStandardRenderers(m_libName, m_device);
   m_renderers.objects = scene.renderersOfDevice(m_libName);
-  m_renderers.current = scene.rendererForDevice(m_libName, prevSubtype);
+  m_renderers.current = scene.rendererOfSubtypeOrFirst(m_libName, prevSubtype);
 }
 
 // Called just before the scene removes renderer 'o' (nullptr: every object).
