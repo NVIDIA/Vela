@@ -4,12 +4,11 @@
 // catch
 #include "catch.hpp"
 // vsr_tests
+#include "HelideTestDevice.h"
 #include "LogCapture.h"
 // vsr
 #include "vsr/scene/Scene.hpp"
 #include "vsr/scene/UpdateDelegate.hpp"
-// anari
-#include <anari/anari_cpp.hpp>
 // std
 #include <cmath>
 #include <string>
@@ -43,44 +42,6 @@ struct CountingDelegate : public vsr::scene::EmptyUpdateDelegate
   int *m_objectAddedCount{nullptr};
 };
 
-// A device whose renderer subtypes reload can query. Absent builds skip
-// rather than fail: what is under test is the scene's bookkeeping.
-struct TestDevice
-{
-  TestDevice()
-  {
-    library = anari::loadLibrary("helide",
-        [](const void *,
-            ANARIDevice,
-            ANARIObject,
-            anari::DataType,
-            ANARIStatusSeverity,
-            ANARIStatusCode,
-            const char *) {});
-    if (library)
-      device = anari::newDevice(library, "default");
-  }
-
-  ~TestDevice()
-  {
-    if (device)
-      anari::release(device, device);
-    if (library)
-      anari::unloadLibrary(library);
-  }
-
-  VSR_NOT_COPYABLE(TestDevice)
-  VSR_NOT_MOVEABLE(TestDevice)
-
-  explicit operator bool() const
-  {
-    return device != nullptr;
-  }
-
-  anari::Library library{nullptr};
-  anari::Device device{nullptr};
-};
-
 std::vector<size_t> rendererIndices(
     const vsr::scene::Scene &scene, vsr::core::Token deviceName)
 {
@@ -90,7 +51,7 @@ std::vector<size_t> rendererIndices(
   return indices;
 }
 
-size_t indexOf(const vsr::scene::RendererAppRef &r)
+size_t indexOrInvalid(const vsr::scene::RendererAppRef &r)
 {
   return r ? r->index() : VSR_INVALID_INDEX;
 }
@@ -422,15 +383,15 @@ SCENARIO("vsr::scene::Scene picks a device's fallback renderer", "[Scene]")
 
     THEN("It returns the device's lowest-index renderer of the subtype")
     {
-      REQUIRE(indexOf(scene.rendererOfSubtypeOrFirst("helide", "fast")) == 0);
-      REQUIRE(indexOf(scene.rendererOfSubtypeOrFirst("helide", "slow")) == 2);
-      REQUIRE(indexOf(scene.rendererOfSubtypeOrFirst("other", "fast")) == 1);
+      REQUIRE(indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "fast")) == 0);
+      REQUIRE(indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "slow")) == 2);
+      REQUIRE(indexOrInvalid(scene.rendererOfSubtypeOrFirst("other", "fast")) == 1);
     }
 
     THEN("Without a renderer of the subtype, it returns the device's first")
     {
-      REQUIRE(indexOf(scene.rendererOfSubtypeOrFirst("helide", "ao")) == 0);
-      REQUIRE(indexOf(scene.rendererOfSubtypeOrFirst("other", "slow")) == 1);
+      REQUIRE(indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "ao")) == 0);
+      REQUIRE(indexOrInvalid(scene.rendererOfSubtypeOrFirst("other", "slow")) == 1);
     }
 
     THEN("Without renderers of the device, it returns empty")
@@ -440,26 +401,25 @@ SCENARIO("vsr::scene::Scene picks a device's fallback renderer", "[Scene]")
 
     THEN("By default it excludes nothing")
     {
-      REQUIRE(indexOf(scene.rendererOfSubtypeOrFirst(
-                  "helide", "fast", VSR_INVALID_INDEX))
-          == 0);
+      REQUIRE(
+          indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "fast")) == 0);
     }
 
     THEN("An excluded renderer of the subtype yields to the next one")
     {
       REQUIRE(
-          indexOf(scene.rendererOfSubtypeOrFirst("helide", "fast", 0)) == 3);
+          indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "fast", 0)) == 3);
     }
 
     THEN("Excluding the subtype's only renderer falls back to the first")
     {
       REQUIRE(
-          indexOf(scene.rendererOfSubtypeOrFirst("helide", "slow", 2)) == 0);
+          indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "slow", 2)) == 0);
     }
 
     THEN("An excluded first renderer is not the fallback")
     {
-      REQUIRE(indexOf(scene.rendererOfSubtypeOrFirst("helide", "ao", 0)) == 2);
+      REQUIRE(indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "ao", 0)) == 2);
     }
 
     THEN("Excluding the device's only renderer returns empty")
@@ -470,14 +430,14 @@ SCENARIO("vsr::scene::Scene picks a device's fallback renderer", "[Scene]")
     THEN("Excluding another device's renderer changes nothing")
     {
       REQUIRE(
-          indexOf(scene.rendererOfSubtypeOrFirst("helide", "fast", 1)) == 0);
+          indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "fast", 1)) == 0);
     }
   }
 }
 
 SCENARIO("vsr::scene::Scene reloads a device's renderers in place", "[Scene]")
 {
-  TestDevice anariDevice;
+  HelideTestDevice anariDevice;
   if (!anariDevice) {
     WARN("helide unavailable, skipping");
     return;
@@ -485,6 +445,8 @@ SCENARIO("vsr::scene::Scene reloads a device's renderers in place", "[Scene]")
   auto d = anariDevice.device;
 
   const auto offered = vsr::scene::getANARIObjectSubtypes(d, ANARI_RENDERER);
+  // The cases below assume helide offers one subtype, so a subtype it lacks
+  // can be made up and every survivor is its 'default' renderer.
   REQUIRE(offered == std::vector<std::string>{"default"});
 
   // What a renderer of a fresh scene looks like.
@@ -582,7 +544,7 @@ SCENARIO("vsr::scene::Scene reloads a device's renderers in place", "[Scene]")
     }
   }
 
-  GIVEN("Several offered-subtype renderers between others, in storage order")
+  GIVEN("Two renderers of the offered subtype, a lower-index one first")
   {
     scene.createStandardRenderers("helide", d); // 0
     scene.createRenderer("helide", "retired"); // 1
