@@ -139,7 +139,19 @@ struct Scene
   std::vector<RendererAppRef> createStandardRenderers(
       Token deviceName, anari::Device device);
   std::vector<RendererAppRef> renderersOfDevice(Token deviceName) const;
-  void removeRenderersForDevice(Token deviceName);
+  // Bring the device's renderers back in step with the device: for each
+  // subtype it offers, the lowest-index renderer keeps its slot, name, and
+  // metadata but has its parameters reset to defaults; missing subtypes are
+  // created; then every other renderer of the device (clones and subtypes it
+  // no longer offers) is removed.
+  void reloadStandardRenderers(Token deviceName, anari::Device device);
+  // The device's lowest-index renderer of 'subtype', otherwise its first
+  // renderer, otherwise empty. The renderer at 'excludeObjectIndex' is passed
+  // over, so a delegate can pick a replacement for the renderer the scene is
+  // about to remove.
+  RendererAppRef rendererOfSubtypeOrFirst(Token deviceName,
+      Token subtype,
+      size_t excludeObjectIndex = VSR_INVALID_INDEX) const;
 
   MultiUpdateDelegate &updateDelegate();
   const MultiUpdateDelegate &updateDelegate() const;
@@ -237,6 +249,8 @@ struct Scene
   void removeDefragCallback(size_t token);
 
  private:
+  RendererAppRef createStandardRenderer(
+      Token deviceName, anari::Device d, Token subtype);
   friend bool ::vsr::io::deserialize_CameraArchive(
       Scene &, core::DataNode &, ::vsr::io::ArchiveValidationResult *);
 

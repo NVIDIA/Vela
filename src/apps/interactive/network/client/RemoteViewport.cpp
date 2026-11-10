@@ -144,9 +144,9 @@ void RemoteViewport::setNetworkChannel(vsr::network::NetworkChannel *c)
 void RemoteViewport::disconnect()
 {
   m_receivedRendererIdx = VSR_INVALID_INDEX;
-  m_renderers.current = {};
-  m_renderers.objects.clear();
-  m_prevRenderer = {};
+  m_sentRendererIdx = VSR_INVALID_INDEX;
+  m_rendererSettled = false;
+  m_renderers.unbind();
   m_receivedCameraIdx = VSR_INVALID_INDEX;
   m_camera.current = {};
   m_prevCamera = {};
@@ -174,21 +174,6 @@ void RemoteViewport::camera_centerView()
 {
   vsr::core::logWarning(
       "Camera center view is not currently supported in RemoteViewport.");
-}
-
-void RemoteViewport::renderer_clone()
-{
-  vsr::core::logWarning(
-      "Renderer cloning is not currently supported in RemoteViewport.");
-}
-
-void RemoteViewport::renderer_resetParameterDefaults()
-{
-  if (!m_renderers.current)
-    return;
-
-  vsr::core::logWarning(
-      "Renderer parameter reset is not currently supported in RemoteViewport.");
 }
 
 void RemoteViewport::viewport_reshape(vsr::math::int2 _newSize)
@@ -236,32 +221,35 @@ void RemoteViewport::updateRenderer()
   if (!m_channel || !m_channel->isConnected())
     return;
 
-  auto *ctx = appContext();
-  auto &scene = ctx->vsr.scene;
-  if (m_renderers.objects.empty()
-      && scene.numberOfObjects(ANARI_RENDERER) != 0) {
-    auto fr = scene.getObject<vsr::scene::Renderer>(0);
-    m_renderers.objects = scene.renderersOfDevice(fr->rendererDeviceName());
-  } else if (m_renderers.objects.empty()) {
-    // We only update when we have the list of renderers from the server
+  // The list follows the device of the first renderer the server sends.
+  auto &scene = appContext()->vsr.scene;
+  if (m_renderers.empty()) {
+    const auto first = scene.getObject<vsr::scene::Renderer>(0);
+    if (!first)
+      return;
+    m_renderers.bind(scene, first->rendererDeviceName());
+    // The list's default pick is not a choice to send to the server.
+    m_sentRendererIdx = m_renderers.current()->index();
+  }
+
+  size_t currentIdx = m_renderers.current()->index();
+  const bool pickedLocally = currentIdx != m_sentRendererIdx;
+
+  // Until the user picks one, take the server's renderer once it is listed.
+  const auto &renderers = m_renderers.objects();
+  if (!m_rendererSettled && !pickedLocally) {
+    if (m_receivedRendererIdx < renderers.size()) {
+      m_renderers.select(renderers[m_receivedRendererIdx]->index());
+      m_sentRendererIdx = m_renderers.current()->index();
+      m_rendererSettled = true;
+    }
     return;
   }
 
-  const bool rendererFromServer =
-      !m_renderers.current && m_receivedRendererIdx != VSR_INVALID_INDEX;
-  const bool rendererChanged = m_renderers.current != m_prevRenderer;
-
-  if (rendererFromServer) {
-    m_renderers.current = m_receivedRendererIdx >= m_renderers.objects.size()
-        ? vsr::scene::RendererAppRef{}
-        : m_renderers.objects[m_receivedRendererIdx];
-    m_prevRenderer = m_renderers.current;
-  } else if (rendererChanged) {
-    auto currentIdx =
-        m_renderers.current ? m_renderers.current->index() : VSR_INVALID_INDEX;
-    m_receivedRendererIdx = currentIdx;
+  m_rendererSettled = true;
+  if (pickedLocally) {
     m_channel->send(MessageType::SERVER_SET_CURRENT_RENDERER, &currentIdx);
-    m_prevRenderer = m_renderers.current;
+    m_sentRendererIdx = currentIdx;
   }
 }
 

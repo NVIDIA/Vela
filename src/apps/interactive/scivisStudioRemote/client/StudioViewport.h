@@ -112,8 +112,6 @@ struct StudioViewport : public vsr::ui::imgui::BaseViewport
   std::optional<vsr::rendering::CameraPose> serverDefaultView() const;
   void camera_resetView(bool resetAzEl = true) override;
   void camera_centerView() override;
-  void renderer_clone() override;
-  void renderer_resetParameterDefaults() override;
 
   void takeLatestFrame();
   void syncPipelineToFrame();

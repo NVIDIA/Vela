@@ -3,12 +3,16 @@
 
 // catch
 #include "catch.hpp"
+// vsr_tests
+#include "HelideTestDevice.h"
+#include "LogCapture.h"
 // vsr
 #include "vsr/scene/Scene.hpp"
 #include "vsr/scene/UpdateDelegate.hpp"
 // std
 #include <cmath>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -37,6 +41,20 @@ struct CountingDelegate : public vsr::scene::EmptyUpdateDelegate
 
   int *m_objectAddedCount{nullptr};
 };
+
+std::vector<size_t> rendererIndices(
+    const vsr::scene::Scene &scene, vsr::core::Token deviceName)
+{
+  std::vector<size_t> indices;
+  for (const auto &r : scene.renderersOfDevice(deviceName))
+    indices.push_back(r->index());
+  return indices;
+}
+
+size_t indexOrInvalid(const vsr::scene::RendererAppRef &r)
+{
+  return r ? r->index() : VSR_INVALID_INDEX;
+}
 
 } // namespace
 
@@ -347,6 +365,233 @@ SCENARIO("vsr::scene::Scene delegate registration controls live signaling",
         REQUIRE(geometry);
         REQUIRE(scene.updateDelegate().size() == 0);
         REQUIRE(objectAddedCount == 0);
+      }
+    }
+  }
+}
+
+SCENARIO("vsr::scene::Scene picks a device's fallback renderer", "[Scene]")
+{
+  vsr::scene::Scene scene;
+
+  GIVEN("Renderers of made-up subtypes on two devices")
+  {
+    scene.createRenderer("helide", "fast"); // 0
+    scene.createRenderer("other", "fast"); // 1
+    scene.createRenderer("helide", "slow"); // 2
+    scene.createRenderer("helide", "fast"); // 3: a clone of 0
+
+    THEN("It returns the device's lowest-index renderer of the subtype")
+    {
+      REQUIRE(indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "fast")) == 0);
+      REQUIRE(indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "slow")) == 2);
+      REQUIRE(indexOrInvalid(scene.rendererOfSubtypeOrFirst("other", "fast")) == 1);
+    }
+
+    THEN("Without a renderer of the subtype, it returns the device's first")
+    {
+      REQUIRE(indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "ao")) == 0);
+      REQUIRE(indexOrInvalid(scene.rendererOfSubtypeOrFirst("other", "slow")) == 1);
+    }
+
+    THEN("Without renderers of the device, it returns empty")
+    {
+      REQUIRE_FALSE(scene.rendererOfSubtypeOrFirst("devX", "fast"));
+    }
+
+    THEN("By default it excludes nothing")
+    {
+      REQUIRE(
+          indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "fast")) == 0);
+    }
+
+    THEN("An excluded renderer of the subtype yields to the next one")
+    {
+      REQUIRE(
+          indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "fast", 0)) == 3);
+    }
+
+    THEN("Excluding the subtype's only renderer falls back to the first")
+    {
+      REQUIRE(
+          indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "slow", 2)) == 0);
+    }
+
+    THEN("An excluded first renderer is not the fallback")
+    {
+      REQUIRE(indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "ao", 0)) == 2);
+    }
+
+    THEN("Excluding the device's only renderer returns empty")
+    {
+      REQUIRE_FALSE(scene.rendererOfSubtypeOrFirst("other", "fast", 1));
+    }
+
+    THEN("Excluding another device's renderer changes nothing")
+    {
+      REQUIRE(
+          indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "fast", 1)) == 0);
+    }
+  }
+}
+
+SCENARIO("vsr::scene::Scene reloads a device's renderers in place", "[Scene]")
+{
+  HelideTestDevice anariDevice;
+  if (!anariDevice) {
+    WARN("helide unavailable, skipping");
+    return;
+  }
+  auto d = anariDevice.device;
+
+  const auto offered = vsr::scene::getANARIObjectSubtypes(d, ANARI_RENDERER);
+  // The cases below assume helide offers one subtype, so a subtype it lacks
+  // can be made up and every survivor is its 'default' renderer.
+  REQUIRE(offered == std::vector<std::string>{"default"});
+
+  // What a renderer of a fresh scene looks like.
+  vsr::scene::Scene reference;
+  const auto fresh = reference.createStandardRenderers("helide", d).front();
+  const auto freshBackground =
+      fresh->parameterValueAs<vsr::math::float4>("background");
+  REQUIRE(freshBackground);
+
+  vsr::scene::Scene scene;
+  LogCapture log;
+
+  GIVEN(
+      "An edited standard renderer, a clone of it, a subtype helide does not"
+      " offer, and another device's renderer")
+  {
+    scene.createRenderer("helide", "retired"); // 0
+    {
+      auto other = scene.createRenderer("other", "default"); // 1
+      other->setParameter("madeUp", 1.f);
+
+      auto standard = scene.createStandardRenderers("helide", d).front(); // 2
+      REQUIRE(standard->index() == 2);
+      standard->setName("my renderer");
+      standard->setMetadataValue("note", vsr::core::Any(7));
+      standard->setParameter(
+          "background", vsr::math::float4(1.f, 0.f, 0.f, 1.f));
+      standard->setParameter("madeUp", 1.f);
+
+      REQUIRE(vsr::scene::cloneObject(standard.get())->index() == 3);
+      scene.createRenderer("helide", "retired"); // 4
+    }
+    REQUIRE(
+        rendererIndices(scene, "helide") == std::vector<size_t>{0, 2, 3, 4});
+
+    WHEN("The device's renderers are reloaded")
+    {
+      scene.reloadStandardRenderers("helide", d);
+      auto kept = scene.getObject<vsr::scene::Renderer>(2);
+
+      THEN("The lowest-index renderer of the offered subtype keeps its slot")
+      {
+        REQUIRE(kept);
+        REQUIRE(kept->subtype() == "default");
+        REQUIRE(rendererIndices(scene, "helide") == std::vector<size_t>{2});
+      }
+
+      THEN("Its parameters return to the device's defaults")
+      {
+        REQUIRE(kept->numParameters() == fresh->numParameters());
+        REQUIRE_FALSE(kept->parameter("madeUp"));
+        REQUIRE(kept->parameterValueAs<vsr::math::float4>("background")
+            == freshBackground);
+      }
+
+      THEN("Its name and metadata are unchanged")
+      {
+        REQUIRE(kept->name() == "my renderer");
+        REQUIRE(kept->getMetadataValue("note").getAs<int>() == 7);
+      }
+
+      THEN("The clone and the subtypes helide does not offer are removed")
+      {
+        REQUIRE_FALSE(scene.getObject(ANARI_RENDERER, 0));
+        REQUIRE_FALSE(scene.getObject(ANARI_RENDERER, 3));
+        REQUIRE_FALSE(scene.getObject(ANARI_RENDERER, 4));
+      }
+
+      THEN("The other device's renderer is untouched")
+      {
+        REQUIRE(rendererIndices(scene, "other") == std::vector<size_t>{1});
+        auto other = scene.getObject<vsr::scene::Renderer>(1);
+        REQUIRE(other->parameterValueAs<float>("madeUp") == 1.f);
+      }
+
+      THEN("No use count goes below zero")
+      {
+        REQUIRE_FALSE(log.sawMessageContaining("decUseCount"));
+      }
+    }
+
+    WHEN("Reloading while holding the kept renderer")
+    {
+      auto held = scene.getObject<vsr::scene::Renderer>(2);
+      const auto heldUses = held->useCount(vsr::scene::Object::UseKind::APP);
+      scene.reloadStandardRenderers("helide", d);
+
+      THEN("The held reference still names it, with its use count intact")
+      {
+        REQUIRE(held);
+        REQUIRE(held->index() == 2);
+        REQUIRE(held->useCount(vsr::scene::Object::UseKind::APP) == heldUses);
+        REQUIRE_FALSE(log.sawMessageContaining("decUseCount"));
+      }
+    }
+  }
+
+  GIVEN("Two renderers of the offered subtype, a lower-index one first")
+  {
+    scene.createStandardRenderers("helide", d); // 0
+    scene.createRenderer("helide", "retired"); // 1
+    scene.createRenderer("helide", "default"); // 2: a clone of 0
+
+    WHEN("The device's renderers are reloaded")
+    {
+      scene.reloadStandardRenderers("helide", d);
+
+      THEN("Only the lowest-index one survives, where it was")
+      {
+        REQUIRE(rendererIndices(scene, "helide") == std::vector<size_t>{0});
+        REQUIRE(
+            scene.renderersOfDevice("helide").front()->subtype() == "default");
+      }
+    }
+  }
+
+  GIVEN("A device whose only renderer is of a subtype it does not offer")
+  {
+    scene.createRenderer("helide", "retired"); // 0
+
+    WHEN("The device's renderers are reloaded")
+    {
+      scene.reloadStandardRenderers("helide", d);
+
+      THEN("The offered subtype is created before the old one is removed")
+      {
+        // Created first, the new renderer could not reuse slot 0, so a stale
+        // index stays detectably dead.
+        REQUIRE(rendererIndices(scene, "helide") == std::vector<size_t>{1});
+        REQUIRE(
+            scene.getObject<vsr::scene::Renderer>(1)->subtype() == "default");
+        REQUIRE_FALSE(scene.getObject(ANARI_RENDERER, 0));
+      }
+    }
+  }
+
+  GIVEN("A device without renderers")
+  {
+    WHEN("The device's renderers are reloaded")
+    {
+      scene.reloadStandardRenderers("helide", d);
+
+      THEN("Its standard renderers are created")
+      {
+        REQUIRE(rendererIndices(scene, "helide") == std::vector<size_t>{0});
       }
     }
   }

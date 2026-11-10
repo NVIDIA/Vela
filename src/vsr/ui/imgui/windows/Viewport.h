@@ -70,8 +70,10 @@ struct Viewport : public BaseViewport
   void camera_resetView(bool resetAzEl = true) override;
   void camera_centerView() override;
 
+  bool renderer_hasActions() const override;
   void renderer_clone() override;
   void renderer_resetParameterDefaults() override;
+  void renderer_reloadDefaults() override;
 
   void teardownDevice();
   // 'pixel' in render-image pixels, row 0 at the bottom.
@@ -136,7 +138,8 @@ struct Viewport : public BaseViewport
   // ANARI objects //
 
   anari::Device m_device{nullptr};
-  vsr::scene::RendererAppRef m_prevRenderer;
+  // The renderer handle last given to m_anariPass, to detect a change.
+  anari::Renderer m_boundRenderer{nullptr};
   vsr::scene::CameraAppRef m_prevCamera;
   vsr::core::ObjectVersion m_lastCameraChange{};
 

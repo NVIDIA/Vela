@@ -25,6 +25,7 @@ project_sources(PRIVATE
   windows/Log.cpp
   windows/MultiDeviceViewport.cpp
   windows/ObjectEditor.cpp
+  windows/RendererList.cpp
   windows/Terminal.cpp
   windows/TransferFunctionEditor.cpp
   windows/Viewport.cpp

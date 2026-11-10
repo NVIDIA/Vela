@@ -164,6 +164,17 @@ void BaseViewport::camera_setUseImplicitAspectRatio(bool on)
   m_camera.useImplicitAspectRatio = on;
 }
 
+bool BaseViewport::renderer_hasActions() const
+{
+  return false;
+}
+
+void BaseViewport::renderer_clone() {}
+
+void BaseViewport::renderer_resetParameterDefaults() {}
+
+void BaseViewport::renderer_reloadDefaults() {}
+
 bool BaseViewport::gizmo_canShow() const
 {
   if (!m_gizmo.active || !viewport_isActive())
@@ -478,36 +489,49 @@ void BaseViewport::ui_animationSlider()
 void BaseViewport::ui_menubar_Renderer(bool selectableRenderers)
 {
   if (ImGui::BeginMenu("Renderer")) {
-    if (selectableRenderers && m_renderers.objects.size() > 1) {
+    const auto &renderers = m_renderers.objects();
+    if (selectableRenderers && renderers.size() > 1) {
       ImGui::Text("Subtype:");
       ImGui::Indent(INDENT_AMOUNT);
-      for (int i = 0; i < m_renderers.objects.size(); i++) {
+      for (int i = 0; i < renderers.size(); i++) {
         ImGui::PushID(i);
-        auto ro = m_renderers.objects[i];
+        auto ro = renderers[i];
         const std::string &oName = ro->name();
         const char *rName =
             oName.empty() ? ro->subtype().c_str() : oName.c_str();
-        if (ImGui::RadioButton(rName, m_renderers.current == ro))
-          m_renderers.current = ro;
+        if (ImGui::RadioButton(rName, m_renderers.current() == ro))
+          m_renderers.select(ro->index());
         ImGui::PopID();
       }
       ImGui::Unindent(INDENT_AMOUNT);
     }
 
-    if (selectableRenderers) {
+    const bool showActions = selectableRenderers && renderer_hasActions();
+
+    if (showActions) {
       ImGui::Separator();
 
       if (ImGui::MenuItem("Clone Current Renderer"))
         renderer_clone();
 
+      if (ImGui::BeginMenu("Reload Default Renderers?")) {
+        if (ImGui::MenuItem("Yes"))
+          renderer_reloadDefaults();
+        ImGui::EndMenu();
+      }
+      tooltipForPreviousItem(
+          "reset every standard renderer's parameters to the device's "
+          "defaults, add renderers the device now offers, and remove clones "
+          "and renderers it no longer offers");
+
       ImGui::Separator();
     }
 
-    if (!m_renderers.objects.empty()) {
+    if (!m_renderers.empty()) {
       ImGui::Text("Parameters:");
       ImGui::Indent(INDENT_AMOUNT);
 
-      vsr::ui::buildUI_object(*m_renderers.current,
+      vsr::ui::buildUI_object(*m_renderers.current(),
           appContext()->vsr.scene,
           true,
           0,
@@ -515,7 +539,7 @@ void BaseViewport::ui_menubar_Renderer(bool selectableRenderers)
 
       ImGui::Unindent(INDENT_AMOUNT);
 
-      if (selectableRenderers) {
+      if (showActions) {
         ImGui::Separator();
         ImGui::Separator();
         ImGui::Indent(INDENT_AMOUNT);

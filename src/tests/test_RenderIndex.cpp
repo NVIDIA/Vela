@@ -3,6 +3,8 @@
 
 // catch
 #include "catch.hpp"
+// vsr_tests
+#include "HelideTestDevice.h"
 // vsr
 #include "vsr/rendering/index/RenderIndexAllLayers.hpp"
 #include "vsr/rendering/index/RenderToAnariObjectsVisitor.hpp"
@@ -17,40 +19,6 @@ namespace {
 
 using namespace vsr::core;
 using namespace vsr::scene;
-
-// A device the tests can drive without a display or a GPU. Absent builds skip
-// rather than fail: what is under test is VSR's bookkeeping, not the device.
-struct TestDevice
-{
-  TestDevice()
-  {
-    library = anari::loadLibrary("helide", [](const void *,
-                                               ANARIDevice,
-                                               ANARIObject,
-                                               anari::DataType,
-                                               ANARIStatusSeverity,
-                                               ANARIStatusCode,
-                                               const char *) {});
-    if (library)
-      device = anari::newDevice(library, "default");
-  }
-
-  ~TestDevice()
-  {
-    if (device)
-      anari::release(device, device);
-    if (library)
-      anari::unloadLibrary(library);
-  }
-
-  explicit operator bool() const
-  {
-    return device != nullptr;
-  }
-
-  anari::Library library{nullptr};
-  anari::Device device{nullptr};
-};
 
 // The world's bounds are the cheapest thing a device will tell us about where
 // the geometry it was given actually ended up.
@@ -108,7 +76,7 @@ vsr::math::mat4 translation(float x)
 
 SCENARIO("Rewriting a transform array moves its instances", "[RenderIndex]")
 {
-  TestDevice anariDevice;
+  HelideTestDevice anariDevice;
   if (!anariDevice) {
     WARN("helide unavailable, skipping");
     return;
@@ -160,7 +128,7 @@ SCENARIO("Rewriting a transform array moves its instances", "[RenderIndex]")
 SCENARIO(
     "Placements of the same Surfaces share one ANARI Group", "[RenderIndex]")
 {
-  TestDevice anariDevice;
+  HelideTestDevice anariDevice;
   if (!anariDevice) {
     WARN("helide unavailable, skipping");
     return;

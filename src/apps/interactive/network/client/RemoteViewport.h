@@ -39,9 +39,6 @@ struct RemoteViewport : public BaseViewport
   void camera_resetView(bool resetAzEl = true) override;
   void camera_centerView() override;
 
-  void renderer_clone() override;
-  void renderer_resetParameterDefaults() override;
-
   void viewport_reshape(vsr::math::int2 newWindowSize) override;
 
   void updateRenderer();
@@ -57,8 +54,12 @@ struct RemoteViewport : public BaseViewport
   bool m_showOverlay{true};
 
   size_t m_receivedRendererIdx{VSR_INVALID_INDEX};
+  // Whether the current renderer was taken from the server or picked here;
+  // until then, the server's choice is adopted when it arrives.
+  bool m_rendererSettled{false};
+  // The current renderer's object index as the server last heard it.
+  size_t m_sentRendererIdx{VSR_INVALID_INDEX};
   size_t m_receivedCameraIdx{VSR_INVALID_INDEX};
-  vsr::scene::RendererAppRef m_prevRenderer;
   vsr::scene::CameraAppRef m_prevCamera;
 
   // Camera manipulator //

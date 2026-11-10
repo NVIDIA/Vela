@@ -141,7 +141,7 @@ void StudioViewport::ui_menubar(bool connected)
   }
 
   ImGui::BeginDisabled(!connected);
-  if (m_renderers.current)
+  if (m_renderers.current())
     BaseViewport::ui_menubar_Renderer(false);
   if (m_camera.current)
     BaseViewport::ui_menubar_Camera();
@@ -432,15 +432,16 @@ void StudioViewport::adoptCamera(vsr::scene::CameraAppRef camera)
 void StudioViewport::adoptRenderer(size_t rendererIndex)
 {
   auto &scene = appContext()->vsr.scene;
-  m_renderers.objects.clear();
-  m_renderers.current = {};
-  if (rendererIndex != VSR_INVALID_INDEX)
-    m_renderers.current = scene.getObject<vsr::scene::Renderer>(rendererIndex);
+  auto renderer = scene.getObject<vsr::scene::Renderer>(rendererIndex);
   const size_t count = scene.numberOfObjects(ANARI_RENDERER);
-  for (size_t i = 0; i < count && !m_renderers.current; ++i)
-    m_renderers.current = scene.getObject<vsr::scene::Renderer>(i);
-  if (m_renderers.current)
-    m_renderers.objects.push_back(m_renderers.current);
+  for (size_t i = 0; i < count && !renderer; ++i)
+    renderer = scene.getObject<vsr::scene::Renderer>(i);
+  if (!renderer) {
+    m_renderers.unbind();
+    return;
+  }
+  m_renderers.bind(scene, renderer->rendererDeviceName());
+  m_renderers.select(renderer.index());
 }
 
 void StudioViewport::dropMirrorReferences()
@@ -448,8 +449,7 @@ void StudioViewport::dropMirrorReferences()
   m_camera.current = {};
   m_camera.arcballToken = {};
   m_manipulatorSynchronized = false;
-  m_renderers.objects.clear();
-  m_renderers.current = {};
+  m_renderers.unbind();
   m_reportResizes = false;
   m_sentFrameConfig = vsr::math::uint2(0, 0);
   // The server this outline was sent to is gone, being re-bootstrapped or
@@ -641,21 +641,6 @@ void StudioViewport::camera_centerView()
   }
   m_camera.arcball->setAxis(axis);
   m_camera.arcballToken = 0;
-}
-
-// Required by BaseViewport, but unreachable: the Renderer menu is built
-// without renderer selection, so it offers neither.
-void StudioViewport::renderer_clone()
-{
-  vsr::core::logWarning(
-      "[StudioViewport] renderer cloning is not available in the client yet");
-}
-
-void StudioViewport::renderer_resetParameterDefaults()
-{
-  vsr::core::logWarning(
-      "[StudioViewport] renderer parameter reset is not available in the"
-      " client yet");
 }
 
 } // namespace vsr::scivis_studio::client

@@ -15,6 +15,7 @@
 // vsr_rendering
 #include "vsr/rendering/view/ManipulatorToVSR.hpp"
 // std
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
@@ -174,25 +175,18 @@ void Viewport::setLibrary(
 
       vsr::core::logStatus("[viewport] setting up renderer objects...");
 
-      m_renderers.objects = scene.renderersOfDevice(selectedLibName);
-      if (m_renderers.objects.empty())
-        m_renderers.objects = scene.createStandardRenderers(selectedLibName, d);
+      m_renderers.bind(scene, selectedLibName);
+      if (m_renderers.empty())
+        scene.createStandardRenderers(selectedLibName, d);
 
-      if (rendererIndex != VSR_INVALID_INDEX) {
-        auto renderer = scene.getObject<vsr::scene::Renderer>(rendererIndex);
-        if (renderer && renderer->rendererDeviceName() == selectedLibName)
-          m_renderers.current = renderer;
-        else {
-          vsr::core::logWarning(
-              "[viewport] renderer object index %zu is unavailable for ANARI "
-              "device '%s'; using the default renderer",
-              rendererIndex,
-              selectedLibName.c_str());
-        }
+      if (rendererIndex != VSR_INVALID_INDEX
+          && !m_renderers.select(rendererIndex)) {
+        vsr::core::logWarning(
+            "[viewport] renderer object index %zu is unavailable for ANARI "
+            "device '%s'; using the default renderer",
+            rendererIndex,
+            selectedLibName.c_str());
       }
-
-      if (!m_renderers.current && !m_renderers.objects.empty())
-        m_renderers.current = m_renderers.objects[0];
 
       vsr::core::logStatus("[viewport] populating render index...");
 
@@ -265,7 +259,8 @@ const std::string &Viewport::libraryName() const
 
 size_t Viewport::currentRendererObjectIndex() const
 {
-  return m_renderers.current ? m_renderers.current->index() : VSR_INVALID_INDEX;
+  const auto current = m_renderers.current();
+  return current ? current->index() : VSR_INVALID_INDEX;
 }
 
 void Viewport::setDeviceChangeCb(ViewportDeviceChangeCb cb)
@@ -491,35 +486,35 @@ void Viewport::camera_centerView()
   m_camera.arcballToken = 0;
 }
 
+bool Viewport::renderer_hasActions() const
+{
+  return true;
+}
+
 void Viewport::renderer_clone()
 {
-  if (!m_renderers.current)
-    return;
-
-  auto *clone = vsr::scene::cloneObject(m_renderers.current.get());
-  if (!clone || clone->type() != ANARI_RENDERER)
-    return;
-
-  auto cloneRef =
-      appContext()->vsr.scene.getObject<vsr::scene::Renderer>(clone->index());
-  if (!cloneRef)
-    return;
-
-  m_renderers.objects.push_back(cloneRef);
-  m_renderers.current = cloneRef;
+  const auto current = m_renderers.current();
+  if (auto *clone = current ? vsr::scene::cloneObject(current.get()) : nullptr)
+    m_renderers.select(clone->index()); // the list added it as it was created
 }
 
 void Viewport::renderer_resetParameterDefaults()
 {
-  if (!m_device || !m_renderers.current)
+  auto current = m_renderers.current();
+  if (!m_device || !current)
     return;
 
-  m_renderers.current->removeAllParameters();
-  m_renderers.current->setCommonParameterDefaults();
-  vsr::scene::parseANARIObjectInfo(*m_renderers.current,
-      m_device,
-      ANARI_RENDERER,
-      m_renderers.current->subtype().c_str());
+  current->removeAllParameters();
+  current->setCommonParameterDefaults();
+  vsr::scene::parseANARIObjectInfo(
+      *current, m_device, ANARI_RENDERER, current->subtype().c_str());
+}
+
+void Viewport::renderer_reloadDefaults()
+{
+  // m_renderers drops the removed renderers and reselects as they go.
+  if (m_device)
+    appContext()->vsr.scene.reloadStandardRenderers(m_libName, m_device);
 }
 
 void Viewport::teardownDevice()
@@ -554,9 +549,8 @@ void Viewport::teardownDevice()
   if (m_device)
     anari::release(m_device, m_device);
 
-  m_renderers.objects.clear();
-  m_renderers.current = nullptr;
-  m_prevRenderer = {};
+  m_renderers.unbind();
+  m_boundRenderer = nullptr;
 
   m_device = nullptr;
 }
@@ -629,7 +623,10 @@ void Viewport::camera_setUseImplicitAspectRatio(bool on)
 
 void Viewport::updateFrame()
 {
-  if (m_prevRenderer == m_renderers.current && m_prevCamera == m_camera.current)
+  const auto current = m_renderers.current();
+  const anari::Renderer renderer =
+      current ? m_rIdx->renderer(current->index()) : nullptr;
+  if (renderer == m_boundRenderer && m_prevCamera == m_camera.current)
     return;
 
   if (!m_camera.current)
@@ -639,9 +636,9 @@ void Viewport::updateFrame()
     m_anariPass->setCamera(m_rIdx->camera(m_camera.current->index()));
     m_prevCamera = m_camera.current;
   }
-  if (m_renderers.current) {
-    m_anariPass->setRenderer(m_rIdx->renderer(m_renderers.current->index()));
-    m_prevRenderer = m_renderers.current;
+  if (renderer) {
+    m_anariPass->setRenderer(renderer);
+    m_boundRenderer = renderer;
   }
 }
 
@@ -1123,9 +1120,10 @@ void Viewport::ui_overlay()
   if (ImGui::BeginChild(
           "##viewportOverlay", ImVec2(0, 0), childFlags, childWindowFlags)) {
     ImGui::Text("  device: %s", m_libName.c_str());
+    const auto renderer = m_renderers.current();
     ImGui::TextColored(ImVec4(0.0f, 1.0f, 1.0f, 1.f),
         "renderer: %s",
-        m_renderers.current ? m_renderers.current->subtype().c_str() : "---");
+        renderer ? renderer->subtype().c_str() : "---");
 
     // Camera indicator
     ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),
