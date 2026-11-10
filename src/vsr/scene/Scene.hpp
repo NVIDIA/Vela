@@ -146,9 +146,12 @@ struct Scene
   // no longer offers) is removed.
   void reloadStandardRenderers(Token deviceName, anari::Device device);
   // The device's lowest-index renderer of 'subtype', otherwise its first
-  // renderer, otherwise empty.
-  RendererAppRef rendererOfSubtypeOrFirst(
-      Token deviceName, Token subtype) const;
+  // renderer, otherwise empty. The renderer at 'excludeObjectIndex' is passed
+  // over, so a delegate can pick a replacement for the renderer the scene is
+  // about to remove.
+  RendererAppRef rendererOfSubtypeOrFirst(Token deviceName,
+      Token subtype,
+      size_t excludeObjectIndex = VSR_INVALID_INDEX) const;
 
   MultiUpdateDelegate &updateDelegate();
   const MultiUpdateDelegate &updateDelegate() const;

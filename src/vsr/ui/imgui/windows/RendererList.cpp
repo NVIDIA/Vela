@@ -117,15 +117,9 @@ void RendererList::rendererRemoved(const Renderer &r)
   if (!m_current || m_current->index() != r.index())
     return;
 
-  const auto sameSubtype = std::find_if(m_objects.begin(),
-      m_objects.end(),
-      [&](auto &o) { return o->subtype() == r.subtype(); });
-  if (sameSubtype != m_objects.end())
-    m_current = *sameSubtype;
-  else if (!m_objects.empty())
-    m_current = m_objects.front();
-  else
-    m_current = {};
+  // The scene still holds 'r' while it signals, so pass it over.
+  m_current =
+      m_scene->rendererOfSubtypeOrFirst(m_deviceName, r.subtype(), r.index());
 }
 
 std::vector<RendererAppRef>::iterator RendererList::find(size_t objectIndex)

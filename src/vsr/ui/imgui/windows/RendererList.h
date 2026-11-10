@@ -20,9 +20,8 @@ namespace vsr::ui::imgui {
  * so its use-counted refs never outlive their objects.
  *
  * A non-empty list always has a current renderer. When the current one is
- * removed, the list's renderer of the same subtype takes over, otherwise its
- * first renderer -- the rule of Scene::rendererOfSubtypeOrFirst(), applied to
- * the list because the scene still holds the removed renderer when it signals.
+ * removed, Scene::rendererOfSubtypeOrFirst() picks its replacement: the
+ * renderer of the same subtype, otherwise the device's first renderer.
  *
  * The bound scene must outlive the binding: unbind() (or destroy the list)
  * before the scene goes away.

@@ -735,12 +735,13 @@ void Scene::reloadStandardRenderers(Token deviceName, anari::Device d)
 }
 
 RendererAppRef Scene::rendererOfSubtypeOrFirst(
-    Token deviceName, Token subtype) const
+    Token deviceName, Token subtype, size_t excludeObjectIndex) const
 {
   RendererAppRef first;
   RendererAppRef match;
   foreach_item_const(m_db.renderer, [&](const Renderer *r) {
-    if (match || !r || r->rendererDeviceName() != deviceName)
+    if (match || !r || r->index() == excludeObjectIndex
+        || r->rendererDeviceName() != deviceName)
       return;
     if (!first)
       first = getObject<Renderer>(r->index());
