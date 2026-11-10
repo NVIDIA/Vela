@@ -1120,10 +1120,10 @@ void Viewport::ui_overlay()
   if (ImGui::BeginChild(
           "##viewportOverlay", ImVec2(0, 0), childFlags, childWindowFlags)) {
     ImGui::Text("  device: %s", m_libName.c_str());
+    const auto renderer = m_renderers.current();
     ImGui::TextColored(ImVec4(0.0f, 1.0f, 1.0f, 1.f),
         "renderer: %s",
-        m_renderers.current() ? m_renderers.current()->subtype().c_str()
-                              : "---");
+        renderer ? renderer->subtype().c_str() : "---");
 
     // Camera indicator
     ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f),

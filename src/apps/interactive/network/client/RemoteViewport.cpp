@@ -145,7 +145,7 @@ void RemoteViewport::disconnect()
 {
   m_receivedRendererIdx = VSR_INVALID_INDEX;
   m_sentRendererIdx = VSR_INVALID_INDEX;
-  m_rendererFromServer = false;
+  m_rendererSettled = false;
   m_renderers.unbind();
   m_receivedCameraIdx = VSR_INVALID_INDEX;
   m_camera.current = {};
@@ -224,25 +224,30 @@ void RemoteViewport::updateRenderer()
   // The list follows the device of the first renderer the server sends.
   auto &scene = appContext()->vsr.scene;
   if (m_renderers.empty()) {
-    auto first = scene.getObject<vsr::scene::Renderer>(0);
+    const auto first = scene.getObject<vsr::scene::Renderer>(0);
     if (!first)
       return;
     m_renderers.bind(scene, first->rendererDeviceName());
-  }
-
-  // Take the server's current renderer first, once the list has it.
-  const auto &renderers = m_renderers.objects();
-  if (!m_rendererFromServer) {
-    if (m_receivedRendererIdx >= renderers.size())
-      return;
-    m_renderers.select(renderers[m_receivedRendererIdx]->index());
+    // The list's default pick is not a choice to send to the server.
     m_sentRendererIdx = m_renderers.current()->index();
-    m_rendererFromServer = true;
-    return;
   }
 
   size_t currentIdx = m_renderers.current()->index();
-  if (currentIdx != m_sentRendererIdx) {
+  const bool pickedLocally = currentIdx != m_sentRendererIdx;
+
+  // Until the user picks one, take the server's renderer once it is listed.
+  const auto &renderers = m_renderers.objects();
+  if (!m_rendererSettled && !pickedLocally) {
+    if (m_receivedRendererIdx < renderers.size()) {
+      m_renderers.select(renderers[m_receivedRendererIdx]->index());
+      m_sentRendererIdx = m_renderers.current()->index();
+      m_rendererSettled = true;
+    }
+    return;
+  }
+
+  m_rendererSettled = true;
+  if (pickedLocally) {
     m_channel->send(MessageType::SERVER_SET_CURRENT_RENDERER, &currentIdx);
     m_sentRendererIdx = currentIdx;
   }

@@ -55,6 +55,7 @@ struct RendererList
   void rendererAdded(const vsr::scene::Renderer &r);
   void rendererRemoved(const vsr::scene::Renderer &r);
   void allObjectsRemoved();
+  std::vector<vsr::scene::RendererAppRef>::iterator find(size_t objectIndex);
 
   vsr::scene::Scene *m_scene{nullptr};
   vsr::core::Token m_deviceName;

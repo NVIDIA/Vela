@@ -3,11 +3,11 @@
 
 // catch
 #include "catch.hpp"
+// vsr_tests
+#include "LogCapture.h"
 // vsr
 #include "vsr/scene/Scene.hpp"
 #include "windows/RendererList.h"
-
-#include "LogCapture.h"
 // std
 #include <vector>
 

@@ -86,9 +86,7 @@ void RendererList::unbind()
 
 bool RendererList::select(size_t objectIndex)
 {
-  auto pos = std::find_if(m_objects.begin(), m_objects.end(), [&](auto &o) {
-    return o->index() == objectIndex;
-  });
+  const auto pos = find(objectIndex);
   if (pos == m_objects.end())
     return false;
   m_current = *pos;
@@ -111,9 +109,7 @@ void RendererList::rendererAdded(const Renderer &r)
 
 void RendererList::rendererRemoved(const Renderer &r)
 {
-  auto pos = std::find_if(m_objects.begin(), m_objects.end(), [&](auto &o) {
-    return o->index() == r.index();
-  });
+  const auto pos = find(r.index());
   if (pos == m_objects.end())
     return;
 
@@ -121,7 +117,7 @@ void RendererList::rendererRemoved(const Renderer &r)
   if (!m_current || m_current->index() != r.index())
     return;
 
-  auto sameSubtype = std::find_if(m_objects.begin(),
+  const auto sameSubtype = std::find_if(m_objects.begin(),
       m_objects.end(),
       [&](auto &o) { return o->subtype() == r.subtype(); });
   if (sameSubtype != m_objects.end())
@@ -130,6 +126,13 @@ void RendererList::rendererRemoved(const Renderer &r)
     m_current = m_objects.front();
   else
     m_current = {};
+}
+
+std::vector<RendererAppRef>::iterator RendererList::find(size_t objectIndex)
+{
+  return std::find_if(m_objects.begin(), m_objects.end(), [&](auto &o) {
+    return o->index() == objectIndex;
+  });
 }
 
 void RendererList::allObjectsRemoved()
