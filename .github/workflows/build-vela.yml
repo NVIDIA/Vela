@@ -22,6 +22,15 @@ jobs:
             generator: Ninja
     steps:
     - uses: actions/checkout@v6
+    # Third-party sources (Lua, sol2, zlib, ...) are downloaded by
+    # anari_sdk_fetch_project into <source>/.anari_deps and MD5-verified, so a
+    # cache hit skips the network entirely and a stale entry just re-downloads.
+    - name: Cache fetched dependency sources
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}/.anari_deps
+        key: anari-deps-${{ runner.os }}-${{ hashFiles('external/**/CMakeLists.txt') }}
+        restore-keys: anari-deps-${{ runner.os }}-
     - name: Setup MSVC (Windows)
       if: runner.os == 'Windows'
       uses: ilammy/msvc-dev-cmd@v1
@@ -90,6 +99,15 @@ jobs:
             generator: Ninja
     steps:
     - uses: actions/checkout@v6
+    # Third-party sources (Lua, sol2, zlib, ...) are downloaded by
+    # anari_sdk_fetch_project into <source>/.anari_deps and MD5-verified, so a
+    # cache hit skips the network entirely and a stale entry just re-downloads.
+    - name: Cache fetched dependency sources
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}/.anari_deps
+        key: anari-deps-${{ runner.os }}-${{ hashFiles('external/**/CMakeLists.txt') }}
+        restore-keys: anari-deps-${{ runner.os }}-
     - name: Setup MSVC (Windows)
       if: runner.os == 'Windows'
       uses: ilammy/msvc-dev-cmd@v1

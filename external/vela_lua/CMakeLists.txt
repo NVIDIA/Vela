@@ -18,50 +18,54 @@ if(LUA_FOUND)
   endif()
 endif()
 
+# Fetched from the lua/lua GitHub mirror (tag v5.4.8) rather than lua.org/ftp,
+# whose server frequently times out on CI runners. Same sources as the release
+# tarball, but laid out at the archive root instead of under src/.
 anari_sdk_fetch_project(
   NAME ${PROJECT_NAME}
-  URL https://www.lua.org/ftp/lua-5.4.8.tar.gz
-  MD5 81cf5265b8634967d8a7480d238168ce
+  URL https://github.com/lua/lua/archive/refs/tags/v5.4.8.tar.gz
+  MD5 af2c3cf59f247cab6c2f23c383e2f44c
 )
+set(VELA_LUA_SRC ${vela_ext_lua_LOCATION})
 
 project_add_library(STATIC
   # Lua source files (core library, no standalone interpreter)
-  ${vela_ext_lua_LOCATION}/src/lapi.c
-  ${vela_ext_lua_LOCATION}/src/lcode.c
-  ${vela_ext_lua_LOCATION}/src/lctype.c
-  ${vela_ext_lua_LOCATION}/src/ldebug.c
-  ${vela_ext_lua_LOCATION}/src/ldo.c
-  ${vela_ext_lua_LOCATION}/src/ldump.c
-  ${vela_ext_lua_LOCATION}/src/lfunc.c
-  ${vela_ext_lua_LOCATION}/src/lgc.c
-  ${vela_ext_lua_LOCATION}/src/llex.c
-  ${vela_ext_lua_LOCATION}/src/lmem.c
-  ${vela_ext_lua_LOCATION}/src/lobject.c
-  ${vela_ext_lua_LOCATION}/src/lopcodes.c
-  ${vela_ext_lua_LOCATION}/src/lparser.c
-  ${vela_ext_lua_LOCATION}/src/lstate.c
-  ${vela_ext_lua_LOCATION}/src/lstring.c
-  ${vela_ext_lua_LOCATION}/src/ltable.c
-  ${vela_ext_lua_LOCATION}/src/ltm.c
-  ${vela_ext_lua_LOCATION}/src/lundump.c
-  ${vela_ext_lua_LOCATION}/src/lvm.c
-  ${vela_ext_lua_LOCATION}/src/lzio.c
+  ${VELA_LUA_SRC}/lapi.c
+  ${VELA_LUA_SRC}/lcode.c
+  ${VELA_LUA_SRC}/lctype.c
+  ${VELA_LUA_SRC}/ldebug.c
+  ${VELA_LUA_SRC}/ldo.c
+  ${VELA_LUA_SRC}/ldump.c
+  ${VELA_LUA_SRC}/lfunc.c
+  ${VELA_LUA_SRC}/lgc.c
+  ${VELA_LUA_SRC}/llex.c
+  ${VELA_LUA_SRC}/lmem.c
+  ${VELA_LUA_SRC}/lobject.c
+  ${VELA_LUA_SRC}/lopcodes.c
+  ${VELA_LUA_SRC}/lparser.c
+  ${VELA_LUA_SRC}/lstate.c
+  ${VELA_LUA_SRC}/lstring.c
+  ${VELA_LUA_SRC}/ltable.c
+  ${VELA_LUA_SRC}/ltm.c
+  ${VELA_LUA_SRC}/lundump.c
+  ${VELA_LUA_SRC}/lvm.c
+  ${VELA_LUA_SRC}/lzio.c
   # Lua auxiliary library
-  ${vela_ext_lua_LOCATION}/src/lauxlib.c
-  ${vela_ext_lua_LOCATION}/src/lbaselib.c
-  ${vela_ext_lua_LOCATION}/src/lcorolib.c
-  ${vela_ext_lua_LOCATION}/src/ldblib.c
-  ${vela_ext_lua_LOCATION}/src/liolib.c
-  ${vela_ext_lua_LOCATION}/src/lmathlib.c
-  ${vela_ext_lua_LOCATION}/src/loadlib.c
-  ${vela_ext_lua_LOCATION}/src/loslib.c
-  ${vela_ext_lua_LOCATION}/src/lstrlib.c
-  ${vela_ext_lua_LOCATION}/src/ltablib.c
-  ${vela_ext_lua_LOCATION}/src/lutf8lib.c
-  ${vela_ext_lua_LOCATION}/src/linit.c
+  ${VELA_LUA_SRC}/lauxlib.c
+  ${VELA_LUA_SRC}/lbaselib.c
+  ${VELA_LUA_SRC}/lcorolib.c
+  ${VELA_LUA_SRC}/ldblib.c
+  ${VELA_LUA_SRC}/liolib.c
+  ${VELA_LUA_SRC}/lmathlib.c
+  ${VELA_LUA_SRC}/loadlib.c
+  ${VELA_LUA_SRC}/loslib.c
+  ${VELA_LUA_SRC}/lstrlib.c
+  ${VELA_LUA_SRC}/ltablib.c
+  ${VELA_LUA_SRC}/lutf8lib.c
+  ${VELA_LUA_SRC}/linit.c
 )
 
-project_include_directories(PUBLIC ${vela_ext_lua_LOCATION}/src)
+project_include_directories(PUBLIC ${VELA_LUA_SRC})
 
 # Platform-specific definitions
 if(UNIX AND NOT APPLE)
