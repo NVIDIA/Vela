@@ -6,6 +6,9 @@
 #include "Window.h"
 // vsr
 #include "vsr/core/FlatMap.hpp"
+// std
+#include <string>
+#include <vector>
 
 namespace vsr::ui::imgui {
 
@@ -45,6 +48,7 @@ struct LayerTree : public Window
   bool canAddRemoveLayers() const; // Full
 
   void buildUI_layerHeader();
+  void buildUI_filter();
   void buildUI_tree();
   void buildUI_activateObjectSceneMenu();
   void buildUI_handleSelection();
@@ -68,6 +72,15 @@ struct LayerTree : public Window
       const std::vector<vsr::scene::LayerNodeRef> &sourceNodes,
       bool cutOperation);
 
+  // Filtering //
+
+  bool filterActive() const;
+  // Fill m_nodeShown for the layer: a node matches when it passes the
+  // type checkboxes and it or an ancestor passes the name filter; it is
+  // shown when it matches or any descendant does.
+  void updateNodeFilter(vsr::scene::Layer &layer);
+  bool nodeShown(size_t nodeIndex) const;
+
   bool isValidDropTarget(vsr::scene::Layer &layer,
       vsr::scene::LayerNodeRef targetParent,
       const vsr::scene::LayerNodeRef *sourceNodes,
@@ -84,6 +97,15 @@ struct LayerTree : public Window
   std::vector<int> m_needToTreePop;
   int m_layerIdx{0};
   vsr::scene::LayerNodeRef m_anchorNode;
+
+  std::string m_nameFilter;
+  bool m_showOnlySurfaces{false};
+  bool m_showOnlyVolumes{false};
+  bool m_showOnlyLights{false};
+  // Set when the filter changes, so the next tree build expands every shown
+  // node and the matches are visible without hunting for them.
+  bool m_expandShownNodes{false};
+  std::vector<bool> m_nodeShown;
 };
 
 } // namespace vsr::ui::imgui

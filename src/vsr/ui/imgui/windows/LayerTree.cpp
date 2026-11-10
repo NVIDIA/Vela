@@ -12,11 +12,37 @@
 #include "vsr/ui/imgui/modals/ImportFileDialog.h"
 #include "vsr/ui/imgui/vsr_ui_imgui.h"
 // std
+#include <algorithm>
+#include <cctype>
 #include <string>
 
 namespace vsr::ui::imgui {
 
 static std::string s_newLayerName;
+
+static bool containsIgnoreCase(
+    const std::string &text, const std::string &query)
+{
+  auto it = std::search(text.begin(),
+      text.end(),
+      query.begin(),
+      query.end(),
+      [](unsigned char a, unsigned char b) {
+        return std::tolower(a) == std::tolower(b);
+      });
+  return it != text.end();
+}
+
+// The name the tree shows for an unnamed object node is its object's name, so
+// the name filter checks both.
+static bool nodeNameContains(
+    const vsr::scene::LayerNodeData &node, const std::string &query)
+{
+  if (containsIgnoreCase(node.name(), query))
+    return true;
+  const auto *obj = node.getObject();
+  return obj && containsIgnoreCase(obj->name(), query);
+}
 
 static const char *UI_layerName_callback(void *l, int index)
 {
@@ -36,6 +62,7 @@ void LayerTree::buildUI()
   }
 
   buildUI_layerHeader();
+  buildUI_filter();
   ImGui::Separator();
   buildUI_tree();
   buildUI_handleSelection();
@@ -133,6 +160,101 @@ void LayerTree::buildUI_layerHeader()
   ImGui::EndDisabled();
 }
 
+void LayerTree::buildUI_filter()
+{
+  if (appContext()->vsr.scene.numberOfLayers() == 0)
+    return;
+
+  bool changed = false;
+
+  ImGui::SetNextItemWidth(-1.0f);
+  changed |= ImGui::InputTextWithHint(
+      "##nameFilter", "filter by name...", &m_nameFilter);
+
+  ImGui::TextUnformatted("show only:");
+  ImGui::SameLine();
+  changed |= ImGui::Checkbox("surfaces", &m_showOnlySurfaces);
+  ImGui::SameLine();
+  changed |= ImGui::Checkbox("volumes", &m_showOnlyVolumes);
+  ImGui::SameLine();
+  changed |= ImGui::Checkbox("lights", &m_showOnlyLights);
+
+  if (filterActive()) {
+    ImGui::SameLine();
+    if (ImGui::SmallButton("reset")) {
+      m_nameFilter.clear();
+      m_showOnlySurfaces = false;
+      m_showOnlyVolumes = false;
+      m_showOnlyLights = false;
+    }
+  }
+
+  m_expandShownNodes = changed && filterActive();
+}
+
+bool LayerTree::filterActive() const
+{
+  return !m_nameFilter.empty() || m_showOnlySurfaces || m_showOnlyVolumes
+      || m_showOnlyLights;
+}
+
+void LayerTree::updateNodeFilter(vsr::scene::Layer &layer)
+{
+  m_nodeShown.assign(layer.capacity(), false);
+
+  const bool anyTypeFilter =
+      m_showOnlySurfaces || m_showOnlyVolumes || m_showOnlyLights;
+
+  auto passesTypeFilter = [&](const vsr::scene::LayerNodeData &node) {
+    if (!anyTypeFilter)
+      return true;
+    switch (node.type()) {
+    case ANARI_SURFACE:
+      return m_showOnlySurfaces;
+    case ANARI_VOLUME:
+      return m_showOnlyVolumes;
+    case ANARI_LIGHT:
+      return m_showOnlyLights;
+    default:
+      return false;
+    }
+  };
+
+  // For each node on the current path: whether it or an ancestor passed the
+  // name filter, so a matching transform's whole subtree matches too.
+  std::vector<bool> nameMatchOnPath;
+
+  layer.traverse(
+      layer.root(),
+      [&](auto &node, int level) {
+        // The root is never drawn, so its own name never matches.
+        const bool nameMatch = m_nameFilter.empty()
+            || (level > 0
+                && (nameMatchOnPath.back()
+                    || nodeNameContains(*node, m_nameFilter)));
+        nameMatchOnPath.push_back(nameMatch);
+        return true;
+      },
+      [&](auto &node, int level) {
+        const bool nameMatch = nameMatchOnPath.back();
+        nameMatchOnPath.pop_back();
+        if (level == 0)
+          return;
+        // Children exit before their parent, so a shown child has already
+        // marked this node shown.
+        if (nameMatch && passesTypeFilter(*node))
+          m_nodeShown[node.index()] = true;
+        if (m_nodeShown[node.index()])
+          m_nodeShown[node.parent().index()] = true;
+      });
+}
+
+bool LayerTree::nodeShown(size_t nodeIndex) const
+{
+  return !filterActive()
+      || (nodeIndex < m_nodeShown.size() && m_nodeShown[nodeIndex]);
+}
+
 std::vector<vsr::scene::LayerNodeRef> LayerTree::computeSelectionRange(
     vsr::scene::Layer &layer,
     const vsr::scene::LayerNodeRef &anchor,
@@ -148,6 +270,10 @@ std::vector<vsr::scene::LayerNodeRef> LayerTree::computeSelectionRange(
   bool foundSecond = false;
 
   layer.traverse(layer.root(), [&](auto &node, int level) {
+    // Hidden subtrees are not part of a range the user can see.
+    if (level > 0 && !nodeShown(node.index()))
+      return false;
+
     auto nodeRef = layer.at(node.index());
 
     // Check if this is either the anchor or target
@@ -204,9 +330,14 @@ void LayerTree::buildUI_tree()
 
     m_needToTreePop.clear();
     m_needToTreePop.resize(layer.capacity(), false);
+    if (filterActive())
+      updateNodeFilter(layer);
+
     auto onNodeEntryBuildUI = [&](auto &node, int level) {
       if (level == 0)
         return true;
+      if (!nodeShown(node.index()))
+        return false;
 
       ImGui::TableNextRow();
       ImGui::TableSetColumnIndex(0);
@@ -296,6 +427,8 @@ void LayerTree::buildUI_tree()
       if (node.isLeaf()) {
         node_flags |=
             ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+      } else if (m_expandShownNodes) {
+        ImGui::SetNextItemOpen(true, ImGuiCond_Always);
       } else {
         ImGui::SetNextItemOpen(true, ImGuiCond_FirstUseEver);
       }
