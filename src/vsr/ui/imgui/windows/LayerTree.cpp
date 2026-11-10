@@ -61,6 +61,7 @@ void LayerTree::buildUI()
     return;
   }
 
+  checkForExternalSelectionChange();
   buildUI_layerHeader();
   buildUI_filter();
   ImGui::Separator();
@@ -70,6 +71,10 @@ void LayerTree::buildUI()
   buildUI_objectSceneMenu();
   buildUI_newLayerSceneMenu();
   buildUI_setActiveLayersSceneMenus();
+
+  // Anything the tree itself did to the selection this frame is already in
+  // view, so it must not trigger a reveal next frame.
+  m_lastSeenSelection = appContext()->getFirstSelected();
 }
 
 void LayerTree::setEditMode(EditMode mode)
@@ -83,6 +88,41 @@ void LayerTree::dropSceneReferences()
   m_hoveredNode = VSR_INVALID_INDEX;
   m_menuNode = VSR_INVALID_INDEX;
   m_layerIdx = 0;
+  m_lastSeenSelection = {};
+  m_revealNode = {};
+  m_revealAncestors.clear();
+}
+
+void LayerTree::checkForExternalSelectionChange()
+{
+  auto selected = appContext()->getFirstSelected();
+  if (selected == m_lastSeenSelection)
+    return;
+  m_lastSeenSelection = selected;
+
+  m_revealNode = {};
+  m_revealAncestors.clear();
+  if (!selected.valid())
+    return;
+
+  // Show the layer that holds the node.
+  const auto *nodeLayer = (*selected)->layer();
+  const auto &layers = appContext()->vsr.scene.layers();
+  bool foundLayer = false;
+  for (size_t i = 0; i < layers.size(); i++) {
+    if (layers.at_index(i).second.ptr.get() == nodeLayer) {
+      m_layerIdx = static_cast<int>(i);
+      foundLayer = true;
+      break;
+    }
+  }
+  if (!foundLayer)
+    return;
+
+  m_revealNode = selected;
+  for (auto p = (*selected).parent(); p.valid() && !(*p).isRoot();
+       p = (*p).parent())
+    m_revealAncestors.push_back(p.index());
 }
 
 bool LayerTree::canEdit() const
@@ -424,10 +464,18 @@ void LayerTree::buildUI_tree()
         break;
       }
 
+      const bool isRevealNode =
+          m_revealNode.valid() && node.index() == m_revealNode.index();
+      const bool isRevealAncestor = m_revealNode.valid()
+          && std::find(m_revealAncestors.begin(),
+                 m_revealAncestors.end(),
+                 node.index())
+              != m_revealAncestors.end();
+
       if (node.isLeaf()) {
         node_flags |=
             ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-      } else if (m_expandShownNodes) {
+      } else if (m_expandShownNodes || isRevealAncestor) {
         ImGui::SetNextItemOpen(true, ImGuiCond_Always);
       } else {
         ImGui::SetNextItemOpen(true, ImGuiCond_FirstUseEver);
@@ -437,6 +485,17 @@ void LayerTree::buildUI_tree()
           ImGui::TreeNodeEx(&node, node_flags, "%s %s", typeText, nameText);
 
       m_needToTreePop[node.index()] = open && !node.isLeaf();
+
+      // Scroll only when the row is not already fully in view, so a pick of
+      // a visible node leaves the tree where it is.
+      if (isRevealNode) {
+        const auto *drawList = ImGui::GetWindowDrawList();
+        const bool fullyVisible =
+            ImGui::GetItemRectMin().y >= drawList->GetClipRectMin().y
+            && ImGui::GetItemRectMax().y <= drawList->GetClipRectMax().y;
+        if (!fullyVisible)
+          ImGui::SetScrollHereY(0.5f);
+      }
 
       if (ImGui::IsItemHovered()) {
         m_hoveredNode = node.index();
@@ -588,6 +647,10 @@ void LayerTree::buildUI_tree()
 
     layer.traverse(layer.root(), onNodeEntryBuildUI, onNodeExitTreePop);
     ImGui::EndTable();
+
+    // One build reveals the node; a node the filter hides stays hidden.
+    m_revealNode = {};
+    m_revealAncestors.clear();
 
     // Drag and drop target on the panel itself. Will drop under the root
     // node. Off in read-only mode, same as the per-node drop targets above.
