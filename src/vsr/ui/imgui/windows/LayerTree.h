@@ -47,6 +47,13 @@ struct LayerTree : public Window
   bool canEdit() const; // not ReadOnly
   bool canAddRemoveLayers() const; // Full
 
+  // Reveal //
+
+  // When the first selected node changed outside this widget (a viewport
+  // pick, a demo, a script), switch to its layer and arm m_revealNode so the
+  // next tree build expands its ancestors and scrolls it into view.
+  void checkForExternalSelectionChange();
+
   void buildUI_layerHeader();
   void buildUI_filter();
   void buildUI_tree();
@@ -106,6 +113,14 @@ struct LayerTree : public Window
   // node and the matches are visible without hunting for them.
   bool m_expandShownNodes{false};
   std::vector<bool> m_nodeShown;
+
+  // The first selected node as of the end of the last build; a difference at
+  // the start of a build means the selection changed outside this widget.
+  vsr::scene::LayerNodeRef m_lastSeenSelection;
+  // Node to bring into view on this build, and the indices of its ancestors
+  // to force open.
+  vsr::scene::LayerNodeRef m_revealNode;
+  std::vector<size_t> m_revealAncestors;
 };
 
 } // namespace vsr::ui::imgui
