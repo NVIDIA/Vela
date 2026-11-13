@@ -43,7 +43,18 @@ void serializeArray(
   if (array.kind() == scene::Array::MemoryKind::CUDA) {
     const size_t numBytes = array.size() * array.elementSize();
     std::vector<uint8_t> hostBuffer(numBytes);
-    cudaMemcpy(hostBuffer.data(), memory, numBytes, cudaMemcpyDeviceToHost);
+    const auto err =
+        cudaMemcpy(hostBuffer.data(), memory, numBytes, cudaMemcpyDeviceToHost);
+    if (err != cudaSuccess) {
+      // Write the array as a proxy rather than archiving garbage texels.
+      core::logError(
+          "[serializeArray] cudaMemcpy of %zu bytes failed (%s); "
+          "writing array as a proxy",
+          numBytes,
+          cudaGetErrorString(err));
+      arrayData = static_cast<int>(array.elementType());
+      return;
+    }
     arrayData.setValueAsArray(
         array.elementType(), hostBuffer.data(), array.size());
   } else

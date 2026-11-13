@@ -9,6 +9,7 @@
 #include "tinyply.h"
 // std
 #include <fstream>
+#include <memory>
 
 namespace vsr::io {
 
@@ -24,7 +25,7 @@ void import_PLY(Scene &scene,
   std::vector<uint8_t> byte_buffer;
 
   try {
-    file_stream.reset(new std::ifstream(filename, std::ios::binary));
+    file_stream = std::make_unique<std::ifstream>(filename, std::ios::binary);
 
     if (!file_stream || file_stream->fail()) {
       throw std::runtime_error(

@@ -791,7 +791,7 @@ Layer *Scene::addLayer(Token name)
 {
   auto &ls = m_layers[name];
   if (!ls.ptr) {
-    ls.ptr.reset(new Layer(this, name.str()));
+    ls.ptr = std::make_shared<Layer>(this, name.str());
     m_updateDelegate.signalLayerAdded(ls.ptr.get());
     m_numActiveLayers++;
   }

@@ -350,7 +350,16 @@ Array::Array(anari::DataType arrayType,
     m_data = nullptr;
   } else if (kind == MemoryKind::CUDA) {
 #if VSR_USE_CUDA
-    cudaMalloc(&m_data, size() * elementSize());
+    const auto err = cudaMalloc(&m_data, size() * elementSize());
+    if (err != cudaSuccess) {
+      logError("%s of %s elements: cudaMalloc of %zu bytes failed (%s)",
+          anari::toString(this->type()),
+          anari::toString(this->elementType()),
+          size() * elementSize(),
+          cudaGetErrorString(err));
+      m_data = nullptr;
+      return;
+    }
 #else
     throw std::runtime_error("CUDA support not enabled!");
 #endif

@@ -29,7 +29,7 @@ struct CopyToSDLTexturePass::CopyToSDLTexturePassImpl
 
 CopyToSDLTexturePass::CopyToSDLTexturePass(SDL_Renderer *renderer)
 {
-  m_impl = new CopyToSDLTexturePassImpl;
+  m_impl = std::make_unique<CopyToSDLTexturePassImpl>();
   m_impl->renderer = renderer;
 }
 
@@ -40,8 +40,6 @@ CopyToSDLTexturePass::~CopyToSDLTexturePass()
     cudaGraphicsUnregisterResource(m_impl->graphicsResource);
 #endif
   SDL_DestroyTexture(m_impl->texture);
-  delete m_impl;
-  m_impl = nullptr;
 }
 
 const char *CopyToSDLTexturePass::name() const
