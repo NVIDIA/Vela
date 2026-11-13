@@ -8,8 +8,8 @@
 #include "vsr/core/Logging.hpp"
 // vsr_scripting
 #ifdef VSR_USE_LUA
-#include <sol/sol.hpp>
 #include "vsr/scripting/LuaContext.hpp"
+#include <sol/sol.hpp>
 #endif
 // std
 #include <algorithm>

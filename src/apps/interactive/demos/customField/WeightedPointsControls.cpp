@@ -2,6 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "WeightedPointsControls.h"
+#include "WeightedPointsOctree.h"
+#include <vsr/animation/AnimationManager.hpp>
+#include <vsr/core/Logging.hpp>
+#include <vsr/core/VSRMath.hpp>
+#include <vsr/scene/objects/Array.hpp>
+#include <vsr/scene/objects/SpatialField.hpp>
+#include <vsr/scene/objects/Volume.hpp>
 #include <vsr/ui/imgui/vsr_ui_imgui.h>
 #include <algorithm>
 #include <cmath>
@@ -9,13 +16,6 @@
 #include <cstring>
 #include <limits>
 #include <random>
-#include <vsr/animation/AnimationManager.hpp>
-#include <vsr/core/Logging.hpp>
-#include <vsr/core/VSRMath.hpp>
-#include <vsr/scene/objects/Array.hpp>
-#include <vsr/scene/objects/SpatialField.hpp>
-#include <vsr/scene/objects/Volume.hpp>
-#include "WeightedPointsOctree.h"
 
 namespace vsr::demo {
 

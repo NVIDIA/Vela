@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <cstdint>
 #include "gpu/gpu_math.h"
+#include <cstdint>
 
 namespace visrtx {
 constexpr uint32_t DEMO_WEIGHTED_POINTS_FIELD_TYPE = 201;

@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <cuda_runtime_api.h>
 #include <anari/anari_cpp.hpp>
+#include <cuda_runtime_api.h>
 #include <cstdint>
 
 namespace vsr::algorithms::cuda {

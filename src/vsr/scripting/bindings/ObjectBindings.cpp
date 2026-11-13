@@ -20,9 +20,9 @@
 #include "vsr/scripting/Sol2Helpers.hpp"
 
 #include <fmt/format.h>
+#include <sol/sol.hpp>
 #include <algorithm>
 #include <functional>
-#include <sol/sol.hpp>
 #include <vector>
 
 namespace vsr::scripting {

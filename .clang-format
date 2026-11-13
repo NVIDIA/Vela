@@ -51,13 +51,16 @@ DisableFormat:   false
 ExperimentalAutoDetectBinPacking: false
 FixNamespaceComments: true
 ForEachMacros:   [ foreach, foreach_active, foreach_tiled, foreach_unique, cdo, cfor, cif, cwhile ]
+# Mirrors CODING_STANDARDS.md section 3: project headers, then external
+# libraries, then the standard library. A .cpp file's own header (see
+# IncludeIsMainRegex) always sorts first. Sorting never crosses a labeled group.
 IncludeCategories:
-  - Regex:           '^<.*\.i?h>'
+  - Regex:           '^"'
     Priority:        1
-  - Regex:           '^<.*'
-    Priority:        2
-  - Regex:           '.*'
+  - Regex:           '^<[A-Za-z0-9_]+>$'
     Priority:        3
+  - Regex:           '^<'
+    Priority:        2
 IncludeIsMainRegex: '([-_](test|unittest))?$'
 IndentCaseLabels: false
 IndentWidth:     2

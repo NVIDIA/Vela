@@ -4,8 +4,8 @@
 #pragma once
 
 // anari
-#include <anari/anari_cpp/ext/linalg.h>
 #include <anari/anari_cpp.hpp>
+#include <anari/anari_cpp/ext/linalg.h>
 // helium
 #include <helium/helium_math.h>
 // std

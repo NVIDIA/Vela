@@ -4,11 +4,11 @@
 #pragma once
 
 #include <vsr/app/Context.h>
+#include <vsr/scene/Object.hpp>
+#include <vsr/scene/objects/Array.hpp>
 #include <vsr/ui/imgui/windows/Window.h>
 #include <string>
 #include <vector>
-#include <vsr/scene/Object.hpp>
-#include <vsr/scene/objects/Array.hpp>
 
 namespace vsr::demo {
 

@@ -3,9 +3,9 @@
 
 #pragma once
 
+#include "vsr/core/VSRMath.hpp"
 #include <cuda_runtime_api.h>
 #include <cstdint>
-#include "vsr/core/VSRMath.hpp"
 
 namespace vsr::algorithms::cuda {
 

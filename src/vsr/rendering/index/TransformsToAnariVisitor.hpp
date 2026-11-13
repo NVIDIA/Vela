@@ -4,13 +4,13 @@
 #pragma once
 
 // vsr_core
-#include <anari/anari_cpp/ext/linalg.h>
 #include "vsr/scene/Layer.hpp"
+#include <anari/anari_cpp/ext/linalg.h>
 // vsr_rendering
 #include "vsr/rendering/index/RenderIndexFilterFcn.hpp"
 // std
-#include <algorithm>
 #include <anari/anari_cpp.hpp>
+#include <algorithm>
 #include <cstdint>
 #include <iterator>
 #include <stack>

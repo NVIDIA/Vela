@@ -3,11 +3,11 @@
 
 #pragma once
 
+#include "PbrtLexer.hpp"
+#include "PbrtScene.hpp"
 #include <set>
 #include <string>
 #include <vector>
-#include "PbrtLexer.hpp"
-#include "PbrtScene.hpp"
 
 namespace pbrt {
 

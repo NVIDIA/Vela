@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <cstdint>
 #include "vsr/core/VSRMath.hpp"
+#include <cstdint>
 
 namespace vsr::algorithms::cpu {
 
