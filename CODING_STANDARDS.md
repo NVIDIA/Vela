@@ -76,15 +76,24 @@ Additional rules:
   3. Standard library headers, labeled `// std`
 
   ```cpp
+  #include "RenderIndexAllLayers.hpp"
   // vsr_core
+  #include "vsr/core/Logging.hpp"
+  // vsr_scene
   #include "vsr/scene/Scene.hpp"
-  // vsr_rendering
-  #include "vsr/rendering/index/RenderIndex.hpp"
   // anari
   #include <anari/anari_cpp.hpp>
   // std
   #include <vector>
   ```
+- A `.cpp` file includes its **own header first**, unlabeled, ahead of the
+  labeled groups (the first line of the example above). This proves the header
+  is self-contained.
+- Includes of sibling files by relative path (`"Object.h"`,
+  `"detail/Helpers.h"`) are project headers: they belong in group 1, under a
+  label naming the library or app they live in.
+- `clang-format` sorts includes only within a group, so labels also keep it
+  from mixing the groups together.
 - Forward-declare types in headers where possible to minimize include depth.
   Use fully-qualified names in forward declarations.
 
@@ -230,8 +239,23 @@ Avoid features that obscure intent or have poor tooling support.
 | Compile-time invariants | `static_assert(condition, "message")` |
 | Recoverable / expected failure | Return `bool` or `std::optional` |
 
-Do not use `try`/`catch` inside library code — let exceptions propagate to the
-application layer.
+Library code lets exceptions propagate to the application layer: do not catch
+an exception just to hide it, and do not throw and catch to steer normal
+control flow. A `try`/`catch` in library code is allowed only at one of these
+boundaries:
+
+- **Translation** — a third-party or `std` call that reports failure by
+  throwing (a format parser, `std::stof`, `std::filesystem`, sol2, asio) is
+  caught right where it is called, and the failure is turned into this
+  function's fallible return (see below) plus a log message.
+- **Rollback** — partially applied state is undone before rethrowing
+  (`catch (...) { undo(); throw; }`) or before returning the failure value.
+- **Thread or callback edge** — an exception must not escape a worker thread,
+  a task, or a callback invoked through a C API (ANARI, SDL). Catch it there
+  and log it, or hand it to the owning thread with `std::exception_ptr`.
+
+Catch the narrowest type that the call actually throws; `catch (...)` belongs
+only to rollback and thread/callback edges.
 
 ### Fallible Returns
 
