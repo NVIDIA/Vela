@@ -11,6 +11,8 @@
 #include "ImagePass.h"
 // SDL3
 #include <SDL3/SDL.h>
+// std
+#include <memory>
 
 namespace vsr::rendering {
 
@@ -28,7 +30,7 @@ struct CopyToSDLTexturePass : public ImageSink
   void updateSize() override;
 
   struct CopyToSDLTexturePassImpl;
-  CopyToSDLTexturePassImpl *m_impl{nullptr};
+  std::unique_ptr<CopyToSDLTexturePassImpl> m_impl;
 };
 
 } // namespace vsr::rendering

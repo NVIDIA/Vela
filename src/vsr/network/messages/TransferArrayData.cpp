@@ -43,7 +43,17 @@ TransferArrayData::TransferArrayData(const vsr::scene::Array *array)
   if (array->kind() == vsr::scene::Array::MemoryKind::CUDA) {
     const size_t numBytes = array->size() * array->elementSize();
     std::vector<std::byte> hostBuf(numBytes);
-    cudaMemcpy(hostBuf.data(), array->data(), numBytes, cudaMemcpyDeviceToHost);
+    const auto err = cudaMemcpy(
+        hostBuf.data(), array->data(), numBytes, cudaMemcpyDeviceToHost);
+    if (err != cudaSuccess) {
+      // Send no data; the receiver rejects the transfer as a type mismatch.
+      vsr::core::logError(
+          "[message::TransferArrayData] cudaMemcpy of %zu bytes failed (%s)",
+          numBytes,
+          cudaGetErrorString(err));
+      d.clearValue();
+      return;
+    }
     d.setValueAsArray(array->elementType(), hostBuf.data(), array->size());
   } else
 #endif
