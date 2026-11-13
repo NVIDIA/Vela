@@ -7,6 +7,7 @@
 #include "vsr/animation/AnimationManager.hpp"
 // vsr_core
 #include "vsr/core/ColorMapUtil.hpp"
+// vsr_scene
 #include "vsr/scene/Scene.hpp"
 // vsr_rendering
 #include "vsr/rendering/index/RenderIndex.hpp"

@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "Animations.h"
-// vsr_core
+// vsr_animation
 #include "vsr/animation/AnimationManager.hpp"
+// vsr_core
 #include "vsr/core/Logging.hpp"
 // vsr_ui_imgui
 #include "vsr/ui/imgui/Application.h"

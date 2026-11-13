@@ -10,6 +10,7 @@
 #include "vsr/ui/imgui/vsr_ui_imgui.h"
 // vsr_core
 #include "vsr/core/Logging.hpp"
+// vsr_scene
 #include "vsr/scene/objects/Camera.hpp"
 #include "vsr/scene/objects/Renderer.hpp"
 // vsr_rendering

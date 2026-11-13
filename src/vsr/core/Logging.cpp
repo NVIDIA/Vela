@@ -2,15 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "Logging.hpp"
-// vsr
+// vsr_core
 #include "vsr/core/Timer.hpp"
+// fmt
+#include <fmt/format.h>
 // std
 #include <chrono>
 #include <cstdarg>
 #include <string>
 #include <vector>
-// fmt
-#include <fmt/format.h>
 
 namespace vsr::core {
 

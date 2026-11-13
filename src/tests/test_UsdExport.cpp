@@ -5,12 +5,12 @@
 
 #if VSR_USE_USD
 
-// catch
-#include "catch.hpp"
 // vsr_tests
 #include "UsdTestFixtures.h"
-// vsr
+// vsr_io
 #include "vsr/io/exporters.hpp"
+// catch
+#include "catch.hpp"
 
 namespace {
 

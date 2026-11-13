@@ -6,14 +6,15 @@
 
 #if VSR_USE_USD
 
-// catch
-#include "catch.hpp"
 // vsr_tests
 #include "UsdTestFixtures.h"
-// vsr
+// vsr_core
 #include "vsr/core/DataTree.hpp"
+// vsr_io
 #include "vsr/io/animation/UsdFileBinding.hpp"
 #include "vsr/io/archives/AnimationManagerArchive.hpp"
+// catch
+#include "catch.hpp"
 // std
 #include <set>
 #include <string>

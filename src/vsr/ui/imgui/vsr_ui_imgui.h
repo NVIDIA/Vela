@@ -3,7 +3,7 @@
 
 #pragma once
 
-// vsr_core
+// vsr_scene
 #include "vsr/scene/Scene.hpp"
 // imgui
 #include <imgui.h>

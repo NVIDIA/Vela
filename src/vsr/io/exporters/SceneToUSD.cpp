@@ -4,11 +4,14 @@
 #define VSR_USE_USD 1
 #endif
 
-// vsr
+// vsr_animation
 #include "vsr/animation/AnimationManager.hpp"
+// vsr_core
 #include "vsr/core/Logging.hpp"
+// vsr_io
 #include "vsr/io/exporters.hpp"
 #include "vsr/io/images/ImageCache.hpp"
+// vsr_scene
 #include "vsr/scene/Scene.hpp"
 #include "vsr/scene/objects/Array.hpp"
 #include "vsr/scene/objects/Camera.hpp"

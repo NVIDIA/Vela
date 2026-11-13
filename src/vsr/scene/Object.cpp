@@ -11,14 +11,15 @@
 
 // vsr_core
 #include "vsr/core/Logging.hpp"
+#if VSR_USE_CUDA
+// cuda
+#include <cuda_runtime.h>
+#endif
 // std
 #include <algorithm>
 #include <cstring>
 #include <iomanip>
 #include <tuple>
-#if VSR_USE_CUDA
-#include <cuda_runtime.h>
-#endif
 
 namespace vsr::scene {
 

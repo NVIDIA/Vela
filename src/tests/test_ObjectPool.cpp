@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+// vsr_core
+#include "vsr/core/ObjectPool.hpp"
 // catch
 #include "catch.hpp"
-// vsr
-#include "vsr/core/ObjectPool.hpp"
 // std
 #include <string>
 

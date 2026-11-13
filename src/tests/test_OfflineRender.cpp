@@ -7,7 +7,7 @@
 #include "vsr/app/Context.h"
 #include "vsr/app/renderAnimationSequence.h"
 #ifdef VSR_TEST_UI
-// vsr_ui
+// vsr_ui_imgui
 #include "vsr/ui/imgui/Application.h"
 #endif
 // catch

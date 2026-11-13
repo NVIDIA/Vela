@@ -5,7 +5,7 @@
 
 // vsr_ui_imgui
 #include <vsr/ui/imgui/windows/Window.h>
-// vsr_core
+// vsr_scene
 #include <vsr/scene/objects/Array.hpp>
 #include <vsr/scene/objects/SpatialField.hpp>
 // std

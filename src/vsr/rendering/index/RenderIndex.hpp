@@ -3,7 +3,7 @@
 
 #pragma once
 
-// vsr_core
+// vsr_scene
 #include "vsr/scene/AnariHandleCache.hpp"
 #include "vsr/scene/Scene.hpp"
 #include "vsr/scene/UpdateDelegate.hpp"

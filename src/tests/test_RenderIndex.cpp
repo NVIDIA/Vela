@@ -1,14 +1,15 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// catch
-#include "catch.hpp"
 // vsr_tests
 #include "HelideTestDevice.h"
-// vsr
+// vsr_rendering
 #include "vsr/rendering/index/RenderIndexAllLayers.hpp"
 #include "vsr/rendering/index/RenderToAnariObjectsVisitor.hpp"
+// vsr_scene
 #include "vsr/scene/Scene.hpp"
+// catch
+#include "catch.hpp"
 // anari
 #include <anari/anari_cpp.hpp>
 // std

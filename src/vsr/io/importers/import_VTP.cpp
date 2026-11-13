@@ -10,6 +10,7 @@
 #include "vsr/io/importers/detail/importer_common.hpp"
 // vsr_core
 #include "vsr/core/Logging.hpp"
+// vsr_scene
 #include "vsr/scene/algorithms/computeScalarRange.hpp"
 #if VSR_USE_VTK
 // vtk

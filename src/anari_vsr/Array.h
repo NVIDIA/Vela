@@ -4,13 +4,13 @@
 #pragma once
 
 #include "DeviceGlobalState.h"
+// vsr_scene
+#include "vsr/scene/objects/Array.hpp"
 // helium
 #include "helium/array/Array1D.h"
 #include "helium/array/Array2D.h"
 #include "helium/array/Array3D.h"
 #include "helium/array/ObjectArray.h"
-// vsr_core
-#include "vsr/scene/objects/Array.hpp"
 
 namespace vsr_device {
 

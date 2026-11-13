@@ -3,12 +3,7 @@
 
 #pragma once
 
-// SDL
-#include <SDL3/SDL.h>
-// std
-#include <array>
-#include <limits>
-// vsr_core
+// vsr_scene
 #include <vsr/scene/Object.hpp>
 #include <vsr/scene/UpdateDelegate.hpp>
 // vsr_app
@@ -18,6 +13,11 @@
 // vsr_ui_imgui
 #include <vsr/ui/imgui/Application.h>
 #include <vsr/ui/imgui/windows/Window.h>
+// SDL
+#include <SDL3/SDL.h>
+// std
+#include <array>
+#include <limits>
 
 #include "DistributedSceneController.h"
 

@@ -3,7 +3,7 @@
 
 #pragma once
 
-// vsr
+// vsr_core
 #include "vsr/core/Logging.hpp"
 // std
 #include <string>

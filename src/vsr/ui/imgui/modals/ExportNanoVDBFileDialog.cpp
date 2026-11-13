@@ -6,7 +6,7 @@
 #include "vsr/core/Logging.hpp"
 // vsr_io
 #include "vsr/io/exporters.hpp"
-// vsr ui
+// vsr_ui_imgui
 #include "vsr/ui/imgui/Application.h"
 #include "vsr/ui/imgui/modals/BlockingTaskModal.h"
 // imgui

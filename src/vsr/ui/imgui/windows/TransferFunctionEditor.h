@@ -6,13 +6,14 @@
 #include "Window.h"
 // vsr_core
 #include "vsr/core/ColorMapUtil.hpp"
+// vsr_scene
 #include "vsr/scene/objects/Array.hpp"
 #include "vsr/scene/objects/Volume.hpp"
+// SDL
+#include <SDL3/SDL.h>
 // std
 #include <string>
 #include <vector>
-// SDL
-#include <SDL3/SDL.h>
 
 namespace vsr::ui::imgui {
 

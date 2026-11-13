@@ -4,6 +4,7 @@
 #include "vsr/scene/AnariHandleCache.hpp"
 // vsr_core
 #include "vsr/core/Logging.hpp"
+// vsr_scene
 #include "vsr/scene/ObjectId.hpp"
 #include "vsr/scene/Scene.hpp"
 

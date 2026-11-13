@@ -4,11 +4,14 @@
 #pragma once
 
 #include "Window.h"
-// vsr
+// vsr_app
 #include "vsr/app/Context.h"
+// vsr_core
 #include "vsr/core/Timer.hpp"
 #include "vsr/core/VSRMath.hpp"
+// vsr_rendering
 #include "vsr/rendering/view/CameraPath.h"
+// std
 #include <atomic>
 #include <future>
 #include <mutex>

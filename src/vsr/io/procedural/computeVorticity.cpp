@@ -13,10 +13,8 @@
 #include <nanovdb/NanoVDB.h>
 // anari
 #include <anari/frontend/anari_enums.h>
-// std
-#include <cstring>
-#include <string>
 #if VSR_USE_VTK
+// vtk
 #include <vtkCellArray.h>
 #include <vtkDataObject.h>
 #include <vtkFloatArray.h>
@@ -28,6 +26,9 @@
 #include <vtkSmartPointer.h>
 #include <vtkUnstructuredGrid.h>
 #endif
+// std
+#include <cstring>
+#include <string>
 
 namespace vsr::io {
 

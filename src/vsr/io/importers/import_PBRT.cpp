@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// vsr
+// vsr_core
 #include "vsr/core/Logging.hpp"
+// vsr_io
 #include "vsr/io/importers.hpp"
 #include "vsr/io/importers/detail/HDRImage.h"
 #include "vsr/io/importers/detail/importer_common.hpp"
