@@ -44,8 +44,7 @@ void ArrayHydration::request(vsr::scene::Array &array)
 
   protocol::RequestArrayData req;
   req.array = SceneObjectRef{ANARI_ARRAY, index};
-  m_request.sendForResult<protocol::ArrayDataResult>(
-      m_connection->projectOps(),
+  m_request.sendForResult<protocol::ArrayDataResult>(m_connection->projectOps(),
       std::move(req),
       [this, index, scene](const protocol::ProjectOpReply &reply,
           const std::optional<protocol::ArrayDataResult> &result) {

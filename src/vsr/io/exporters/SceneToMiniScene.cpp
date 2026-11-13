@@ -477,8 +477,8 @@ mini::Mesh::SP MiniSceneExporter::meshFor(const Surface &s)
         dst.push_back(convert(
             static_cast<const uint8_t *>(a->data()) + c * a->elementSize()));
     } else if (const auto *a = hostArrayParameter(*geom, vertexName); a
-               && a->isHost() && a->data() && a->elementType() == type
-               && a->size() == numVertices) {
+        && a->isHost() && a->data() && a->elementType() == type
+        && a->size() == numVertices) {
       for (size_t i = 0; i < numVertices; i++)
         dst.push_back(convert(
             static_cast<const uint8_t *>(a->data()) + i * a->elementSize()));

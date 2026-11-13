@@ -375,8 +375,7 @@ void Application::setupImGuiStyle()
   style.Colors[ImGuiCol_TextSelectedBg] =
       ImVec4(0.25882354f, 0.5882353f, 0.9764706f, 0.35f);
   style.Colors[ImGuiCol_DragDropTarget] = ImVec4(1.0f, 1.0f, 0.0f, 0.9f);
-  style.Colors[ImGuiCol_NavCursor] =
-      ImVec4(0.4627451f, 0.7254902f, 0.0f, 1.0f);
+  style.Colors[ImGuiCol_NavCursor] = ImVec4(0.4627451f, 0.7254902f, 0.0f, 1.0f);
   style.Colors[ImGuiCol_NavWindowingHighlight] = ImVec4(1.0f, 1.0f, 1.0f, 0.7f);
   style.Colors[ImGuiCol_NavWindowingDimBg] = ImVec4(0.8f, 0.8f, 0.8f, 0.2f);
   style.Colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.8f, 0.8f, 0.8f, 0.35f);

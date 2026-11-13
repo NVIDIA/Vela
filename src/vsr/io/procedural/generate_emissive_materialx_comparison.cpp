@@ -14,7 +14,8 @@
 //   - physicallyBased: `emissive` IS radiance — author it directly.
 //   - mdl: emission intensity is radiant EXITANCE (radiance = intensity/PI), so
 //     the source authors `value * math::PI`.
-//   - materialx: standard_surface's shadergen owns the EDF normalization, so the
+//   - materialx: standard_surface's shadergen owns the EDF normalization, so
+//   the
 //     app authors the target radiance straight into `emission` — no PI factor.
 //     A mismatched floor pool here reveals a convention bug in the transcoder.
 //

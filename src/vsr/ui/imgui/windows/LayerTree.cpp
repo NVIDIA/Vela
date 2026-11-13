@@ -121,7 +121,7 @@ void LayerTree::checkForExternalSelectionChange()
 
   m_revealNode = selected;
   for (auto p = (*selected).parent(); p.valid() && !(*p).isRoot();
-       p = (*p).parent())
+      p = (*p).parent())
     m_revealAncestors.push_back(p.index());
 }
 

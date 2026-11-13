@@ -544,8 +544,8 @@ SCENARIO("ServerConnection names which mirror replacement is happening",
       THEN("the replacement is a mid-session one, and leaves a whole scene")
       {
         REQUIRE(pollUntil(f.connection, [&] { return f.mirrorReplaces == 2; }));
-        REQUIRE(
-            f.replaceKinds == std::vector<MirrorReplace>{Bootstrap, MidSession});
+        REQUIRE(f.replaceKinds
+            == std::vector<MirrorReplace>{Bootstrap, MidSession});
         REQUIRE(f.mirrorHasGeometry());
       }
     }
@@ -574,9 +574,8 @@ SCENARIO("ServerConnection names which mirror replacement is happening",
     f.server.channel->restart();
     REQUIRE(pollUntil(f.connection,
         [&] { return f.connection.state() == ConnectionState::Lost; }));
-    REQUIRE(pollUntil(f.connection, [&] {
-      return f.connection.bootstrapping() && f.mirrorHasGeometry();
-    }));
+    REQUIRE(pollUntil(f.connection,
+        [&] { return f.connection.bootstrapping() && f.mirrorHasGeometry(); }));
 
     WHEN("the server closes mid-bracket")
     {

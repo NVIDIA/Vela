@@ -9,7 +9,8 @@ namespace vsr::scene {
 
 /*
  * ANARI Sampler object that provides texture or data lookup for material
- * parameters; subtype selects the sampling source (1D/2D/3D image, primitive, etc.).
+ * parameters; subtype selects the sampling source (1D/2D/3D image, primitive,
+ * etc.).
  *
  * Example:
  *   auto samp = scene.createObject<Sampler>(tokens::sampler::image2D);

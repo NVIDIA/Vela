@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // vsr_algorithms
-#include "vsr/algorithms/cuda/downsample.hpp"
 #include "../math/color.h"
 #include "detail/SinglePassDownsampler.h"
+#include "vsr/algorithms/cuda/downsample.hpp"
 // std
 #include <cstdio>
 #include <vector>
@@ -37,8 +37,8 @@ struct LogLuminanceLoader
   __device__ float operator()(uint32_t x, uint32_t y) const
   {
     const size_t idx = (size_t(y) * width + x) * 4;
-    return log2f(math::clampedLuminance(
-        hdr[idx + 0], hdr[idx + 1], hdr[idx + 2]));
+    return log2f(
+        math::clampedLuminance(hdr[idx + 0], hdr[idx + 1], hdr[idx + 2]));
   }
 };
 

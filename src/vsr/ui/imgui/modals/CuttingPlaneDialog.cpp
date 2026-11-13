@@ -55,9 +55,8 @@ void CuttingPlaneDialog::buildUI()
   if (ImGui::Button("Apply")) {
     float plane[4];
     if (m_enabled) {
-      float len = sqrtf(m_normal[0] * m_normal[0]
-                      + m_normal[1] * m_normal[1]
-                      + m_normal[2] * m_normal[2]);
+      float len = sqrtf(m_normal[0] * m_normal[0] + m_normal[1] * m_normal[1]
+          + m_normal[2] * m_normal[2]);
       if (len < 1e-6f)
         len = 1.f;
       plane[0] = m_normal[0] / len;
@@ -72,8 +71,8 @@ void CuttingPlaneDialog::buildUI()
     auto &scene = appContext()->vsr.scene;
     foreach_item_const(scene.objectDB().renderer, [&](vsr::scene::Renderer *r) {
       if (r)
-        r->setParameter(vsr::core::Token("cutPlane"),
-                        ANARI_FLOAT32_VEC4, plane);
+        r->setParameter(
+            vsr::core::Token("cutPlane"), ANARI_FLOAT32_VEC4, plane);
     });
   }
 

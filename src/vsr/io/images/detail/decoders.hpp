@@ -64,7 +64,8 @@ bool isUdimPattern(const std::string &path);
 // are brought to the largest tile's size and channel count; a set whose tiles
 // differ in component type, or that holds a block-compressed tile, does not
 // decode. See docs/adr/0050-pack-udim-tile-sets-into-one-image.md.
-DecodedImage decodeUdimTileSet(const std::string &pattern, ColorSpace colorSpace);
+DecodedImage decodeUdimTileSet(
+    const std::string &pattern, ColorSpace colorSpace);
 
 DecodedImage decodeImageFromMemory(const void *data,
     size_t numBytes,

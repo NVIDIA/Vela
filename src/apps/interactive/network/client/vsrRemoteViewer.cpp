@@ -54,9 +54,9 @@ Application::Application()
 
   m_client = std::make_shared<vsr::network::NetworkClient>();
 
-  m_updateDelegate =
-      ctx->vsr.scene.updateDelegate().emplace<vsr::network::NetworkUpdateDelegate>(
-          &ctx->vsr.scene, m_client.get());
+  m_updateDelegate = ctx->vsr.scene.updateDelegate()
+                         .emplace<vsr::network::NetworkUpdateDelegate>(
+                             &ctx->vsr.scene, m_client.get());
 
   ctx->vsr.animationMgr.setTimeChangedCallback([this](float time) {
     if (m_timeUpdatesEnabled)

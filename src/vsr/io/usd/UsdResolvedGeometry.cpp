@@ -372,8 +372,8 @@ void resolvePartPrimvar(ResolvedPart &part,
     return;
   }
 
-  auto selected = gatherTrianglesValue(
-      primvar.value, triangles, primvar.valuesPerTriangle);
+  auto selected =
+      gatherTrianglesValue(primvar.value, triangles, primvar.valuesPerTriangle);
   if (isUv)
     selected = reversedTexCoordV(selected);
   addAttribute(part, parameter, std::move(selected));
@@ -394,19 +394,15 @@ ResolvedPart resolveTrianglePart(const TriangulatedMesh &mesh,
   part.subtype = vsr::scene::tokens::geometry::triangle;
   part.name = name;
 
-  addAttribute(part,
-      Token("vertex.position"),
-      pxr::VtValue(mesh.positions),
-      "points");
+  addAttribute(
+      part, Token("vertex.position"), pxr::VtValue(mesh.positions), "points");
 
   pxr::VtVec3iArray indices;
   indices.reserve(triangles.size());
   for (uint32_t triangle : triangles)
     indices.push_back(mesh.triangleIndices[triangle]);
-  addTypedAttribute(part,
-      Token("primitive.index"),
-      ANARI_UINT32_VEC3,
-      pxr::VtValue(indices));
+  addTypedAttribute(
+      part, Token("primitive.index"), ANARI_UINT32_VEC3, pxr::VtValue(indices));
 
   auto bind = [&](const std::string &primvarName,
                   const std::string &vsrName,
@@ -508,7 +504,8 @@ ResolvedGeometry resolveMesh(const pxr::HdSceneIndexBaseRefPtr &sceneIndex,
       primvars.emplace(name.GetString(), std::move(primvar));
   }
 
-  auto pointsIt = primvars.find(pxr::HdPrimvarsSchemaTokens->points.GetString());
+  auto pointsIt =
+      primvars.find(pxr::HdPrimvarsSchemaTokens->points.GetString());
   if (pointsIt == primvars.end()
       || !pointsIt->second.value.IsHolding<pxr::VtVec3fArray>())
     return retval;
@@ -965,8 +962,7 @@ DisplayColor readDisplayColor(const pxr::HdSceneIndexPrim &prim)
   return retval;
 }
 
-ResolvedGeometry resolveGeometry(
-    const pxr::HdSceneIndexBaseRefPtr &sceneIndex,
+ResolvedGeometry resolveGeometry(const pxr::HdSceneIndexBaseRefPtr &sceneIndex,
     const pxr::SdfPath &primPath,
     const pxr::HdSceneIndexPrim &prim,
     const GeometryResolveOptions &options)
@@ -995,8 +991,7 @@ bool isResolvedParameterName(const char *name)
 // Drop what this Part no longer provides, so a primvar that stops resolving
 // leaves nothing of the previous frame behind -- including the case where a
 // prim swaps a `vertex.radius` array for a scalar `radius` or back.
-void clearStaleParameters(
-    scene::Geometry &geometry, const ResolvedPart &part)
+void clearStaleParameters(scene::Geometry &geometry, const ResolvedPart &part)
 {
   std::vector<Token> stale;
   for (size_t i = 0; i < geometry.numParameters(); ++i) {

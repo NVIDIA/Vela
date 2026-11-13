@@ -75,8 +75,8 @@ static SamplerRef importEmbeddedTexture(ImageCache &cache,
   std::vector<uint8_t> rgba(
       size_t(embeddedTexture->mWidth) * size_t(embeddedTexture->mHeight) * 4);
   for (size_t i = 0;
-       i < size_t(embeddedTexture->mWidth) * embeddedTexture->mHeight;
-       ++i) {
+      i < size_t(embeddedTexture->mWidth) * embeddedTexture->mHeight;
+      ++i) {
     const auto &src = embeddedTexture->pcData[i];
     rgba[i * 4 + 0] = src.r;
     rgba[i * 4 + 1] = src.g;
@@ -326,8 +326,7 @@ static std::vector<MaterialRef> importASSIMPMaterials(
           m->setParameterObject("baseColor", *sampler);
         }
       } else if (aiColor3D baseColor;
-                 assimpMat->Get(AI_MATKEY_BASE_COLOR, baseColor)
-                 == AI_SUCCESS) {
+          assimpMat->Get(AI_MATKEY_BASE_COLOR, baseColor) == AI_SUCCESS) {
         m->setParameter("baseColor", ANARI_FLOAT32_VEC3, &baseColor);
       }
 
@@ -345,8 +344,8 @@ static std::vector<MaterialRef> importASSIMPMaterials(
           m->setParameterObject("metallic", *sampler);
         }
       } else if (ai_real metallicFactor;
-                 assimpMat->Get(AI_MATKEY_METALLIC_FACTOR, metallicFactor)
-                 == AI_SUCCESS) {
+          assimpMat->Get(AI_MATKEY_METALLIC_FACTOR, metallicFactor)
+          == AI_SUCCESS) {
         m->setParameter("metallic", ANARI_FLOAT32, &metallicFactor);
       }
 
@@ -364,8 +363,8 @@ static std::vector<MaterialRef> importASSIMPMaterials(
           m->setParameterObject("roughness", *sampler);
         }
       } else if (ai_real roughnessFactor;
-                 assimpMat->Get(AI_MATKEY_ROUGHNESS_FACTOR, roughnessFactor)
-                 == AI_SUCCESS) {
+          assimpMat->Get(AI_MATKEY_ROUGHNESS_FACTOR, roughnessFactor)
+          == AI_SUCCESS) {
         m->setParameter("roughness", ANARI_FLOAT32, &roughnessFactor);
       }
 
@@ -438,8 +437,8 @@ static std::vector<MaterialRef> importASSIMPMaterials(
           m->setParameterObject("sheenColor", *sampler);
         }
       } else if (aiColor3D sheenColor;
-                 assimpMat->Get(AI_MATKEY_SHEEN_COLOR_FACTOR, sheenColor)
-                 == AI_SUCCESS) {
+          assimpMat->Get(AI_MATKEY_SHEEN_COLOR_FACTOR, sheenColor)
+          == AI_SUCCESS) {
         m->setParameter("sheenColor", ANARI_FLOAT32_VEC3, &sheenColor);
       }
 
@@ -454,9 +453,8 @@ static std::vector<MaterialRef> importASSIMPMaterials(
           m->setParameterObject("sheenRoughness", *sampler);
         }
       } else if (ai_real sheenRoughnessFactor;
-                 assimpMat->Get(
-                     AI_MATKEY_SHEEN_ROUGHNESS_FACTOR, sheenRoughnessFactor)
-                 == AI_SUCCESS) {
+          assimpMat->Get(AI_MATKEY_SHEEN_ROUGHNESS_FACTOR, sheenRoughnessFactor)
+          == AI_SUCCESS) {
         m->setParameter("sheenRoughness", ANARI_FLOAT32, &sheenRoughnessFactor);
       }
 
@@ -471,8 +469,8 @@ static std::vector<MaterialRef> importASSIMPMaterials(
           m->setParameterObject("clearcoat", *sampler);
         }
       } else if (ai_real clearcoatFactor;
-                 assimpMat->Get(AI_MATKEY_CLEARCOAT_FACTOR, clearcoatFactor)
-                 == AI_SUCCESS) {
+          assimpMat->Get(AI_MATKEY_CLEARCOAT_FACTOR, clearcoatFactor)
+          == AI_SUCCESS) {
         m->setParameter("clearcoat", ANARI_FLOAT32, &clearcoatFactor);
       }
 
@@ -488,9 +486,9 @@ static std::vector<MaterialRef> importASSIMPMaterials(
           m->setParameterObject("clearcoatRoughness", *sampler);
         }
       } else if (ai_real clearcoatRoughnessFactor;
-                 assimpMat->Get(AI_MATKEY_CLEARCOAT_ROUGHNESS_FACTOR,
-                     clearcoatRoughnessFactor)
-                 == AI_SUCCESS) {
+          assimpMat->Get(
+              AI_MATKEY_CLEARCOAT_ROUGHNESS_FACTOR, clearcoatRoughnessFactor)
+          == AI_SUCCESS) {
         m->setParameter(
             "clearcoatRoughness", ANARI_FLOAT32, &clearcoatRoughnessFactor);
       }
@@ -521,8 +519,8 @@ static std::vector<MaterialRef> importASSIMPMaterials(
           m->setParameterObject("emissive", *sampler);
         }
       } else if (aiColor3D emissiveColor;
-                 assimpMat->Get(AI_MATKEY_COLOR_EMISSIVE, emissiveColor)
-                 == AI_SUCCESS) {
+          assimpMat->Get(AI_MATKEY_COLOR_EMISSIVE, emissiveColor)
+          == AI_SUCCESS) {
         m->setParameter("emissive", ANARI_FLOAT32_VEC3, &emissiveColor);
       }
 

@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-#include "vsr/scripting/LuaBindings.hpp"
+#include <fmt/format.h>
 #include "vsr/scene/Layer.hpp"
 #include "vsr/scene/objects/Array.hpp"
-#include <fmt/format.h>
+#include "vsr/scripting/LuaBindings.hpp"
 
 #include <sol/sol.hpp>
 
@@ -14,7 +14,8 @@ void registerLayerBindings(sol::state &lua)
 {
   sol::table vsr = lua["vsr"];
 
-  vsr.new_usertype<scene::LayerNodeRef>("LayerNode",
+  vsr.new_usertype<scene::LayerNodeRef>(
+      "LayerNode",
       sol::no_constructor,
       "valid",
       &scene::LayerNodeRef::valid,
@@ -29,11 +30,17 @@ void registerLayerBindings(sol::state &lua)
         return fmt::format("LayerNode({})", r->value().name());
       },
       "parent",
-      [](scene::LayerNodeRef &r) { return r.valid() ? r->parent() : scene::LayerNodeRef{}; },
+      [](scene::LayerNodeRef &r) {
+        return r.valid() ? r->parent() : scene::LayerNodeRef{};
+      },
       "next",
-      [](scene::LayerNodeRef &r) { return r.valid() ? r->next() : scene::LayerNodeRef{}; },
+      [](scene::LayerNodeRef &r) {
+        return r.valid() ? r->next() : scene::LayerNodeRef{};
+      },
       "sibling",
-      [](scene::LayerNodeRef &r) { return r.valid() ? r->sibling() : scene::LayerNodeRef{}; },
+      [](scene::LayerNodeRef &r) {
+        return r.valid() ? r->sibling() : scene::LayerNodeRef{};
+      },
       "isRoot",
       [](const scene::LayerNodeRef &r) { return r.valid() && r->isRoot(); },
       "isLeaf",
@@ -51,12 +58,12 @@ void registerLayerBindings(sol::state &lua)
         return {};
       },
       "childByName",
-      [](scene::LayerNodeRef &r, const std::string &name) -> scene::LayerNodeRef {
+      [](scene::LayerNodeRef &r,
+          const std::string &name) -> scene::LayerNodeRef {
         if (!r.valid())
           return {};
-        return find_first_child(r, [&](const scene::LayerNodeData &d) {
-          return d.name() == name;
-        });
+        return find_first_child(
+            r, [&](const scene::LayerNodeData &d) { return d.name() == name; });
       },
       "name",
       sol::property(
@@ -68,13 +75,21 @@ void registerLayerBindings(sol::state &lua)
               r->value().name() = n;
           }),
       "isObject",
-      [](const scene::LayerNodeRef &r) { return r.valid() && r->value().isObject(); },
+      [](const scene::LayerNodeRef &r) {
+        return r.valid() && r->value().isObject();
+      },
       "isTransform",
-      [](const scene::LayerNodeRef &r) { return r.valid() && r->value().isTransform(); },
+      [](const scene::LayerNodeRef &r) {
+        return r.valid() && r->value().isTransform();
+      },
       "isEmpty",
-      [](const scene::LayerNodeRef &r) { return !r.valid() || r->value().isEmpty(); },
+      [](const scene::LayerNodeRef &r) {
+        return !r.valid() || r->value().isEmpty();
+      },
       "isEnabled",
-      [](const scene::LayerNodeRef &r) { return r.valid() && r->value().isEnabled(); },
+      [](const scene::LayerNodeRef &r) {
+        return r.valid() && r->value().isEnabled();
+      },
       "setEnabled",
       [](scene::LayerNodeRef &r, bool enabled) {
         if (r.valid())
@@ -82,7 +97,8 @@ void registerLayerBindings(sol::state &lua)
       },
       "getTransform",
       [](const scene::LayerNodeRef &r) -> math::mat4 {
-        return r.valid() ? r->value().getTransform() : math::mat4(math::identity);
+        return r.valid() ? r->value().getTransform()
+                         : math::mat4(math::identity);
       },
       "getTransformSRT",
       [](const scene::LayerNodeRef &r) -> math::mat3 {
@@ -114,7 +130,8 @@ void registerLayerBindings(sol::state &lua)
       });
 
   using Layer = scene::Layer;
-  vsr.new_usertype<Layer>("Layer",
+  vsr.new_usertype<Layer>(
+      "Layer",
       sol::no_constructor,
       "root",
       [](Layer &l) { return l.root(); },
@@ -127,7 +144,7 @@ void registerLayerBindings(sol::state &lua)
       "foreach",
       [](Layer &l, sol::function fn) {
         l.traverse(l.root(), [&fn, &l](scene::LayerNode &node, int level) {
-            sol::object result = fn(l.at(node.index()), level);
+          sol::object result = fn(l.at(node.index()), level);
           if (result.is<bool>() && !result.as<bool>())
             return false;
           return true;

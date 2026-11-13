@@ -10,8 +10,8 @@
 namespace vsr::demo {
 
 void WeightedPointsOctree::build(const std::vector<WeightedPoint> &points,
-                                 int maxPointsPerLeaf,
-                                 int maxDepth)
+    int maxPointsPerLeaf,
+    int maxDepth)
 {
   m_flatValues.clear();
   m_flatIndices.clear();
@@ -21,12 +21,18 @@ void WeightedPointsOctree::build(const std::vector<WeightedPoint> &points,
   float bmin[3] = {points[0].x, points[0].y, points[0].z};
   float bmax[3] = {points[0].x, points[0].y, points[0].z};
   for (const auto &p : points) {
-    if (p.x < bmin[0]) bmin[0] = p.x;
-    if (p.y < bmin[1]) bmin[1] = p.y;
-    if (p.z < bmin[2]) bmin[2] = p.z;
-    if (p.x > bmax[0]) bmax[0] = p.x;
-    if (p.y > bmax[1]) bmax[1] = p.y;
-    if (p.z > bmax[2]) bmax[2] = p.z;
+    if (p.x < bmin[0])
+      bmin[0] = p.x;
+    if (p.y < bmin[1])
+      bmin[1] = p.y;
+    if (p.z < bmin[2])
+      bmin[2] = p.z;
+    if (p.x > bmax[0])
+      bmax[0] = p.x;
+    if (p.y > bmax[1])
+      bmax[1] = p.y;
+    if (p.z > bmax[2])
+      bmax[2] = p.z;
   }
   float pad = 1e-4f;
   for (int i = 0; i < 3; i++) {
@@ -48,9 +54,18 @@ void WeightedPointsOctree::build(const std::vector<WeightedPoint> &points,
     allIndices[i] = i;
 
   std::vector<Node> tree;
-  buildRecursive(tree, points, allIndices,
-                 cx, cy, cz, hx, hy, hz,
-                 0, maxPointsPerLeaf, maxDepth);
+  buildRecursive(tree,
+      points,
+      allIndices,
+      cx,
+      cy,
+      cz,
+      hx,
+      hy,
+      hz,
+      0,
+      maxPointsPerLeaf,
+      maxDepth);
 
   // Propagate values bottom-up: parent value = SUM of children,
   // parent position = weighted centroid
@@ -81,18 +96,26 @@ void WeightedPointsOctree::build(const std::vector<WeightedPoint> &points,
 }
 
 void WeightedPointsOctree::buildRecursive(std::vector<Node> &tree,
-                                          const std::vector<WeightedPoint> &points,
-                                          const std::vector<size_t> &indices,
-                                          float cx, float cy, float cz,
-                                          float hx, float hy, float hz,
-                                          int depth,
-                                          int maxPointsPerLeaf,
-                                          int maxDepth)
+    const std::vector<WeightedPoint> &points,
+    const std::vector<size_t> &indices,
+    float cx,
+    float cy,
+    float cz,
+    float hx,
+    float hy,
+    float hz,
+    int depth,
+    int maxPointsPerLeaf,
+    int maxDepth)
 {
   size_t myIdx = tree.size();
   tree.emplace_back();
-  tree[myIdx].center[0] = cx; tree[myIdx].center[1] = cy; tree[myIdx].center[2] = cz;
-  tree[myIdx].halfSize[0] = hx; tree[myIdx].halfSize[1] = hy; tree[myIdx].halfSize[2] = hz;
+  tree[myIdx].center[0] = cx;
+  tree[myIdx].center[1] = cy;
+  tree[myIdx].center[2] = cz;
+  tree[myIdx].halfSize[0] = hx;
+  tree[myIdx].halfSize[1] = hy;
+  tree[myIdx].halfSize[2] = hz;
 
   if (indices.size() <= (size_t)maxPointsPerLeaf || depth >= maxDepth) {
     tree[myIdx].isLeaf = true;
@@ -130,23 +153,35 @@ void WeightedPointsOctree::buildRecursive(std::vector<Node> &tree,
         std::vector<size_t> childIndices;
         for (size_t i : indices) {
           const auto &p = points[i];
-          if (p.x >= ncx - chx && p.x <= ncx + chx &&
-              p.y >= ncy - chy && p.y <= ncy + chy &&
-              p.z >= ncz - chz && p.z <= ncz + chz)
+          if (p.x >= ncx - chx && p.x <= ncx + chx && p.y >= ncy - chy
+              && p.y <= ncy + chy && p.z >= ncz - chz && p.z <= ncz + chz)
             childIndices.push_back(i);
         }
 
         tree[myIdx].children[childSlot] = (int)tree.size();
 
         if (!childIndices.empty()) {
-          buildRecursive(tree, points, childIndices,
-                         ncx, ncy, ncz, chx, chy, chz,
-                         depth + 1, maxPointsPerLeaf, maxDepth);
+          buildRecursive(tree,
+              points,
+              childIndices,
+              ncx,
+              ncy,
+              ncz,
+              chx,
+              chy,
+              chz,
+              depth + 1,
+              maxPointsPerLeaf,
+              maxDepth);
         } else {
           size_t emptyIdx = tree.size();
           tree.emplace_back();
-          tree[emptyIdx].center[0] = ncx; tree[emptyIdx].center[1] = ncy; tree[emptyIdx].center[2] = ncz;
-          tree[emptyIdx].halfSize[0] = chx; tree[emptyIdx].halfSize[1] = chy; tree[emptyIdx].halfSize[2] = chz;
+          tree[emptyIdx].center[0] = ncx;
+          tree[emptyIdx].center[1] = ncy;
+          tree[emptyIdx].center[2] = ncz;
+          tree[emptyIdx].halfSize[0] = chx;
+          tree[emptyIdx].halfSize[1] = chy;
+          tree[emptyIdx].halfSize[2] = chz;
           tree[emptyIdx].value = 0.f;
           tree[emptyIdx].isLeaf = true;
           tree[emptyIdx].pointCount = 0;
@@ -157,7 +192,8 @@ void WeightedPointsOctree::buildRecursive(std::vector<Node> &tree,
 
 void WeightedPointsOctree::flattenBFS(const std::vector<Node> &tree)
 {
-  if (tree.empty()) return;
+  if (tree.empty())
+    return;
 
   int N = (int)tree.size();
   m_flatValues.resize(N * 4, 0.f);

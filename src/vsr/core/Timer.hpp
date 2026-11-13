@@ -86,4 +86,4 @@ inline double Timer::perSecondSmoothed() const
   return m_smoothDen / m_smoothNom;
 }
 
-} // namespace vsr
+} // namespace vsr::core

@@ -128,8 +128,7 @@ void UsdGeometryFileBinding::onDefragment(const scene::IndexRemapper &cb)
   for (auto &part : m_parts) {
     if (!part.geometry)
       continue;
-    const size_t newIndex =
-        cb(part.geometry->type(), part.geometry->index());
+    const size_t newIndex = cb(part.geometry->type(), part.geometry->index());
     part.geometry.updateDefragmentedIndex(newIndex);
   }
 }
@@ -170,8 +169,9 @@ UsdGeometryFileBinding *UsdGeometryFileBinding::addToAnimation(
   }
 
   if (parts.empty()) {
-    logWarning("[UsdGeometryFileBinding] no target geometry for '%s' survives"
-               " in the scene; skipping",
+    logWarning(
+        "[UsdGeometryFileBinding] no target geometry for '%s' survives"
+        " in the scene; skipping",
         primPath.c_str());
     return nullptr;
   }
@@ -237,8 +237,8 @@ void UsdGeometryFileBinding::update(float t)
   session()->setTime(session()->timeCodeAt(t));
 
   auto prim = session()->sceneIndex()->GetPrim(path);
-  const auto resolved =
-      usd::resolveGeometry(session()->sceneIndex(), path, prim, m_resolveOptions);
+  const auto resolved = usd::resolveGeometry(
+      session()->sceneIndex(), path, prim, m_resolveOptions);
   if (!resolved.valid())
     return;
 
@@ -263,8 +263,9 @@ void UsdGeometryFileBinding::update(float t)
 
   if (applied < m_parts.size() && !m_partsChangedReported) {
     m_partsChangedReported = true;
-    logWarning("[UsdGeometryFileBinding] '%s': %zu of %zu parts no longer"
-               " resolve; their geometry is left as imported",
+    logWarning(
+        "[UsdGeometryFileBinding] '%s': %zu of %zu parts no longer"
+        " resolve; their geometry is left as imported",
         primPath().c_str(),
         m_parts.size() - applied,
         m_parts.size());

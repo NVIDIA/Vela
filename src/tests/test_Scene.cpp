@@ -92,11 +92,12 @@ SCENARIO("vsr::scene::Scene owns an intrinsic update delegate root", "[Scene]")
       REQUIRE(&constScene.updateDelegate() == &delegate);
     }
 
-    THEN("Registering a child delegate observes new scene-owned objects and arrays")
+    THEN(
+        "Registering a child delegate observes new scene-owned objects and arrays")
     {
       int objectAddedCount = 0;
-      auto *countingDelegate = scene.updateDelegate().emplace<CountingDelegate>(
-          &objectAddedCount);
+      auto *countingDelegate =
+          scene.updateDelegate().emplace<CountingDelegate>(&objectAddedCount);
       auto geometry = scene.createObject<vsr::scene::Geometry>(
           vsr::scene::tokens::geometry::sphere);
       auto array = scene.createArray(ANARI_FLOAT32, 4);
@@ -158,8 +159,8 @@ SCENARIO("vsr::scene::Scene deep-clones layer subtrees", "[Scene]")
     WHEN("The subtree is cloned with object references cloned")
     {
       const bool cloneObjectReferences = true;
-      auto cloneGroup = scene.cloneLayerSubtree(
-          group, layer->root(), cloneObjectReferences);
+      auto cloneGroup =
+          scene.cloneLayerSubtree(group, layer->root(), cloneObjectReferences);
 
       THEN("The clone has distinct objects and remapped object parameters")
       {
@@ -168,8 +169,8 @@ SCENARIO("vsr::scene::Scene deep-clones layer subtrees", "[Scene]")
 
         auto cloneLightNode = findDirectChild(cloneGroup, "mainLight");
         REQUIRE(cloneLightNode);
-        auto *cloneLight = dynamic_cast<vsr::scene::Light *>(
-            (*cloneLightNode)->getObject());
+        auto *cloneLight =
+            dynamic_cast<vsr::scene::Light *>((*cloneLightNode)->getObject());
         REQUIRE(cloneLight != nullptr);
         REQUIRE(cloneLight != light.data());
         REQUIRE(cloneLight->parameterValueAs<float>("irradiance").value()
@@ -337,8 +338,8 @@ SCENARIO("vsr::scene::Scene delegate registration controls live signaling",
   {
     vsr::scene::Scene scene;
     int objectAddedCount = 0;
-    auto *delegate = scene.updateDelegate().emplace<CountingDelegate>(
-        &objectAddedCount);
+    auto *delegate =
+        scene.updateDelegate().emplace<CountingDelegate>(&objectAddedCount);
 
     REQUIRE(scene.updateDelegate().size() == 1);
 
@@ -383,15 +384,20 @@ SCENARIO("vsr::scene::Scene picks a device's fallback renderer", "[Scene]")
 
     THEN("It returns the device's lowest-index renderer of the subtype")
     {
-      REQUIRE(indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "fast")) == 0);
-      REQUIRE(indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "slow")) == 2);
-      REQUIRE(indexOrInvalid(scene.rendererOfSubtypeOrFirst("other", "fast")) == 1);
+      REQUIRE(indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "fast"))
+          == 0);
+      REQUIRE(indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "slow"))
+          == 2);
+      REQUIRE(
+          indexOrInvalid(scene.rendererOfSubtypeOrFirst("other", "fast")) == 1);
     }
 
     THEN("Without a renderer of the subtype, it returns the device's first")
     {
-      REQUIRE(indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "ao")) == 0);
-      REQUIRE(indexOrInvalid(scene.rendererOfSubtypeOrFirst("other", "slow")) == 1);
+      REQUIRE(
+          indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "ao")) == 0);
+      REQUIRE(
+          indexOrInvalid(scene.rendererOfSubtypeOrFirst("other", "slow")) == 1);
     }
 
     THEN("Without renderers of the device, it returns empty")
@@ -401,25 +407,28 @@ SCENARIO("vsr::scene::Scene picks a device's fallback renderer", "[Scene]")
 
     THEN("By default it excludes nothing")
     {
-      REQUIRE(
-          indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "fast")) == 0);
+      REQUIRE(indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "fast"))
+          == 0);
     }
 
     THEN("An excluded renderer of the subtype yields to the next one")
     {
       REQUIRE(
-          indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "fast", 0)) == 3);
+          indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "fast", 0))
+          == 3);
     }
 
     THEN("Excluding the subtype's only renderer falls back to the first")
     {
       REQUIRE(
-          indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "slow", 2)) == 0);
+          indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "slow", 2))
+          == 0);
     }
 
     THEN("An excluded first renderer is not the fallback")
     {
-      REQUIRE(indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "ao", 0)) == 2);
+      REQUIRE(indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "ao", 0))
+          == 2);
     }
 
     THEN("Excluding the device's only renderer returns empty")
@@ -430,7 +439,8 @@ SCENARIO("vsr::scene::Scene picks a device's fallback renderer", "[Scene]")
     THEN("Excluding another device's renderer changes nothing")
     {
       REQUIRE(
-          indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "fast", 1)) == 0);
+          indexOrInvalid(scene.rendererOfSubtypeOrFirst("helide", "fast", 1))
+          == 0);
     }
   }
 }

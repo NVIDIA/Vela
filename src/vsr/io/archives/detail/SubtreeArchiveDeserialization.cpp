@@ -97,8 +97,8 @@ void rollbackDeserializedState(Scene &scene,
 {
   if (animationManager) {
     for (auto it = result.createdAnimations.rbegin();
-         it != result.createdAnimations.rend();
-         ++it)
+        it != result.createdAnimations.rend();
+        ++it)
       animationManager->removeAnimation(*it);
   }
   if (result.root)

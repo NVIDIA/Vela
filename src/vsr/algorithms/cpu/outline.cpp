@@ -94,7 +94,8 @@ void outlinePrimitives(const uint32_t *objectId,
           continue;
         }
 
-        const uint64_t key = primitiveKey(neighborObjectId, neighborPrimitiveId);
+        const uint64_t key =
+            primitiveKey(neighborObjectId, neighborPrimitiveId);
         if (!sawValid) {
           sawValid = true;
           firstValidKey = key;

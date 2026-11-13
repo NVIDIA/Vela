@@ -85,7 +85,8 @@ void OfflineRenderModal::start()
           ctx->offline.output.filePrefix,
           [&](int frameIndex, int numFrames) {
             m_result.frameIndex = frameIndex;
-            vsr::core::logStatus("[OfflineRenderModal] Rendering frame %d of %d",
+            vsr::core::logStatus(
+                "[OfflineRenderModal] Rendering frame %d of %d",
                 frameIndex + 1,
                 numFrames);
             return !m_canceled.load();

@@ -169,28 +169,28 @@ def Xform "World"
     {
         uniform token purpose = "default"
 )") + QUAD_MESH_BODY
-            + R"(
+        + R"(
     }
 
     def Mesh "Rendered"
     {
         uniform token purpose = "render"
 )" + QUAD_MESH_BODY
-            + R"(
+        + R"(
     }
 
     def Mesh "Stand_In"
     {
         uniform token purpose = "proxy"
 )" + QUAD_MESH_BODY
-            + R"(
+        + R"(
     }
 
     def Mesh "Helper"
     {
         uniform token purpose = "guide"
 )" + QUAD_MESH_BODY
-            + R"(
+        + R"(
     }
 }
 )";
@@ -267,8 +267,7 @@ def Xform "World"
         auto hidden = findNode(layer, "Hidden");
         REQUIRE(hidden);
         REQUIRE_FALSE((*hidden)->isEnabled());
-        REQUIRE(stage.report.countOf(
-                    vsr::io::UsdSkipReason::RESOLVED_INVISIBLE)
+        REQUIRE(stage.report.countOf(vsr::io::UsdSkipReason::RESOLVED_INVISIBLE)
             == 1);
       }
     }
@@ -338,7 +337,7 @@ def Xform "AssetA"
     def Mesh "Quad"
     {
 )") + QUAD_MESH_BODY
-            + R"(
+        + R"(
     }
 }
 
@@ -347,7 +346,7 @@ def Xform "AssetB"
     def Mesh "Quad"
     {
 )" + QUAD_MESH_BODY
-            + R"(
+        + R"(
     }
 }
 )";

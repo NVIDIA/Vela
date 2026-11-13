@@ -26,11 +26,10 @@ TF_REGISTRY_FUNCTION(TfType)
 
 CaseFileFormat::CaseFileFormat()
     : SdfFileFormat(CaseFileFormatTokens->Id,
-        CaseFileFormatTokens->Version,
-        CaseFileFormatTokens->Target,
-        "case")
-{
-}
+          CaseFileFormatTokens->Version,
+          CaseFileFormatTokens->Target,
+          "case")
+{}
 
 CaseFileFormat::~CaseFileFormat() = default;
 
@@ -57,10 +56,8 @@ bool CaseFileFormat::CanRead(const std::string &file) const
   return false;
 }
 
-
-bool CaseFileFormat::Read(SdfLayer *layer,
-    const std::string &resolvedPath,
-    bool metadataOnly) const
+bool CaseFileFormat::Read(
+    SdfLayer *layer, const std::string &resolvedPath, bool metadataOnly) const
 {
   vsr::io::ensight::CaseData caseData;
   if (!vsr::io::ensight::parseCase(resolvedPath, caseData))
@@ -117,7 +114,8 @@ bool CaseFileFormat::Read(SdfLayer *layer,
   // Root scope prim
   SdfPath defaultPath =
       SdfPath::AbsoluteRootPath().AppendChild(TfToken("default"));
-  SdfPrimSpecHandle defaultPrim = SdfCreatePrimInLayer(layerHandle, defaultPath);
+  SdfPrimSpecHandle defaultPrim =
+      SdfCreatePrimInLayer(layerHandle, defaultPath);
   defaultPrim->SetSpecifier(SdfSpecifierDef);
   defaultPrim->SetTypeName("Scope");
   layer->SetDefaultPrim(TfToken("default"));

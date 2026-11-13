@@ -14,7 +14,8 @@ namespace vsr::scene {
 
 /*
  * Fixed-size typed data buffer that wraps host memory, CUDA device memory, or
- * a proxy placeholder; maps to an ANARI array object and supports 1-3 dimensions.
+ * a proxy placeholder; maps to an ANARI array object and supports 1-3
+ * dimensions.
  *
  * Example:
  *   auto arr = scene.createArray(ANARI_FLOAT32_VEC3, 1024);

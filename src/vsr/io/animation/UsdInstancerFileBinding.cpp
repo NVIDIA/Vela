@@ -92,8 +92,9 @@ UsdInstancerFileBinding *UsdInstancerFileBinding::addToAnimation(
 
   auto *transforms = (*arrayNode)->getTransformArray();
   if (!transforms) {
-    logWarning("[UsdInstancerFileBinding] node '%s' is not a transform-array"
-               " node; skipping",
+    logWarning(
+        "[UsdInstancerFileBinding] node '%s' is not a transform-array"
+        " node; skipping",
         (*arrayNode)->name().c_str());
     return nullptr;
   }

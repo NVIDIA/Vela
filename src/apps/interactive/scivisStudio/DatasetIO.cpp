@@ -719,8 +719,8 @@ bool removeDatasetRuntime(vsr::scene::Scene &scene,
   }
 
   for (auto it = result.plan.ownedAnimations.rbegin();
-       it != result.plan.ownedAnimations.rend();
-       ++it)
+      it != result.plan.ownedAnimations.rend();
+      ++it)
     animationManager.removeAnimation(*it);
 
   scene.removeNode(root, false);

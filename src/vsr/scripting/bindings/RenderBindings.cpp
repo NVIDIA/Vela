@@ -276,8 +276,7 @@ void registerRenderBindings(sol::state &lua)
     anari::setParameter(dev->device, cam, "direction", camera.direction);
     anari::setParameter(dev->device, cam, "up", camera.up);
     if (camera.aperture > 0.f) {
-      anari::setParameter(
-          dev->device, cam, "apertureRadius", camera.aperture);
+      anari::setParameter(dev->device, cam, "apertureRadius", camera.aperture);
       anari::setParameter(
           dev->device, cam, "focusDistance", camera.focusDistance);
     }

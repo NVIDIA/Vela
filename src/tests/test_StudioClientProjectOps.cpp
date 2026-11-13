@@ -1848,8 +1848,8 @@ SCENARIO("ArrayHydration fills a mirror proxy before letting it be edited",
 
       THEN("the mirror array holds the samples and may now be edited")
       {
-        REQUIRE(pollUntil(f.connection,
-            [&] { return hydration.hydrated(array->index()); }));
+        REQUIRE(pollUntil(
+            f.connection, [&] { return hydration.hydrated(array->index()); }));
         REQUIRE_FALSE(array->isProxy());
         const auto *samples = array->dataAs<vsr::math::float4>();
         REQUIRE(samples != nullptr);
@@ -1881,8 +1881,8 @@ SCENARIO("ArrayHydration fills a mirror proxy before letting it be edited",
 
       THEN("nothing is hydrated and the reason is kept")
       {
-        REQUIRE(pollUntil(f.connection,
-            [&] { return !hydration.lastError().empty(); }));
+        REQUIRE(pollUntil(
+            f.connection, [&] { return !hydration.lastError().empty(); }));
         REQUIRE_FALSE(hydration.hydrated(array->index()));
         REQUIRE(array->isProxy());
       }

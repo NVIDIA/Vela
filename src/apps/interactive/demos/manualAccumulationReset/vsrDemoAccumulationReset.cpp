@@ -47,9 +47,8 @@ class Application : public VSRApplication
 
     m_viewport->setLibraryToDefault();
 
-    manipulator->setConfig(vsr::math::float3(0.f, 0.f, 0.f),
-        4.f,
-        vsr::math::float2(315.f, 20.f));
+    manipulator->setConfig(
+        vsr::math::float3(0.f, 0.f, 0.f), 4.f, vsr::math::float2(315.f, 20.f));
 
     return windows;
   }

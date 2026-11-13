@@ -39,7 +39,7 @@ struct MeanLogLuminanceScratch
   MeanLogLuminanceScratch(MeanLogLuminanceScratch &&) = delete;
   MeanLogLuminanceScratch &operator=(MeanLogLuminanceScratch &&) = delete;
 
-  float *storage{nullptr};  // [mip levels..., tile counter]
+  float *storage{nullptr}; // [mip levels..., tile counter]
   size_t capacityTexels{0}; // floats available at `storage` (0 = empty)
 };
 

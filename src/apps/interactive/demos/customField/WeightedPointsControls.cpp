@@ -2,30 +2,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "WeightedPointsControls.h"
-#include "WeightedPointsOctree.h"
 #include <vsr/ui/imgui/vsr_ui_imgui.h>
-#include <vsr/animation/AnimationManager.hpp>
-#include <vsr/core/Logging.hpp>
-#include <vsr/core/VSRMath.hpp>
-#include <vsr/scene/objects/Array.hpp>
-#include <vsr/scene/objects/SpatialField.hpp>
-#include <vsr/scene/objects/Volume.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <limits>
 #include <random>
+#include <vsr/animation/AnimationManager.hpp>
+#include <vsr/core/Logging.hpp>
+#include <vsr/core/VSRMath.hpp>
+#include <vsr/scene/objects/Array.hpp>
+#include <vsr/scene/objects/SpatialField.hpp>
+#include <vsr/scene/objects/Volume.hpp>
+#include "WeightedPointsOctree.h"
 
 namespace vsr::demo {
 
-WeightedPointsControls::WeightedPointsControls(
-    vsr::ui::imgui::Application *app,
+WeightedPointsControls::WeightedPointsControls(vsr::ui::imgui::Application *app,
     const char *name,
     const std::string &pdbPath)
-    : Window(app, name)
-    , m_pdbPath(pdbPath)
-    , m_usePDB(!pdbPath.empty())
+    : Window(app, name), m_pdbPath(pdbPath), m_usePDB(!pdbPath.empty())
 {}
 
 void WeightedPointsControls::buildUI()
@@ -156,11 +153,12 @@ void WeightedPointsControls::createScene()
   auto *layer = scene.defaultLayer();
   layer->clear();
 
-  // Tear down the previous scene before rebuilding (Regenerate / source change).
-  // Remove the parameter-holding objects (volume, field) before the arrays they
-  // reference, so their PARAMETER uses are released against live pool slots.
-  // Leaving them stranded lets their stale parameter handles later decrement
-  // reused array slots (the "decUseCount on zero use count" warnings).
+  // Tear down the previous scene before rebuilding (Regenerate / source
+  // change). Remove the parameter-holding objects (volume, field) before the
+  // arrays they reference, so their PARAMETER uses are released against live
+  // pool slots. Leaving them stranded lets their stale parameter handles later
+  // decrement reused array slots (the "decUseCount on zero use count"
+  // warnings).
   if (m_volume)
     scene.removeObject(m_volume.data());
   if (m_field)
@@ -404,7 +402,11 @@ void WeightedPointsControls::rebuildField()
   vsr::core::logStatus(
       "[customField demo] %zu points -> %d nodes, "
       "sigma=%.4f, cutoff=%.3f, range=[0, %.2f]",
-      n, numNodes, sigma, cutoff, rangeMax);
+      n,
+      numNodes,
+      sigma,
+      cutoff,
+      rangeMax);
 }
 
 void WeightedPointsControls::rebuildFieldFast()

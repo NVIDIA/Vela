@@ -31,7 +31,8 @@ struct NetworkUpdateDelegate : public vsr::scene::BaseUpdateDelegate
       const std::vector<const vsr::scene::Parameter *> &) override;
   void signalArrayMapped(const vsr::scene::Array *) override;
   void signalArrayUnmapped(const vsr::scene::Array *) override;
-  void signalObjectParameterUseCountZero(const vsr::scene::Object *obj) override;
+  void signalObjectParameterUseCountZero(
+      const vsr::scene::Object *obj) override;
   void signalObjectLayerUseCountZero(const vsr::scene::Object *obj) override;
   void signalObjectRemoved(const vsr::scene::Object *) override;
   void signalRemoveAllObjects() override;

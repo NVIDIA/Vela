@@ -130,7 +130,8 @@ bool isUdimPattern(const std::string &path)
   return path.find(UDIM_TOKEN) != std::string::npos;
 }
 
-DecodedImage decodeUdimTileSet(const std::string &pattern, ColorSpace colorSpace)
+DecodedImage decodeUdimTileSet(
+    const std::string &pattern, ColorSpace colorSpace)
 {
   const auto at = pattern.find(UDIM_TOKEN);
   if (at == std::string::npos)
@@ -219,7 +220,8 @@ DecodedImage decodeUdimTileSet(const std::string &pattern, ColorSpace colorSpace
   atlas.height = cellHeight * atlas.tileRows;
   atlas.rowOrder = RowOrder::TOP_DOWN;
   // A cell no tile fills stays zero: transparent black.
-  atlas.texels.assign(atlas.width * atlas.height * channels * componentBytes, 0);
+  atlas.texels.assign(
+      atlas.width * atlas.height * channels * componentBytes, 0);
 
   const auto opaque = opaqueComponent(family, componentBytes);
   for (auto &tile : tiles) {

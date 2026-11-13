@@ -25,9 +25,7 @@ namespace vsr_ui = vsr::ui::imgui;
 class Application : public VSRApplication
 {
  public:
-  Application(const std::string &pdbPath)
-      : m_pdbPath(pdbPath)
-  {}
+  Application(const std::string &pdbPath) : m_pdbPath(pdbPath) {}
 
   ~Application() override = default;
 
@@ -67,9 +65,8 @@ class Application : public VSRApplication
     isoeditor->hide();
 
     viewport->setLibraryToDefault();
-    manipulator->setConfig(vsr::math::float3(0.f, 0.f, 0.f),
-        3.5f,
-        vsr::math::float2(30.f, -20.f));
+    manipulator->setConfig(
+        vsr::math::float3(0.f, 0.f, 0.f), 3.5f, vsr::math::float2(30.f, -20.f));
 
     return windows;
   }

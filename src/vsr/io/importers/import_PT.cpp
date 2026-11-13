@@ -1,5 +1,6 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2019-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2026 NVIDIA CORPORATION &
+ * AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -103,7 +104,7 @@ ModelData loadModel(const char *filename)
       ("Total parameters: " + std::to_string(data.total_parameters)).c_str());
   logInfo(("Memory usage: "
       + std::to_string(data.total_parameters * sizeof(float) / 1024.0f) + " KB")
-              .c_str());
+          .c_str());
   logInfo("=================================");
 
   return data;

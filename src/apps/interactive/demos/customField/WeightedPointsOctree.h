@@ -28,15 +28,30 @@ class WeightedPointsOctree
 {
  public:
   void build(const std::vector<WeightedPoint> &points,
-             int maxPointsPerLeaf = 8,
-             int maxDepth = 20);
+      int maxPointsPerLeaf = 8,
+      int maxDepth = 20);
 
-  const std::vector<float> &flatValues() const { return m_flatValues; }
-  const std::vector<int32_t> &flatIndices() const { return m_flatIndices; }
+  const std::vector<float> &flatValues() const
+  {
+    return m_flatValues;
+  }
+  const std::vector<int32_t> &flatIndices() const
+  {
+    return m_flatIndices;
+  }
 
-  int numNodes() const { return (int)(m_flatValues.size() / 4); }
-  const float *boundsMin() const { return m_boundsMin; }
-  const float *boundsMax() const { return m_boundsMax; }
+  int numNodes() const
+  {
+    return (int)(m_flatValues.size() / 4);
+  }
+  const float *boundsMin() const
+  {
+    return m_boundsMin;
+  }
+  const float *boundsMax() const
+  {
+    return m_boundsMax;
+  }
 
  private:
   struct Node
@@ -44,18 +59,24 @@ class WeightedPointsOctree
     float center[3];
     float halfSize[3];
     float value = 0.f;
-    int children[8] = {-1,-1,-1,-1,-1,-1,-1,-1};
+    int children[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
     bool isLeaf = true;
     int pointCount = 0;
     std::vector<size_t> pointIndices;
   };
 
   void buildRecursive(std::vector<Node> &tree,
-                      const std::vector<WeightedPoint> &points,
-                      const std::vector<size_t> &indices,
-                      float cx, float cy, float cz,
-                      float hx, float hy, float hz,
-                      int depth, int maxPointsPerLeaf, int maxDepth);
+      const std::vector<WeightedPoint> &points,
+      const std::vector<size_t> &indices,
+      float cx,
+      float cy,
+      float cz,
+      float hx,
+      float hy,
+      float hz,
+      int depth,
+      int maxPointsPerLeaf,
+      int maxDepth);
 
   void flattenBFS(const std::vector<Node> &tree);
 

@@ -184,8 +184,8 @@ void import_AGX(Scene &scene,
             const float *values = (const float *)pv.data;
             float minVal = values[0], maxVal = values[0];
             for (size_t i = 1;
-                 i < std::min((size_t)pv.elementCount, (size_t)100);
-                 i++) {
+                i < std::min((size_t)pv.elementCount, (size_t)100);
+                i++) {
               if (values[i] < minVal)
                 minVal = values[i];
               if (values[i] > maxVal)

@@ -53,7 +53,7 @@ void normalizeAssetNames(std::vector<AssetT> &assets)
              [&](const std::string &a) {
                return assetNamesEqual(a, candidate);
              });
-         ++n)
+        ++n)
       candidate = base + " (" + std::to_string(n) + ")";
     asset.name = candidate;
     assigned.push_back(candidate);

@@ -89,8 +89,8 @@ struct DatasetDirtyDelegate : vsr::scene::EmptyUpdateDelegate
     context->invalidateDatasetMembership();
   }
 
-  void signalParameterUpdated(const vsr::scene::Object *object,
-      const vsr::scene::Parameter *p) override
+  void signalParameterUpdated(
+      const vsr::scene::Object *object, const vsr::scene::Parameter *p) override
   {
     context->markDatasetDirtyForObject(object);
     if (referencesObjects(p))
@@ -1144,8 +1144,7 @@ Dataset *ProjectContext::addStaticDataset(const std::string &name,
   dataset.importerType = toString(importerType);
   dataset.source = collectSourceMetadata(sourcePath);
   if (vsr::io::isUsdImporter(importerType) && !variantSelections.empty()) {
-    dataset.source.importerSettings.set(
-        dataset::USD_VARIANT_SELECTIONS_SETTING,
+    dataset.source.importerSettings.set(dataset::USD_VARIANT_SELECTIONS_SETTING,
         vsr::io::toString(variantSelections));
   }
   dataset.status = DatasetStatus::Importing;
@@ -1819,8 +1818,8 @@ bool ProjectContext::reimportStaticDataset(
     } else {
       vsr::io::import_file(stagedScene,
           stagedAnimations,
-          importFileFor(importerTypeFromString(dataset->importerType),
-              dataset->source),
+          importFileFor(
+              importerTypeFromString(dataset->importerType), dataset->source),
           stagedRoot);
     }
   } catch (const std::exception &e) {

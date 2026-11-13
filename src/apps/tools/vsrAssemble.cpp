@@ -46,10 +46,13 @@ void printUsage(const char *programName)
   printf("  -usd <file...>             Import USD files\n");
   printf("  -usd_mtlx <file...>        Import USD files as native MaterialX\n");
   printf("  -usd_mdl <file...>         Import USD files as native MDL\n");
-  printf("  -usd_variant <set>=<var>   Select a USD variant for the USD files\n");
+  printf(
+      "  -usd_variant <set>=<var>   Select a USD variant for the USD files\n");
   printf("                             that follow (repeatable)\n");
-  printf("  -l, --layer <name>         Specify layer name for following imports\n");
-  printf("  -assimp <file...>          Import via ASSIMP (supports many formats)\n");
+  printf(
+      "  -l, --layer <name>         Specify layer name for following imports\n");
+  printf(
+      "  -assimp <file...>          Import via ASSIMP (supports many formats)\n");
   printf("  -axyz <file...>            Import AXYZ point cloud files\n");
   printf("  -e57xyz <file...>          Import E57 point cloud files\n");
   printf("  -pdb <file...>             Import PDB molecule files\n");
@@ -57,7 +60,8 @@ void printUsage(const char *programName)
   printf("  -trk <file...>             Import TRK track files\n");
   printf("  -nbody <file...>           Import N-body simulation files\n");
   printf("\n");
-  printf("A Scene Archive holds no animations; an animated scene is saved at\n");
+  printf(
+      "A Scene Archive holds no animations; an animated scene is saved at\n");
   printf("its current frame.\n");
   printf("\n");
   printf("Example:\n");

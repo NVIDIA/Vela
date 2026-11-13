@@ -26,9 +26,8 @@ using namespace vsr::core;
 #ifndef _WIN32
 // Extract RGB pixel data from an EXRImage+EXRHeader into a flipped RGB float
 // array. Returns false if no usable channels found.
-static bool extractRGBFromEXRImage(const EXRImage &img,
-    const EXRHeader &hdr,
-    std::vector<float> &out_pixels)
+static bool extractRGBFromEXRImage(
+    const EXRImage &img, const EXRHeader &hdr, std::vector<float> &out_pixels)
 {
   const int w = img.width;
   const int h = img.height;

@@ -98,8 +98,8 @@ void TransformBinding::update(float t)
         m_rotation[sample.lo], m_rotation[sample.hi], sample.alpha);
     trans = vsr::math::slerp(
         m_translation[sample.lo], m_translation[sample.hi], sample.alpha);
-    scl = vsr::math::slerp(
-        m_scale[sample.lo], m_scale[sample.hi], sample.alpha);
+    scl =
+        vsr::math::slerp(m_scale[sample.lo], m_scale[sample.hi], sample.alpha);
   }
 
   (*m_target)->setAsTransform(composeTransform(rot, trans, scl));

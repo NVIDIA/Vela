@@ -365,8 +365,7 @@ void RenderServer::setup_Messaging()
           vsr::core::logStatus(
               "[Server] Saving Scene Archive '%s' as requested by client.",
               filename.c_str());
-          if (!vsr::io::save_SceneArchive(
-                  m_ctx.vsr.scene, filename.c_str())) {
+          if (!vsr::io::save_SceneArchive(m_ctx.vsr.scene, filename.c_str())) {
             vsr::core::logError(
                 "[Server] Failed to save Scene Archive '%s'", filename.c_str());
           }

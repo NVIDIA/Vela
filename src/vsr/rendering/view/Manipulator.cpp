@@ -32,8 +32,10 @@ void Manipulator::setConfig(const CameraPose &p)
   setConfig(p.lookat, p.azeldist.z, {p.azeldist.x, p.azeldist.y});
 }
 
-void Manipulator::setConfig(
-    anari::math::float3 center, float dist, anari::math::float2 azel, float speedScale)
+void Manipulator::setConfig(anari::math::float3 center,
+    float dist,
+    anari::math::float2 azel,
+    float speedScale)
 {
   m_at = center;
   m_distance = dist;

@@ -57,8 +57,7 @@ TransferFunctionEditor::~TransferFunctionEditor()
     SDL_DestroyTexture(m_tfnPaletteTexture);
 }
 
-void TransferFunctionEditor::setArrayAccess(
-    TransferFunctionArrayAccess *access)
+void TransferFunctionEditor::setArrayAccess(TransferFunctionArrayAccess *access)
 {
   m_arrayAccess = access;
 }
@@ -68,8 +67,8 @@ void TransferFunctionEditor::buildUI()
   setObjectPtrsFromSelectedObject();
 
   if (m_volume && m_awaitingSamples) {
-    ImGui::Text("%s",
-        m_arrayAccess ? m_arrayAccess->pendingReason() : "{no samples}");
+    ImGui::Text(
+        "%s", m_arrayAccess ? m_arrayAccess->pendingReason() : "{no samples}");
     return;
   }
 
@@ -638,7 +637,7 @@ void TransferFunctionEditor::loadColormap(
       vsr::core::logStatus(("[tfn_editor] Reduced opacity control points from "
           + std::to_string(colors.size()) + " to "
           + std::to_string(opacityPoints.size()) + " points")
-                               .c_str());
+              .c_str());
     }
   }
 

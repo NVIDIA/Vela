@@ -9,7 +9,8 @@ namespace vsr::scene {
 
 /*
  * ANARI Volume object that visualizes volumetric data through a transfer
- * function applied to a SpatialField; subtype selects the volume representation.
+ * function applied to a SpatialField; subtype selects the volume
+ * representation.
  *
  * Example:
  *   auto vol = scene.createObject<Volume>(tokens::volume::transferFunction1D);

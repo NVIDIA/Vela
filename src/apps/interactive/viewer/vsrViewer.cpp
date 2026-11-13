@@ -60,8 +60,7 @@ class Application : public VSRApplication
   {
     if (metadata.status == vsr::core::DataTreeMetadataReadStatus::Missing) {
       if (auto *projectKindNode = root.child("projectKind")) {
-        const auto projectKind =
-            projectKindNode->getValueOr<std::string>("");
+        const auto projectKind = projectKindNode->getValueOr<std::string>("");
         vsr::core::logError(
             "[vsrViewer] Refusing to load '%s': projectKind='%s' is not a "
             "vsrViewer state file",

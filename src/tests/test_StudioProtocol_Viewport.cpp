@@ -633,8 +633,8 @@ SCENARIO("RequestArrayData names an array and ArrayDataResult carries it",
       REQUIRE(out.elementType == ANARI_FLOAT32_VEC4);
       REQUIRE(out.elementCount == samples.size());
       REQUIRE(out.data.size() == result.data.size());
-      REQUIRE(std::memcmp(out.data.data(), samples.data(), out.data.size())
-          == 0);
+      REQUIRE(
+          std::memcmp(out.data.data(), samples.data(), out.data.size()) == 0);
     }
 
     THEN("an empty result reads back empty rather than stale")
@@ -674,8 +674,8 @@ SCENARIO("An ObjectMetadataEntry carries a value, an array, or a removal",
       REQUIRE_FALSE(out.isRemoval());
       REQUIRE(out.arrayElementType == ANARI_FLOAT32_VEC2);
       REQUIRE(out.arrayElementCount == points.size());
-      REQUIRE(std::memcmp(
-                  out.arrayData.data(), points.data(), out.arrayData.size())
+      REQUIRE(
+          std::memcmp(out.arrayData.data(), points.data(), out.arrayData.size())
           == 0);
     }
 

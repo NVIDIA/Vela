@@ -11,8 +11,8 @@
 //   - horizontal gradient quad    (textured emission, smooth)
 //   - ANARI quad light            (light-primitive reference, same footprint)
 //
-// Pair with generate_default_lights disabled / a dark renderer background to see
-// the effect. See TestEmissiveGeometryLight.cpp for the quantitative
+// Pair with generate_default_lights disabled / a dark renderer background to
+// see the effect. See TestEmissiveGeometryLight.cpp for the quantitative
 // counterpart.
 
 #include "vsr/io/procedural.hpp"
@@ -196,7 +196,8 @@ void generate_emissive_geometries(Scene &scene, LayerNodeRef location)
     geom->setParameter("radius", 0.3f);
     auto surface = scene.createSurface("coolSphere",
         geom,
-        makeConstantEmitter(scene, "coolSphere_material", float3(0.9f, 3.f, 12.f)));
+        makeConstantEmitter(
+            scene, "coolSphere_material", float3(0.9f, 3.f, 12.f)));
     scene.insertChildObjectNode(root, surface);
   }
 
@@ -232,13 +233,14 @@ void generate_emissive_geometries(Scene &scene, LayerNodeRef location)
   }
 
   // Slot 4 — ANARI quad light reference: same footprint/height as the emitters,
-  // emitting downward, for side-by-side comparison with the emissive geometries.
+  // emitting downward, for side-by-side comparison with the emissive
+  // geometries.
   {
     auto light = scene.createObject<Light>(tokens::light::quad);
     light->setName("referenceQuadLight");
     light->setParameter("color", float3(1.f, 0.9f, 0.7f));
-    light->setParameter("position",
-        float3(3.f - kEmitterHalf, kEmitterY, -kEmitterHalf));
+    light->setParameter(
+        "position", float3(3.f - kEmitterHalf, kEmitterY, -kEmitterHalf));
     light->setParameter("edge1", float3(2.f * kEmitterHalf, 0.f, 0.f));
     light->setParameter("edge2", float3(0.f, 0.f, 2.f * kEmitterHalf));
     light->setParameter("intensity", 9.f);

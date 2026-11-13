@@ -65,9 +65,8 @@ struct SWCPoint
 // Build SDF geometry from a parsed SWC file
 // ---------------------------------------------------------------------------
 
-static void buildSWCSDF(Scene &scene,
-    const std::string &filename,
-    LayerNodeRef location)
+static void buildSWCSDF(
+    Scene &scene, const std::string &filename, LayerNodeRef location)
 {
   std::ifstream file(filename);
   if (!file.is_open()) {

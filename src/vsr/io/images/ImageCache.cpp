@@ -327,7 +327,8 @@ SamplerRef makeImageSampler(ImageCache &cache,
   if (settings.uvTransform || image.vFlipInSampler || tiled) {
     auto uv = settings.uvTransform.value_or(UvTransform{});
     if (tiled)
-      composeTileGrid(uv.transform, uv.offset, image.tileColumns, image.tileRows);
+      composeTileGrid(
+          uv.transform, uv.offset, image.tileColumns, image.tileRows);
     if (image.vFlipInSampler)
       composeVFlip(uv.transform, uv.offset);
     sampler->setParameter("inTransform", uv.transform);

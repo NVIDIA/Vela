@@ -177,11 +177,11 @@ void Timeline::buildUI_canvas()
 
   const auto writeTrackLabel =
       [](const vsr::animation::Animation &anim, char *label, size_t size) {
-    if (anim.name().size() > 20)
-      std::snprintf(label, size, "%.17s...", anim.name().c_str());
-    else
-      std::snprintf(label, size, "%s", anim.name().c_str());
-  };
+        if (anim.name().size() > 20)
+          std::snprintf(label, size, "%.17s...", anim.name().c_str());
+        else
+          std::snprintf(label, size, "%s", anim.name().c_str());
+      };
 
   const ImGuiStyle &style = ImGui::GetStyle();
   float maxTrackLabelWidth = ImGui::CalcTextSize("+ Add Track").x;
@@ -194,8 +194,7 @@ void Timeline::buildUI_canvas()
 
   const float removeButtonWidth =
       ImGui::CalcTextSize("x").x + style.FramePadding.x * 2.f;
-  const float nameButtonWidth =
-      maxTrackLabelWidth + style.FramePadding.x * 2.f;
+  const float nameButtonWidth = maxTrackLabelWidth + style.FramePadding.x * 2.f;
   const float nameColWidth = nameButtonWidth + style.ItemSpacing.x
       + removeButtonWidth + cellPaddingX * 2.f;
   float canvasWidth = ImGui::GetContentRegionAvail().x - nameColWidth;
@@ -300,8 +299,8 @@ void Timeline::buildUI_canvas()
       char label[64];
       writeTrackLabel(anim, label, sizeof(label));
       float colW = ImGui::GetContentRegionAvail().x;
-      float trackButtonWidth = std::max(
-          0.f, colW - removeButtonWidth - style.ItemSpacing.x);
+      float trackButtonWidth =
+          std::max(0.f, colW - removeButtonWidth - style.ItemSpacing.x);
       if (ImGui::Button(label, ImVec2(trackButtonWidth, rowHeight))) {
         if (ImGui::GetIO().KeyCtrl) {
           if (selected)
