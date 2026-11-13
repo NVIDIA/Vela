@@ -53,13 +53,12 @@ void registerObjectMethodsOn(sol::usertype<UserType> &ut, Accessor access)
   };
 
   ut["setParameter"] = [access](UserType &u,
-                            const std::string &name,
-                            sol::object value,
-                            sol::this_state s) {
+                           const std::string &name,
+                           sol::object value,
+                           sol::this_state s) {
     auto *obj = access(u);
     if (!obj)
-      throw std::runtime_error(
-          "attempt to set parameter on invalid reference");
+      throw std::runtime_error("attempt to set parameter on invalid reference");
     setParameterFromLua(obj, name, value);
   };
 
@@ -119,8 +118,8 @@ void registerObjectMethodsOn(sol::usertype<UserType> &ut, Accessor access)
       });
 
   ut["getParameter"] = [access](UserType &u,
-                            const std::string &name,
-                            sol::this_state s) -> sol::object {
+                           const std::string &name,
+                           sol::this_state s) -> sol::object {
     auto *obj = access(u);
     if (!obj)
       return sol::lua_nil;

@@ -85,10 +85,9 @@ SCENARIO("Rewriting a transform array moves its instances", "[RenderIndex]")
   GIVEN("A populated render index over a transform-array node")
   {
     InstancedSphereScene content;
-    auto *index =
-        content.scene.updateDelegate()
-            .emplace<vsr::rendering::RenderIndexAllLayers>(
-                content.scene, Token("helide"), anariDevice.device);
+    auto *index = content.scene.updateDelegate()
+                      .emplace<vsr::rendering::RenderIndexAllLayers>(
+                          content.scene, Token("helide"), anariDevice.device);
     index->populate();
 
     REQUIRE(worldBoundsMax(anariDevice.device, *index).x == Approx(1.f));

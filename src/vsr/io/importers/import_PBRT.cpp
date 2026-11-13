@@ -1184,7 +1184,7 @@ static bool resolveImagemapChain(const pbrt::Scene &pbrtScene,
           fv && !fv->empty())
         k *= (*fv)[0];
       else if (auto *sv = std::get_if<std::vector<std::string>>(&it->second);
-               sv && !sv->empty() && nextTex.empty())
+          sv && !sv->empty() && nextTex.empty())
         nextTex = (*sv)[0];
     }
     if (nextTex.empty())
@@ -1342,7 +1342,7 @@ static float resolveDielectricEta(const pbrt::ParamList &params, float def)
   if (auto *fv = std::get_if<std::vector<float>>(&it->second)) {
     eta = extract(*fv, def);
   } else if (auto *sv = std::get_if<std::vector<std::string>>(&it->second);
-             sv && !sv->empty()) {
+      sv && !sv->empty()) {
     logWarning(
         "[import_PBRT] dielectric: named spectrum '%s' for eta "
         "not supported, using %.3f",
@@ -1893,7 +1893,7 @@ static MaterialRef applyShapeAlpha(Scene &scene,
     floatAlpha = std::clamp((*fv)[0], 0.f, 1.f);
     haveFloatAlpha = true;
   } else if (auto *sv = std::get_if<std::vector<std::string>>(&alphaIt->second);
-             sv && !sv->empty()) {
+      sv && !sv->empty()) {
     const auto &alphaTexName = (*sv)[0];
     auto texIt = pbrtScene.textures.find(alphaTexName);
     if (texIt == pbrtScene.textures.end()) {

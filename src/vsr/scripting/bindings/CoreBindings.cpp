@@ -40,23 +40,21 @@ static std::vector<Vec> tableToVecs(sol::table t, const char *typeName)
     } else if (o.is<sol::table>()) {
       sol::table sub = o.as<sol::table>();
       if (sub.size() != N)
-        throw std::runtime_error(
-            std::string("expected ") + typeName + " or table of "
-            + std::to_string(N) + " numbers");
+        throw std::runtime_error(std::string("expected ") + typeName
+            + " or table of " + std::to_string(N) + " numbers");
       if constexpr (N == 2)
         v[i] = Vec(sub[1].get<float>(), sub[2].get<float>());
       else if constexpr (N == 3)
-        v[i] = Vec(
-            sub[1].get<float>(), sub[2].get<float>(), sub[3].get<float>());
+        v[i] =
+            Vec(sub[1].get<float>(), sub[2].get<float>(), sub[3].get<float>());
       else if constexpr (N == 4)
         v[i] = Vec(sub[1].get<float>(),
             sub[2].get<float>(),
             sub[3].get<float>(),
             sub[4].get<float>());
     } else {
-      throw std::runtime_error(
-          std::string("expected ") + typeName + " or table of "
-          + std::to_string(N) + " numbers");
+      throw std::runtime_error(std::string("expected ") + typeName
+          + " or table of " + std::to_string(N) + " numbers");
     }
   }
   return v;
@@ -450,16 +448,24 @@ void registerContextBindings(sol::state &lua)
                   "addObjectParameterBinding: invalid object at index "
                   + std::to_string(i));
           }
-          a.addObjectParameterBinding(
-              obj, core::Token(param), dataType, ptrs.data(), tb.data(),
-              count, interp);
+          a.addObjectParameterBinding(obj,
+              core::Token(param),
+              dataType,
+              ptrs.data(),
+              tb.data(),
+              count,
+              interp);
         } else {
           // Value types — decode into a typed vector, then pass as void*
           auto addValues = [&](auto *typed, auto vec) {
             (void)typed;
-            a.addObjectParameterBinding(
-                obj, core::Token(param), dataType, vec.data(), tb.data(),
-                count, interp);
+            a.addObjectParameterBinding(obj,
+                core::Token(param),
+                dataType,
+                vec.data(),
+                tb.data(),
+                count,
+                interp);
           };
 
           switch (dataType) {
@@ -489,33 +495,45 @@ void registerContextBindings(sol::state &lua)
                     "addObjectParameterBinding: expected mat4 at index "
                     + std::to_string(i));
             }
-            a.addObjectParameterBinding(
-                obj, core::Token(param), dataType, v.data(), tb.data(),
-                count, interp);
+            a.addObjectParameterBinding(obj,
+                core::Token(param),
+                dataType,
+                v.data(),
+                tb.data(),
+                count,
+                interp);
             break;
           }
           case ANARI_INT32: {
             std::vector<int32_t> v(count);
             for (size_t i = 0; i < count; i++)
               v[i] = dataTable[i + 1].get<int32_t>();
-            a.addObjectParameterBinding(
-                obj, core::Token(param), dataType, v.data(), tb.data(),
-                count, interp);
+            a.addObjectParameterBinding(obj,
+                core::Token(param),
+                dataType,
+                v.data(),
+                tb.data(),
+                count,
+                interp);
             break;
           }
           case ANARI_UINT32: {
             std::vector<uint32_t> v(count);
             for (size_t i = 0; i < count; i++)
               v[i] = dataTable[i + 1].get<uint32_t>();
-            a.addObjectParameterBinding(
-                obj, core::Token(param), dataType, v.data(), tb.data(),
-                count, interp);
+            a.addObjectParameterBinding(obj,
+                core::Token(param),
+                dataType,
+                v.data(),
+                tb.data(),
+                count,
+                interp);
             break;
           }
           default:
             throw std::runtime_error(
-                "addObjectParameterBinding: unsupported data type '"
-                + typeStr + "'");
+                "addObjectParameterBinding: unsupported data type '" + typeStr
+                + "'");
           }
         }
       },

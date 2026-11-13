@@ -98,7 +98,7 @@ core::TransferFunction toTransferFunction(const VolumeTransferFunction &vtf)
 
   if (!vtf.opacityValues.empty()) {
     for (size_t i = 0; i < vtf.opacityValues.size() && i < vtf.xPoints.size();
-         ++i)
+        ++i)
       tf.opacityPoints.emplace_back(vtf.xPoints[i], vtf.opacityValues[i]);
   } else {
     for (size_t i = 0; i < vtf.colors.size() && i < vtf.xPoints.size(); ++i)

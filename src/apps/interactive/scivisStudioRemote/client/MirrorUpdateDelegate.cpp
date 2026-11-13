@@ -143,8 +143,9 @@ void MirrorUpdateDelegate::sendArray(const vsr::scene::Array *a)
   if (!m_send || a == nullptr || a->isProxy() || a->isEmpty())
     return;
   vsr::network::messages::TransferArrayData transfer(a);
-  m_send(protocol::encodeSceneMessage<protocol::StudioMessageType::SetArrayData>(
-      transfer));
+  m_send(
+      protocol::encodeSceneMessage<protocol::StudioMessageType::SetArrayData>(
+          transfer));
 }
 
 void MirrorUpdateDelegate::sendParameter(

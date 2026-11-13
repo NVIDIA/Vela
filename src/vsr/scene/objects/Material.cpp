@@ -32,7 +32,8 @@ Material::Material(Token subtype) : Object(ANARI_MATERIAL, subtype)
         .setMin(0.f)
         .setMax(1.f);
     injectAlphaMode();
-  } else if (subtype == tokens::material::physicallyBased || subtype == tokens::material::physicallyBasedMDL) {
+  } else if (subtype == tokens::material::physicallyBased
+      || subtype == tokens::material::physicallyBasedMDL) {
     addParameter("baseColor")
         .setValue(float3(0.8f, 0.8f, 0.8f))
         .setDescription("base color")
@@ -145,14 +146,14 @@ Material::Material(Token subtype) : Object(ANARI_MATERIAL, subtype)
         .setValue("::visrtx::default::diffuseWhite")
         .setDescription("MDL module name");
   } else if (subtype == tokens::material::materialx) {
-    addParameter("source")
-        .setValue("")
-        .setDescription("A .mtlx document: a file path (documentFile) or "
-                        "inline .mtlx XML (documentInline)");
+    addParameter("source").setValue("").setDescription(
+        "A .mtlx document: a file path (documentFile) or "
+        "inline .mtlx XML (documentInline)");
     addParameter("sourceType")
         .setValue("documentFile")
-        .setDescription("How source is interpreted: documentFile or "
-                        "documentInline");
+        .setDescription(
+            "How source is interpreted: documentFile or "
+            "documentInline");
     addParameter("materialName")
         .setValue("")
         .setDescription("Material to select within the document");
@@ -209,7 +210,8 @@ void applyMaterialXStandardSurfacePreset(Material &m)
   addF("emission", 0.f, 0.f, 1.f, "emission weight");
   addColor("emission_color", float3(1.f, 1.f, 1.f), "emission color");
   addF("coat", 0.f, 0.f, 1.f, "coat weight");
-  addColor("opacity", float3(1.f, 1.f, 1.f),
+  addColor("opacity",
+      float3(1.f, 1.f, 1.f),
       "opacity (consumed monochromatically by standard_surface)");
 }
 

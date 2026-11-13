@@ -20,14 +20,18 @@ inline __device__ float sampleWeightedPoints(
   if (!field.values || !field.indices || field.numNodes <= 0)
     return 0.f;
 
-  if (P.x < field.domainMin.x || P.x > field.domainMax.x ||
-      P.y < field.domainMin.y || P.y > field.domainMax.y ||
-      P.z < field.domainMin.z || P.z > field.domainMax.z)
+  if (P.x < field.domainMin.x || P.x > field.domainMax.x
+      || P.y < field.domainMin.y || P.y > field.domainMax.y
+      || P.z < field.domainMin.z || P.z > field.domainMax.z)
     return 0.f;
 
   const int N = field.numNodes;
 
-  struct Entry { int idx; float cut; };
+  struct Entry
+  {
+    int idx;
+    float cut;
+  };
   Entry stack[32];
   int sp = 0;
 
@@ -48,15 +52,16 @@ inline __device__ float sampleWeightedPoints(
     float curCutoff = e.cut;
 
     int childBegin = field.indices[ni * 2];
-    int childEnd   = field.indices[ni * 2 + 1];
+    int childEnd = field.indices[ni * 2 + 1];
 
     if (childBegin == 0 && childEnd == 0) {
       float nv = field.values[ni * 4 + 3];
-      if (nv <= 0.f) continue;
+      if (nv <= 0.f)
+        continue;
       float dx = P.x - field.values[ni * 4 + 0];
       float dy = P.y - field.values[ni * 4 + 1];
       float dz = P.z - field.values[ni * 4 + 2];
-      result += nv * expf(-(dx*dx + dy*dy + dz*dz) * field.inv2SigmaSq);
+      result += nv * expf(-(dx * dx + dy * dy + dz * dz) * field.inv2SigmaSq);
       continue;
     }
 
@@ -67,12 +72,13 @@ inline __device__ float sampleWeightedPoints(
 
     for (int ci = childBegin; ci <= childEnd; ci++) {
       float cv = field.values[ci * 4 + 3];
-      if (cv <= 0.f) continue;
+      if (cv <= 0.f)
+        continue;
 
       float dx = P.x - field.values[ci * 4 + 0];
       float dy = P.y - field.values[ci * 4 + 1];
       float dz = P.z - field.values[ci * 4 + 2];
-      float d2 = dx*dx + dy*dy + dz*dz;
+      float d2 = dx * dx + dy * dy + dz * dz;
 
       if (d2 >= curCutoff * curCutoff) {
         result += cv * expf(-d2 * field.inv2SigmaSq);

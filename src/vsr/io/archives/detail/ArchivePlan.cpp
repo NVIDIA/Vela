@@ -194,7 +194,7 @@ bool classifyAnimations(const animation::AnimationManager &manager,
 {
   const auto &animations = manager.animations();
   for (size_t animationIndex = 0; animationIndex < animations.size();
-       ++animationIndex) {
+      ++animationIndex) {
     const auto &animation = animations[animationIndex];
     bool inside = false;
     bool outside = false;

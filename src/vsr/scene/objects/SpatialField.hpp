@@ -14,7 +14,8 @@ struct Scene;
  * (e.g. structured-regular, NanoVDB) consumed by a Volume for rendering.
  *
  * Example:
- *   auto field = scene.createObject<SpatialField>(tokens::spatial_field::structuredRegular);
+ *   auto field =
+ * scene.createObject<SpatialField>(tokens::spatial_field::structuredRegular);
  *   field->setParameter("data", dataArray);
  */
 struct SpatialField : public Object

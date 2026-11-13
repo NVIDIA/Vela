@@ -59,8 +59,7 @@ class TransferFunctionEditor : public Window
   void setMap(int which = 0);
   void setObjectPtrsFromSelectedObject();
   void loadDefaultMaps();
-  void loadColormap(
-      const std::string &filepath, const std::string &name);
+  void loadColormap(const std::string &filepath, const std::string &name);
 
   void saveColormapTo1dt(const std::string &filepath);
   void saveColormapToParaview(const std::string &filepath);
@@ -73,7 +72,7 @@ class TransferFunctionEditor : public Window
   // Data //
 
   vsr::scene::Volume *m_volume{nullptr};
-  std::vector<vsr::scene::Volume*> m_otherVolumes;
+  std::vector<vsr::scene::Volume *> m_otherVolumes;
   vsr::scene::Array *m_colorMapArray{nullptr};
   vsr::scene::Volume *m_lastColorVolume{nullptr};
   TransferFunctionArrayAccess *m_arrayAccess{nullptr};

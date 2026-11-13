@@ -2,21 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "WeightedPointsField.h"
-#include "WeightedPointsFieldData.h"
-#include "gpu/gpu_decl.h"
+#include <cuda_runtime.h>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-#include <cuda_runtime.h>
+#include "WeightedPointsFieldData.h"
+#include "gpu/gpu_decl.h"
 
 namespace visrtx_custom {
 
 WeightedPointsField::WeightedPointsField(visrtx::DeviceGlobalState *d)
-    : CustomField(d)
-    , m_valuesArray(this)
-    , m_indicesArray(this)
-{
-}
+    : CustomField(d), m_valuesArray(this), m_indicesArray(this)
+{}
 
 WeightedPointsField::~WeightedPointsField()
 {
@@ -25,8 +22,14 @@ WeightedPointsField::~WeightedPointsField()
 
 void WeightedPointsField::freeDeviceArrays()
 {
-  if (m_dValues) { cudaFree(m_dValues); m_dValues = nullptr; }
-  if (m_dIndices) { cudaFree(m_dIndices); m_dIndices = nullptr; }
+  if (m_dValues) {
+    cudaFree(m_dValues);
+    m_dValues = nullptr;
+  }
+  if (m_dIndices) {
+    cudaFree(m_dIndices);
+    m_dIndices = nullptr;
+  }
   m_dValuesSize = 0;
   m_dIndicesSize = 0;
 }
@@ -35,10 +38,10 @@ void WeightedPointsField::commitParameters()
 {
   m_sigma = getParam<float>("sigma", 0.f);
   m_cutoff = getParam<float>("cutoff", 0.f);
-  m_domainMin = getParam<visrtx::vec3>(
-      "domainMin", visrtx::vec3(0.f, 0.f, 0.f));
-  m_domainMax = getParam<visrtx::vec3>(
-      "domainMax", visrtx::vec3(1.f, 1.f, 1.f));
+  m_domainMin =
+      getParam<visrtx::vec3>("domainMin", visrtx::vec3(0.f, 0.f, 0.f));
+  m_domainMax =
+      getParam<visrtx::vec3>("domainMax", visrtx::vec3(1.f, 1.f, 1.f));
 
   m_valuesArray = getParamObject<visrtx::Array1D>("values");
   m_indicesArray = getParamObject<visrtx::Array1D>("indices");
@@ -55,8 +58,8 @@ void WeightedPointsField::finalize()
     const float *hostPtr = m_valuesArray->beginAs<float>();
 
     auto err1 = cudaMalloc(&m_dValues, m_dValuesSize);
-    auto err2 = cudaMemcpy(
-        m_dValues, hostPtr, m_dValuesSize, cudaMemcpyHostToDevice);
+    auto err2 =
+        cudaMemcpy(m_dValues, hostPtr, m_dValuesSize, cudaMemcpyHostToDevice);
 
     if (err1 != cudaSuccess || err2 != cudaSuccess) {
       m_dValues = nullptr;
@@ -70,8 +73,8 @@ void WeightedPointsField::finalize()
     const int32_t *hostPtr = m_indicesArray->beginAs<int32_t>();
 
     auto err1 = cudaMalloc(&m_dIndices, m_dIndicesSize);
-    auto err2 = cudaMemcpy(
-        m_dIndices, hostPtr, m_dIndicesSize, cudaMemcpyHostToDevice);
+    auto err2 =
+        cudaMemcpy(m_dIndices, hostPtr, m_dIndicesSize, cudaMemcpyHostToDevice);
 
     if (err1 != cudaSuccess || err2 != cudaSuccess) {
       m_dIndices = nullptr;
@@ -118,10 +121,8 @@ void WeightedPointsField::finalize()
 bool WeightedPointsField::isValid() const
 {
   return m_valuesArray && m_indicesArray && m_dValues && m_dIndices
-      && m_numNodes > 0
-      && m_domainMin.x < m_domainMax.x
-      && m_domainMin.y < m_domainMax.y
-      && m_domainMin.z < m_domainMax.z;
+      && m_numNodes > 0 && m_domainMin.x < m_domainMax.x
+      && m_domainMin.y < m_domainMax.y && m_domainMin.z < m_domainMax.z;
 }
 
 visrtx::box3 WeightedPointsField::bounds() const
@@ -141,8 +142,8 @@ visrtx::SpatialFieldGPUData WeightedPointsField::gpuData() const
   sf.samplerCallableIndex =
       visrtx::SbtCallableEntryPoints::SpatialFieldSamplerCustom;
   sf.data.custom.subType = visrtx::DEMO_WEIGHTED_POINTS_FIELD_TYPE;
-  std::memcpy(sf.data.custom.fieldData, &m_deviceData,
-      sizeof(WeightedPointsFieldData));
+  std::memcpy(
+      sf.data.custom.fieldData, &m_deviceData, sizeof(WeightedPointsFieldData));
   sf.roi = bounds();
   sf.grid = m_uniformGrid.gpuData();
   return sf;

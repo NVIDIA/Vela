@@ -125,8 +125,8 @@ void expandPrototype(ImportContext &ctx,
       vsr::math::inverse(flattenedXformOf(sceneIndex, prototypeRoot));
 
   for (size_t i = 0;
-       i < content.surfaces.size() && i < content.gprimPaths.size();
-       ++i) {
+      i < content.surfaces.size() && i < content.gprimPaths.size();
+      ++i) {
     const auto &path = content.gprimPaths[i];
     const auto local =
         vsr::math::mul(inverseRoot, flattenedXformOf(sceneIndex, path));
@@ -384,7 +384,7 @@ void convertInstancer(ImportContext &ctx,
   bool boundAnyPrototype = false;
 
   for (size_t protoIndex = 0; protoIndex < placementsOfPrim.prototypes.size();
-       ++protoIndex) {
+      ++protoIndex) {
     auto content = convertPrototype(
         ctx, sceneIndex, placementsOfPrim.prototypes[protoIndex], registry);
 

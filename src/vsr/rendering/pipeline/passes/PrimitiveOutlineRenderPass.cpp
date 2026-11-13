@@ -16,8 +16,7 @@ PrimitiveOutlineRenderPass::PrimitiveOutlineRenderPass() = default;
 
 PrimitiveOutlineRenderPass::~PrimitiveOutlineRenderPass() = default;
 
-void PrimitiveOutlineRenderPass::setOutlineColor(
-    const vsr::math::float4 &color)
+void PrimitiveOutlineRenderPass::setOutlineColor(const vsr::math::float4 &color)
 {
   m_outlineColor = color;
 }

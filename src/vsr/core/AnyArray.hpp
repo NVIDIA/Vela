@@ -41,11 +41,11 @@ struct AnyArray
 
   // Type / capacity query
   anari::DataType elementType() const;
-  size_t size() const;        // element count
+  size_t size() const; // element count
   size_t elementSize() const; // bytes per element (anari::sizeOf(type))
-  size_t byteSize() const;    // total bytes
+  size_t byteSize() const; // total bytes
   bool empty() const;
-  bool valid() const;         // elementType() != ANARI_UNKNOWN
+  bool valid() const; // elementType() != ANARI_UNKNOWN
   operator bool() const;
 
   template <typename T>
@@ -73,9 +73,9 @@ struct AnyArray
   T *dataAs();
 
   // Mutation
-  void resize(size_t count);  // grows/shrinks, zero-fills new elements
+  void resize(size_t count); // grows/shrinks, zero-fills new elements
   void reserve(size_t count); // pre-allocate without resize
-  void reset();               // clear buffer and type
+  void reset(); // clear buffer and type
 
   void setElement(size_t i, const void *value);
   template <typename T>
@@ -88,8 +88,7 @@ struct AnyArray
 
 // Inlined definitions ////////////////////////////////////////////////////////
 
-inline AnyArray::AnyArray(anari::DataType type, size_t count)
-    : m_type(type)
+inline AnyArray::AnyArray(anari::DataType type, size_t count) : m_type(type)
 {
   m_storage.resize(count * anari::sizeOf(type), 0);
 }
@@ -197,8 +196,7 @@ inline T &AnyArray::get(size_t i)
 template <typename T>
 inline const T *AnyArray::dataAs() const
 {
-  static_assert(
-      anari::ANARITypeFor<T>::value != ANARI_STRING,
+  static_assert(anari::ANARITypeFor<T>::value != ANARI_STRING,
       "AnyArray::dataAs<T>() does not support string element types");
   assert(sizeof(T) == elementSize());
   return reinterpret_cast<const T *>(data());
@@ -207,8 +205,7 @@ inline const T *AnyArray::dataAs() const
 template <typename T>
 inline T *AnyArray::dataAs()
 {
-  static_assert(
-      anari::ANARITypeFor<T>::value != ANARI_STRING,
+  static_assert(anari::ANARITypeFor<T>::value != ANARI_STRING,
       "AnyArray::dataAs<T>() does not support string element types");
   assert(sizeof(T) == elementSize());
   return reinterpret_cast<T *>(data());

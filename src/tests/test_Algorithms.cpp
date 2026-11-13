@@ -232,9 +232,8 @@ SCENARIO(
 
       THEN("The result is finite, with NaN at the floor and Inf at the ceiling")
       {
-        const float expected = (std::log2(1e-4f) + std::log2(1e8f) + 0.f
-                                   + std::log2(4.f))
-            / 4.f;
+        const float expected =
+            (std::log2(1e-4f) + std::log2(1e8f) + 0.f + std::log2(4.f)) / 4.f;
         REQUIRE(mean.has_value());
         REQUIRE(std::isfinite(*mean));
         REQUIRE(*mean == Approx(expected));
@@ -438,9 +437,17 @@ SCENARIO("Host box outlining rasterizes only the projected box edges",
 
     WHEN("The box outline is drawn without a depth buffer")
     {
-      cpu::boxOutline(
-          box, projView, eye, dir, true, nullptr, color.data(), boxColor, 1u,
-          8u, 8u);
+      cpu::boxOutline(box,
+          projView,
+          eye,
+          dir,
+          true,
+          nullptr,
+          color.data(),
+          boxColor,
+          1u,
+          8u,
+          8u);
 
       THEN("Border pixels of the projected rectangle are shaded")
       {
@@ -482,8 +489,17 @@ SCENARIO("Host box outlining respects the depth buffer", "[Algorithms]")
     WHEN("Everything in the depth buffer is nearer than the box")
     {
       std::vector<float> depth(64, 0.5f);
-      cpu::boxOutline(box, projView, eye, dir, true, depth.data(),
-          color.data(), boxColor, 1u, 8u, 8u);
+      cpu::boxOutline(box,
+          projView,
+          eye,
+          dir,
+          true,
+          depth.data(),
+          color.data(),
+          boxColor,
+          1u,
+          8u,
+          8u);
 
       THEN("No pixels are shaded")
       {
@@ -496,8 +512,17 @@ SCENARIO("Host box outlining respects the depth buffer", "[Algorithms]")
     WHEN("Everything in the depth buffer is farther than the box")
     {
       std::vector<float> depth(64, 2.f);
-      cpu::boxOutline(box, projView, eye, dir, true, depth.data(),
-          color.data(), boxColor, 1u, 8u, 8u);
+      cpu::boxOutline(box,
+          projView,
+          eye,
+          dir,
+          true,
+          depth.data(),
+          color.data(),
+          boxColor,
+          1u,
+          8u,
+          8u);
 
       THEN("Edge pixels are shaded")
       {
@@ -507,8 +532,17 @@ SCENARIO("Host box outlining respects the depth buffer", "[Algorithms]")
 
     WHEN("Occluding depth exists but no depth buffer is passed")
     {
-      cpu::boxOutline(box, projView, eye, dir, true, nullptr, color.data(),
-          boxColor, 1u, 8u, 8u);
+      cpu::boxOutline(box,
+          projView,
+          eye,
+          dir,
+          true,
+          nullptr,
+          color.data(),
+          boxColor,
+          1u,
+          8u,
+          8u);
 
       THEN("The outline is drawn as an overlay anyway")
       {
@@ -519,8 +553,17 @@ SCENARIO("Host box outlining respects the depth buffer", "[Algorithms]")
     WHEN("The depth buffer exactly matches the box (touching geometry)")
     {
       std::vector<float> depth(64, 1.f);
-      cpu::boxOutline(box, projView, eye, dir, true, depth.data(),
-          color.data(), boxColor, 1u, 8u, 8u);
+      cpu::boxOutline(box,
+          projView,
+          eye,
+          dir,
+          true,
+          depth.data(),
+          color.data(),
+          boxColor,
+          1u,
+          8u,
+          8u);
 
       THEN("The relative bias keeps the outline visible")
       {
@@ -530,8 +573,7 @@ SCENARIO("Host box outlining respects the depth buffer", "[Algorithms]")
   }
 }
 
-SCENARIO(
-    "Host box outlining clips edges behind a perspective camera",
+SCENARIO("Host box outlining clips edges behind a perspective camera",
     "[Algorithms]")
 {
   GIVEN("A perspective camera at the origin looking down -z")
@@ -557,8 +599,17 @@ SCENARIO(
     WHEN("The box is entirely behind the camera")
     {
       const math::box3 box{{-1.f, -1.f, 1.f}, {1.f, 1.f, 2.f}};
-      cpu::boxOutline(box, projView, eye, dir, false, nullptr, color.data(),
-          boxColor, 1u, 8u, 8u);
+      cpu::boxOutline(box,
+          projView,
+          eye,
+          dir,
+          false,
+          nullptr,
+          color.data(),
+          boxColor,
+          1u,
+          8u,
+          8u);
 
       THEN("Nothing is drawn")
       {
@@ -571,8 +622,17 @@ SCENARIO(
     WHEN("The box straddles the eye plane")
     {
       const math::box3 box{{-1.f, -1.f, -4.f}, {1.f, 1.f, 1.f}};
-      cpu::boxOutline(box, projView, eye, dir, false, nullptr, color.data(),
-          boxColor, 1u, 8u, 8u);
+      cpu::boxOutline(box,
+          projView,
+          eye,
+          dir,
+          false,
+          nullptr,
+          color.data(),
+          boxColor,
+          1u,
+          8u,
+          8u);
 
       THEN("The part in front of the camera is still drawn")
       {
@@ -585,8 +645,17 @@ SCENARIO(
     WHEN("The box is fully in front of the camera")
     {
       const math::box3 box{{-1.f, -1.f, -4.f}, {1.f, 1.f, -2.f}};
-      cpu::boxOutline(box, projView, eye, dir, false, nullptr, color.data(),
-          boxColor, 1u, 8u, 8u);
+      cpu::boxOutline(box,
+          projView,
+          eye,
+          dir,
+          false,
+          nullptr,
+          color.data(),
+          boxColor,
+          1u,
+          8u,
+          8u);
 
       THEN("The projected front-face corners land at the expected pixels")
       {
@@ -602,8 +671,17 @@ SCENARIO(
       // Nearest box point (0, 0, -2) is 2 units from the eye (Euclidean).
       const math::box3 box{{-1.f, -1.f, -4.f}, {1.f, 1.f, -2.f}};
       std::vector<float> depth(64, 1.f);
-      cpu::boxOutline(box, projView, eye, dir, false, depth.data(),
-          color.data(), boxColor, 1u, 8u, 8u);
+      cpu::boxOutline(box,
+          projView,
+          eye,
+          dir,
+          false,
+          depth.data(),
+          color.data(),
+          boxColor,
+          1u,
+          8u,
+          8u);
 
       THEN("The Euclidean eye-distance test rejects every fragment")
       {
@@ -618,8 +696,17 @@ SCENARIO(
       // Farthest box point is sqrt(1+1+16) ~= 4.24 units from the eye.
       const math::box3 box{{-1.f, -1.f, -4.f}, {1.f, 1.f, -2.f}};
       std::vector<float> depth(64, 50.f);
-      cpu::boxOutline(box, projView, eye, dir, false, depth.data(),
-          color.data(), boxColor, 1u, 8u, 8u);
+      cpu::boxOutline(box,
+          projView,
+          eye,
+          dir,
+          false,
+          depth.data(),
+          color.data(),
+          boxColor,
+          1u,
+          8u,
+          8u);
 
       THEN("The outline is drawn")
       {

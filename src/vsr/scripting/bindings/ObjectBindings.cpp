@@ -19,8 +19,8 @@
 #include "vsr/scripting/LuaBindings.hpp"
 #include "vsr/scripting/Sol2Helpers.hpp"
 
-#include <algorithm>
 #include <fmt/format.h>
+#include <algorithm>
 #include <functional>
 #include <sol/sol.hpp>
 #include <vector>
@@ -900,7 +900,8 @@ void registerObjectBindings(sol::state &lua)
   };
 
   auto arrayRefType = registerObjectPoolRef<scene::Array>(vsr, "Array");
-  arrayRefType["elementType"] = +[](const scene::ArrayRef &r) -> anari::DataType {
+  arrayRefType["elementType"] =
+      +[](const scene::ArrayRef &r) -> anari::DataType {
     return r.valid() ? r.data()->elementType() : ANARI_UNKNOWN;
   };
   arrayRefType["size"] = +[](const scene::ArrayRef &r) -> size_t {

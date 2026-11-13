@@ -83,8 +83,14 @@ struct ObjectMetadataEntry
   uint64_t arrayElementCount{0};
   std::vector<std::byte> arrayData;
 
-  bool holdsArray() const { return arrayElementType != ANARI_UNKNOWN; }
-  bool isRemoval() const { return !holdsArray() && !value.valid(); }
+  bool holdsArray() const
+  {
+    return arrayElementType != ANARI_UNKNOWN;
+  }
+  bool isRemoval() const
+  {
+    return !holdsArray() && !value.valid();
+  }
 };
 
 struct SetObjectMetadata

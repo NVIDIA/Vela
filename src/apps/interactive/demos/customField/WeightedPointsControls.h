@@ -6,9 +6,9 @@
 #include <vsr/app/Context.h>
 #include <vsr/ui/imgui/windows/Window.h>
 #include <string>
+#include <vector>
 #include <vsr/scene/Object.hpp>
 #include <vsr/scene/objects/Array.hpp>
-#include <vector>
 
 namespace vsr::demo {
 

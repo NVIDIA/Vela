@@ -5,8 +5,8 @@
 
 // vsr_core
 #include "vsr/core/FlatMap.hpp"
-#include "vsr/core/VSRMath.hpp"
 #include "vsr/core/Token.hpp"
+#include "vsr/core/VSRMath.hpp"
 // vsr_io
 #include "vsr/io/usd/UsdGeometryResolveOptions.h"
 // vsr_scene
@@ -84,8 +84,7 @@ struct ResolvedGeometry
 };
 
 // Resolve one gprim at whatever Time Code the scene index is currently set to.
-ResolvedGeometry resolveGeometry(
-    const pxr::HdSceneIndexBaseRefPtr &sceneIndex,
+ResolvedGeometry resolveGeometry(const pxr::HdSceneIndexBaseRefPtr &sceneIndex,
     const pxr::SdfPath &primPath,
     const pxr::HdSceneIndexPrim &prim,
     const GeometryResolveOptions &options);

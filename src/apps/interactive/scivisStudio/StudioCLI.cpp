@@ -126,7 +126,8 @@ std::string formatDatasetTable(const std::vector<DatasetSummary> &datasets)
   }
   const auto writeRow = [&](const std::vector<std::string> &row) {
     for (size_t i = 0; i < row.size(); ++i)
-      out << (i ? "  " : "") << padded(row[i], i + 1 < row.size() ? widths[i] : 0);
+      out << (i ? "  " : "")
+          << padded(row[i], i + 1 < row.size() ? widths[i] : 0);
     out << '\n';
   };
   writeRow(header);
@@ -311,8 +312,7 @@ bool parseStudioCommandLine(const std::vector<std::string> &args,
     return false;
 
   // Remaining positionals are source paths / Source List entries.
-  commandLine.paths.assign(
-      positionals.begin() + next, positionals.end());
+  commandLine.paths.assign(positionals.begin() + next, positionals.end());
   next = positionals.size();
 
   switch (commandLine.command) {
@@ -373,14 +373,16 @@ bool parseStudioCommandLine(const std::vector<std::string> &args,
     return false;
   }
   if (commandLine.pathsFrom && !takesEntries) {
-    error = "--paths-from only applies to commands that take source-list "
-            "entries";
+    error =
+        "--paths-from only applies to commands that take source-list "
+        "entries";
     return false;
   }
   if (!commandLine.setShotFrameCount
       && commandLine.command != StudioCommand::DatasetCreateFileAnimation) {
-    error = "--no-shot-frame-count only applies to dataset create "
-            "file-animation";
+    error =
+        "--no-shot-frame-count only applies to dataset create "
+        "file-animation";
     return false;
   }
   if ((commandLine.remapFrom || commandLine.remapTo)
@@ -473,8 +475,9 @@ bool gatherSourceListEntries(const StudioCommandLine &commandLine,
   error.clear();
 
   if (!commandLine.paths.empty() && commandLine.pathsFrom) {
-    error = "pass source-list entries either as arguments or via "
-            "--paths-from, not both";
+    error =
+        "pass source-list entries either as arguments or via "
+        "--paths-from, not both";
     return false;
   }
 
@@ -559,10 +562,8 @@ ProjectShowResult makeProjectShowResult(const Project &project)
   result.directory = project.projectDirectory.string();
   result.shots.reserve(project.shots.size());
   for (const auto &shot : project.shots) {
-    result.shots.push_back({shot.id,
-        shot.name,
-        shot.frameCount,
-        shot.id == project.activeShotId});
+    result.shots.push_back(
+        {shot.id, shot.name, shot.frameCount, shot.id == project.activeShotId});
   }
   result.datasets.reserve(project.datasets.size());
   for (const auto &dataset : project.datasets) {
@@ -593,8 +594,9 @@ std::string formatProjectShow(const ProjectShowResult &result)
   out << "Project '" << result.name << "' at " << result.directory << '\n';
   out << "Shots (" << result.shots.size() << "):\n";
   for (const auto &shot : result.shots) {
-    out << "  " << shot.id << "  " << shot.name << "  frames: "
-        << shot.frameCount << (shot.active ? "  [active]" : "") << '\n';
+    out << "  " << shot.id << "  " << shot.name
+        << "  frames: " << shot.frameCount << (shot.active ? "  [active]" : "")
+        << '\n';
   }
   out << "Datasets (" << result.datasets.size() << "):\n";
   if (!result.datasets.empty()) {
@@ -663,11 +665,10 @@ std::string formatDatasetCreate(const DatasetCreateResult &result)
   if (result.declared)
     out << "declared ";
   out << (result.dataset.sourceKind
-                 == std::string(dataset::toString(DatasetSourceKind::Static))
-             ? "static"
-             : "file-animation")
-      << " dataset " << result.dataset.id << " '" << result.dataset.name
-      << "'";
+              == std::string(dataset::toString(DatasetSourceKind::Static))
+          ? "static"
+          : "file-animation")
+      << " dataset " << result.dataset.id << " '" << result.dataset.name << "'";
   if (result.frameCount)
     out << " (" << result.frameCount << " frames)";
   out << '\n';
@@ -716,8 +717,7 @@ std::string formatDatasetSources(const DatasetSourcesResult &result)
 
 namespace {
 
-int runProjectInit(
-    const StudioCommandLine &commandLine, std::ostream &output)
+int runProjectInit(const StudioCommandLine &commandLine, std::ostream &output)
 {
   vsr::app::Context appContext;
   ProjectContext context(&appContext);
@@ -788,8 +788,7 @@ int runDatasetShow(const StudioCommandLine &commandLine, std::ostream &output)
     }
   }
 
-  result.provenanceSourcePath =
-      details->sourceKind == DatasetSourceKind::Static
+  result.provenanceSourcePath = details->sourceKind == DatasetSourceKind::Static
       ? details->source.sourcePath
       : std::string();
   for (const auto &setting : details->source.importerSettings)
@@ -827,11 +826,11 @@ int runDatasetCreateStatic(
   auto &context = session.context;
 
   const auto &sourcePath = commandLine.paths.front();
-  auto *dataset = context.addStaticDataset(
-      defaultDatasetName(commandLine.name, sourcePath),
-      sourcePath,
-      importerType,
-      commandLine.usdVariantSelections);
+  auto *dataset =
+      context.addStaticDataset(defaultDatasetName(commandLine.name, sourcePath),
+          sourcePath,
+          importerType,
+          commandLine.usdVariantSelections);
   if (!dataset || dataset->status != DatasetStatus::Available) {
     return commandFailed("static dataset import failed for '" + sourcePath
         + "' (see log for details); project untouched");
@@ -871,8 +870,8 @@ int runDatasetCreateFileAnimation(const StudioCommandLine &commandLine,
 
   Dataset *dataset = nullptr;
   if (commandLine.declare) {
-    dataset =
-        context.addDeclaredFileAnimationDataset(name, entries, importerType, options);
+    dataset = context.addDeclaredFileAnimationDataset(
+        name, entries, importerType, options);
     if (!dataset)
       return commandFailed("failed to declare file-animation dataset");
   } else {
@@ -968,8 +967,7 @@ int runDatasetSources(const StudioCommandLine &commandLine,
   return 0;
 }
 
-int runDatasetRename(
-    const StudioCommandLine &commandLine, std::ostream &output)
+int runDatasetRename(const StudioCommandLine &commandLine, std::ostream &output)
 {
   BookkeepingSession session;
   std::string error;
@@ -994,8 +992,7 @@ int runDatasetRename(
   return 0;
 }
 
-int runDatasetRemove(
-    const StudioCommandLine &commandLine, std::ostream &output)
+int runDatasetRemove(const StudioCommandLine &commandLine, std::ostream &output)
 {
   BookkeepingSession session;
   std::string error;

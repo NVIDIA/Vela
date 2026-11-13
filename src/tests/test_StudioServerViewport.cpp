@@ -848,8 +848,8 @@ SCENARIO("StudioServer serves and accepts array contents", "[StudioServer]")
         REQUIRE(result->elementType == array->elementType());
         REQUIRE(result->elementCount == array->size());
         REQUIRE(result->data.size() == array->size() * array->elementSize());
-        REQUIRE(std::memcmp(
-                    result->data.data(), array->data(), result->data.size())
+        REQUIRE(
+            std::memcmp(result->data.data(), array->data(), result->data.size())
             == 0);
         REQUIRE(client.count(StudioMessageType::ProjectSnapshot) == 0);
       }

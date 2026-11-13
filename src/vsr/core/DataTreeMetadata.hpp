@@ -90,8 +90,8 @@ inline DataTreeMetadataReadResult readDataTreeMetadata(const DataNode &root)
   if (!metadataNode)
     return {};
 
-  auto requiredNode = [&](const char *name, anari::DataType type)
-      -> const DataNode * {
+  auto requiredNode = [&](const char *name,
+                          anari::DataType type) -> const DataNode * {
     auto *node = metadataNode->child(name);
     if (!node)
       return nullptr;
@@ -110,8 +110,8 @@ inline DataTreeMetadataReadResult readDataTreeMetadata(const DataNode &root)
     return result;
   };
 
-  auto describeMissingOrWrongType =
-      [&](const char *name, anari::DataType type) -> std::string {
+  auto describeMissingOrWrongType = [&](const char *name,
+                                        anari::DataType type) -> std::string {
     std::string message = std::string(metadataNodeName) + "/" + name
         + " must be " + anari::toString(type);
     if (auto *node = metadataNode->child(name)) {
@@ -124,7 +124,8 @@ inline DataTreeMetadataReadResult readDataTreeMetadata(const DataNode &root)
 
   auto *envelopeVersion = requiredNode("envelopeVersion", ANARI_INT32);
   if (!envelopeVersion)
-    return malformed(describeMissingOrWrongType("envelopeVersion", ANARI_INT32));
+    return malformed(
+        describeMissingOrWrongType("envelopeVersion", ANARI_INT32));
 
   auto *fileType = requiredNode("fileType", ANARI_STRING);
   if (!fileType)

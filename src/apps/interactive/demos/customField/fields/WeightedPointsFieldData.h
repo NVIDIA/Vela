@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "gpu/gpu_math.h"
 #include <cstdint>
+#include "gpu/gpu_math.h"
 
 namespace visrtx {
 constexpr uint32_t DEMO_WEIGHTED_POINTS_FIELD_TYPE = 201;
@@ -12,13 +12,13 @@ constexpr uint32_t DEMO_WEIGHTED_POINTS_FIELD_TYPE = 201;
 
 struct WeightedPointsFieldData
 {
-  const float *values;       // device ptr: 4 floats per node (x,y,z,value)
-  const int32_t *indices;    // device ptr: 2 ints per node (childBegin,childEnd)
+  const float *values; // device ptr: 4 floats per node (x,y,z,value)
+  const int32_t *indices; // device ptr: 2 ints per node (childBegin,childEnd)
   int32_t numNodes;
-  float sigma;               // Gaussian width
-  float inv2SigmaSq;         // 1 / (2 * sigma^2), precomputed
-  float cutoff;              // initial LOD distance
-  float maxValue;            // conservative global upper bound (fallback)
+  float sigma; // Gaussian width
+  float inv2SigmaSq; // 1 / (2 * sigma^2), precomputed
+  float cutoff; // initial LOD distance
+  float maxValue; // conservative global upper bound (fallback)
   visrtx::vec3 domainMin;
   visrtx::vec3 domainMax;
 };

@@ -651,8 +651,7 @@ void StudioServer::applyControlState()
 size_t StudioServer::coalesceEdits(std::vector<SceneEdit> &edits)
 {
   using Key = std::tuple<anari::DataType, size_t, std::string>;
-  auto keyOf = [](const SceneObjectRef &object,
-                   const std::string &name) {
+  auto keyOf = [](const SceneObjectRef &object, const std::string &name) {
     return Key{object.type, object.objectIndex, name};
   };
 
@@ -661,7 +660,8 @@ size_t StudioServer::coalesceEdits(std::vector<SceneEdit> &edits)
   std::set<Key> laterMetadata;
   std::vector<bool> keep(edits.size(), true);
   for (size_t i = edits.size(); i-- > 0;) {
-    if (const auto *set = std::get_if<protocol::SetObjectParameter>(&edits[i])) {
+    if (const auto *set =
+            std::get_if<protocol::SetObjectParameter>(&edits[i])) {
       keep[i] = laterParameters.insert(keyOf(set->object, set->name)).second;
     } else if (const auto *removal =
                    std::get_if<protocol::RemoveObjectParameter>(&edits[i])) {

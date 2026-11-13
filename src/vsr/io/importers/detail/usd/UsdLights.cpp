@@ -396,7 +396,7 @@ void convertCamera(ImportContext &ctx, const pxr::SdfPath &primPath)
   // prim itself is static.
   std::vector<double> sampleTimes;
   for (auto current = usdPrim; current && !current.IsPseudoRoot();
-       current = current.GetParent()) {
+      current = current.GetParent()) {
     pxr::UsdGeomXformable xformable(current);
     if (!xformable)
       continue;

@@ -7,6 +7,19 @@ on:
     branches: [ main ]
 
 jobs:
+  format:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v6
+    # Pin the formatter: different clang-format releases format differently.
+    # Files listed in .clang-format-ignore are skipped.
+    - name: Install clang-format
+      run: pip install clang-format==21.1.8
+    - name: Check formatting
+      run: >
+        git ls-files 'src/*.cpp' 'src/*.hpp' 'src/*.h' 'src/*.cu' 'src/*.cuh'
+        | xargs clang-format --dry-run --Werror
+
   build:
     runs-on: ${{ matrix.runs-on }}
     strategy:

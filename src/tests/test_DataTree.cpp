@@ -262,8 +262,7 @@ SCENARIO("vsr::core::DataTree interface", "[DataTree]")
   }
 }
 
-SCENARIO("An empty DataNode's lookups never reach its relatives",
-    "[DataTree]")
+SCENARIO("An empty DataNode's lookups never reach its relatives", "[DataTree]")
 {
   GIVEN("A list whose item \"0\" holds an empty list of its own")
   {

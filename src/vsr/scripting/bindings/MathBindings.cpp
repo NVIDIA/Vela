@@ -18,8 +18,8 @@ static void registerVecArithmetic(sol::usertype<T> &ut)
   ut[sol::meta_function::subtraction] = [](const T &a, const T &b) {
     return a - b;
   };
-  ut[sol::meta_function::multiplication] =
-      [](sol::object lhs, sol::object rhs) -> T {
+  ut[sol::meta_function::multiplication] = [](sol::object lhs,
+                                               sol::object rhs) -> T {
     if (lhs.is<T>() && rhs.is<T>())
       return lhs.as<T>() * rhs.as<T>();
     if (lhs.is<T>() && rhs.is<double>())
@@ -28,8 +28,7 @@ static void registerVecArithmetic(sol::usertype<T> &ut)
       return static_cast<float>(lhs.as<double>()) * rhs.as<T>();
     throw std::runtime_error("invalid operand types for *");
   };
-  ut[sol::meta_function::division] =
-      [](sol::object lhs, sol::object rhs) -> T {
+  ut[sol::meta_function::division] = [](sol::object lhs, sol::object rhs) -> T {
     if (lhs.is<T>() && rhs.is<T>())
       return lhs.as<T>() / rhs.as<T>();
     if (lhs.is<T>() && rhs.is<double>())
@@ -46,12 +45,10 @@ void registerMathBindings(sol::state &lua)
   auto float2Type = vsr.new_usertype<math::float2>("float2",
       sol::constructors<math::float2(), math::float2(float, float)>(),
       "x",
-      sol::property(
-          [](math::float2 &v) { return v.x; },
+      sol::property([](math::float2 &v) { return v.x; },
           [](math::float2 &v, float x) { v.x = x; }),
       "y",
-      sol::property(
-          [](math::float2 &v) { return v.y; },
+      sol::property([](math::float2 &v) { return v.y; },
           [](math::float2 &v, float y) { v.y = y; }),
       sol::meta_function::to_string,
       [](const math::float2 &v) {
@@ -62,16 +59,13 @@ void registerMathBindings(sol::state &lua)
   auto float3Type = vsr.new_usertype<math::float3>("float3",
       sol::constructors<math::float3(), math::float3(float, float, float)>(),
       "x",
-      sol::property(
-          [](math::float3 &v) { return v.x; },
+      sol::property([](math::float3 &v) { return v.x; },
           [](math::float3 &v, float x) { v.x = x; }),
       "y",
-      sol::property(
-          [](math::float3 &v) { return v.y; },
+      sol::property([](math::float3 &v) { return v.y; },
           [](math::float3 &v, float y) { v.y = y; }),
       "z",
-      sol::property(
-          [](math::float3 &v) { return v.z; },
+      sol::property([](math::float3 &v) { return v.z; },
           [](math::float3 &v, float z) { v.z = z; }),
       sol::meta_function::to_string,
       [](const math::float3 &v) {
@@ -83,20 +77,16 @@ void registerMathBindings(sol::state &lua)
       sol::constructors<math::float4(),
           math::float4(float, float, float, float)>(),
       "x",
-      sol::property(
-          [](math::float4 &v) { return v.x; },
+      sol::property([](math::float4 &v) { return v.x; },
           [](math::float4 &v, float x) { v.x = x; }),
       "y",
-      sol::property(
-          [](math::float4 &v) { return v.y; },
+      sol::property([](math::float4 &v) { return v.y; },
           [](math::float4 &v, float y) { v.y = y; }),
       "z",
-      sol::property(
-          [](math::float4 &v) { return v.z; },
+      sol::property([](math::float4 &v) { return v.z; },
           [](math::float4 &v, float z) { v.z = z; }),
       "w",
-      sol::property(
-          [](math::float4 &v) { return v.w; },
+      sol::property([](math::float4 &v) { return v.w; },
           [](math::float4 &v, float w) { v.w = w; }),
       sol::meta_function::to_string,
       [](const math::float4 &v) {
@@ -109,14 +99,17 @@ void registerMathBindings(sol::state &lua)
       sol::constructors<math::mat3(),
           math::mat3(math::float3, math::float3, math::float3)>(),
       sol::meta_function::index,
-      [](sol::this_state L, const math::mat3 &m, sol::object key) -> sol::object {
+      [](sol::this_state L,
+          const math::mat3 &m,
+          sol::object key) -> sol::object {
         if (key.is<int>()) {
           int i = key.as<int>();
           if (i < 0 || i > 2)
             throw std::out_of_range("mat3 index must be 0, 1, or 2");
           return sol::make_object(L, m[i]);
         }
-        if (key.is<std::string_view>() && key.as<std::string_view>() == "identity")
+        if (key.is<std::string_view>()
+            && key.as<std::string_view>() == "identity")
           return sol::make_object(L, math::IDENTITY_MAT3);
         return sol::lua_nil;
       },
@@ -134,10 +127,10 @@ void registerMathBindings(sol::state &lua)
             fmt::format("float3({}, {}, {})", m[2].x, m[2].y, m[2].z));
       });
 
-  vsr.new_usertype<math::mat4>("mat4",
+  vsr.new_usertype<math::mat4>(
+      "mat4",
       sol::constructors<math::mat4(),
-          math::mat4(
-              math::float4, math::float4, math::float4, math::float4)>(),
+          math::mat4(math::float4, math::float4, math::float4, math::float4)>(),
       sol::meta_function::multiplication,
       sol::overload([](const math::mat4 &a,
                         const math::mat4 &b) { return math::mul(a, b); },
@@ -145,14 +138,17 @@ void registerMathBindings(sol::state &lua)
             return math::mul(a, v);
           }),
       sol::meta_function::index,
-      [](sol::this_state L, const math::mat4 &m, sol::object key) -> sol::object {
+      [](sol::this_state L,
+          const math::mat4 &m,
+          sol::object key) -> sol::object {
         if (key.is<int>()) {
           int i = key.as<int>();
           if (i < 0 || i > 3)
             throw std::out_of_range("mat4 index must be 0, 1, 2, or 3");
           return sol::make_object(L, m[i]);
         }
-        if (key.is<std::string_view>() && key.as<std::string_view>() == "identity")
+        if (key.is<std::string_view>()
+            && key.as<std::string_view>() == "identity")
           return sol::make_object(L, math::IDENTITY_MAT4);
         return sol::lua_nil;
       },
@@ -175,22 +171,18 @@ void registerMathBindings(sol::state &lua)
                 "float4({}, {}, {}, {})", m[3].x, m[3].y, m[3].z, m[3].w));
       });
 
-  vsr["float2"] =
-      sol::overload([]() { return math::float2(); },
-          [](float x, float y) { return math::float2(x, y); });
+  vsr["float2"] = sol::overload([]() { return math::float2(); },
+      [](float x, float y) { return math::float2(x, y); });
 
-  vsr["float3"] =
-      sol::overload([]() { return math::float3(); },
-          [](float x, float y, float z) { return math::float3(x, y, z); });
+  vsr["float3"] = sol::overload([]() { return math::float3(); },
+      [](float x, float y, float z) { return math::float3(x, y, z); });
 
-  vsr["float4"] =
-      sol::overload([]() { return math::float4(); },
-          [](float x, float y, float z, float w) {
-            return math::float4(x, y, z, w);
-          });
+  vsr["float4"] = sol::overload([]() { return math::float4(); },
+      [](float x, float y, float z, float w) {
+        return math::float4(x, y, z, w);
+      });
 
-  auto mat3Call = sol::overload(
-      []() { return math::mat3(); },
+  auto mat3Call = sol::overload([]() { return math::mat3(); },
       [](const math::float3 &col0,
           const math::float3 &col1,
           const math::float3 &col2) { return math::mat3(col0, col1, col2); });
@@ -206,8 +198,7 @@ void registerMathBindings(sol::state &lua)
   mat3Ctor[sol::metatable_key] = mat3CtorMt;
   vsr["mat3"] = mat3Ctor;
 
-  auto mat4Call = sol::overload(
-      []() { return math::mat4(); },
+  auto mat4Call = sol::overload([]() { return math::mat4(); },
       [](const math::float4 &col0,
           const math::float4 &col1,
           const math::float4 &col2,
@@ -217,15 +208,15 @@ void registerMathBindings(sol::state &lua)
   sol::table mat4Ctor = lua.create_table();
   sol::table mat4CtorMt = lua.create_table();
   mat4Ctor["new"] = mat4Call;
-  mat4CtorMt[sol::meta_function::call] = sol::overload(
-      [](sol::table) { return math::mat4(); },
-      [](sol::table,
-          const math::float4 &col0,
-          const math::float4 &col1,
-          const math::float4 &col2,
-          const math::float4 &col3) {
-        return math::mat4(col0, col1, col2, col3);
-      });
+  mat4CtorMt[sol::meta_function::call] =
+      sol::overload([](sol::table) { return math::mat4(); },
+          [](sol::table,
+              const math::float4 &col0,
+              const math::float4 &col1,
+              const math::float4 &col2,
+              const math::float4 &col3) {
+            return math::mat4(col0, col1, col2, col3);
+          });
   mat4Ctor[sol::metatable_key] = mat4CtorMt;
   vsr["mat4"] = mat4Ctor;
 

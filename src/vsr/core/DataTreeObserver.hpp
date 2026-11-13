@@ -63,8 +63,8 @@ struct DataTreeObserver
   // Bracket a run of edits that should produce at most one downstream rebuild.
   // Nesting is counted, so an outer batch is not ended by an inner one. Every
   // Signal above still arrives; only the work they trigger is coalesced.
-  // Optional hooks (CODING_STANDARDS section 13): an Observer that has nothing to
-  // coalesce need not say so.
+  // Optional hooks (CODING_STANDARDS section 13): an Observer that has nothing
+  // to coalesce need not say so.
   virtual void signalUpdateBatchBegin() {}
   virtual void signalUpdateBatchEnd() {}
 

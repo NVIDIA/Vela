@@ -113,8 +113,7 @@ static bool validateWrite(const ProjectSavePlan &plan,
         error);
   }
   if (!write.writer || !write.validator)
-    return fail(
-        "missing writer or validator for " + write.description, error);
+    return fail("missing writer or validator for " + write.description, error);
   if (write.ownedTarget && !validRelativePath(*write.ownedTarget)) {
     return fail("invalid owned target for " + write.description + ": "
             + write.ownedTarget->generic_string(),
@@ -303,8 +302,8 @@ bool AssetTransaction::commit(const ProjectSavePlan &plan, std::string *error)
     }
     if (!std::filesystem::is_regular_file(entry.stage, ec) || ec) {
       cleanupStages();
-      return fail("writer did not stage a regular file for "
-              + entry.write->description,
+      return fail(
+          "writer did not stage a regular file for " + entry.write->description,
           error);
     }
     if (!entry.write->validator(entry.stage, &stageError)) {

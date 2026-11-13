@@ -300,7 +300,7 @@ std::vector<std::filesystem::path> RemoteBrowseDialog::chosenPaths(
   }
   case BrowseMode::OpenFiles:
     for (size_t i = 0; i < m_entries.size() && i < m_multiSelected.size();
-         ++i) {
+        ++i) {
       if (m_multiSelected[i])
         paths.push_back(m_directory / m_entries[i].name);
     }

@@ -151,10 +151,8 @@ void addTransformAnimation(
     frames.push_back(next);
   }
 
-  addTransformStepBinding(ctx.animation(),
-      node,
-      frames,
-      normalizeSampleTimes(ctx.stage, times));
+  addTransformStepBinding(
+      ctx.animation(), node, frames, normalizeSampleTimes(ctx.stage, times));
   ctx.reportAnimatedPrim(authoredTimes.size());
 }
 

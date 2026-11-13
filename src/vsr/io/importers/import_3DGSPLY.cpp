@@ -39,11 +39,14 @@ void import_3DGSPLY(Scene &scene,
     file.parse_header(*file_stream);
     std::shared_ptr<tinyply::PlyData> pos, scale, rot, opacity, sh_dc;
 
-    pos = file.request_properties_from_element("vertex", { "x", "y", "z" });
-    scale = file.request_properties_from_element("vertex", { "scale_0", "scale_1", "scale_2" });
-    rot = file.request_properties_from_element("vertex", { "rot_0", "rot_1", "rot_2", "rot_3" });
-    opacity = file.request_properties_from_element("vertex", { "opacity" });
-    sh_dc = file.request_properties_from_element("vertex", { "f_dc_0", "f_dc_1", "f_dc_2" });
+    pos = file.request_properties_from_element("vertex", {"x", "y", "z"});
+    scale = file.request_properties_from_element(
+        "vertex", {"scale_0", "scale_1", "scale_2"});
+    rot = file.request_properties_from_element(
+        "vertex", {"rot_0", "rot_1", "rot_2", "rot_3"});
+    opacity = file.request_properties_from_element("vertex", {"opacity"});
+    sh_dc = file.request_properties_from_element(
+        "vertex", {"f_dc_0", "f_dc_1", "f_dc_2"});
 
     // Higher-degree spherical harmonics (f_rest_0, f_rest_1, ...)
     std::vector<std::string> rest_names;
@@ -53,14 +56,18 @@ void import_3DGSPLY(Scene &scene,
       bool exists = false;
 
       // Query header for property existence
-      for (const auto& e : file.get_elements()) {
+      for (const auto &e : file.get_elements()) {
         if (e.name == "vertex") {
-          for (const auto& p : e.properties) {
-            if (p.name == prop_name) { exists = true; break; }
+          for (const auto &p : e.properties) {
+            if (p.name == prop_name) {
+              exists = true;
+              break;
+            }
           }
         }
       }
-      if (!exists) break;
+      if (!exists)
+        break;
       rest_names.push_back(prop_name);
       sh_cnt++;
     }
@@ -83,9 +90,11 @@ void import_3DGSPLY(Scene &scene,
     if (opacity)
       logInfo("    read %zu total opacities", opacity->count);
     if (sh_dc)
-      logInfo("    read %zu total spherical harmonic coefficients", sh_dc->count);
+      logInfo(
+          "    read %zu total spherical harmonic coefficients", sh_dc->count);
     if (sh_rest)
-      logInfo("    read %zu total higher order SH coefficients", sh_rest->count);
+      logInfo(
+          "    read %zu total higher order SH coefficients", sh_rest->count);
 
     if (!pos || !scale || !rot || !opacity || !sh_dc) {
       logWarning(
@@ -95,14 +104,19 @@ void import_3DGSPLY(Scene &scene,
 
     size_t numVertices = pos->count;
 
-    const float* posPtr = reinterpret_cast<const float*>(pos->buffer.get());
-    const float* scalePtr = reinterpret_cast<const float*>(scale->buffer.get());
-    const float* rotPtr = reinterpret_cast<const float*>(rot->buffer.get());
-    const float* opacityPtr = reinterpret_cast<const float*>(opacity->buffer.get());
-    const float* shDcPtr = reinterpret_cast<const float*>(sh_dc->buffer.get());
-    const float* shRestPtr = sh_rest ? reinterpret_cast<const float*>(sh_rest->buffer.get()) : nullptr;
+    const float *posPtr = reinterpret_cast<const float *>(pos->buffer.get());
+    const float *scalePtr =
+        reinterpret_cast<const float *>(scale->buffer.get());
+    const float *rotPtr = reinterpret_cast<const float *>(rot->buffer.get());
+    const float *opacityPtr =
+        reinterpret_cast<const float *>(opacity->buffer.get());
+    const float *shDcPtr = reinterpret_cast<const float *>(sh_dc->buffer.get());
+    const float *shRestPtr = sh_rest
+        ? reinterpret_cast<const float *>(sh_rest->buffer.get())
+        : nullptr;
 
-    struct {
+    struct
+    {
       std::vector<anari::math::float3> P;
       std::vector<anari::math::float3> S;
       std::vector<anari::math::float4> Q;
@@ -112,13 +126,21 @@ void import_3DGSPLY(Scene &scene,
     } gaussians;
 
     for (size_t i = 0; i < numVertices; ++i) {
-      anari::math::float3 P{ posPtr[i * 3], posPtr[i * 3 + 1], posPtr[i * 3 + 2] };
-      anari::math::float3 S{ expf(scalePtr[i * 3]), expf(scalePtr[i * 3 + 1]), expf(scalePtr[i * 3 + 2]) };
+      anari::math::float3 P{
+          posPtr[i * 3], posPtr[i * 3 + 1], posPtr[i * 3 + 2]};
+      anari::math::float3 S{expf(scalePtr[i * 3]),
+          expf(scalePtr[i * 3 + 1]),
+          expf(scalePtr[i * 3 + 2])};
       // wijk -> ijkw:
-      anari::math::float4 Q{ rotPtr[i * 4 + 1], rotPtr[i * 4 + 2], rotPtr[i * 4 + 3], rotPtr[i * 4 ] };
+      anari::math::float4 Q{rotPtr[i * 4 + 1],
+          rotPtr[i * 4 + 2],
+          rotPtr[i * 4 + 3],
+          rotPtr[i * 4]};
       float op = 1.f / (1.f + expf(-opacityPtr[i]));
       anari::math::float3 f_dc;
-      if (shDcPtr) f_dc = anari::math::float3{ shDcPtr[i * 3 + 0], shDcPtr[i * 3 + 1], shDcPtr[i * 3 + 2] };
+      if (shDcPtr)
+        f_dc = anari::math::float3{
+            shDcPtr[i * 3 + 0], shDcPtr[i * 3 + 1], shDcPtr[i * 3 + 2]};
 
       gaussians.P.push_back(P);
       gaussians.S.push_back(S);

@@ -52,7 +52,8 @@ struct UsdInstancerFileBinding : public UsdFileBinding
 
   // Reconstruct from a serialized node; returns null if the target layer node
   // is missing from the scene or is not a transform-array node.
-  static UsdInstancerFileBinding *addToAnimation(vsr::animation::Animation &anim,
+  static UsdInstancerFileBinding *addToAnimation(
+      vsr::animation::Animation &anim,
       scene::Scene &scene,
       vsr::core::DataNode &node);
 

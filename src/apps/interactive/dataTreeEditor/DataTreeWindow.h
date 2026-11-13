@@ -39,7 +39,11 @@ class DataTreeWindow : public vsr::ui::imgui::Window
   // For Delete:   remove the child named 'name' from target.
   struct PendingOp
   {
-    enum Type { AddChild, Delete } type;
+    enum Type
+    {
+      AddChild,
+      Delete
+    } type;
     vsr::core::DataNode *target{nullptr};
     std::string name;
   };

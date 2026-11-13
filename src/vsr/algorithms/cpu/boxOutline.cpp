@@ -75,8 +75,8 @@ ProjectedEdges projectBoxEdges(const vsr::math::box3 &box,
 
       auto toScreen = [&](const float4 &c) {
         const float2 ndc(c.x / c.w, c.y / c.w);
-        return float2((ndc.x * 0.5f + 0.5f) * width,
-            (ndc.y * 0.5f + 0.5f) * height);
+        return float2(
+            (ndc.x * 0.5f + 0.5f) * width, (ndc.y * 0.5f + 0.5f) * height);
       };
 
       auto &edge = result.e[result.count++];
@@ -131,8 +131,8 @@ void boxOutline(const vsr::math::box3 &box,
         const float3 world =
             (edge.world0 * iw0 + edge.world1 * iw1) / (iw0 + iw1);
 
-        const float z = orthographicDepth ? dot(world - eye, dir)
-                                          : length(world - eye);
+        const float z =
+            orthographicDepth ? dot(world - eye, dir) : length(world - eye);
         if (orthographicDepth && z < 0.f)
           continue; // behind the orthographic camera plane
         if (depth && z * (1.f - DEPTH_BIAS) > depth[i])

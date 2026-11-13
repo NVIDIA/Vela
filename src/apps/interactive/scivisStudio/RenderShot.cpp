@@ -269,7 +269,8 @@ RenderShotResult renderActiveShotToFrames(
       pipeline.render();
     const auto filename = (outputDirectory / ss.str()).string();
     if (!vsr::rendering::saveImage(pipeline, filename))
-      return failRender(out, "Failed to save rendered frame '" + filename + "'");
+      return failRender(
+          out, "Failed to save rendered frame '" + filename + "'");
     ++out.framesCompleted;
   }
 

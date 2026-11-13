@@ -629,12 +629,11 @@ def Xform "World"
   }
 }
 
-
 // A path naming a UDIM tile set names no file, so USD's resolver leaves it
 // unresolved; it has to be anchored to the layer that authored it, which for a
 // referenced asset is not the Stage's own directory (ADR 0050).
-SCENARIO("An OmniPBR tile set beside a referenced asset is found",
-    "[UsdImport]")
+SCENARIO(
+    "An OmniPBR tile set beside a referenced asset is found", "[UsdImport]")
 {
   GIVEN("An asset in a subdirectory whose OmniPBR diffuse names a tile set")
   {
@@ -696,7 +695,8 @@ def Xform "World"
             boundMaterial(stage.scene)
                 ->parameterValueAsObject<vsr::scene::Sampler>("baseColor");
         REQUIRE(sampler != nullptr);
-        auto *image = sampler->parameterValueAsObject<vsr::scene::Array>("image");
+        auto *image =
+            sampler->parameterValueAsObject<vsr::scene::Array>("image");
         REQUIRE(image != nullptr);
         REQUIRE(image->dim(0) == 2);
         REQUIRE(image->dim(1) == 1);

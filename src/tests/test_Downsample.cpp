@@ -47,8 +47,8 @@ struct DeviceImage
 
   explicit DeviceImage(const std::vector<float> &rgba)
   {
-    REQUIRE(cudaMalloc((void **)&data, rgba.size() * sizeof(float))
-        == cudaSuccess);
+    REQUIRE(
+        cudaMalloc((void **)&data, rgba.size() * sizeof(float)) == cudaSuccess);
     REQUIRE(cudaMemcpy(data,
                 rgba.data(),
                 rgba.size() * sizeof(float),
@@ -156,8 +156,7 @@ SCENARIO("vsr::algorithms::cuda::meanLogLuminance", "[Downsample]")
 
     THEN("the SPD reduction matches the host reference")
     {
-      REQUIRE(require(gpuMeanLogLum(lum, w, h))
-          == Approx(exact).margin(1e-3));
+      REQUIRE(require(gpuMeanLogLum(lum, w, h)) == Approx(exact).margin(1e-3));
     }
   }
 
@@ -240,7 +239,8 @@ SCENARIO("vsr::algorithms::cuda::meanLogLuminance", "[Downsample]")
     // than launching the downsampler at all.
     THEN("the mean is that texel's log-luminance")
     {
-      REQUIRE(require(gpuMeanLogLum({8.f}, 1u, 1u)) == Approx(3.f).margin(1e-4));
+      REQUIRE(
+          require(gpuMeanLogLum({8.f}, 1u, 1u)) == Approx(3.f).margin(1e-4));
     }
 
     THEN("a black texel is held up by the luminance floor")
@@ -271,11 +271,13 @@ SCENARIO("vsr::algorithms::cuda::meanLogLuminance", "[Downsample]")
     std::vector<float> row(200, 4.f);
     THEN("a 200x1 row reduces exactly")
     {
-      REQUIRE(require(gpuMeanLogLum(row, 200u, 1u)) == Approx(2.f).margin(1e-3));
+      REQUIRE(
+          require(gpuMeanLogLum(row, 200u, 1u)) == Approx(2.f).margin(1e-3));
     }
     THEN("a 1x200 column reduces exactly")
     {
-      REQUIRE(require(gpuMeanLogLum(row, 1u, 200u)) == Approx(2.f).margin(1e-3));
+      REQUIRE(
+          require(gpuMeanLogLum(row, 1u, 200u)) == Approx(2.f).margin(1e-3));
     }
   }
 

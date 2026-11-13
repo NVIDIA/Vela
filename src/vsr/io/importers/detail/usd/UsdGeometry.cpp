@@ -104,8 +104,7 @@ MaterialPlan planMaterials(ImportContext &ctx,
         ? meshUvName
         : subsetResolved.uvPrimvarName;
     retval.uvNamesByPart.set(part.name, subsetUvName);
-    retval.anyNonDefaultUv =
-        retval.anyNonDefaultUv || subsetUvName != "st";
+    retval.anyNonDefaultUv = retval.anyNonDefaultUv || subsetUvName != "st";
   }
 
   return retval;
@@ -219,7 +218,8 @@ ConvertedGeometry convertGeometry(ImportContext &ctx,
   // the conventional `st` means the first resolve assigned them wrongly. That
   // costs one extra resolve, at import only: a binding is handed the answer.
   if (materials.anyNonDefaultUv) {
-    resolved = resolveGeometry(sceneIndex, primPath, prim, retval.resolveOptions);
+    resolved =
+        resolveGeometry(sceneIndex, primPath, prim, retval.resolveOptions);
     if (!resolved.valid())
       return retval;
   }

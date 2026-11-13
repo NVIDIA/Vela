@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include "spatial_field/CustomField.h"
-#include "array/Array1D.h"
 #include "WeightedPointsFieldData.h"
+#include "array/Array1D.h"
+#include "spatial_field/CustomField.h"
 
 namespace visrtx_custom {
 

@@ -247,11 +247,11 @@ SCENARIO("Dataset creation request payloads", "[StudioProtocol]")
       REQUIRE(sets);
       REQUIRE(sets->sets.size() == 2);
       REQUIRE(sets->sets[0].name == "color");
-      REQUIRE(sets->sets[0].variants
-          == std::vector<std::string>{"blue", "red"});
+      REQUIRE(
+          sets->sets[0].variants == std::vector<std::string>{"blue", "red"});
       REQUIRE(sets->sets[1].name == "lod");
-      REQUIRE(sets->sets[1].variants
-          == std::vector<std::string>{"high", "low"});
+      REQUIRE(
+          sets->sets[1].variants == std::vector<std::string>{"high", "low"});
     }
 
     THEN("a missing sourcePath is rejected")

@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "vsr/scene/Scene.hpp"
 #include "vsr/io/procedural/computeVorticity.hpp"
+#include "vsr/scene/Scene.hpp"
 
 namespace vsr::io {
 

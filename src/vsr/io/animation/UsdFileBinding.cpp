@@ -87,8 +87,7 @@ bool UsdFileBinding::ensureSession()
   m_session = usd::acquireUsdSession(m_stageFile, m_variantSelections);
   if (!m_session) {
     m_sessionFailed = true;
-    logWarning(
-        "[%s] failed to open stage '%s'", logTag(), m_stageFile.c_str());
+    logWarning("[%s] failed to open stage '%s'", logTag(), m_stageFile.c_str());
     reportLoadFailure(0, "failed to open USD stage '" + m_stageFile + "'");
   }
   return bool(m_session);

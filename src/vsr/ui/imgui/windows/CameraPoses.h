@@ -9,8 +9,8 @@
 #include <future>
 #include <mutex>
 #include "vsr/app/Context.h"
-#include "vsr/core/VSRMath.hpp"
 #include "vsr/core/Timer.hpp"
+#include "vsr/core/VSRMath.hpp"
 #include "vsr/rendering/view/CameraPath.h"
 
 namespace vsr::ui::imgui {
@@ -19,8 +19,7 @@ struct Viewport;
 
 struct CameraPoses : public Window
 {
-  CameraPoses(Application *app,
-      const char *name = "Camera Poses");
+  CameraPoses(Application *app, const char *name = "Camera Poses");
   void buildUI() override;
 
  private:

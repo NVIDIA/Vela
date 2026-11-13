@@ -48,25 +48,25 @@ void RemoteStaticDatasetAction::scanVariantSets(
   // Latest wins, as a Remote Browse listing does: the older reply is told
   // apart by its id and dropped.
   m_pendingScan.clear();
-  const bool sent = m_pendingScan.sendForResult<UsdVariantSetsResult>(
-      m_context->ops(),
-      std::move(scan),
-      [this, done](const ProjectOpReply &reply,
-          const std::optional<UsdVariantSetsResult> &result) {
-        if (reply.requestId != m_pendingScan.handle.requestId)
-          return;
-        m_pendingScan.clear();
-        if (!reply.ok) {
-          done(false, {}, reply.error);
-          return;
-        }
-        vsr::io::UsdVariantSetCatalog sets;
-        if (result) {
-          for (const auto &set : result->sets)
-            sets[set.name].insert(set.variants.begin(), set.variants.end());
-        }
-        done(true, sets, {});
-      });
+  const bool sent =
+      m_pendingScan.sendForResult<UsdVariantSetsResult>(m_context->ops(),
+          std::move(scan),
+          [this, done](const ProjectOpReply &reply,
+              const std::optional<UsdVariantSetsResult> &result) {
+            if (reply.requestId != m_pendingScan.handle.requestId)
+              return;
+            m_pendingScan.clear();
+            if (!reply.ok) {
+              done(false, {}, reply.error);
+              return;
+            }
+            vsr::io::UsdVariantSetCatalog sets;
+            if (result) {
+              for (const auto &set : result->sets)
+                sets[set.name].insert(set.variants.begin(), set.variants.end());
+            }
+            done(true, sets, {});
+          });
   if (!sent)
     done(false, {}, "not connected to the server");
 }

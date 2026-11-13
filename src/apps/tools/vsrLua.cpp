@@ -37,8 +37,9 @@ static void printUsage(const char *progName)
   printf("  index:populate()\n");
   printf("  local camera = vsr.CameraSetup.new()\n");
   printf("  camera.position = vsr.vec3(0, 0, 5)\n");
-  printf("  local pipeline = vsr.render.createPipeline(1920, 1080, device, "
-         "index, camera)\n");
+  printf(
+      "  local pipeline = vsr.render.createPipeline(1920, 1080, device, "
+      "index, camera)\n");
   printf(
       "  vsr.render.renderToFile(pipeline, 128, \"output.ppm\", 1920, 1080)\n");
 }
@@ -133,7 +134,8 @@ int main(int argc, const char *argv[])
   vsr::scripting::LuaContext ctx;
 
   // Set up print callback to output to stdout
-  ctx.setPrintCallback([](const std::string &msg) { printf("%s", msg.c_str()); });
+  ctx.setPrintCallback(
+      [](const std::string &msg) { printf("%s", msg.c_str()); });
 
   // Set up module search paths
   ctx.addScriptSearchPaths(vsr::scripting::LuaContext::defaultSearchPaths());
@@ -180,7 +182,8 @@ int main(int argc, const char *argv[])
   // Execute the script
   auto result = ctx.executeFile(scriptPath);
   if (!result.success) {
-    fprintf(stderr, "Error executing %s:\n%s\n", scriptPath, result.error.c_str());
+    fprintf(
+        stderr, "Error executing %s:\n%s\n", scriptPath, result.error.c_str());
     return 1;
   }
 

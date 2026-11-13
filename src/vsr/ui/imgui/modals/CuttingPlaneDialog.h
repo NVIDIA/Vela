@@ -15,7 +15,7 @@ struct CuttingPlaneDialog : public Modal
   void buildUI() override;
 
  private:
-  bool  m_enabled{false};
+  bool m_enabled{false};
   float m_normal[3]{0.f, 0.f, 1.f};
   float m_d{0.f};
 };

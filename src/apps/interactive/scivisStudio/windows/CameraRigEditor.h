@@ -21,7 +21,8 @@ struct CameraRigEditor : public vsr::ui::imgui::Window
  private:
   bool inputText(const char *label, std::string &value, size_t capacity = 512);
   // Buffered, reject-on-commit rig-name field: edits a scratch buffer and only
-  // applies a valid, unique name on commit, surfacing an inline error otherwise.
+  // applies a valid, unique name on commit, surfacing an inline error
+  // otherwise.
   void buildUI_nameField(CameraRig &rig);
   void syncSelectionToActiveShot();
   void pollPendingFileIO();
