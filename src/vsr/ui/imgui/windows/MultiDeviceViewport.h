@@ -6,8 +6,8 @@
 // vsr_ui_imgui
 #include <vsr/ui/imgui/windows/Window.h>
 // vsr_rendering
-#include <vsr/rendering/pipeline/ImagePipeline.h>
 #include <vsr/rendering/index/RenderIndexAllLayers.hpp>
+#include <vsr/rendering/pipeline/ImagePipeline.h>
 #include <vsr/rendering/view/Manipulator.hpp>
 // std
 #include <memory>

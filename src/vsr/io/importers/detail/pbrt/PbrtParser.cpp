@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "PbrtParser.hpp"
+#include "vsr/core/Logging.hpp"
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
-#include "vsr/core/Logging.hpp"
 
 namespace pbrt {
 

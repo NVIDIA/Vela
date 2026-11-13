@@ -3,11 +3,11 @@
 
 #pragma once
 
+#include "vsr/core/FlatMap.hpp"
 #include <cstdint>
 #include <map>
 #include <string>
 #include <vector>
-#include "vsr/core/FlatMap.hpp"
 
 namespace vsr::io::ensight {
 

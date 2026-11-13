@@ -5,13 +5,13 @@
 
 #include "Window.h"
 // vsr
-#include <atomic>
-#include <future>
-#include <mutex>
 #include "vsr/app/Context.h"
 #include "vsr/core/Timer.hpp"
 #include "vsr/core/VSRMath.hpp"
 #include "vsr/rendering/view/CameraPath.h"
+#include <atomic>
+#include <future>
+#include <mutex>
 
 namespace vsr::ui::imgui {
 

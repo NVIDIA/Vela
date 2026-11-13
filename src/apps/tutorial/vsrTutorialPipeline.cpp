@@ -6,9 +6,9 @@
 // vsr_io
 #include <vsr/io/procedural.hpp>
 // vsr_rendering
+#include <vsr/rendering/index/RenderIndexFlatRegistry.hpp>
 #include <vsr/rendering/pipeline/ImagePipeline.h>
 #include <vsr/rendering/pipeline/saveImage.h>
-#include <vsr/rendering/index/RenderIndexFlatRegistry.hpp>
 // std
 #include <cstdio>
 

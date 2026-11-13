@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-#include <fmt/format.h>
-#include <sol/sol.hpp>
 #include "vsr/rendering/index/RenderIndexAllLayers.hpp"
 #include "vsr/rendering/pick/PickRequest.h"
 #include "vsr/rendering/pipeline/ImagePipeline.h"
 #include "vsr/scene/Scene.hpp"
 #include "vsr/scripting/LuaBindings.hpp"
+#include <fmt/format.h>
+#include <sol/sol.hpp>
 
 #include <cctype>
 #include <cerrno>

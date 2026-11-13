@@ -12,8 +12,8 @@
 #include <pxr/usd/sdf/primSpec.h>
 #include <pxr/usd/sdf/types.h>
 
-#include <fstream>
 #include "vsr/io/importers/detail/importer_common.hpp"
+#include <fstream>
 
 PXR_NAMESPACE_OPEN_SCOPE
 

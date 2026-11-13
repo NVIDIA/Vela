@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "WeightedPointsField.h"
+#include "WeightedPointsFieldData.h"
+#include "gpu/gpu_decl.h"
 #include <cuda_runtime.h>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-#include "WeightedPointsFieldData.h"
-#include "gpu/gpu_decl.h"
 
 namespace visrtx_custom {
 

@@ -3,9 +3,9 @@
 
 #pragma once
 
+#include "vsr/algorithms/cpu/toneMap.hpp" // ToneMapOperator enum
 #include <cuda_runtime_api.h>
 #include <cstdint>
-#include "vsr/algorithms/cpu/toneMap.hpp" // ToneMapOperator enum
 
 namespace vsr::algorithms::cuda {
 

@@ -4,9 +4,9 @@
 #include "RenderDeviceConfig.h"
 #include "RenderRuntime.h"
 // vsr_app
+#include "vsr/app/renderAnimationSequence.h"
 #include <vsr/app/ApplicationDump.h>
 #include <vsr/app/Context.h>
-#include "vsr/app/renderAnimationSequence.h"
 // vsr_core
 #include "vsr/core/DataTree.hpp"
 #include "vsr/core/Logging.hpp"

@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-#include <fmt/format.h>
 #include "vsr/scene/Layer.hpp"
 #include "vsr/scene/objects/Array.hpp"
 #include "vsr/scripting/LuaBindings.hpp"
+#include <fmt/format.h>
 
 #include <sol/sol.hpp>
 
