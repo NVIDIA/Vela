@@ -1,15 +1,17 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// catch
-#include "catch.hpp"
-// vsr
+// vsr_core
 #include "vsr/core/DataTree.hpp"
 #include "vsr/core/DataTreeMetadata.hpp"
+// vsr_io
 #include "vsr/io/archives/CameraArchive.hpp"
 #include "vsr/io/archives/RendererArchive.hpp"
 #include "vsr/io/serialization/serialization_internal.hpp"
+// vsr_scene
 #include "vsr/scene/Scene.hpp"
+// catch
+#include "catch.hpp"
 // std
 #include <cstdio>
 #include <filesystem>

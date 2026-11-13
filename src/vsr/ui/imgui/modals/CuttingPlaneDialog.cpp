@@ -4,6 +4,7 @@
 #include "CuttingPlaneDialog.h"
 // vsr_core
 #include "vsr/core/ObjectPool.hpp"
+// vsr_scene
 #include "vsr/scene/objects/Renderer.hpp"
 // vsr_ui_imgui
 #include "vsr/ui/imgui/Application.h"

@@ -6,7 +6,7 @@
 
 #ifdef VSR_ALGORITHMS_HAS_CUDA
 
-// vsr
+// vsr_algorithms
 #include "vsr/algorithms/cpu/downsample.hpp"
 #include "vsr/algorithms/cuda/downsample.hpp"
 // cuda

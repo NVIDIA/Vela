@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "AppSettingsDialog.h"
-// vsr_ui
+// vsr_ui_imgui
 #include "vsr/ui/imgui/Application.h"
 #include "vsr/ui/imgui/vsr_ui_imgui.h"
 

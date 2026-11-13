@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// catch
-#include "catch.hpp"
-// vsr
+// vsr_scene
 #include "vsr/scene/ObjectUsePtr.hpp"
 #include "vsr/scene/Scene.hpp"
+// catch
+#include "catch.hpp"
 
 using vsr::scene::Material;
 using vsr::scene::MaterialRef;

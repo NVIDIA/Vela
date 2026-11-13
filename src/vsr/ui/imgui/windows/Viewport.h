@@ -5,7 +5,7 @@
 
 #include "BaseViewport.h"
 
-// vsr_core
+// vsr_scene
 #include "vsr/scene/objects/Camera.hpp"
 // vsr_rendering
 #include "vsr/rendering/index/RenderIndex.hpp"

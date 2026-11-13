@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// catch
+// vsr_tests
 #include "NetworkTestHelpers.h"
+// catch
 #include "catch.hpp"
 // vsr_network
 #include "vsr/network/NetworkChannel.hpp"

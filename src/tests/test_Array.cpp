@@ -6,12 +6,12 @@
 #define VSR_USE_CUDA 0
 #endif
 
-// catch
-#include "catch.hpp"
-// vsr_core
+// vsr_scene
 #include "vsr/scene/Scene.hpp"
 #include "vsr/scene/algorithms/computeScalarRange.hpp"
 #include "vsr/scene/objects/Array.hpp"
+// catch
+#include "catch.hpp"
 // std
 #include <cstdint>
 #include <cstring>

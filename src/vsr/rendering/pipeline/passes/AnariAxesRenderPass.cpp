@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "AnariAxesRenderPass.h"
+// vsr_core
+#include "vsr/core/Logging.hpp"
 // std
 #include <cstring>
-// vsr
-#include "vsr/core/Logging.hpp"
 
 namespace vsr::rendering {
 

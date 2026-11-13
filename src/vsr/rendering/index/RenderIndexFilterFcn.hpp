@@ -3,7 +3,7 @@
 
 #pragma once
 
-// vsr_core
+// vsr_scene
 #include "vsr/scene/Object.hpp"
 // std
 #include <functional>

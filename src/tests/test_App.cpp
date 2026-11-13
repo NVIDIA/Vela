@@ -2,14 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "TestDirectories.h"
-// catch
-#include "catch.hpp"
-// vsr
+// vsr_app
 #include "vsr/app/ANARIDeviceManager.h"
 #include "vsr/app/ApplicationDump.h"
 #include "vsr/app/Context.h"
 #include "vsr/app/LegacyApplicationContext.h"
+// vsr_io
 #include "vsr/io/archives/SceneArchive.hpp"
+// catch
+#include "catch.hpp"
 // std
 #include <filesystem>
 #include <fstream>

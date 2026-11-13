@@ -1,11 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// catch
-#include "StudioRemoteTestHelpers.h"
-#include "StudioServerTestHelpers.h"
-#include "TestDirectories.h"
-#include "catch.hpp"
 // vsr_scivis_studio_server_core
 #include "ArrayHistogram.h"
 #include "ServerOptions.h"
@@ -22,13 +17,20 @@
 #include "StudioProtocol.h"
 #include "TaskMessages.h"
 #include "ViewportMessages.h"
-// vsr_scene
+// vsr_network
 #include "vsr/network/messages/TransferArrayData.hpp"
+// vsr_scene
 #include "vsr/scene/Scene.hpp"
 #include "vsr/scene/objects/Array.hpp"
 // vsr_core
 #include "vsr/core/DataTree.hpp"
 #include "vsr/core/VSRMath.hpp"
+// vsr_tests
+#include "StudioRemoteTestHelpers.h"
+#include "StudioServerTestHelpers.h"
+#include "TestDirectories.h"
+// catch
+#include "catch.hpp"
 // std
 #include <chrono>
 #include <cmath>

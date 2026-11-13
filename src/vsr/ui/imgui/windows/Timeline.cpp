@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "Timeline.h"
-// vsr_core
+// vsr_animation
 #include "vsr/animation/Animation.hpp"
 #include "vsr/animation/AnimationManager.hpp"
+// vsr_core
 #include "vsr/core/ObjectPool.hpp"
+// vsr_scene
 #include "vsr/scene/objects/Camera.hpp"
 // vsr_ui_imgui
 #include "vsr/ui/imgui/Application.h"

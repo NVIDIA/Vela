@@ -1,16 +1,16 @@
 // SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// vsr_core
+// vsr_scene
 #include <vsr/scene/Scene.hpp>
 // vsr_io
 #include <vsr/io/procedural.hpp>
 // vsr_rendering
 #include <vsr/rendering/index/RenderIndexFlatRegistry.hpp>
-// std
-#include <cstdio>
 // stb_image
 #include "stb_image_write.h"
+// std
+#include <cstdio>
 
 using float3 = vsr::math::float3;
 using float4 = vsr::math::float4;

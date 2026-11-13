@@ -3,12 +3,13 @@
 
 #pragma once
 
-// catch
-#include "catch.hpp"
-// vsr
+// vsr_io
 #include "vsr/io/images/ImageCache.hpp"
+// vsr_scene
 #include "vsr/scene/objects/Material.hpp"
 #include "vsr/scene/objects/Sampler.hpp"
+// catch
+#include "catch.hpp"
 
 // The output transform of the sampler a material binds to `parameter`.
 vsr::io::OutputTransform boundOutputTransform(

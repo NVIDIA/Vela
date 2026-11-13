@@ -4,7 +4,7 @@
 #include "TestDirectories.h"
 // catch
 #include "catch.hpp"
-// vsr
+// vsr_core
 #define VSR_DATA_TREE_TEST_MODE
 #include "vsr/core/DataTree.hpp"
 #include "vsr/core/DataTreeMetadata.hpp"

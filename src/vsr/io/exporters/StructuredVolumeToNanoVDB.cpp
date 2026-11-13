@@ -1,10 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// vsr
+// vsr_core
 #include "vsr/core/Logging.hpp"
+// vsr_io
 #include "vsr/io/exporters.hpp"
 #include "vsr/io/exporters/NanoVdbSidecar.hpp"
+// vsr_scene
 #include "vsr/scene/Scene.hpp"
 #include "vsr/scene/objects/Array.hpp"
 #include "vsr/scene/objects/SpatialField.hpp"

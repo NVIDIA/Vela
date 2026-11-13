@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "LayerTree.h"
-// vsr_core
+// vsr_scene
 #include "vsr/scene/objects/Volume.hpp"
 // vsr_io
 #include "vsr/io/procedural.hpp"

@@ -4,7 +4,7 @@
 #pragma once
 
 #include "vsr/network/Message.hpp"
-// vsr_core
+// vsr_scene
 #include "vsr/scene/Scene.hpp"
 
 namespace vsr::network::messages {

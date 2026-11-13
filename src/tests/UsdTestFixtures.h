@@ -7,16 +7,18 @@
 
 #pragma once
 
+// vsr_animation
+#include "vsr/animation/AnimationManager.hpp"
+// vsr_io
+#include "vsr/io/importers.hpp"
+// vsr_scene
+#include "vsr/scene/Scene.hpp"
+#include "vsr/scene/objects/Material.hpp"
 // tests
 #include "SamplerAssertions.h"
 #include "TestDirectories.h"
 // catch
 #include "catch.hpp"
-// vsr
-#include "vsr/animation/AnimationManager.hpp"
-#include "vsr/io/importers.hpp"
-#include "vsr/scene/Scene.hpp"
-#include "vsr/scene/objects/Material.hpp"
 // std
 #include <filesystem>
 #include <fstream>

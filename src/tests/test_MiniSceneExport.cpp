@@ -5,14 +5,15 @@
 
 #if VSR_USE_MINISCENE
 
-// catch
-#include "catch.hpp"
 // vsr_tests
 #include "LogCapture.h"
-// vsr
+// vsr_io
 #include "vsr/io/exporters.hpp"
 #include "vsr/io/images/ImageCache.hpp"
+// vsr_scene
 #include "vsr/scene/Scene.hpp"
+// catch
+#include "catch.hpp"
 // miniScene
 #include "miniScene/Scene.h"
 // std

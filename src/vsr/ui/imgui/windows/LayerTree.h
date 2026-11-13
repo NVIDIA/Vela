@@ -4,7 +4,7 @@
 #pragma once
 
 #include "Window.h"
-// vsr
+// vsr_core
 #include "vsr/core/FlatMap.hpp"
 // std
 #include <string>

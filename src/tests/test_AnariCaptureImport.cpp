@@ -4,12 +4,14 @@
 // ANARI Captures written by hand, in the version-1 format the ANARI-SDK
 // `capture` device documents (src/devices/capture/README.md), then imported.
 
+// vsr_animation
+#include "vsr/animation/AnimationManager.hpp"
+// vsr_io
+#include "vsr/io/importers.hpp"
+// vsr_scene
+#include "vsr/scene/Scene.hpp"
 // catch
 #include "catch.hpp"
-// vsr
-#include "vsr/animation/AnimationManager.hpp"
-#include "vsr/io/importers.hpp"
-#include "vsr/scene/Scene.hpp"
 // tests
 #include "TestDirectories.h"
 // std

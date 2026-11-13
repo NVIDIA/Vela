@@ -5,6 +5,7 @@
 // vsr_core
 #include "vsr/core/DataTree.hpp"
 #include "vsr/core/Logging.hpp"
+// vsr_scene
 #include "vsr/scene/objects/Array.hpp"
 // std
 #include <vector>

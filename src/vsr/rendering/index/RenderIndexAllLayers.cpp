@@ -6,6 +6,7 @@
 #include "RenderToAnariObjectsVisitor.hpp"
 // vsr_core
 #include "vsr/core/Logging.hpp"
+// vsr_rendering
 #include "vsr/rendering/index/TransformsToAnariVisitor.hpp"
 // std
 #include <algorithm>

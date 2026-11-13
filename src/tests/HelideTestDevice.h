@@ -3,7 +3,7 @@
 
 #pragma once
 
-// vsr
+// vsr_core
 #include "vsr/core/TypeMacros.hpp"
 // anari
 #include <anari/anari_cpp.hpp>

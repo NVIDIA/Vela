@@ -3,11 +3,12 @@
 
 // Procedural scene generators.
 
+// vsr_io
+#include "vsr/io/procedural.hpp"
+// vsr_scene
+#include "vsr/scene/Scene.hpp"
 // catch
 #include "catch.hpp"
-// vsr
-#include "vsr/io/procedural.hpp"
-#include "vsr/scene/Scene.hpp"
 // std
 #include <array>
 #include <cmath>

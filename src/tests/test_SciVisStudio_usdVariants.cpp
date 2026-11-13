@@ -6,14 +6,14 @@
 
 #if VSR_USE_USD
 
-// catch
-#include "catch.hpp"
 // vsr_tests
 #include "UsdTestFixtures.h"
+// vsr_app
+#include "vsr/app/Context.h"
+// catch
+#include "catch.hpp"
 // scivisStudio
 #include "ProjectContext.h"
-// vsr
-#include "vsr/app/Context.h"
 
 using namespace vsr::scivis_studio;
 

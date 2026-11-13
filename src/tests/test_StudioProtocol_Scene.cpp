@@ -1,19 +1,20 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// catch
-#include "catch.hpp"
 // vsr_scivis_studio_protocol
 #include "SceneMessages.h"
 #include "StudioCodec.h"
 #include "StudioProtocol.h"
-// vsr
+// vsr_network
 #include "vsr/network/Message.hpp"
 #include "vsr/network/messages/NewObject.hpp"
 #include "vsr/network/messages/RemoveObject.hpp"
 #include "vsr/network/messages/TransferLayer.hpp"
 #include "vsr/network/messages/TransferScene.hpp"
+// vsr_scene
 #include "vsr/scene/Scene.hpp"
+// catch
+#include "catch.hpp"
 // std
 #include <string>
 #include <vector>

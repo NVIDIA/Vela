@@ -3,7 +3,7 @@
 
 #pragma once
 
-// vsr_math
+// vsr_core
 #include "vsr/core/VSRMath.hpp"
 // std
 #include <vector>

@@ -3,12 +3,13 @@
 
 #pragma once
 
-// vsr_core
+// vsr_scene
 #include "vsr/scene/Layer.hpp"
 // vsr_rendering
 #include "vsr/rendering/index/RenderIndexFilterFcn.hpp"
-// std
+// anari
 #include <anari/anari_cpp.hpp>
+// std
 #include <algorithm>
 #include <cstdint>
 #include <iterator>

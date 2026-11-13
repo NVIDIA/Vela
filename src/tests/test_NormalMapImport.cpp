@@ -4,16 +4,18 @@
 // Normal maps arrive decoded the way ANARI's physicallyBased material expects
 // them: the sampler returns the tangent-space normal, not the encoded texel.
 
-// catch
-#include "catch.hpp"
 // vsr_tests
 #include "SamplerAssertions.h"
 #include "TestDirectories.h"
-// vsr
+// vsr_animation
 #include "vsr/animation/AnimationManager.hpp"
+// vsr_io
 #include "vsr/io/images/ImageCache.hpp"
 #include "vsr/io/importers.hpp"
+// vsr_scene
 #include "vsr/scene/Scene.hpp"
+// catch
+#include "catch.hpp"
 // std
 #include <filesystem>
 #include <fstream>

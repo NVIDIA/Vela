@@ -1,16 +1,19 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+// vsr_animation
+#include "vsr/animation/AnimationManager.hpp"
+// vsr_core
+#include "vsr/core/VSRMath.hpp"
+// vsr_io
+#include "vsr/io/importers.hpp"
+#include "vsr/io/importers/detail/importer_common.hpp"
+// vsr_scene
+#include "vsr/scene/Scene.hpp"
 // catch
 #include "catch.hpp"
 // helium
 #include <helium/helium_math.h>
-// vsr
-#include "vsr/animation/AnimationManager.hpp"
-#include "vsr/core/VSRMath.hpp"
-#include "vsr/io/importers.hpp"
-#include "vsr/io/importers/detail/importer_common.hpp"
-#include "vsr/scene/Scene.hpp"
 // std
 #include <algorithm>
 #include <cstdint>

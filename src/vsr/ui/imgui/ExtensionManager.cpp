@@ -9,6 +9,7 @@
 // vsr_scripting
 #ifdef VSR_USE_LUA
 #include "vsr/scripting/LuaContext.hpp"
+// sol2
 #include <sol/sol.hpp>
 #endif
 // std

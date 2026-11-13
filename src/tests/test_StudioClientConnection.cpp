@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// catch
+// vsr_tests
 #include "StudioFakeServer.h"
 #include "StudioRemoteTestHelpers.h"
+// catch
 #include "catch.hpp"
 // vsr_scivis_studio_client_core
 #include "ServerConnection.h"

@@ -5,15 +5,16 @@
 
 #if VSR_USE_USD
 
-// catch
-#include "catch.hpp"
 // vsr_tests
 #include "LogCapture.h"
 #include "UsdTestFixtures.h"
-// vsr
+// vsr_core
 #include "vsr/core/Logging.hpp"
+// vsr_scene
 #include "vsr/scene/objects/Array.hpp"
 #include "vsr/scene/objects/Volume.hpp"
+// catch
+#include "catch.hpp"
 // std
 #include <fstream>
 #include <string>
