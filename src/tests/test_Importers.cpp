@@ -609,3 +609,31 @@ SCENARIO("Transfer-function volumes always carry a color Array", "[Importers]")
     }
   }
 }
+
+SCENARIO(
+    "A PDB file with hybrid-36 atom serials imports every atom", "[Importers]")
+{
+  // Writers that run out of columns spell the atom serial and the residue
+  // number in hybrid-36 ("A0000" follows 99999, "A000" follows 9999).
+  ScopedFixtureDirectory scratch("vsr_importers_pdb_");
+  const auto path = scratch.path / "large.pdb";
+  std::ofstream(path)
+      << "HETATM99999  O   HOH W9999       1.000   2.000   3.000  1.00 20.00"
+         "           O  \n"
+         "HETATMA0000  O   HOH WA000       4.000   5.000   6.000  1.00 20.00"
+         "           O  \n";
+
+  vsr::scene::Scene scene;
+  vsr::animation::AnimationManager animMgr(&scene);
+  vsr::io::import_PDB(scene, animMgr, path.string().c_str());
+
+  REQUIRE(scene.numberOfObjects(ANARI_SURFACE) == 1);
+  REQUIRE(scene.numberOfObjects(ANARI_GEOMETRY) == 1);
+  auto spheres = scene.getObject<vsr::scene::Geometry>(0);
+  const auto *positions =
+      spheres->parameterValueAsObject<vsr::scene::Array>("vertex.position");
+  REQUIRE(positions != nullptr);
+  REQUIRE(positions->size() == 2);
+  REQUIRE(positions->dataAs<vsr::math::float3>()[1]
+      == vsr::math::float3(4.f, 5.f, 6.f));
+}
