@@ -5,11 +5,13 @@
 #include "vsr/io/importers.hpp"
 
 #include <array>
+#include <charconv>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -268,6 +270,28 @@ static std::string trim(const std::string &str)
 }
 
 /**
+ * Parses an integer index field (atom serial, residue sequence number).
+ *
+ * Writers that run out of columns (more than 99,999 atoms or 9,999 residues)
+ * spell these fields in hybrid-36 ("A0000" follows "99999"). Neither field is
+ * used to build the geometry, so a non-decimal spelling is not an error.
+ *
+ * @param field The field's columns.
+ * @return The decimal value, or no value when the field is not a decimal
+ * integer.
+ */
+static std::optional<int> parseIndexField(const std::string &field)
+{
+  const std::string digits = trim(field);
+  const char *end = digits.data() + digits.size();
+  int value = 0;
+  const auto [ptr, ec] = std::from_chars(digits.data(), end, value);
+  if (digits.empty() || ec != std::errc() || ptr != end)
+    return {};
+  return value;
+}
+
+/**
  * Parses an atom line from a PDB file.
  *
  * @param line The line to parse.
@@ -283,12 +307,12 @@ void parseAtomLine(const std::string &line, Atoms &atoms)
   }
 
   Atom atom;
-  atom.serial = std::stoi(line.substr(6, 5));
+  atom.serial = parseIndexField(line.substr(6, 5)).value_or(-1);
   atom.name = trim(line.substr(12, 4));
   atom.altLoc = line[16];
   atom.residueName = trim(line.substr(17, 3));
   atom.chainID = line[21];
-  atom.residueSeq = std::stoi(line.substr(22, 4));
+  atom.residueSeq = parseIndexField(line.substr(22, 4)).value_or(-1);
   atom.iCode = line[26];
   atom.position.x = std::stod(line.substr(30, 8));
   atom.position.y = std::stod(line.substr(38, 8));
