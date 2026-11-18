@@ -199,7 +199,7 @@ void Frame::saveLiveCapture()
   capture.lastCapturedFinalization = lastFinalization;
   capture.framesSinceLastCapture = 0;
 
-  const char *filename = "live_capture.vsr";
+  const char *filename = capture.filename.c_str();
   reportMessage(ANARI_SEVERITY_INFO, "saving Scene Archive to '%s'", filename);
   if (!vsr::io::save_SceneArchive(*state->scene, filename)) {
     reportMessage(
