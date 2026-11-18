@@ -13,7 +13,7 @@ offline inspection in `vsrViewer`.
 - ANARI arrays are backed by VSR arrays, including shared-memory array data.
 - Every `captureInterval` rendered frames (default 60), if commits were
   finalized since the last write, the device saves a Scene Archive to
-  `live_capture.vsr`. A pending capture is also written when the frame is
+  `live_capture.vsr` (or the file named by `captureFilename`). A pending capture is also written when the frame is
   released.
 
 ### Why Use This Device
@@ -32,7 +32,8 @@ offline inspection in `vsrViewer`.
 - The device creates its own internal `vsr::scene::Scene`.
 - It also creates a surrogate backend ANARI device used for frame rendering.
 - Backend library selection comes from `ANARI_VSR_LIBRARY` (default: `helide`).
-- Captures are written to `live_capture.vsr` in the process working directory.
+- Captures are written to `live_capture.vsr` in the process working directory
+  unless `captureFilename` or `ANARI_VSR_CAPTURE_FILENAME` names another file.
 
 2. External-scene capture mode (`scene` device parameter)
 
@@ -87,6 +88,18 @@ anari::commitParameters(d, d);
 clamped to 1. `vsrViewer` sets it to 1 because it only renders the VSR device
 when explicitly syncing the scene.
 
+Change where captures are written:
+
+```cpp
+anari::setParameter(d, d, "captureFilename", "/tmp/my_app.vsr");
+anari::commitParameters(d, d);
+```
+
+`captureFilename` is an `ANARI_STRING`; relative paths resolve against the
+process working directory, and an empty string counts as unset. Changing it
+makes the next capture write the new file even if nothing was committed since
+the last write. The directory must already exist.
+
 ### Inspecting Captures in `vsrViewer`
 
 Once `live_capture.vsr` is generated:
@@ -104,6 +117,9 @@ You can also load the `.vsr` file from the viewer UI.
 - `ANARI_VSR_CAPTURE_INTERVAL`: number of rendered frames between
   `live_capture.vsr` writes (default: `60`). The `captureInterval` device
   parameter takes precedence when set.
+- `ANARI_VSR_CAPTURE_FILENAME`: file the device writes captures to (default:
+  `live_capture.vsr`). The `captureFilename` device parameter takes precedence
+  when set.
 
 ### Example in This Repository
 

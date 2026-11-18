@@ -274,8 +274,24 @@ void Device::deviceCommitParameters()
     interval = 1;
   }
 
-  deviceState()->liveCapture.frameInterval =
-      uint32_t(std::min<int64_t>(interval, UINT32_MAX));
+  auto &capture = deviceState()->liveCapture;
+  capture.frameInterval = uint32_t(std::min<int64_t>(interval, UINT32_MAX));
+
+  // capture filename: device parameter > ANARI_VSR_CAPTURE_FILENAME >
+  // live_capture.vsr (an empty value counts as unset)
+  std::string filename = "live_capture.vsr";
+  if (auto *filenameEnv = getenv("ANARI_VSR_CAPTURE_FILENAME");
+      filenameEnv && *filenameEnv)
+    filename = filenameEnv;
+  if (auto param = getParamString("captureFilename", ""); !param.empty())
+    filename = param;
+
+  if (filename != capture.filename) {
+    capture.filename = filename;
+    // the new file has never been written, so the next capture must not be
+    // skipped for lack of new commits
+    capture.lastCapturedFinalization = 0;
+  }
 }
 
 int Device::deviceGetProperty(const char *name,
