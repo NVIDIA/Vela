@@ -13,21 +13,31 @@ Instance::Instance(DeviceGlobalState *s, vsr::core::Token /*subtype*/)
 
 void Instance::commitParameters()
 {
-  m_xfmArray = getParamObject<helium::Array1D>("transform");
+  m_xfmArray = getParamObject<Array>("transform");
   m_xfm = getParam<anari::math::mat4>("transform", linalg::identity);
   m_group = getParamObject<Group>("group");
 }
 
 void Instance::finalize()
 {
-  m_invXfmData.clear();
+  m_xfms.clear();
   if (m_xfmArray) {
-    m_invXfmData.resize(m_xfmArray->totalSize());
-    std::transform(m_xfmArray->beginAs<anari::math::mat4>(),
-        m_xfmArray->endAs<anari::math::mat4>(),
-        m_invXfmData.begin(),
-        [](const anari::math::mat4 &m) { return anari::math::inverse(m); });
+    const auto *a = m_xfmArray->vsrArray();
+    if (m_xfmArray->type() != ANARI_ARRAY1D
+        || a->elementType() != ANARI_FLOAT32_MAT4) {
+      reportMessage(ANARI_SEVERITY_WARNING,
+          "ignoring 'transform' array on ANARIInstance: expected an "
+          "ANARI_ARRAY1D of ANARI_FLOAT32_MAT4, got %s of %s",
+          anari::toString(m_xfmArray->type()),
+          anari::toString(a->elementType()));
+    } else {
+      const auto *begin = a->dataAs<anari::math::mat4>();
+      m_xfms.assign(begin, begin + a->size());
+    }
   }
+  if (m_xfms.empty())
+    m_xfms.push_back(m_xfm);
+
   if (!m_group)
     reportMessage(ANARI_SEVERITY_WARNING, "missing 'group' on ANARIInstance");
 
@@ -42,12 +52,12 @@ bool Instance::isValid() const
 
 uint32_t Instance::numTransforms() const
 {
-  return m_xfmArray ? uint32_t(m_xfmArray->totalSize()) : 1u;
+  return uint32_t(m_xfms.size());
 }
 
 const anari::math::mat4 &Instance::xfm(uint32_t i) const
 {
-  return m_xfmArray ? *m_xfmArray->valueAt<anari::math::mat4>(i) : m_xfm;
+  return m_xfms[i];
 }
 
 const Group *Instance::group() const

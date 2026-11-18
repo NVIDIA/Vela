@@ -114,6 +114,11 @@ vsr::scene::Object *Array::vsrObject() const
   return m_array.data();
 }
 
+const vsr::scene::Array *Array::vsrArray() const
+{
+  return m_array.data();
+}
+
 DeviceGlobalState *Array::deviceState() const
 {
   return (DeviceGlobalState *)m_state;
