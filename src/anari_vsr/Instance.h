@@ -3,7 +3,10 @@
 
 #pragma once
 
+#include "Array.h"
 #include "Group.h"
+// std
+#include <vector>
 
 namespace vsr_device {
 
@@ -23,9 +26,12 @@ struct Instance : public Object
   const Group *group() const;
 
  private:
+  // "transform" is either a single mat4 or, with
+  // KHR_INSTANCE_TRANSFORM_ARRAY, an ANARI_ARRAY1D of mat4; finalize() copies
+  // whichever was given into m_xfms, which always holds at least one matrix
   anari::math::mat4 m_xfm;
-  std::vector<anari::math::mat4> m_invXfmData;
-  helium::ChangeObserverPtr<helium::Array1D> m_xfmArray;
+  helium::ChangeObserverPtr<Array> m_xfmArray;
+  std::vector<anari::math::mat4> m_xfms;
   helium::IntrusivePtr<Group> m_group;
 };
 

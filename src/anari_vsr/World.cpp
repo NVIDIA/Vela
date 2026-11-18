@@ -72,8 +72,12 @@ void World::updateLayer()
   l->clear();
 
   for (auto *inst : m_instances) {
-    auto instNode = l->root()->insert_last_child({l, inst->xfm()});
-    inst->group()->addObjectsToLayer(instNode);
+    // one transform node per matrix of a KHR_INSTANCE_TRANSFORM_ARRAY
+    // instance, each holding the group's objects
+    for (uint32_t i = 0; i < inst->numTransforms(); i++) {
+      auto instNode = l->root()->insert_last_child({l, inst->xfm(i)});
+      inst->group()->addObjectsToLayer(instNode);
+    }
   }
 
   if (m_zeroSurfaceData || m_zeroVolumeData || m_zeroLightData) {

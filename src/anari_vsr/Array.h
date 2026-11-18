@@ -42,6 +42,7 @@ struct Array : public helium::BaseArray
       uint32_t flags) override;
 
   vsr::scene::Object *vsrObject() const;
+  const vsr::scene::Array *vsrArray() const;
   DeviceGlobalState *deviceState() const;
 
  private:
