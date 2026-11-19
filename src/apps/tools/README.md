@@ -10,7 +10,7 @@ headless rendering, and scripting.
 | `obj2header` | Convert a Wavefront OBJ mesh into a generated C/C++ header with packed vertex arrays. | `./obj2header <file.obj> <outfile.h>` |
 | `vsrPrint` | Print a `.vsr` file as the Data Tree Text Encoding. | `./vsrPrint <file.vsr>` |
 | `vsrConvert` | Convert a `.vsr` file between the Binary and Text Encodings. | `./vsrConvert [--text\|--binary] <input.vsr> <output.vsr>` |
-| `vsrAssemble` | Load scene inputs with the same importer flags as the viewers and save them as a Scene Archive. | `./vsrAssemble [-o <file.vsr>] <scene inputs...>` |
+| `vsrAssemble` | Load scene inputs with the same importer flags as the viewers and write a Scene Archive or miniScene file. | `./vsrAssemble [-o <file.vsr> \| --export-mini <file.mini>] <scene inputs...>` |
 | `vsrRender` | Render noninteractive stills or explicit animation from native state and/or imports, preserving supplied saved settings. | `./vsrRender [options] <input>...` |
 | `vsrUsdInfo` | List the Variant Sets a USD Stage offers and their variants. | `./vsrUsdInfo <stage.usd>` |
 | `vsrVolumeToNanoVDB` | Convert supported structured volume files to NanoVDB (`.vdb`) with optional quantization settings. | `./vsrVolumeToNanoVDB [options] <input_volume> <output.vdb>` |
@@ -65,19 +65,24 @@ Usage:
 
 ## `vsrAssemble`
 
-Assembles a scene from the same scene-loading command line as the viewers (`-vsr`, `-gltf`, `-obj`, `-usd`, `-usd_variant`, `-l`/`--layer`,
-...) and saves it as a Scene Archive instead of rendering it. No ANARI device
-is loaded. The archive is written to `scene.vsr` unless `-o`/`--output`
-names another file. If any input file does not exist, the tool lists every
-missing one and exits without writing an archive.
+Assembles a scene from the same scene-loading command line as the viewers
+(`-vsr`, `-gltf`, `-obj`, `-usd`, `-usd_variant`, `-l`/`--layer`, ...)
+without loading an ANARI device. By default it writes a Scene Archive to
+`scene.vsr`. Use `-o`/`--output` to name another archive file. If any input
+file does not exist, the tool lists every missing file and exits before writing
+output.
 
-A Scene Archive holds no animation-manager state, so an animated scene is
-saved at its current frame without its animations.
+With `VSR_USE_MINISCENE=ON`, use `--export-mini <file.mini>` in place of
+`-o`/`--output` to write a miniScene file. See
+[ADR 0042](../../../docs/adr/0042-export-miniscene-in-the-form-haystack-consumes.md)
+for what the miniScene format preserves. Both output formats save an animated
+scene at its current frame without its animations.
 
 Usage:
 
 ```bash
 ./vsrAssemble -l geometry -gltf model.glb -hdri env.hdr -o scene.vsr
+./vsrAssemble -obj model.obj --export-mini model.mini
 ```
 
 ## `vsrRender`
@@ -446,7 +451,7 @@ Usage:
 ./vsrLua -i
 ```
 
-For miniScene export without rendering, use the existing Lua/I/O API (requires
+Scripts can also export miniScene files through the Lua/I/O API (requires
 `VSR_USE_LUA=ON` and `VSR_USE_MINISCENE=ON`):
 
 ```sh

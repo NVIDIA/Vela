@@ -8,6 +8,7 @@
 #include <vsr/core/Timer.hpp>
 // vsr_io
 #include <vsr/io/archives.hpp>
+#include <vsr/io/exporters.hpp>
 // std
 #include <cstdio>
 #include <filesystem>
@@ -17,12 +18,12 @@
 #include <vector>
 
 // Assemble a scene using the viewers' scene-loading flags (-vsr, -gltf, -obj,
-// -usd, -l, ...) and save it as a Scene Archive instead of rendering it.
+// -usd, -l, ...) and write a Scene Archive or miniScene file.
 // No ANARI device is loaded.
 
 namespace {
 
-const char *DEFAULT_OUTPUT = "scene.vsr";
+constexpr const char *DEFAULT_OUTPUT = "scene.vsr";
 
 void printUsage(const char *programName)
 {
@@ -30,6 +31,10 @@ void printUsage(const char *programName)
   printf("Options:\n");
   printf("  -o, --output <file>        Scene Archive to write (default: %s)\n",
       DEFAULT_OUTPUT);
+  printf(
+      "  --export-mini <file>      Write a miniScene file (requires "
+      "VSR_USE_MINISCENE=ON)\n");
+  printf("                            Use in place of -o/--output\n");
   printf("  -h, --help                 Show this help message\n");
   printf("\n");
   printf("Scene Archive Options:\n");
@@ -74,9 +79,11 @@ void printUsage(const char *programName)
 bool parseOptions(int argc,
     const char *argv[],
     std::string &outputFile,
+    bool &exportMini,
     std::vector<std::string> &sceneArgs,
     int &exitCode)
 {
+  bool outputSpecified = false;
   sceneArgs.push_back(argv[0]);
   for (int i = 1; i < argc; i++) {
     const std::string arg = argv[i];
@@ -84,12 +91,29 @@ bool parseOptions(int argc,
       printUsage(argv[0]);
       exitCode = 0;
       return false;
-    } else if (arg == "-o" || arg == "--output") {
-      if (i + 1 >= argc) {
+    } else if (arg == "-o" || arg == "--output" || arg == "--export-mini") {
+      const bool miniOption = arg == "--export-mini";
+      if (i + 1 >= argc
+          || (miniOption
+              && (argv[i + 1][0] == '\0' || argv[i + 1][0] == '-'))) {
         fprintf(stderr, "Error: %s requires an argument\n", arg.c_str());
         exitCode = 1;
         return false;
       }
+      if (outputSpecified && exportMini != miniOption) {
+        fprintf(stderr,
+            "Error: --export-mini cannot be combined with -o/--output\n");
+        exitCode = 1;
+        return false;
+      }
+      if (miniOption && !VSR_USE_MINISCENE) {
+        fprintf(stderr,
+            "Error: --export-mini requires a build with VSR_USE_MINISCENE=ON\n");
+        exitCode = 1;
+        return false;
+      }
+      outputSpecified = true;
+      exportMini = miniOption;
       outputFile = argv[++i];
     } else
       sceneArgs.push_back(arg);
@@ -137,9 +161,10 @@ int main(int argc, const char *argv[])
   vsr::core::setLogToStdout();
 
   std::string outputFile = DEFAULT_OUTPUT;
+  bool exportMini = false;
   std::vector<std::string> sceneArgs;
   int exitCode = 0;
-  if (!parseOptions(argc, argv, outputFile, sceneArgs, exitCode))
+  if (!parseOptions(argc, argv, outputFile, exportMini, sceneArgs, exitCode))
     return exitCode;
 
   auto ctx = std::make_unique<vsr::app::Context>();
@@ -186,11 +211,14 @@ int main(int argc, const char *argv[])
   if (!ctx->vsr.animationMgr.animations().empty())
     printf("Scene is animated; saving its current frame without animations\n");
 
-  printf("Saving Scene Archive '%s'...\n", outputFile.c_str());
+  printf("Saving %s '%s'...\n",
+      exportMini ? "miniScene file" : "Scene Archive",
+      outputFile.c_str());
   fflush(stdout);
   timer.start();
-  const bool saved =
-      vsr::io::save_SceneArchive(ctx->vsr.scene, outputFile.c_str());
+  const bool saved = exportMini
+      ? vsr::io::export_SceneToMiniScene(ctx->vsr.scene, outputFile.c_str())
+      : vsr::io::save_SceneArchive(ctx->vsr.scene, outputFile.c_str());
   timer.end();
 
   if (!saved) {
