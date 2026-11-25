@@ -985,6 +985,14 @@ bool LayerTree::buildUI_mutatingMenuItems(
           ImGui::EndMenu(); // "hdri"
         }
 
+        ImGui::Separator();
+        if (auto subtype = vsr::ui::buildUI_customSubtype_menu()) {
+          const auto name = *subtype + " light";
+          scene.insertNewChildObjectNode<vsr::scene::Light>(
+              menuNode, *subtype, name.c_str());
+          clearSelectedNode = true;
+        }
+
         ImGui::EndMenu(); // "light"
       }
 
@@ -1011,6 +1019,30 @@ bool LayerTree::buildUI_mutatingMenuItems(
         }
 
         ImGui::EndMenu(); // "surface"
+      }
+
+      if (ImGui::BeginMenu("volume")) {
+#define OBJECT_UI_MENU_ITEM(subtype)                                           \
+  if (ImGui::MenuItem(#subtype)) {                                             \
+    scene.insertNewChildObjectNode<vsr::scene::Volume>(                        \
+        menuNode, vsr::scene::tokens::volume::subtype, #subtype " volume");    \
+    clearSelectedNode = true;                                                  \
+  }
+        OBJECT_UI_MENU_ITEM(gaussianSplat);
+        OBJECT_UI_MENU_ITEM(structuredRectilinear);
+        OBJECT_UI_MENU_ITEM(structuredRegular);
+        OBJECT_UI_MENU_ITEM(transferFunction1D);
+#undef OBJECT_UI_MENU_ITEM
+
+        ImGui::Separator();
+        if (auto subtype = vsr::ui::buildUI_customSubtype_menu()) {
+          const auto name = *subtype + " volume";
+          scene.insertNewChildObjectNode<vsr::scene::Volume>(
+              menuNode, *subtype, name.c_str());
+          clearSelectedNode = true;
+        }
+
+        ImGui::EndMenu(); // "volume"
       }
 
       ImGui::EndMenu(); // "new object"
