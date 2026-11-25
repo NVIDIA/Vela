@@ -11,6 +11,8 @@
 // std
 #include <array>
 #include <cstddef>
+#include <optional>
+#include <string>
 
 namespace vsr::ui {
 
@@ -72,6 +74,12 @@ bool buildUI_parameter(vsr::scene::Object &o,
     const ObjectEditPolicy &policy = {});
 size_t buildUI_objects_menulist(
     const vsr::scene::Scene &scene, anari::DataType &type);
+
+// A "custom..." submenu holding a text box for an object subtype the menu
+// doesn't list. Returns the typed subtype once the user commits it (Enter or
+// the "create" button), closing the enclosing popup; std::nullopt otherwise.
+std::optional<std::string> buildUI_customSubtype_menu(
+    const char *label = "custom...");
 
 void tooltipForPreviousItem(const char *text, bool showWhenDisabled = true);
 

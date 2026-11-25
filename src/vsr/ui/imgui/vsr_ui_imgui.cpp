@@ -8,6 +8,7 @@
 #include "vsr/core/ColorMapUtil.hpp"
 // std
 #include <cstring>
+#include <utility>
 
 namespace vsr::ui {
 
@@ -291,6 +292,10 @@ static void buildUI_parameter_contextMenu(vsr::scene::Scene &scene,
               ImGui::EndMenu(); // "MaterialX"
             }
 
+            ImGui::Separator();
+            if (auto subtype = buildUI_customSubtype_menu())
+              m = scene.createObject<vsr::scene::Material>(*subtype);
+
             if (m)
               p->setValue({m->type(), m->index()});
             ImGui::EndMenu(); // "material"
@@ -314,6 +319,10 @@ static void buildUI_parameter_contextMenu(vsr::scene::Scene &scene,
             OBJECT_UI_MENU_ITEM("triangle", triangle);
 #undef OBJECT_UI_MENU_ITEM
 
+            ImGui::Separator();
+            if (auto subtype = buildUI_customSubtype_menu())
+              g = scene.createObject<vsr::scene::Geometry>(*subtype);
+
             if (g)
               p->setValue({g->type(), g->index()});
             ImGui::EndMenu(); // "geometry"
@@ -335,9 +344,13 @@ static void buildUI_parameter_contextMenu(vsr::scene::Scene &scene,
             OBJECT_UI_MENU_ITEM("transform", transform);
 #undef OBJECT_UI_MENU_ITEM
 
+            ImGui::Separator();
+            if (auto subtype = buildUI_customSubtype_menu())
+              s = scene.createObject<vsr::scene::Sampler>(*subtype);
+
             if (s)
               p->setValue({s->type(), s->index()});
-            ImGui::EndMenu(); // "material"
+            ImGui::EndMenu(); // "sampler"
           }
 
           ImGui::EndMenu(); // "new"
@@ -925,6 +938,33 @@ size_t buildUI_objects_menulist(
     ImGui::PopID();
   }
 
+  return retval;
+}
+
+std::optional<std::string> buildUI_customSubtype_menu(const char *label)
+{
+  // Only one context menu is open at a time, so call sites can share this.
+  static std::string s_subtype;
+
+  std::optional<std::string> retval;
+  if (ImGui::BeginMenu(label)) {
+    if (ImGui::IsWindowAppearing())
+      ImGui::SetKeyboardFocusHere();
+    const bool entered = ImGui::InputTextWithHint("##customSubtype",
+        "subtype",
+        &s_subtype,
+        ImGuiInputTextFlags_EnterReturnsTrue);
+    ImGui::SameLine();
+    ImGui::BeginDisabled(s_subtype.empty());
+    const bool clicked = ImGui::Button("create");
+    ImGui::EndDisabled();
+    if ((entered || clicked) && !s_subtype.empty()) {
+      retval = std::move(s_subtype);
+      s_subtype.clear();
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndMenu();
+  }
   return retval;
 }
 
