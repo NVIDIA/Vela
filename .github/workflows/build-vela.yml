@@ -21,6 +21,8 @@ jobs:
         | xargs clang-format --dry-run --Werror
 
   build:
+    # Formatting is cheap; fail on it before spending runners on builds.
+    needs: format
     runs-on: ${{ matrix.runs-on }}
     strategy:
       matrix:
@@ -97,6 +99,8 @@ jobs:
         ctest -C ${{ matrix.config }} --output-on-failure
 
   build-cuda:
+    # Formatting is cheap; fail on it before spending runners on builds.
+    needs: format
     runs-on: ${{ matrix.runs-on }}
     strategy:
       matrix:
